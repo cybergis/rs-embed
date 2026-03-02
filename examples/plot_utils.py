@@ -63,9 +63,13 @@ def _infer_should_flipud_from_meta(meta):
 
 def _robust_scale01(x, lo=2.0, hi=98.0, eps=1e-8):
     """Scale array to [0,1] with percentile clipping."""
-    a = np.percentile(x, lo)
-    b = np.percentile(x, hi)
+    x = np.asarray(x, dtype=np.float32)
+    if not np.isfinite(x).any():
+        return np.zeros_like(x, dtype=np.float32)
+    a = np.nanpercentile(x, lo)
+    b = np.nanpercentile(x, hi)
     y = np.clip((x - a) / (b - a + eps), 0.0, 1.0)
+    y = np.nan_to_num(y, nan=0.0, posinf=1.0, neginf=0.0)
     return y
 
 def _stabilize_pca_sign(components: np.ndarray) -> np.ndarray:
@@ -99,7 +103,12 @@ def fit_pca_rgb(
     D, H, W = dhw.shape
 
     X = dhw.reshape(D, H * W).T  # [N, D]
+    finite_rows = np.all(np.isfinite(X), axis=1)
+    X = X[finite_rows]
     N = X.shape[0]
+
+    if N == 0:
+        raise ValueError("No finite pixels available for PCA fit.")
 
     rng = np.random.default_rng(seed)
     if n_samples is not None and N > n_samples:
@@ -112,11 +121,22 @@ def fit_pca_rgb(
     mean = Xs.mean(axis=0) if center else np.zeros((D,), dtype=np.float32)
     Xc = Xs - mean
 
-    # SVD for PCA
-    # Xc = U S Vt, rows are samples
-    # PCs are rows of Vt
-    U, S, Vt = np.linalg.svd(Xc, full_matrices=False)
-    comps = _stabilize_pca_sign(Vt[:3].astype(np.float32))  # [3, D]
+    if Xc.shape[0] < 2 or np.allclose(np.nanstd(Xc, axis=0), 0.0):
+        comps = np.eye(D, dtype=np.float32)[:3]
+    else:
+        # SVD for PCA
+        # Xc = U S Vt, rows are samples
+        # PCs are rows of Vt
+        try:
+            _, _, Vt = np.linalg.svd(Xc, full_matrices=False)
+            comps = Vt[:3].astype(np.float32)
+        except np.linalg.LinAlgError:
+            # Fallback for numerically unstable SVD cases.
+            cov = (Xc.T @ Xc) / max(1, Xc.shape[0] - 1)
+            vals, vecs = np.linalg.eigh(cov)
+            order = np.argsort(vals)[::-1]
+            comps = vecs[:, order[:3]].T.astype(np.float32)
+        comps = _stabilize_pca_sign(comps)
 
     return {
         "mean": mean.astype(np.float32),
@@ -139,11 +159,13 @@ def transform_pca_rgb(
     D, H, W = dhw.shape
 
     X = dhw.reshape(D, H * W).T  # [N, D]
+    X = np.nan_to_num(X, nan=0.0, posinf=0.0, neginf=0.0)
     mean = pca["mean"]
     comps = pca["components"]  # [3,D]
 
     Xc = X - mean if pca.get("center", True) else X
     Y = Xc @ comps.T  # [N,3]
+    Y = np.nan_to_num(Y, nan=0.0, posinf=0.0, neginf=0.0)
 
     # robust scale each channel to [0,1]
     rgb = np.zeros_like(Y, dtype=np.float32)

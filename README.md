@@ -4,12 +4,14 @@
 **A single line of code to get embeddings from Any Remote Sensing Foundation Model (RSFM) for Any location and Any time**
 
 
+[![arXiv](https://img.shields.io/badge/arXiv-2602.23678-b31b1b.svg)](https://arxiv.org/abs/2602.23678)
 [![Docs](https://img.shields.io/badge/docs-online-brightgreen)](https://cybergis.github.io/rs-embed/)
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=cybergis.rs-embed)
 ![License](https://img.shields.io/github/license/cybergis/rs-embed)
 ![Last Commit](https://img.shields.io/github/last-commit/cybergis/rs-embed)
 
-[Docs](https://cybergis.github.io/rs-embed/) · [Learn](https://cybergis.github.io/rs-embed/quickstart/) · [Guide](https://cybergis.github.io/rs-embed/workflows/) · [StartNow](./examples/playground.ipynb)  · [UseCase](./examples/demo.ipynb)
+
+[Docs](https://cybergis.github.io/rs-embed/) · [Learn](https://cybergis.github.io/rs-embed/quickstart/) · [Guide](https://cybergis.github.io/rs-embed/workflows/) · [StartNow](./examples/playground.ipynb)  · [UseCase](./examples/demo.ipynb) · [Paper](https://arxiv.org/abs/2602.23678)
 
 </div>
 
@@ -93,8 +95,6 @@ Compatibility / convenience wrappers (still supported, but not required to learn
 
 This is a convenience index with basic model info only (for quick scanning / links). For detailed I/O behavior and preprocessing notes, see [Supported Models](https://cybergis.github.io/rs-embed/models/).
 
-Model IDs now use short canonical names (for example `remoteclip`, `prithvi`, `thor`). Legacy IDs such as `remoteclip_s2rgb` and `prithvi_eo_v2_s2_6b` are still accepted as backward-compatible aliases.
-
 ### Precomputed Embeddings
 
 | Model ID | Type | Resolution | Time Coverage | Publication |
@@ -147,6 +147,19 @@ If you want to implement the extension yourself, you can also follow the guide i
 We would like to thank the following organizations and projects that make rs-embed possible: [Google Earth Engine](https://earthengine.google.com), [TorchGeo](https://github.com/torchgeo/torchgeo), [GeoTessera](https://github.com/ucam-eo/geotessera), [TerraTorch](https://github.com/terrastackai/terratorch), [rshf](https://github.com/mvrl/rshf).
 
 This library also builds upon the incredible work of the Remote Sensing community!(Full list and citations available in our Documentation)
+
+## Citation
+```
+@article{ye2026modelplacetimeremote,
+      title={Any Model, Any Place, Any Time: Get Remote Sensing Foundation Model Embeddings On Demand}, 
+      author={Dingqi Ye and Daniel Kiv and Wei Hu and Jimeng Shi and Shaowen Wang},
+      year={2026},
+      eprint={2602.23678},
+      archivePrefix={arXiv},
+      primaryClass={cs.CV},
+      url={https://arxiv.org/abs/2602.23678}, 
+}
+```
 
 ## License
 This project is released under the [Apache-2.0](LICENSE)
