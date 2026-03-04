@@ -52,7 +52,8 @@ temporal = TemporalSpec.year(2024)
 emb = get_embedding(
     "gse",       # alpha earth
     spatial=spatial,
-    temporal=temporal
+    temporal=temporal,
+     output=OutputSpec.grid()
 )
 
 ```
