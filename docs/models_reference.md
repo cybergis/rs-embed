@@ -28,7 +28,7 @@ This page is best used after you already narrowed down candidate models and want
 | Goal | Start with | Why |
 |---|---|---|
 | Fast baseline / simple pipeline | `tessera`, `gse`, `copernicus` | Precomputed embeddings, fewer runtime dependencies |
-| General on-the-fly RGB experiments | `remoteclip`, `satmae`, `scalemae`, `dynamicvis` | Simple S2 RGB input paths |
+| General on-the-fly RGB experiments | `remoteclip`, `satmae`, `scalemae` | Simple S2 RGB input paths |
 | Time-series modeling | `agrifm`, `anysat`, `galileo` | Native multi-frame temporal packaging |
 | Multispectral / strict spectral semantics | `dofa`, `terramind`, `thor`, `satvision` | Strong channel/schema assumptions |
 | S1/S2 modality experiments | `terrafm` | Supports S2 or S1 paths (per call) |
@@ -59,13 +59,12 @@ Source of truth:
 - `src/rs_embed/embedders/_vit_mae_utils.py`
 - `src/rs_embed/embedders/runtime_utils.py`
 
-Registered on-the-fly IDs:
+Documented on-the-fly IDs:
 
 - `remoteclip`
 - `satmae`
 - `scalemae`
 - `anysat`
-- `dynamicvis`
 - `galileo`
 - `wildsat`
 - `prithvi`
@@ -85,7 +84,6 @@ Registered on-the-fly IDs:
 | `satmae` | `rshf.satmae.SatMAE` | S2 RGB (`B4,B3,B2`) | raw SR -> `/10000` -> RGB `uint8`; prefer model transform, else CLIP norm | default 224; CLIP fallback has `Resize + CenterCrop`; no pad | token sequence -> pooled or patch-token grid | Medium |
 | `scalemae` | `rshf.scalemae.ScaleMAE` (ViT style) | S2 RGB (`B4,B3,B2`) + `input_res_m` | raw SR -> `/10000` -> RGB `uint8`; CLIP norm tensor; pass `input_res_m` | default 224; CLIP path has `Resize + CenterCrop`; no pad | token sequence or pooled vector depending on wrapper output | Medium |
 | `anysat` | AnySat from upstream `hubconf.py` (`AnySat`) | S2 10-band TCHW (or CHW auto-expanded) | clip to `0..10000`; normalize mode default `per_tile_zscore`; builds per-frame `s2_dates` | resize TCHW to default 24; no crop, no pad | patch output `[D,H,W]`, pooled by spatial mean/max | Medium |
-| `dynamicvis` | `DynamicVisBackbone` (official repo) | S2 RGB (`B4,B3,B2`) | raw SR -> `/10000` -> RGB `uint8` -> ImageNet mean/std | default 512; resize to square; no pad | last feature map `[D,H,W]`, pooled by spatial mean/max | Medium |
 | `galileo` | `Encoder` from official `single_file_galileo.py` | S2 10-band TCHW (or CHW auto-expanded) | clip to `0..10000`; normalize mode default `unit_scale`; constructs Galileo tensors with configurable `T` + per-frame `months`, optional NDVI channel | default 64 with patch 8; bilinear resize; no pad | pooled token vector and S2-group token grid | Medium |
 | `wildsat` | WildSAT backbone + optional image head from checkpoint | S2 RGB CHW | clip to `0..10000` then `/10000`; default normalization `minmax`; convert to `uint8` then unit tensor | default 224; resize RGB; no pad | pooled branch output and optional grid (token or feature path) | Medium-Low |
 | `prithvi` | TerraTorch `BACKBONE_REGISTRY` Prithvi backbone | S2 6-band (`BLUE,GREEN,RED,NIR_NARROW,SWIR_1,SWIR_2`) | raw SR -> `/10000` -> clamp `[0,1]`; prep mode from env | default mode `resize` to 224; optional `pad` to patch multiple (legacy) | token sequence -> pooled or patch-token grid | Medium |
@@ -102,7 +100,7 @@ Registered on-the-fly IDs:
 - For most on-the-fly adapters, `TemporalSpec.range(start, end)` means: filter imagery in `[start, end)`, then build one composite patch for model input (`median` by default, or `mosaic` if configured via `SensorSpec.composite`).
 - In these adapters, `meta.input_time` is typically the midpoint of the temporal window and is mainly metadata (or an auxiliary time signal for models that require it), not a guaranteed single-scene acquisition date.
 - Multi-frame adapters: `agrifm`, `anysat`, and `galileo` fetch TCHW sequences by splitting the requested range into sub-windows and compositing each sub-window into one frame.
-- Current single-composite adapters include: `remoteclip`, `satmae`, `scalemae`, `dynamicvis`, `wildsat`, `prithvi`, `terrafm`, `terramind`, `dofa`, `fomo`, `thor`, and `satvision`.
+- Current single-composite adapters include: `remoteclip`, `satmae`, `scalemae`, `wildsat`, `prithvi`, `terrafm`, `terramind`, `dofa`, `fomo`, `thor`, and `satvision`.
 
 ### Multi-frame Semantics
 
@@ -136,7 +134,6 @@ Interpretation:
 | `satmae` | No | No | No | No |
 | `scalemae` | No | No | Yes (`input_res_m`) | Yes: scale/resolution (`sensor.scale_m`) |
 | `anysat` | Yes | Partially (S2-only imagery, plus temporal date tokens) | Yes (`s2`, `s2_dates`) | Yes: day-of-year/date signal (derived from temporal range) |
-| `dynamicvis` | No | No | No | No |
 | `galileo` | Yes | Mostly S2 path in current adapter + temporal month tokens | Yes (multiple tensors + masks + `months`) | Yes: month/time signal (derived from temporal range) |
 | `wildsat` | No | No | No | No |
 | `prithvi` | No (this adapter path) | No | Yes (`x`, `temporal_coords`, `location_coords`) | Yes: location + time are required |
@@ -164,7 +161,6 @@ Practically multi-input models:
 | `satmae` | `RS_EMBED_SATMAE_IMG` |
 | `scalemae` | `RS_EMBED_SCALEMAE_IMG` |
 | `anysat` | `RS_EMBED_ANYSAT_IMG`, `RS_EMBED_ANYSAT_NORM`, `RS_EMBED_ANYSAT_FRAMES` |
-| `dynamicvis` | `RS_EMBED_DYNAMICVIS_IMG` |
 | `galileo` | `RS_EMBED_GALILEO_IMG`, `RS_EMBED_GALILEO_PATCH`, `RS_EMBED_GALILEO_NORM`, `RS_EMBED_GALILEO_INCLUDE_NDVI`, `RS_EMBED_GALILEO_FRAMES`, `RS_EMBED_GALILEO_MONTH` |
 | `wildsat` | `RS_EMBED_WILDSAT_IMG`, `RS_EMBED_WILDSAT_NORM` |
 | `prithvi` | `RS_EMBED_PRITHVI_PREP`, `RS_EMBED_PRITHVI_IMG`, `RS_EMBED_PRITHVI_PATCH_MULT` |

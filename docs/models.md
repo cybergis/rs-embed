@@ -24,7 +24,7 @@ Recommended flow:
 | Goal | Good starting models | Why |
 |---|---|---|
 | Fast baseline / simple pipeline | `tessera`, `gse`, `copernicus` | Precomputed embeddings, fewer runtime dependencies |
-| Simple S2 RGB on-the-fly experiments | `remoteclip`, `satmae`, `scalemae`, `dynamicvis` | Straightforward RGB input paths |
+| Simple S2 RGB on-the-fly experiments | `remoteclip`, `satmae`, `scalemae` | Straightforward RGB input paths |
 | Time-series temporal modeling | `agrifm`, `anysat`, `galileo` | Native multi-frame temporal packaging |
 | Multispectral / strict spectral semantics | `dofa`, `terramind`, `thor`, `satvision` | Strong channel/schema assumptions |
 | Mixed-modality experiments (S1/S2) | `terrafm` | Supports S2 or S1 path (per call) |
@@ -47,7 +47,6 @@ Canonical model IDs are the short names shown below. Legacy IDs (for example `re
 - [`satmae`](models/satmae_rgb.md)
 - [`scalemae`](models/scalemae_rgb.md)
 - [`wildsat`](models/wildsat.md)
-- [`dynamicvis`](models/dynamicvis.md)
 - [`fomo`](models/fomo.md)
 - [`terrafm`](models/terrafm_b.md)
 - [`tessera`](models/tessera.md)
@@ -75,7 +74,6 @@ More model detail pages can be added using the [Model Detail Template](model_det
 | `remoteclip` | S2 RGB (`B4,B3,B2`) | single composite window | `pooled`, `grid` | provider backend; RGB preprocessing | [detail](models/remoteclip_s2rgb.md) |
 | `satmae` | S2 RGB (`B4,B3,B2`) | single composite window | `pooled`, `grid` | RGB path; ViT token/grid behavior | [detail](models/satmae_rgb.md) |
 | `scalemae` | S2 RGB + scale | single composite window | `pooled`, `grid` | requires `sensor.scale_m` / `input_res_m` | [detail](models/scalemae_rgb.md) |
-| `dynamicvis` | S2 RGB (`B4,B3,B2`) | single composite window | `pooled`, `grid` | larger default resize (`512`) | [detail](models/dynamicvis.md) |
 | `wildsat` | S2 RGB | single composite window | `pooled`, `grid` | normalization options | [detail](models/wildsat.md) |
 | `prithvi` | S2 6-band | single composite window | `pooled`, `grid` | required temporal + location side inputs | [detail](models/prithvi_eo_v2_s2_6b.md) |
 | `terrafm` | S2 12-band or S1 VV/VH | single composite window | `pooled`, `grid` | choose modality per call | [detail](models/terrafm_b.md) |

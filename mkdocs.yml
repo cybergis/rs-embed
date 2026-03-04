@@ -62,7 +62,6 @@ nav:
         - remoteclip: models/remoteclip_s2rgb.md
         - satmae: models/satmae_rgb.md
         - scalemae: models/scalemae_rgb.md
-        - dynamicvis: models/dynamicvis.md
         - wildsat: models/wildsat.md
         - prithvi: models/prithvi_eo_v2_s2_6b.md
         - terramind: models/terramind.md
