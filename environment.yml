@@ -313,5 +313,4 @@ dependencies:
       - yarl==1.22.0
       - zarr==3.1.5
       - zipp==3.23.0
-      - thor @git+https://github.com/FM4CS/thor_terratorch_ext.git
-prefix: /u/dingqi2/miniconda3/envs/torchgeo
+      - thor-terratorch-ext @ git+https://github.com/FM4CS/thor_terratorch_ext.git
