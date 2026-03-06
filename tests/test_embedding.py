@@ -17,5 +17,3 @@ def test_embedding_xarray():
     emb = Embedding(data=da, meta={"mode": "grid"})
     assert emb.data.dims == ("C", "H", "W")
     assert emb.data.shape == (3, 4, 4)
-
-

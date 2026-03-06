@@ -1,7 +1,7 @@
 import pytest
 
 from rs_embed.core.errors import SpecError
-from rs_embed.core.specs import BBox, PointBuffer, TemporalSpec, OutputSpec, SensorSpec
+from rs_embed.core.specs import BBox, InputPrepSpec, OutputSpec, PointBuffer, SensorSpec, TemporalSpec
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -43,6 +43,7 @@ def test_bbox_validate_non_4326_crs():
     (TemporalSpec.year(2024), "year"),
     (OutputSpec.pooled(), "mode"),
     (SensorSpec(collection="C", bands=("B1",)), "collection"),
+    (InputPrepSpec.resize(), "mode"),
 ])
 def test_specs_are_frozen(obj, attr):
     with pytest.raises(AttributeError):
@@ -202,3 +203,48 @@ def test_sensor_spec_custom():
     assert s.check_raise is False
     assert s.check_save_dir == "/tmp/out"
 
+
+# ══════════════════════════════════════════════════════════════════════
+# InputPrepSpec
+# ══════════════════════════════════════════════════════════════════════
+
+def test_input_prep_spec_resize_defaults():
+    s = InputPrepSpec.resize()
+    assert s.mode == "resize"
+    assert s.tile_size is None
+    assert s.tile_stride is None
+    assert s.max_tiles == 9
+    assert s.pad_edges is True
+
+
+def test_input_prep_spec_tile_defaults():
+    s = InputPrepSpec.tile(tile_size=224)
+    assert s.mode == "tile"
+    assert s.tile_size == 224
+    assert s.tile_stride is None
+    assert s.max_tiles == 9
+    assert s.pad_edges is True
+
+
+def test_input_prep_spec_tile_custom():
+    s = InputPrepSpec.tile(tile_size=128, tile_stride=64, max_tiles=4, pad_edges=False)
+    assert s.tile_size == 128
+    assert s.tile_stride == 64
+    assert s.max_tiles == 4
+    assert s.pad_edges is False
+
+
+def test_input_prep_spec_auto_defaults():
+    s = InputPrepSpec.auto()
+    assert s.mode == "auto"
+    assert s.tile_size is None
+    assert s.tile_stride is None
+    assert s.max_tiles == 9
+    assert s.pad_edges is True
+
+
+def test_input_prep_spec_auto_custom():
+    s = InputPrepSpec.auto(tile_size=256, max_tiles=16, pad_edges=False)
+    assert s.tile_size == 256
+    assert s.max_tiles == 16
+    assert s.pad_edges is False
