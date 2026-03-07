@@ -100,20 +100,14 @@ class ProviderBase:
         sensor: SensorSpec,
         to_float_image: bool = False,
     ) -> np.ndarray:
-        region = self.get_region(spatial)
-        img = self.build_image(sensor=sensor, temporal=temporal, region=region)
-        if to_float_image:
-            try:
-                img = img.toFloat()
-            except Exception:
-                pass
-        x = self.fetch_array_chw(
-            image=img,
-            bands=tuple(sensor.bands),
-            region=region,
-            scale_m=int(sensor.scale_m),
-            fill_value=float(sensor.fill_value),
-            collection=sensor.collection,
+        from ..internal.api.api_helpers import fetch_provider_patch_raw
+
+        x = fetch_provider_patch_raw(
+            self,
+            spatial=spatial,
+            temporal=temporal,
+            sensor=sensor,
+            to_float_image=bool(to_float_image),
         )
         arr = np.asarray(x, dtype=np.float32)
         if arr.ndim != 3:
