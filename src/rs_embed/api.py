@@ -95,7 +95,7 @@ def _create_default_gee_provider() -> ProviderBase:
 def _provider_factory_for_backend(backend: str) -> Optional[Callable[[], ProviderBase]]:
     b = _normalize_backend_name(backend)
     if b == "auto":
-        b = "gee"
+        b = _default_provider_backend_for_api()
     if not has_provider(b):
         return None
     if b == "gee":
