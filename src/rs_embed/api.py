@@ -883,6 +883,7 @@ def _infer_chunk_embeddings_for_per_item(
     temporal: Optional[TemporalSpec],
     models: List[str],
     backend_n: str,
+    resolved_backend: Dict[str, str],
     device: str,
     output: OutputSpec,
     resolved_sensor: Dict[str, Optional[SensorSpec]],
@@ -919,7 +920,8 @@ def _infer_chunk_embeddings_for_per_item(
         )
         skey = _sensor_cache_key(sspec) if needs_provider_input and sspec is not None else None
         sensor_k = _sensor_key(sspec)
-        embedder, lock = _get_embedder_bundle_cached(_normalize_model_name(m), backend_n, device, sensor_k)
+        m_backend = resolved_backend.get(m, backend_n)
+        embedder, lock = _get_embedder_bundle_cached(_normalize_model_name(m), m_backend, device, sensor_k)
 
         def _record_ok(i: int, emb: Embedding) -> None:
             e_np = _embedding_to_numpy(emb)
@@ -954,7 +956,7 @@ def _infer_chunk_embeddings_for_per_item(
                     temporal=temporal,
                     sensor=sspec,
                     output=output,
-                    backend=backend_n,
+                    backend=m_backend,
                     device=device,
                     input_chw=inp,
                     input_prep=input_prep,
@@ -1010,7 +1012,7 @@ def _infer_chunk_embeddings_for_per_item(
                                 temporal=temporal,
                                 sensor=sspec,
                                 output=output,
-                                backend=backend_n,
+                                backend=m_backend,
                                 device=device,
                             )
 
@@ -1044,7 +1046,7 @@ def _infer_chunk_embeddings_for_per_item(
                                 temporal=temporal,
                                 sensor=sspec,
                                 output=output,
-                                backend=backend_n,
+                                backend=m_backend,
                                 device=device,
                             )
 
@@ -1127,6 +1129,7 @@ def _export_batch_per_item(
     names: List[str],
     ext: str,
     backend_n: str,
+    resolved_backend: Dict[str, str],
     device: str,
     output: OutputSpec,
     resolved_sensor: Dict[str, Optional[SensorSpec]],
@@ -1348,6 +1351,7 @@ def _export_batch_per_item(
                         temporal=temporal,
                         models=models,
                         backend_n=backend_n,
+                        resolved_backend=resolved_backend,
                         device=device,
                         output=output,
                         resolved_sensor=resolved_sensor,
@@ -1380,6 +1384,7 @@ def _export_batch_per_item(
                             temporal=temporal,
                             models=models,
                             backend=backend_n,
+                            resolved_backend=resolved_backend,
                             device=device,
                             output=output,
                             resolved_sensor=resolved_sensor,
@@ -1824,12 +1829,14 @@ def export_batch(
 
     per_model_sensors = per_model_sensors or {}
 
-    # resolve sensors + type per model; validate capabilities upfront
+    # resolve sensors + type + backend per model; validate capabilities upfront
     resolved_sensor: Dict[str, Optional[SensorSpec]] = {}
+    resolved_backend: Dict[str, str] = {}
     model_type: Dict[str, str] = {}
     for m in models:
         m_n = _normalize_model_name(m)
         eff_backend = _resolve_embedding_api_backend(m_n, backend_n)
+        resolved_backend[m] = eff_backend
         cls = get_embedder_cls(m_n)
         try:
             emb_check = cls()
@@ -1874,6 +1881,7 @@ def export_batch(
             models=models,
             out_path=out_file,
             backend=backend_n,
+            resolved_backend=resolved_backend,
             device=device,
             output=output,
             resolved_sensor=resolved_sensor,
@@ -1924,6 +1932,7 @@ def export_batch(
         names=target.names,
         ext=ext,
         backend_n=backend_n,
+        resolved_backend=resolved_backend,
         device=device,
         output=output,
         resolved_sensor=resolved_sensor,

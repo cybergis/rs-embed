@@ -33,6 +33,7 @@ def build_one_point_payload(
     temporal: Optional[TemporalSpec],
     models: List[str],
     backend: str,
+    resolved_backend: Optional[Dict[str, str]] = None,
     device: str,
     output: OutputSpec,
     resolved_sensor: Dict[str, Optional[SensorSpec]],
@@ -73,6 +74,8 @@ def build_one_point_payload(
     local_inp: Dict[str, np.ndarray] = {}
     local_input_meta: Dict[str, Dict[str, Any]] = {}
 
+    _resolved_backend = resolved_backend or {}
+
     for m in models:
         m_entry: Dict[str, Any] = {"model": m, "status": "ok"}
         sspec = resolved_sensor.get(m)
@@ -80,8 +83,9 @@ def build_one_point_payload(
 
         try:
             sensor_k = deps.sensor_key(sspec)
+            m_backend = _resolved_backend.get(m, backend)
             embedder, lock = deps.get_embedder_bundle_cached(
-                deps.normalize_model_name(m), backend, device, sensor_k
+                deps.normalize_model_name(m), m_backend, device, sensor_k
             )
 
             try:
@@ -180,7 +184,7 @@ def build_one_point_payload(
                             temporal=temporal,
                             sensor=sspec,
                             output=output,
-                            backend=backend,
+                            backend=m_backend,
                             device=device,
                             input_chw=(input_chw if pass_input_into_embedder else None),
                         )

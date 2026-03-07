@@ -159,6 +159,7 @@ def run_pending_models(
     resolved_sensor: Dict[str, Optional[SensorSpec]],
     model_type: Dict[str, str],
     backend: str,
+    resolved_backend: Optional[Dict[str, str]] = None,
     provider_enabled: bool,
     device: str,
     save_inputs: bool,
@@ -176,6 +177,7 @@ def run_pending_models(
     progress: Any,
     deps: CombinedModelDeps,
 ) -> Dict[str, Any]:
+    _resolved_backend = resolved_backend or {}
     for m in pending_models:
         deps.drop_model_arrays(arrays, m)
         infer_progress = deps.create_progress(
@@ -194,8 +196,9 @@ def run_pending_models(
         sspec = resolved_sensor.get(m)
         try:
             sensor_k = deps.sensor_key(sspec)
+            m_backend = _resolved_backend.get(m, backend)
             embedder, lock = deps.get_embedder_bundle_cached(
-                deps.normalize_model_name(m), backend, device, sensor_k
+                deps.normalize_model_name(m), m_backend, device, sensor_k
             )
             try:
                 m_entry["describe"] = deps.jsonable(embedder.describe())
@@ -285,7 +288,7 @@ def run_pending_models(
                             temporal=temporal,
                             sensor=sspec,
                             output=output,
-                            backend=backend,
+                            backend=m_backend,
                             device=device,
                             input_chw=inp,
                         )
@@ -334,7 +337,7 @@ def run_pending_models(
                                             temporal=temporal,
                                             sensor=sspec,
                                             output=output,
-                                            backend=backend,
+                                            backend=m_backend,
                                             device=device,
                                         )
 
@@ -380,7 +383,7 @@ def run_pending_models(
                                         temporal=temporal,
                                         sensor=sspec,
                                         output=output,
-                                        backend=backend,
+                                        backend=m_backend,
                                         device=device,
                                     )
 
