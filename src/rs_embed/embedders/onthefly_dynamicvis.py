@@ -17,7 +17,6 @@ from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers.base import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_s2_rgb_chw as _fetch_s2_rgb_chw,
     get_cached_provider,
     is_provider_backend,
@@ -554,7 +553,7 @@ class DynamicVisEmbedder(EmbedderBase):
                 temporal=t,
                 sensor=sensor,
                 out_size=image_size,
-                provider=_call_provider_getter(self._get_provider, backend),
+                provider=self._get_provider(backend),
             )
         else:
             if input_chw.ndim != 3 or int(input_chw.shape[0]) != 3:
@@ -667,7 +666,7 @@ class DynamicVisEmbedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
         n = len(spatials)
 
         scale_m = int(ss.scale_m)

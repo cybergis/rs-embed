@@ -23,7 +23,6 @@ from ..providers import ProviderBase
 from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
     get_cached_provider,
     is_provider_backend,
@@ -778,7 +777,7 @@ class AgriFMEmbedder(EmbedderBase):
 
         if input_chw is None:
             raw_tchw = _fetch_s2_10_raw_tchw(
-                _call_provider_getter(self._get_provider, backend),
+                self._get_provider(backend),
                 spatial,
                 t,
                 n_frames=n_frames,
@@ -922,7 +921,7 @@ class AgriFMEmbedder(EmbedderBase):
         n_frames = max(
             1, int(os.environ.get("RS_EMBED_AGRIFM_FRAMES", str(self.DEFAULT_FRAMES)))
         )
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
         n = len(spatials)
         prefetched_raw: List[Optional[np.ndarray]] = [None] * n
 

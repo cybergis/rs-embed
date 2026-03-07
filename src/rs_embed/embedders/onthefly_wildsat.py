@@ -25,7 +25,6 @@ from ._vit_mae_utils import (
 )
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_s2_rgb_chw as _fetch_s2_rgb_chw,
     get_cached_provider,
     is_provider_backend,
@@ -814,7 +813,7 @@ class WildSATEmbedder(EmbedderBase):
 
         if input_chw is None:
             s2_rgb_chw = _fetch_s2_rgb_chw(
-                _call_provider_getter(self._get_provider, backend_l),
+                self._get_provider(backend_l),
                 spatial=spatial,
                 temporal=t,
                 scale_m=int(ss.scale_m),
@@ -934,7 +933,7 @@ class WildSATEmbedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
-        provider = _call_provider_getter(self._get_provider, backend_l)
+        provider = self._get_provider(backend_l)
         n = len(spatials)
 
         scale_m = int(ss.scale_m)

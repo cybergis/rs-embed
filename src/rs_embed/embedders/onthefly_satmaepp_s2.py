@@ -19,7 +19,6 @@ from ..providers.base import ProviderBase
 from ._vit_mae_utils import base_meta, ensure_torch, temporal_to_range
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     get_cached_provider,
     is_provider_backend,
@@ -698,7 +697,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         t = temporal_to_range(temporal)
         if input_chw is None:
             raw_chw = _fetch_s2_sr_10_raw_chw(
-                provider=_call_provider_getter(self._get_provider, backend),
+                provider=self._get_provider(backend),
                 spatial=spatial,
                 temporal=t,
                 scale_m=int(getattr(sensor, "scale_m", 10)),
@@ -857,7 +856,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         cache_dir = _resolve_hf_cache_dir()
         t = temporal_to_range(temporal)
 
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
         n = len(spatials)
         raws: List[Optional[np.ndarray]] = [None] * n
 

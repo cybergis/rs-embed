@@ -511,11 +511,3 @@ def coerce_input_to_tchw(
 
     raw_tchw = np.nan_to_num(raw_tchw, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(raw_tchw, 0.0, 10000.0).astype(np.float32)
-
-
-def call_provider_getter(
-    getter: Callable[..., ProviderBase],
-    backend: str,
-) -> ProviderBase:
-    """Call a provider getter with the given backend name."""
-    return getter(backend)

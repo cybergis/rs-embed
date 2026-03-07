@@ -20,7 +20,6 @@ from ..core.temporal_utils import temporal_frame_midpoints
 from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     coerce_input_to_tchw as _coerce_input_to_tchw,
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
     get_cached_provider,
@@ -495,7 +494,7 @@ class AnySatEmbedder(EmbedderBase):
         }
 
         if input_chw is None:
-            provider = _call_provider_getter(self._get_provider, backend)
+            provider = self._get_provider(backend)
             raw_tchw = _fetch_s2_10_raw_tchw(
                 provider,
                 spatial,
@@ -623,7 +622,7 @@ class AnySatEmbedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
         n_frames = max(
             1, int(os.environ.get("RS_EMBED_ANYSAT_FRAMES", str(self.DEFAULT_FRAMES)))
         )

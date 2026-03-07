@@ -15,7 +15,6 @@ from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
 from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     get_cached_provider,
     is_provider_backend,
@@ -507,7 +506,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         )
 
         # Fetch S2 6-band patch from provider
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
 
         # Fetch S2 6-band patch from provider (optionally reuse pre-fetched raw patch)
         if input_chw is None:
@@ -683,7 +682,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             sensor = self._default_sensor()
 
         t = temporal_to_range(temporal)
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
         n = len(spatials)
         prefetched_raw: List[Optional[np.ndarray]] = [None] * n
 

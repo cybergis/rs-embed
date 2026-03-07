@@ -16,7 +16,6 @@ from ..providers import ProviderBase
 from ._vit_mae_utils import ensure_torch, pool_from_tokens, tokens_to_grid_dhw
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     get_cached_provider,
     is_provider_backend,
@@ -584,7 +583,7 @@ class THORBaseEmbedder(EmbedderBase):
 
         if input_chw is None:
             raw_chw = _fetch_s2_sr_10_raw_chw(
-                _call_provider_getter(self._get_provider, backend),
+                self._get_provider(backend),
                 spatial,
                 t,
                 scale_m=scale_m,
@@ -730,7 +729,7 @@ class THORBaseEmbedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
-        provider = _call_provider_getter(self._get_provider, backend_l)
+        provider = self._get_provider(backend_l)
 
         scale_m = int(getattr(ss, "scale_m", 10))
         cloudy_pct = int(getattr(ss, "cloudy_pct", 30))

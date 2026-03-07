@@ -22,7 +22,6 @@ from ._vit_mae_utils import (
 )
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_sensor_patch_chw as _fetch_sensor_patch_chw,
     get_cached_provider,
     is_provider_backend,
@@ -992,7 +991,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
         if input_chw is None:
             raw, fetch_meta = _coerce_fetch_result(
                 _fetch_toa_raw_chw_from_gee(
-                    _call_provider_getter(self._get_provider, backend),
+                    self._get_provider(backend),
                     spatial,
                     t,
                     sensor,
@@ -1140,7 +1139,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
         ) -> Tuple[int, np.ndarray, Dict[str, Any]]:
             raw, fetch_meta = _coerce_fetch_result(
                 _fetch_toa_raw_chw_from_gee(
-                    _call_provider_getter(self._get_provider, backend), sp, t, sensor
+                    self._get_provider(backend), sp, t, sensor
                 )
             )
             return i, raw, fetch_meta

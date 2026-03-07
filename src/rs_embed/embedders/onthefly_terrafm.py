@@ -17,7 +17,6 @@ from ..providers import ProviderBase
 from .base import EmbedderBase
 from .meta_utils import build_meta, temporal_midpoint_str
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     fetch_s1_vvvh_raw_chw as _fetch_s1_vvvh_raw_chw_shared,
     get_cached_provider,
@@ -484,7 +483,7 @@ class TerraFMBEmbedder(EmbedderBase):
             if temporal.mode != "range":
                 raise ModelError("terrafm_b_gee requires TemporalSpec.range in v0.1.")
 
-            provider = _call_provider_getter(self._get_provider, backend_l)
+            provider = self._get_provider(backend_l)
 
             if input_chw is None:
                 if modality == "s2":
@@ -723,7 +722,7 @@ class TerraFMBEmbedder(EmbedderBase):
             bool(getattr(sensor, "use_float_linear", True)) if sensor else True
         )
 
-        provider = _call_provider_getter(self._get_provider, backend_l)
+        provider = self._get_provider(backend_l)
         n = len(spatials)
         prefetched_raw: List[Optional[np.ndarray]] = [None] * n
 

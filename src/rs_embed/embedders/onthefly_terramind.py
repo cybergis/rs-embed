@@ -15,7 +15,6 @@ from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     get_cached_provider,
     is_provider_backend,
@@ -483,7 +482,7 @@ class TerraMindEmbedder(EmbedderBase):
             t = temporal_to_range(temporal)
             temporal_used = t
             ss = sensor or self._default_sensor()
-            provider = _call_provider_getter(self._get_provider, backend_l)
+            provider = self._get_provider(backend_l)
 
             scale_m = int(getattr(ss, "scale_m", 10))
             cloudy_pct = int(getattr(ss, "cloudy_pct", 30))
@@ -651,7 +650,7 @@ class TerraMindEmbedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
-        provider = _call_provider_getter(self._get_provider, backend_l)
+        provider = self._get_provider(backend_l)
 
         scale_m = int(getattr(ss, "scale_m", 10))
         cloudy_pct = int(getattr(ss, "cloudy_pct", 30))

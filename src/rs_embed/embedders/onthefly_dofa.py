@@ -17,7 +17,6 @@ from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
 from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     get_cached_provider,
     is_provider_backend,
@@ -550,7 +549,7 @@ class DOFAEmbedder(EmbedderBase):
             wavelengths_um = [float(v) for v in wavelengths_um]
 
             if input_chw is None:
-                provider = _call_provider_getter(self._get_provider, backend_l)
+                provider = self._get_provider(backend_l)
 
                 x_chw, provider_meta = _fetch_gee_multiband_sr_chw(
                     provider,
@@ -718,7 +717,7 @@ class DOFAEmbedder(EmbedderBase):
         cloudy_pct = int(getattr(ss, "cloudy_pct", 30))
         composite = str(getattr(ss, "composite", "median"))
 
-        provider = _call_provider_getter(self._get_provider, backend_l)
+        provider = self._get_provider(backend_l)
         n = len(spatials)
         prefetched_raw: List[Optional[np.ndarray]] = [None] * n
 

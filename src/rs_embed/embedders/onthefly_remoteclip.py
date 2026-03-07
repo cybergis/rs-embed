@@ -18,7 +18,6 @@ from ..providers import ProviderBase
 from .base import EmbedderBase
 from .meta_utils import build_meta, temporal_to_range, temporal_midpoint_str
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_s2_rgb_chw as _fetch_s2_rgb_chw_shared,
     get_cached_provider,
     is_provider_backend,
@@ -650,7 +649,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             raise ModelError("remoteclip_s2rgb requires TemporalSpec.range in v0.1.")
         t = temporal_to_range(temporal)
 
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
 
         # overrides via SensorSpec
         scale_m = sensor.scale_m if sensor else 10
@@ -856,7 +855,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             raise ModelError("remoteclip_s2rgb requires TemporalSpec.range in v0.1.")
 
         t = temporal_to_range(temporal)
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
         scale_m = sensor.scale_m if sensor else 10
         cloudy_pct = sensor.cloudy_pct if sensor else 30
         composite = sensor.composite if sensor else "median"

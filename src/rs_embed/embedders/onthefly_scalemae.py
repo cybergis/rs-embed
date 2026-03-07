@@ -14,7 +14,6 @@ from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
 from ..providers.base import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     get_cached_provider,
     is_provider_backend,
     load_cached_with_device as _load_cached_with_device,
@@ -420,7 +419,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                 temporal=t,
                 sensor=sensor,
                 out_size=image_size,
-                provider=_call_provider_getter(self._get_provider, backend),
+                provider=self._get_provider(backend),
             )
         else:
             # input_chw expected to be raw S2 SR values in band order (B4,B3,B2)
@@ -538,7 +537,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         )
         t = temporal_to_range(temporal)
 
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
         n = len(spatials)
         rgb_u8_all: List[Optional[np.ndarray]] = [None] * n
 

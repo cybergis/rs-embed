@@ -15,7 +15,6 @@ from ..ops.pooling import pool_chw_to_vec
 from .base import EmbedderBase
 from .meta_utils import build_meta, temporal_midpoint_str
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     fetch_collection_patch_all_bands_chw as _fetch_collection_patch_all_bands_chw,
     get_cached_provider,
     is_provider_backend,
@@ -79,7 +78,7 @@ class GSEAnnualEmbedder(EmbedderBase):
         if temporal.mode != "year":
             raise ModelError("gse_annual only supports TemporalSpec.year in v0.1.")
 
-        provider = _call_provider_getter(self._get_provider, backend)
+        provider = self._get_provider(backend)
         emb_chw, band_names = _fetch_collection_patch_all_bands_chw(
             provider,
             spatial=spatial,

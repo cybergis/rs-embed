@@ -19,7 +19,6 @@ from ..providers import ProviderBase
 from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
 from .runtime_utils import (
-    call_provider_getter as _call_provider_getter,
     get_cached_provider,
     is_provider_backend,
     load_cached_with_device as _load_cached_with_device,
@@ -670,7 +669,7 @@ class FoMoEmbedder(EmbedderBase):
 
         if input_chw is None:
             raw = _fetch_s2_sr_12_raw_chw(
-                _call_provider_getter(self._get_provider, backend_l),
+                self._get_provider(backend_l),
                 spatial,
                 t,
                 scale_m=int(ss.scale_m),
@@ -808,7 +807,7 @@ class FoMoEmbedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
-        provider = _call_provider_getter(self._get_provider, backend_l)
+        provider = self._get_provider(backend_l)
 
         n = len(spatials)
         prefetched_raw: List[Optional[np.ndarray]] = [None] * n
