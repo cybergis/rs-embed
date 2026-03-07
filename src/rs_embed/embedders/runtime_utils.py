@@ -174,30 +174,23 @@ def fetch_sensor_patch_chw(
     sensor: SensorSpec,
     to_float_image: bool = False,
 ) -> np.ndarray:
-    """Fetch a CHW patch from a concrete SensorSpec."""
-    # Reuse the shared API helper so embedder-internal fetches (e.g. WildSAT,
-    # SatVision TOA with to_float_image=True) also benefit from GEE BBox
-    # sampleRectangle fallback splitting.
-    from ..internal.api.api_helpers import fetch_provider_patch_raw
+    """Fetch a CHW patch from a concrete SensorSpec.
 
-    x = fetch_provider_patch_raw(
-        provider,
-        spatial=spatial,
-        temporal=temporal,
-        sensor=sensor,
-        to_float_image=bool(to_float_image),
-    )
-    arr = np.asarray(x, dtype=np.float32)
-    if arr.ndim != 3:
-        raise ModelError(
-            f"Expected CHW array from provider fetch, got shape={getattr(arr, 'shape', None)}"
+    Delegates to ``provider.fetch_sensor_patch_chw`` (which already validates
+    ndim, channel count, and calls nan_to_num).  Errors are re-raised as
+    ModelError so embedder-layer callers see a consistent exception type.
+    """
+    from ..core.errors import ProviderError
+
+    try:
+        return provider.fetch_sensor_patch_chw(
+            spatial=spatial,
+            temporal=temporal,
+            sensor=sensor,
+            to_float_image=to_float_image,
         )
-    if int(arr.shape[0]) != len(sensor.bands):
-        raise ModelError(
-            f"Provider fetch channel mismatch: got C={int(arr.shape[0])}, expected C={len(sensor.bands)} "
-            f"for collection={sensor.collection}"
-        )
-    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    except ProviderError as exc:
+        raise ModelError(str(exc)) from exc
 
 
 def _stitch_spatial_last2_arrays(
