@@ -10,12 +10,12 @@ from rs_embed.core import registry
 def clean_registry():
     """Clear registry before and after every test in this module."""
     registry._REGISTRY.clear()
-    if hasattr(registry, "_REGISTRY_IMPORT_ERROR"):
-        registry._REGISTRY_IMPORT_ERROR = None
+    if hasattr(registry, "_REGISTRY_IMPORT_ERRORS"):
+        registry._REGISTRY_IMPORT_ERRORS.clear()
     yield
     registry._REGISTRY.clear()
-    if hasattr(registry, "_REGISTRY_IMPORT_ERROR"):
-        registry._REGISTRY_IMPORT_ERROR = None
+    if hasattr(registry, "_REGISTRY_IMPORT_ERRORS"):
+        registry._REGISTRY_IMPORT_ERRORS.clear()
 
 
 # ══════════════════════════════════════════════════════════════════════
@@ -103,12 +103,12 @@ def test_get_embedder_cls_includes_last_import_error(monkeypatch):
     from rs_embed.core.errors import ModelError
 
     registry._REGISTRY.clear()
-    registry._REGISTRY_IMPORT_ERROR = RuntimeError("boom")
+    registry._REGISTRY_IMPORT_ERRORS["anything"] = RuntimeError("boom")
 
     with pytest.raises(ModelError) as ei:
         registry.get_embedder_cls("anything")
     msg = str(ei.value)
-    assert "Last embedder import error" in msg
+    assert "Import error for 'anything'" in msg
     assert "RuntimeError: boom" in msg
 
 

@@ -334,9 +334,7 @@ def _prithvi_forward_tokens_batch(
         lcoords.append([float(lon), float(lat)])
     temporal_coords = torch.tensor(
         tcoords, dtype=torch.float32, device=device
-    ).unsqueeze(
-        1
-    )  # [B,1,2]
+    ).unsqueeze(1)  # [B,1,2]
     location_coords = torch.tensor(lcoords, dtype=torch.float32, device=device)  # [B,2]
 
     with torch.inference_mode():

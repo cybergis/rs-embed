@@ -871,9 +871,11 @@ class WildSATEmbedder(EmbedderBase):
         if output.mode == "pooled":
             ometa = {
                 **meta,
-                "pooling": output.pooling
-                if fmeta.get("pooled_from_tokens", False)
-                else "identity",
+                "pooling": (
+                    output.pooling
+                    if fmeta.get("pooled_from_tokens", False)
+                    else "identity"
+                ),
                 "pooled_shape": tuple(vec.shape),
             }
             return Embedding(data=vec.astype(np.float32), meta=ometa)

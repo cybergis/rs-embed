@@ -215,9 +215,11 @@ def _load_rshf_remoteclip(
         "ckpt_input": ckpt,
         "ckpt_local_dir": local_dir,
         "weight_file": weight_file,
-        "weight_file_size": os.path.getsize(weight_file)
-        if (weight_file and os.path.exists(weight_file))
-        else None,
+        "weight_file_size": (
+            os.path.getsize(weight_file)
+            if (weight_file and os.path.exists(weight_file))
+            else None
+        ),
         "weights_verified": True,
         "init_warning_suppressed_count": int(suppressed_warning.get("count", 0)),
         **stats,

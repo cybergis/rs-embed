@@ -1127,9 +1127,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
             i: int, sp: SpatialSpec
         ) -> Tuple[int, np.ndarray, Dict[str, Any]]:
             raw, fetch_meta = _coerce_fetch_result(
-                _fetch_toa_raw_chw_from_gee(
-                    self._get_provider(backend), sp, t, sensor
-                )
+                _fetch_toa_raw_chw_from_gee(self._get_provider(backend), sp, t, sensor)
             )
             return i, raw, fetch_meta
 

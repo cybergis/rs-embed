@@ -212,9 +212,9 @@ def _load_dofa_model_cached(variant: str, dev: str):
         "device": dev,
         "device_resolved": dev,
         "weights_url": str(weights.url),
-        "weights_meta": dict(weights.meta)
-        if isinstance(weights.meta, dict)
-        else str(weights.meta),
+        "weights_meta": (
+            dict(weights.meta) if isinstance(weights.meta, dict) else str(weights.meta)
+        ),
         "img_size": int(getattr(model, "img_size", 224)),
         "patch_size": int(getattr(model, "patch_size", 16)),
         "embed_dim": int(getattr(model, "embed_dim", -1)),

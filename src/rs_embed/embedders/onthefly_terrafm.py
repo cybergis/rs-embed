@@ -587,9 +587,11 @@ class TerraFMBEmbedder(EmbedderBase):
                 source = sensor_meta["collection"]
             elif modality == "s1":
                 sensor_meta = {
-                    "collection": "COPERNICUS/S1_GRD_FLOAT"
-                    if use_float_linear
-                    else "COPERNICUS/S1_GRD",
+                    "collection": (
+                        "COPERNICUS/S1_GRD_FLOAT"
+                        if use_float_linear
+                        else "COPERNICUS/S1_GRD"
+                    ),
                     "bands": ("VV", "VH"),
                     "scale_m": scale_m,
                     "cloudy_pct": cloudy_pct,
@@ -610,27 +612,37 @@ class TerraFMBEmbedder(EmbedderBase):
             input_time=temporal_midpoint_str(temporal_used),
             extra={
                 "modality": modality,
-                "scale_m": scale_m
-                if is_provider_backend(backend_l, allow_auto=False)
-                else None,
-                "cloudy_pct": cloudy_pct
-                if is_provider_backend(backend_l, allow_auto=False)
-                else None,
-                "composite": composite
-                if is_provider_backend(backend_l, allow_auto=False)
-                else None,
-                "orbit": orbit
-                if (
-                    is_provider_backend(backend_l, allow_auto=False)
-                    and modality == "s1"
-                )
-                else None,
-                "use_float_linear": use_float_linear
-                if (
-                    is_provider_backend(backend_l, allow_auto=False)
-                    and modality == "s1"
-                )
-                else None,
+                "scale_m": (
+                    scale_m
+                    if is_provider_backend(backend_l, allow_auto=False)
+                    else None
+                ),
+                "cloudy_pct": (
+                    cloudy_pct
+                    if is_provider_backend(backend_l, allow_auto=False)
+                    else None
+                ),
+                "composite": (
+                    composite
+                    if is_provider_backend(backend_l, allow_auto=False)
+                    else None
+                ),
+                "orbit": (
+                    orbit
+                    if (
+                        is_provider_backend(backend_l, allow_auto=False)
+                        and modality == "s1"
+                    )
+                    else None
+                ),
+                "use_float_linear": (
+                    use_float_linear
+                    if (
+                        is_provider_backend(backend_l, allow_auto=False)
+                        and modality == "s1"
+                    )
+                    else None
+                ),
                 "start": getattr(temporal_used, "start", None),
                 "end": getattr(temporal_used, "end", None),
                 "image_size": image_size,
@@ -881,9 +893,11 @@ class TerraFMBEmbedder(EmbedderBase):
             source = sensor_meta["collection"]
         elif modality == "s1":
             sensor_meta = {
-                "collection": "COPERNICUS/S1_GRD_FLOAT"
-                if use_float_linear
-                else "COPERNICUS/S1_GRD",
+                "collection": (
+                    "COPERNICUS/S1_GRD_FLOAT"
+                    if use_float_linear
+                    else "COPERNICUS/S1_GRD"
+                ),
                 "bands": ("VV", "VH"),
                 "scale_m": scale_m,
                 "cloudy_pct": cloudy_pct,
@@ -921,9 +935,9 @@ class TerraFMBEmbedder(EmbedderBase):
                         "cloudy_pct": cloudy_pct,
                         "composite": composite,
                         "orbit": orbit if modality == "s1" else None,
-                        "use_float_linear": use_float_linear
-                        if modality == "s1"
-                        else None,
+                        "use_float_linear": (
+                            use_float_linear if modality == "s1" else None
+                        ),
                         "start": getattr(temporal_used, "start", None),
                         "end": getattr(temporal_used, "end", None),
                         "image_size": image_size,
