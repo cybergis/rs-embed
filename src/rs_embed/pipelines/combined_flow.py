@@ -5,9 +5,9 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ...core.embedding import Embedding
-from ...core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ...tools.output import normalize_embedding_output
+from ..core.embedding import Embedding
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..tools.output import normalize_embedding_output
 
 
 @dataclass(frozen=True)

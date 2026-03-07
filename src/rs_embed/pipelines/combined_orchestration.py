@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ...core.specs import SensorSpec, SpatialSpec
+from ..core.specs import SensorSpec, SpatialSpec
 
 
 def init_combined_provider(

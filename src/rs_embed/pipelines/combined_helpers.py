@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Set, Tuple
 
 import numpy as np
 
-from ...core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 
 
 def init_combined_export_state(

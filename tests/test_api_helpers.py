@@ -1,7 +1,7 @@
 import numpy as np
 
 from rs_embed.core.specs import BBox, SensorSpec
-from rs_embed.internal.api.api_helpers import fetch_provider_patch_raw
+from rs_embed.providers.gee_utils import fetch_provider_patch_raw
 from rs_embed.providers.base import ProviderBase
 
 

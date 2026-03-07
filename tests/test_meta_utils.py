@@ -1,5 +1,5 @@
 from rs_embed.core.specs import TemporalSpec
-from rs_embed.core.temporal_utils import split_temporal_range, temporal_frame_midpoints
+from rs_embed.tools.temporal import split_temporal_range, temporal_frame_midpoints
 from rs_embed.embedders.meta_utils import temporal_to_dict, temporal_to_range
 
 

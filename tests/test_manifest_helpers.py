@@ -4,7 +4,7 @@ import json
 
 
 from rs_embed.core.specs import BBox, OutputSpec, PointBuffer, TemporalSpec
-from rs_embed.internal.api.manifest_helpers import (
+from rs_embed.tools.manifest import (
     combined_resume_manifest,
     load_json_dict,
     point_failure_manifest,

@@ -5,7 +5,7 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
-from ...core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 
 
 @dataclass(frozen=True)

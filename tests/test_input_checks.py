@@ -3,7 +3,7 @@ import os
 import numpy as np
 import pytest
 
-from rs_embed.core.input_checks import (
+from rs_embed.tools.inspection import (
     inspect_chw,
     maybe_inspect_chw,
     checks_enabled,

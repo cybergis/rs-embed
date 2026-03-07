@@ -350,7 +350,7 @@ def test_sensor_key_deterministic_and_differs():
 
 
 def test_sensor_cache_key_deterministic_and_differs():
-    from rs_embed.api import _sensor_cache_key
+    from rs_embed.tools.serialization import sensor_cache_key as _sensor_cache_key
 
     s1 = SensorSpec(collection="A", bands=("B1",))
     s2 = SensorSpec(collection="B", bands=("B1",))
@@ -575,7 +575,7 @@ def test_export_batch_infer_batch_size_is_independent_from_chunk_size(
 
 def test_normalize_embedding_output_idempotent_for_pooled():
     """Pooled embeddings are passed through unchanged; calling twice is safe."""
-    from rs_embed.internal.api.output_helpers import normalize_embedding_output
+    from rs_embed.tools.output import normalize_embedding_output
 
     data = np.arange(8, dtype=np.float32)
     emb = Embedding(data=data, meta={"y_axis_direction": "south_to_north"})
@@ -595,7 +595,7 @@ def test_normalize_embedding_output_grid_south_to_north_applied_once():
     a second time on an already-normalised embedding would set
     grid_orientation_applied=False, incorrectly claiming no flip occurred.
     """
-    from rs_embed.internal.api.output_helpers import normalize_embedding_output
+    from rs_embed.tools.output import normalize_embedding_output
 
     data = np.array([[1.0, 2.0], [3.0, 4.0]], dtype=np.float32)  # 2×2 grid
     emb = Embedding(data=data, meta={"y_axis_direction": "south_to_north"})

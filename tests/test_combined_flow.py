@@ -17,7 +17,7 @@ import pytest
 
 from rs_embed.core.embedding import Embedding
 from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
-from rs_embed.internal.api.combined_flow_helpers import (
+from rs_embed.pipelines.combined_flow import (
     CombinedModelDeps,
     run_pending_models,
 )
