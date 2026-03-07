@@ -379,7 +379,10 @@ def test_export_batch_rejects_non_list_spatials():
 
     with pytest.raises(ModelError, match="non-empty"):
         export_batch(
-            spatials=(_SPATIAL,), temporal=_TEMPORAL, models=["mock_model"], out_dir="/tmp"
+            spatials=(_SPATIAL,),
+            temporal=_TEMPORAL,
+            models=["mock_model"],
+            out_dir="/tmp",
         )
 
     with pytest.raises(ModelError, match="non-empty"):
@@ -769,7 +772,7 @@ def test_export_batch_assert_supported_passes_for_compatible_model(tmp_path):
     assert results[0]["status"] == "ok"
 
 
-def test_export_batch_backend_resolution_before_assert_supported(tmp_path):
+def test_export_batch_backend_resolution_before_assert_supported(tmp_path, monkeypatch):
     """Backend is resolved per model BEFORE capability validation.
 
     A precomputed model declaring backend=["auto"] should pass when the user
@@ -777,9 +780,14 @@ def test_export_batch_backend_resolution_before_assert_supported(tmp_path):
     to "auto" for precomputed models.  Without the per-model resolution fix
     (Finding 11), _assert_supported would see raw "gee" ∉ ["auto"] and raise.
     """
+    import rs_embed.api as api
     from rs_embed.api import export_batch
 
     registry.register("mock_precomputed_local")(_MockPrecomputedLocalEmbedder)
+
+    # Prevent real GEE initialization — the precomputed model uses backend="auto"
+    # after remapping, so no provider is actually needed for inference.
+    monkeypatch.setattr(api, "_provider_factory_for_backend", lambda _b: None)
 
     # _MockPrecomputedLocalEmbedder declares backend=["local", "auto"]
     # User passes backend="gee" → _resolve_embedding_api_backend maps to "auto"
