@@ -1,3 +1,8 @@
+# Implementation based on:
+# GeoTessera (Tessera)
+# CVPR 2026
+# https://arxiv.org/abs/2506.20380
+
 from __future__ import annotations
 
 import os

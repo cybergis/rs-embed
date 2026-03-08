@@ -1,3 +1,8 @@
+# Implementation based on:
+# Galileo: Learning Global and Local Features in Pretrained Remote Sensing Models
+# ICML 2025
+# https://arxiv.org/abs/2502.09356
+
 from __future__ import annotations
 
 import importlib.util

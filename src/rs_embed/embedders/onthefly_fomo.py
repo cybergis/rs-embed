@@ -1,3 +1,9 @@
+# Implementation based on:
+# FoMo-Bench: a multi-modal, multi-scale and multi-task benchmark for Forest Monitoring
+#             Remote Sensing Foundation Models
+# AAAI 2025
+# https://arxiv.org/abs/2312.10114
+
 from __future__ import annotations
 
 import importlib.util

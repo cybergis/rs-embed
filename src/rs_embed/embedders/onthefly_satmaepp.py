@@ -1,3 +1,8 @@
+# Implementation based on:
+# Revisiting Pre-trained Remote Sensing Model Benchmarks: Resizing and Normalization Matters
+# arXiv 2024
+# https://arxiv.org/abs/2403.05419
+
 from __future__ import annotations
 
 import os

@@ -1,4 +1,8 @@
-# src/rs_embed/embedders/onthefly_remoteclip.py
+# Implementation based on:
+# RemoteCLIP: A Vision Language Foundation Model for Remote Sensing
+# IEEE Transactions on Geoscience and Remote Sensing 2024
+# https://arxiv.org/abs/2306.11029
+
 from __future__ import annotations
 
 import logging

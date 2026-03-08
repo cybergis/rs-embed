@@ -1,3 +1,8 @@
+# Implementation based on:
+# TerraMind: Large-Scale Generative Multimodality for Earth Observation
+# ICCV 2025
+# https://arxiv.org/abs/2504.11171
+
 from __future__ import annotations
 
 import os

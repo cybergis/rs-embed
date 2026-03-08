@@ -1,3 +1,8 @@
+# Implementation based on:
+# WildSat (HRSFM)
+# ICCV 2025
+# https://arxiv.org/abs/2412.14428
+
 from __future__ import annotations
 
 import html

@@ -1,3 +1,8 @@
+# Implementation based on:
+# Copernicus Foundation Models
+# ICCV 2025
+# https://arxiv.org/abs/2503.11849
+
 from __future__ import annotations
 
 import os
