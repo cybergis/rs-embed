@@ -4,7 +4,6 @@ from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Any, Dict, Optional, Tuple
-import warnings
 
 
 from .core.errors import ProviderError
@@ -95,11 +94,6 @@ def inspect_gee_patch(
     return_array: bool = False,
 ) -> Dict[str, Any]:
     """Backwards-compatible wrapper around inspect_provider_patch."""
-    warnings.warn(
-        "inspect_gee_patch is deprecated. Use inspect_provider_patch.",
-        DeprecationWarning,
-        stacklevel=2,
-    )
     return inspect_provider_patch(
         spatial=spatial,
         temporal=temporal,
