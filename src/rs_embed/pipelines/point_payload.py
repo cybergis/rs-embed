@@ -1,10 +1,12 @@
 from __future__ import annotations
 
+from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
 
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.types import ExportConfig
 from ..tools.serialization import (
     embedding_to_numpy,
     jsonable,
@@ -39,15 +41,17 @@ def build_one_point_payload(
     input_reports: Dict[Tuple[int, str], Dict[str, Any]],
     prefetch_errors: Dict[Tuple[int, str], str],
     pass_input_into_embedder: bool,
-    save_inputs: bool,
-    save_embeddings: bool,
-    fail_on_bad_input: bool,
-    continue_on_error: bool,
-    max_retries: int,
-    retry_backoff_s: float,
+    config: ExportConfig,
     provider_factory: Optional[Callable[[], Any]] = None,
     model_progress_cb: Optional[Callable[[str], None]] = None,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+    save_inputs = config.save_inputs
+    save_embeddings = config.save_embeddings
+    fail_on_bad_input = config.fail_on_bad_input
+    continue_on_error = config.continue_on_error
+    max_retries = config.max_retries
+    retry_backoff_s = config.retry_backoff_s
+
     arrays: Dict[str, np.ndarray] = {}
     manifest: Dict[str, Any] = {
         "created_at": utc_ts(),

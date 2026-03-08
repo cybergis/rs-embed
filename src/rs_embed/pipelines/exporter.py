@@ -11,6 +11,7 @@ All configuration lives on ``self`` — no 30-argument function calls.
 from __future__ import annotations
 
 import os
+from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
@@ -489,6 +490,11 @@ class BatchExporter:
             for i in idxs:
                 out_file = os.path.join(out_dir, f"{names[i]}{self.ext}")
                 try:
+                    per_item_cfg = (
+                        replace(cfg, save_embeddings=False)
+                        if use_batch
+                        else cfg
+                    )
                     arrays, manifest = build_one_point_payload(
                         point_index=i,
                         spatial=self.spatials[i],
@@ -505,12 +511,7 @@ class BatchExporter:
                         prefetch_errors=prefetch.errors,
                         pass_input_into_embedder=provider_enabled
                         and bool(cfg.save_embeddings),
-                        save_inputs=cfg.save_inputs,
-                        save_embeddings=False if use_batch else cfg.save_embeddings,
-                        fail_on_bad_input=cfg.fail_on_bad_input,
-                        continue_on_error=cfg.continue_on_error,
-                        max_retries=cfg.max_retries,
-                        retry_backoff_s=cfg.retry_backoff_s,
+                        config=per_item_cfg,
                         provider_factory=self.provider_factory,
                         model_progress_cb=(None if use_batch else model_progress_cb),
                     )
