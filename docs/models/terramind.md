@@ -39,7 +39,7 @@
 ### Spatial / temporal
 
 - Provider path: `SpatialSpec` + temporal normalized to range via shared helper
-- Tensor path: no provider fetch; pass `sensor.data` as CHW/BCHW
+- Tensor path: no provider fetch; pass `input_chw` as `CHW`
 
 ### Sensor / channels (provider path)
 
@@ -58,8 +58,9 @@ TerraMind internal semantic mapping is also tracked in metadata (`bands_terramin
 
 ### Tensor backend contract
 
-- `backend="tensor"` requires `sensor.data`
-- accepted shapes: `CHW` or `BCHW`
+- `backend="tensor"` requires `input_chw`
+- accepted shape: `CHW`
+- batch tensor inputs should use `get_embeddings_batch_from_inputs(...)`
 - `C` must be `12`
 - adapter resizes to `224` and applies TerraMind normalization before forward
 
@@ -80,7 +81,7 @@ TerraMind internal semantic mapping is also tracked in metadata (`bands_terramin
 
 ### Tensor path
 
-- Reads `sensor.data`, coerces CHW/BCHW, resizes to `224`, applies same normalization, then forwards model
+- Reads `input_chw`, resizes to `224`, applies same normalization, then forwards model
 
 ---
 
@@ -146,7 +147,7 @@ emb = get_embedding(
 ## Common Failure Modes / Debugging
 
 - wrong channel count for `input_chw` / tensor backend (`C` must be 12)
-- backend mismatch (`tensor` path requires `sensor.data`; provider path requires provider backend)
+- backend mismatch (`tensor` path requires `input_chw`; provider path requires provider backend)
 - hidden normalization changes via `RS_EMBED_TERRAMIND_NORMALIZE`
 - TerraTorch import/build issues for selected model key or optional deps
 

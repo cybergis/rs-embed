@@ -62,8 +62,8 @@ Wavelengths:
 
 ### Tensor backend contract
 
-- `backend="tensor"` requires `sensor.data` as `CHW` or `BCHW`
-- current v0.1 tensor backend expects `B=1` for `BCHW`
+- `backend="tensor"` requires `input_chw` as `CHW`
+- batch tensor inputs should use `get_embeddings_batch_from_inputs(...)`
 - `sensor.wavelengths` should be provided, or `sensor.bands` must allow wavelength inference
 
 ---
@@ -81,7 +81,7 @@ Wavelengths:
 
 ### Tensor path
 
-1. Read `sensor.data` (CHW/BCHW, `B=1` if BCHW)
+1. Read `input_chw` (`CHW`)
 2. Resize to `224x224`
 3. Resolve wavelengths from `sensor.wavelengths` or infer from `sensor.bands`
 4. Forward DOFA with image + wavelengths
@@ -158,7 +158,7 @@ sensor = SensorSpec(
 - provider path called with non-`range` temporal spec
 - wavelength vector missing or wrong length for channel count
 - unsupported band names for automatic wavelength inference
-- tensor backend with `BCHW` and `B != 1`
+- tensor backend called without `input_chw`
 - unknown `variant` (must be `base` or `large`)
 
 Recommended first checks:

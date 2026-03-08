@@ -15,6 +15,7 @@ from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
+    coerce_single_input_chw,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     load_cached_with_device as _load_cached_with_device,
     resolve_device_auto_torch as _resolve_device,
@@ -342,6 +343,93 @@ def _terramind_forward_tokens(
     return tokens, meta
 
 
+def _terramind_forward_tokens_batch(
+    model: Any,
+    x_bchw: np.ndarray,
+    *,
+    modality: str,
+    layer_index: int,
+    device: str,
+) -> Tuple[np.ndarray, Dict[str, Any]]:
+    ensure_torch()
+    import torch
+
+    dev = _resolve_device(device)
+    model = model.to(dev).eval()
+    x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
+
+    with torch.no_grad():
+        out = None
+        try:
+            out = model({str(modality): x})
+        except Exception:
+            out = model(x)
+
+    def _pick_from_sequence(seq: Any, idx: int) -> Optional[torch.Tensor]:
+        if not isinstance(seq, (list, tuple)) or len(seq) == 0:
+            return None
+        cand = None
+        try:
+            cand = seq[idx]
+        except Exception:
+            cand = None
+        if torch.is_tensor(cand) and cand.ndim == 3:
+            return cand
+        for v in reversed(seq):
+            if torch.is_tensor(v) and v.ndim == 3:
+                return v
+        return None
+
+    toks_t = None
+    if isinstance(out, (list, tuple)):
+        toks_t = _pick_from_sequence(out, layer_index)
+    elif isinstance(out, dict):
+        vals = list(out.values())
+        toks_t = _pick_from_sequence(vals, layer_index)
+        if toks_t is None:
+            for v in vals:
+                if torch.is_tensor(v) and v.ndim == 3:
+                    toks_t = v
+                    break
+    elif hasattr(out, "last_hidden_state") and torch.is_tensor(out.last_hidden_state):
+        if out.last_hidden_state.ndim == 3:
+            toks_t = out.last_hidden_state
+    elif torch.is_tensor(out) and out.ndim == 3:
+        toks_t = out
+
+    if toks_t is None:
+        raise ModelError(
+            "TerraMind forward did not return token tensor [B,N,D]. "
+            f"Got type={type(out)}."
+        )
+
+    tokens = toks_t.detach().float().cpu().numpy().astype(np.float32)
+    meta = {
+        "tokens_shape": tuple(tokens.shape[1:]),
+        "batch_tokens_shape": tuple(tokens.shape),
+        "layer_index": int(layer_index),
+        "tokens_include_cls": False,
+    }
+    return tokens, meta
+
+
+def _prepare_terramind_input_chw(
+    input_chw: Any,
+    *,
+    image_size: int,
+    model_key: str,
+    normalize_mode: str,
+) -> np.ndarray:
+    raw_chw = coerce_single_input_chw(
+        input_chw,
+        expected_channels=len(_S2_SR_12_BANDS),
+        model_name="TerraMind",
+    )
+    raw_chw = np.clip(raw_chw, 0.0, 10000.0).astype(np.float32)
+    raw_chw = _resize_chw(raw_chw, size=image_size)
+    return _terramind_zscore_s2(raw_chw, model_key=model_key, mode=normalize_mode)
+
+
 @register("terramind")
 class TerraMindEmbedder(EmbedderBase):
     DEFAULT_MODEL_KEY = "terramind_v1_small"
@@ -432,39 +520,17 @@ class TerraMindEmbedder(EmbedderBase):
         temporal_used: Optional[TemporalSpec] = None
 
         if backend_l == "tensor":
-            if sensor is None or not hasattr(sensor, "data"):
+            if input_chw is None:
                 raise ModelError(
-                    "backend='tensor' requires sensor.data as CHW or BCHW numpy/torch."
+                    "backend='tensor' requires input_chw as CHW. "
+                    "Use get_embeddings_batch_from_inputs(...) for batches."
                 )
-            x = sensor.data
-            try:
-                import torch
-
-                if torch.is_tensor(x):
-                    x = x.detach().cpu().numpy()
-            except Exception:
-                pass
-            arr = np.asarray(x)
-            if arr.ndim == 3:
-                x_bchw = arr[None, ...]
-            elif arr.ndim == 4:
-                x_bchw = arr
-            else:
-                raise ModelError(f"Expected CHW or BCHW, got shape={arr.shape}")
-            if int(x_bchw.shape[1]) != len(_S2_SR_12_BANDS):
-                raise ModelError(
-                    f"TerraMind tensor backend expects C=12, got C={int(x_bchw.shape[1])}"
-                )
-
-            prepared = []
-            for i in range(int(x_bchw.shape[0])):
-                raw = x_bchw[i].astype(np.float32, copy=False)
-                if raw.shape[-2:] != (image_size, image_size):
-                    raw = _resize_chw(raw, size=image_size)
-                prepared.append(
-                    _terramind_zscore_s2(raw, model_key=model_key, mode=normalize_mode)
-                )
-            x_bchw = np.stack(prepared, axis=0).astype(np.float32)
+            x_bchw = _prepare_terramind_input_chw(
+                input_chw,
+                image_size=image_size,
+                model_key=model_key,
+                normalize_mode=normalize_mode,
+            )[None, ...].astype(np.float32)
 
         else:
             provider = self._get_provider(backend)
@@ -624,13 +690,9 @@ class TerraMindEmbedder(EmbedderBase):
 
         backend_l = backend.lower().strip()
         if backend_l == "tensor":
-            return super().get_embeddings_batch(
-                spatials=spatials,
-                temporal=temporal,
-                sensor=sensor,
-                output=output,
-                backend=backend,
-                device=device,
+            raise ModelError(
+                "backend='tensor' batch inference requires "
+                "get_embeddings_batch_from_inputs(...)."
             )
 
         provider = self._get_provider(backend)
@@ -669,22 +731,181 @@ class TerraMindEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        out: List[Embedding] = []
-        for i, sp in enumerate(spatials):
-            raw = prefetched_raw[i]
+        raw_inputs: List[np.ndarray] = []
+        for i, raw in enumerate(prefetched_raw):
             if raw is None:
                 raise ModelError(
                     f"Missing prefetched input at index={i} for terramind."
                 )
-            out.append(
-                self.get_embedding(
-                    spatial=sp,
-                    temporal=temporal,
-                    sensor=ss,
-                    output=output,
-                    backend=backend,
-                    device=device,
-                    input_chw=raw,
-                )
+            raw_inputs.append(raw)
+
+        return self.get_embeddings_batch_from_inputs(
+            spatials=spatials,
+            input_chws=raw_inputs,
+            temporal=temporal,
+            sensor=ss,
+            output=output,
+            backend=backend,
+            device=device,
+        )
+
+    def get_embeddings_batch_from_inputs(
+        self,
+        *,
+        spatials: list[SpatialSpec],
+        input_chws: list[np.ndarray],
+        temporal: Optional[TemporalSpec] = None,
+        sensor: Optional[SensorSpec] = None,
+        output: OutputSpec = OutputSpec.pooled(),
+        backend: str = "auto",
+        device: str = "auto",
+    ) -> list[Embedding]:
+        if len(spatials) != len(input_chws):
+            raise ModelError(
+                f"spatials/input_chws length mismatch: {len(spatials)} != {len(input_chws)}"
             )
+        if not spatials:
+            return []
+
+        backend_l = backend.lower().strip()
+        uses_provider = backend_l != "tensor"
+        t = None
+        fill_value = 0.0
+        source = None
+        sensor_meta = None
+        if uses_provider:
+            self._get_provider(backend)
+            t = temporal_to_range(temporal)
+            ss = sensor or self._default_sensor()
+            scale_m = int(getattr(ss, "scale_m", 10))
+            cloudy_pct = int(getattr(ss, "cloudy_pct", 30))
+            composite = str(getattr(ss, "composite", "median"))
+            fill_value = float(getattr(ss, "fill_value", 0.0))
+            sensor_meta = {
+                "collection": "COPERNICUS/S2_SR_HARMONIZED",
+                "bands": tuple(_S2_SR_12_BANDS),
+                "bands_terramind": tuple(_TERRAMIND_S2L2A_BANDS),
+                "scale_m": scale_m,
+                "cloudy_pct": cloudy_pct,
+                "composite": composite,
+                "fill_value": fill_value,
+            }
+            source = sensor_meta["collection"]
+        else:
+            scale_m = None
+            cloudy_pct = None
+            composite = None
+
+        model_key = os.environ.get(
+            "RS_EMBED_TERRAMIND_MODEL_KEY", self.DEFAULT_MODEL_KEY
+        ).strip()
+        modality = (
+            os.environ.get("RS_EMBED_TERRAMIND_MODALITY", self.DEFAULT_MODALITY).strip()
+            or self.DEFAULT_MODALITY
+        )
+        normalize_mode = os.environ.get(
+            "RS_EMBED_TERRAMIND_NORMALIZE", "zscore"
+        ).strip()
+        layer_index = int(os.environ.get("RS_EMBED_TERRAMIND_LAYER_INDEX", "-1"))
+        pretrained = os.environ.get(
+            "RS_EMBED_TERRAMIND_PRETRAINED", "1"
+        ).strip() not in {"0", "false", "False"}
+        image_size = self.DEFAULT_IMAGE_SIZE
+
+        x_bchw = np.stack(
+            [
+                _prepare_terramind_input_chw(
+                    input_chw,
+                    image_size=image_size,
+                    model_key=model_key,
+                    normalize_mode=normalize_mode,
+                )
+                for input_chw in input_chws
+            ],
+            axis=0,
+        ).astype(np.float32)
+
+        model, wmeta, dev = _load_terramind(
+            model_key=model_key,
+            pretrained=pretrained,
+            modality=modality,
+            device=device,
+        )
+        tokens_bnd, tmeta = _terramind_forward_tokens_batch(
+            model,
+            x_bchw,
+            modality=modality,
+            layer_index=layer_index,
+            device=dev,
+        )
+
+        out: List[Embedding] = []
+        for i, _spatial in enumerate(spatials):
+            meta = build_meta(
+                model=self.model_name,
+                kind="on_the_fly",
+                backend=backend_l,
+                source=source,
+                sensor=sensor_meta,
+                temporal=t,
+                image_size=image_size,
+                input_time=temporal_midpoint_str(t),
+                extra={
+                    "model_key": model_key,
+                    "modality": modality,
+                    "bands": tuple(_S2_SR_12_BANDS),
+                    "bands_terramind": tuple(_TERRAMIND_S2L2A_BANDS),
+                    "normalization": str(normalize_mode),
+                    "device": dev,
+                    "pretrained": bool(pretrained),
+                    "scale_m": scale_m,
+                    "cloudy_pct": cloudy_pct,
+                    "composite": composite,
+                    "fill_value": fill_value if uses_provider else None,
+                    "batch_infer": True,
+                    "input_override": True,
+                    **wmeta,
+                    **tmeta,
+                },
+            )
+            tokens = tokens_bnd[i]
+            if output.mode == "pooled":
+                vec, cls_removed = pool_from_tokens(tokens, output.pooling)
+                out.append(
+                    Embedding(
+                        data=vec.astype(np.float32),
+                        meta={
+                            **meta,
+                            "pooling": output.pooling,
+                            "cls_removed": bool(cls_removed),
+                        },
+                    )
+                )
+                continue
+
+            if output.mode == "grid":
+                grid, (gh, gw), cls_removed = tokens_to_grid_dhw(tokens)
+                gmeta = {
+                    **meta,
+                    "grid_type": "vit_patch_tokens",
+                    "grid_hw": (int(gh), int(gw)),
+                    "grid_shape": tuple(grid.shape),
+                    "cls_removed": bool(cls_removed),
+                }
+                da = xr.DataArray(
+                    grid.astype(np.float32),
+                    dims=("d", "y", "x"),
+                    coords={
+                        "d": np.arange(grid.shape[0]),
+                        "y": np.arange(grid.shape[1]),
+                        "x": np.arange(grid.shape[2]),
+                    },
+                    name="embedding",
+                    attrs=gmeta,
+                )
+                out.append(Embedding(data=da, meta=gmeta))
+                continue
+
+            raise ModelError(f"Unknown output mode: {output.mode}")
+
         return out

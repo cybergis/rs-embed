@@ -9,6 +9,7 @@ from rs_embed.embedders.onthefly_scalemae import ScaleMAERGBEmbedder
 from rs_embed.embedders.onthefly_dynamicvis import DynamicVisEmbedder
 from rs_embed.embedders.onthefly_galileo import GalileoEmbedder
 from rs_embed.embedders.onthefly_wildsat import WildSATEmbedder
+from rs_embed.embedders.onthefly_dofa import DOFAEmbedder
 from rs_embed.embedders.onthefly_terrafm import TerraFMBEmbedder
 from rs_embed.embedders.onthefly_terramind import TerraMindEmbedder
 from rs_embed.embedders.onthefly_fomo import FoMoEmbedder
@@ -150,12 +151,14 @@ def test_terrafm_batch_prefetch_passes_raw_input(monkeypatch):
 
     seen = []
 
-    def _fake_get_embedding(**kw):
-        arr = kw["input_chw"]
-        seen.append((arr.shape[0], float(arr.max())))
-        return Embedding(data=np.array([kw["spatial"].lon], dtype=np.float32), meta={})
+    def _fake_batch_from_inputs(**kw):
+        seen.extend((arr.shape[0], float(arr.max())) for arr in kw["input_chws"])
+        return [
+            Embedding(data=np.array([sp.lon], dtype=np.float32), meta={})
+            for sp in kw["spatials"]
+        ]
 
-    monkeypatch.setattr(emb, "get_embedding", _fake_get_embedding)
+    monkeypatch.setattr(emb, "get_embeddings_batch_from_inputs", _fake_batch_from_inputs)
 
     out = emb.get_embeddings_batch(
         spatials=_spatials(2),
@@ -192,12 +195,14 @@ def test_terramind_batch_prefetch_passes_raw_input(monkeypatch):
 
     seen = []
 
-    def _fake_get_embedding(**kw):
-        arr = kw["input_chw"]
-        seen.append((arr.shape[0], float(arr.max())))
-        return Embedding(data=np.array([kw["spatial"].lon], dtype=np.float32), meta={})
+    def _fake_batch_from_inputs(**kw):
+        seen.extend((arr.shape[0], float(arr.max())) for arr in kw["input_chws"])
+        return [
+            Embedding(data=np.array([sp.lon], dtype=np.float32), meta={})
+            for sp in kw["spatials"]
+        ]
 
-    monkeypatch.setattr(emb, "get_embedding", _fake_get_embedding)
+    monkeypatch.setattr(emb, "get_embeddings_batch_from_inputs", _fake_batch_from_inputs)
 
     out = emb.get_embeddings_batch(
         spatials=_spatials(2),
@@ -210,6 +215,130 @@ def test_terramind_batch_prefetch_passes_raw_input(monkeypatch):
     assert seen_backend["value"] == "auto"
     assert seen[0][0] == 12
     assert seen[0][1] >= 1234.0
+
+
+def test_dofa_tensor_get_embedding_uses_input_chw(monkeypatch):
+    import rs_embed.embedders.onthefly_dofa as dofa
+
+    emb = DOFAEmbedder()
+    seen = {}
+
+    def _fake_resize(x_chw, *, size=224):
+        return x_chw.astype(np.float32, copy=False), {
+            "orig_hw": x_chw.shape[-2:],
+            "target_hw": x_chw.shape[-2:],
+        }
+
+    class _M:
+        patch_size = 16
+        global_pool = True
+
+    def _fake_load(*, variant, device):
+        return _M(), {"device": "cpu"}
+
+    def _fake_forward(model, x_bchw, wavelengths_um, *, device):
+        seen["shape"] = tuple(x_bchw.shape)
+        seen["wavelengths"] = list(wavelengths_um)
+        return (
+            np.ones((4, 2), dtype=np.float32),
+            np.array([1.0, 2.0], dtype=np.float32),
+            {"token_count": 4, "token_dim": 2},
+        )
+
+    monkeypatch.setattr(dofa, "_resize_chw", _fake_resize)
+    monkeypatch.setattr(dofa, "_load_dofa_model", _fake_load)
+    monkeypatch.setattr(dofa, "_dofa_forward_tokens_and_pooled", _fake_forward)
+
+    sensor = SensorSpec(
+        collection="COPERNICUS/S2_SR_HARMONIZED",
+        bands=tuple(
+            ["B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12"]
+        ),
+    )
+    out = emb.get_embedding(
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
+        temporal=None,
+        sensor=sensor,
+        output=OutputSpec.pooled(),
+        backend="tensor",
+        input_chw=np.ones((12, 8, 8), dtype=np.float32),
+    )
+
+    assert seen["shape"] == (1, 12, 8, 8)
+    assert len(seen["wavelengths"]) == 12
+    assert out.data.shape == (2,)
+
+
+def test_terrafm_tensor_get_embedding_uses_input_chw(monkeypatch):
+    import rs_embed.embedders.onthefly_terrafm as tf
+
+    emb = TerraFMBEmbedder()
+    seen = {}
+
+    monkeypatch.setattr(
+        tf,
+        "_resize_chw_to_224",
+        lambda x_chw, *, size=224: x_chw.astype(np.float32, copy=False),
+    )
+    monkeypatch.setattr(
+        tf,
+        "_load_terrafm_b",
+        lambda *, auto_download, cache_dir: (object(), {"device": "cpu"}),
+    )
+
+    def _fake_forward(model, x_bchw, *, device, want_grid):
+        seen["shape"] = tuple(x_bchw.shape)
+        return np.array([1.0, 2.0], dtype=np.float32), None
+
+    monkeypatch.setattr(tf, "_terrafm_pooled_and_grid", _fake_forward)
+
+    out = emb.get_embedding(
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="tensor",
+        input_chw=np.ones((12, 8, 8), dtype=np.float32),
+    )
+
+    assert seen["shape"] == (1, 12, 8, 8)
+    assert out.data.shape == (2,)
+
+
+def test_terramind_tensor_get_embedding_uses_input_chw(monkeypatch):
+    import rs_embed.embedders.onthefly_terramind as tm
+
+    emb = TerraMindEmbedder()
+    seen = {}
+
+    monkeypatch.setattr(
+        tm,
+        "_resize_chw",
+        lambda x_chw, *, size=224: x_chw.astype(np.float32, copy=False),
+    )
+    monkeypatch.setattr(
+        tm,
+        "_load_terramind",
+        lambda **kwargs: (object(), {"device": "cpu"}, "cpu"),
+    )
+
+    def _fake_forward(model, x_bchw, *, modality, layer_index, device):
+        seen["shape"] = tuple(x_bchw.shape)
+        return np.ones((4, 2), dtype=np.float32), {"tokens_shape": (4, 2)}
+
+    monkeypatch.setattr(tm, "_terramind_forward_tokens", _fake_forward)
+
+    out = emb.get_embedding(
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="tensor",
+        input_chw=np.ones((12, 8, 8), dtype=np.float32),
+    )
+
+    assert seen["shape"] == (1, 12, 8, 8)
+    assert out.data.shape == (2,)
 
 
 def test_fomo_batch_prefetch_passes_raw_input(monkeypatch):

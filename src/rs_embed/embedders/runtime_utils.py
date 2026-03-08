@@ -506,3 +506,39 @@ def coerce_input_to_tchw(
 
     raw_tchw = np.nan_to_num(raw_tchw, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(raw_tchw, 0.0, 10000.0).astype(np.float32)
+
+
+def coerce_single_input_chw(
+    input_chw: Any,
+    *,
+    expected_channels: Optional[int],
+    model_name: str,
+) -> np.ndarray:
+    """Normalize one user-provided tensor input into float32 CHW."""
+    raw = input_chw
+    try:
+        import torch
+
+        if torch.is_tensor(raw):
+            raw = raw.detach().cpu().numpy()
+    except Exception:
+        pass
+
+    arr = np.asarray(raw, dtype=np.float32)
+    if arr.ndim == 4:
+        raise ModelError(
+            f"{model_name} expects single-sample input_chw as CHW (C,H,W), "
+            f"got {tuple(int(v) for v in arr.shape)}. "
+            "Use get_embeddings_batch_from_inputs(...) for batches."
+        )
+    if arr.ndim != 3:
+        raise ModelError(
+            f"{model_name} expects input_chw as CHW (C,H,W), "
+            f"got {tuple(int(v) for v in arr.shape)}"
+        )
+    if expected_channels is not None and int(arr.shape[0]) != int(expected_channels):
+        raise ModelError(
+            f"input_chw must be CHW with C={int(expected_channels)} for {model_name}, "
+            f"got {tuple(int(v) for v in arr.shape)}"
+        )
+    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)

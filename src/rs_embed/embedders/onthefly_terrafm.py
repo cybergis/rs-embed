@@ -17,6 +17,7 @@ from ..providers import ProviderBase
 from .base import EmbedderBase
 from .meta_utils import build_meta, temporal_midpoint_str
 from .runtime_utils import (
+    coerce_single_input_chw,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     fetch_s1_vvvh_raw_chw as _fetch_s1_vvvh_raw_chw_shared,
     normalize_s1_vvvh_chw as _normalize_s1_vvvh_chw,
@@ -135,6 +136,32 @@ def _fetch_s1_vvvh_raw_chw(
         composite=str(composite),
         fill_value=0.0,
     )
+
+
+def _prepare_tensor_input_chw(
+    input_chw: Any,
+    *,
+    modality: str,
+    image_size: int,
+) -> np.ndarray:
+    modality_l = str(modality).lower().strip()
+    if modality_l == "s2":
+        x_chw = coerce_single_input_chw(
+            input_chw,
+            expected_channels=12,
+            model_name="TerraFM S2",
+        )
+        x_chw = np.clip(x_chw / 10000.0, 0.0, 1.0).astype(np.float32)
+    elif modality_l == "s1":
+        x_chw = coerce_single_input_chw(
+            input_chw,
+            expected_channels=2,
+            model_name="TerraFM S1",
+        )
+        x_chw = _normalize_s1_vvvh_chw(x_chw)
+    else:
+        raise ModelError("modality must be 's2' or 's1'.")
+    return _resize_chw_to_224(x_chw, size=image_size)
 
 
 # -----------------------------
@@ -435,32 +462,16 @@ class TerraFMBEmbedder(EmbedderBase):
         # Build input tensor
         # -----------------
         if backend_l == "tensor":
-            if sensor is None or not hasattr(sensor, "data"):
+            if input_chw is None:
                 raise ModelError(
-                    "backend='tensor' requires sensor.data as CHW or BCHW numpy/torch."
+                    "backend='tensor' requires input_chw as CHW. "
+                    "Use get_embeddings_batch_from_inputs(...) for batches."
                 )
-            x = sensor.data
-            # accept np or torch
-            try:
-                import torch
-
-                if torch.is_tensor(x):
-                    x = x.detach().cpu().numpy()
-            except Exception:
-                pass
-            x = np.asarray(x)
-            if x.ndim == 3:
-                x_bchw = x[None, ...]
-            elif x.ndim == 4:
-                x_bchw = x
-            else:
-                raise ModelError(f"Expected CHW or BCHW, got shape={x.shape}")
-
-            # resize to 224 to match TerraFM patch embed
-            if x_bchw.shape[-2:] != (image_size, image_size):
-                x_bchw = np.stack(
-                    [_resize_chw_to_224(xi, size=image_size) for xi in x_bchw], axis=0
-                )
+            x_bchw = _prepare_tensor_input_chw(
+                input_chw,
+                modality=modality,
+                image_size=image_size,
+            )[None, ...].astype(np.float32)
 
         else:
             provider = self._get_provider(backend)
@@ -663,14 +674,9 @@ class TerraFMBEmbedder(EmbedderBase):
 
         backend_l = backend.lower().strip()
         if backend_l == "tensor":
-            # tensor path stays sequential in v0.1
-            return super().get_embeddings_batch(
-                spatials=spatials,
-                temporal=temporal,
-                sensor=sensor,
-                output=output,
-                backend=backend,
-                device=device,
+            raise ModelError(
+                "backend='tensor' batch inference requires "
+                "get_embeddings_batch_from_inputs(...)."
             )
         provider = self._get_provider(backend)
 
@@ -738,22 +744,6 @@ class TerraFMBEmbedder(EmbedderBase):
                 )
             raw_inputs.append(raw)
 
-        # Keep batch behavior compatible with instance-level monkeypatch/instrumentation
-        # that overrides get_embedding (used by tests and some downstream wrappers).
-        if "get_embedding" in getattr(self, "__dict__", {}):
-            return [
-                self.get_embedding(
-                    spatial=sp,
-                    temporal=temporal,
-                    sensor=sensor,
-                    output=output,
-                    backend=backend,
-                    device=device,
-                    input_chw=raw,
-                )
-                for sp, raw in zip(spatials, raw_inputs)
-            ]
-
         return self.get_embeddings_batch_from_inputs(
             spatials=spatials,
             input_chws=raw_inputs,
@@ -783,23 +773,14 @@ class TerraFMBEmbedder(EmbedderBase):
             return []
 
         backend_l = backend.lower().strip()
-        if backend_l == "tensor":
-            return super().get_embeddings_batch_from_inputs(
-                spatials=spatials,
-                input_chws=input_chws,
-                temporal=temporal,
-                sensor=sensor,
-                output=output,
-                backend=backend,
-                device=device,
-            )
-        self._get_provider(backend)
-
-        if temporal is None:
-            raise ModelError("terrafm_b_gee requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("terrafm_b_gee requires TemporalSpec.range in v0.1.")
+        uses_provider = backend_l != "tensor"
+        if uses_provider:
+            self._get_provider(backend)
+            if temporal is None:
+                raise ModelError("terrafm_b_gee requires TemporalSpec.range(start,end).")
+            temporal.validate()
+            if temporal.mode != "range":
+                raise ModelError("terrafm_b_gee requires TemporalSpec.range in v0.1.")
 
         modality = str(getattr(sensor, "modality", "s2") if sensor else "s2").lower()
         scale_m = int(getattr(sensor, "scale_m", 10) if sensor else 10)
@@ -819,35 +800,25 @@ class TerraFMBEmbedder(EmbedderBase):
 
         x_bchw_all: List[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
-            if modality == "s2":
-                if input_chw.ndim != 3 or int(input_chw.shape[0]) != 12:
-                    raise ModelError(
-                        f"input_chw must be CHW with 12 bands for TerraFM S2, got {getattr(input_chw, 'shape', None)} at index={i}"
+            try:
+                x_bchw_all.append(
+                    _prepare_tensor_input_chw(
+                        input_chw,
+                        modality=modality,
+                        image_size=image_size,
                     )
-                x_chw = np.clip(input_chw.astype(np.float32) / 10000.0, 0.0, 1.0)
-            elif modality == "s1":
-                if input_chw.ndim != 3 or int(input_chw.shape[0]) != 2:
-                    raise ModelError(
-                        f"input_chw must be CHW with 2 bands (VV,VH) for TerraFM S1, got {getattr(input_chw, 'shape', None)} at index={i}"
-                    )
-                x = input_chw.astype(np.float32)
-                x = np.log1p(np.maximum(x, 0.0))
-                denom = np.percentile(x, 99) if np.isfinite(x).all() else 1.0
-                denom = float(denom) if denom > 0 else 1.0
-                x_chw = np.clip(x / denom, 0.0, 1.0).astype(np.float32)
-            else:
-                raise ModelError("modality must be 's2' or 's1'.")
-
-            x_bchw_all.append(_resize_chw_to_224(x_chw, size=image_size))
+                )
+            except ModelError as exc:
+                raise ModelError(f"{exc} at index={i}") from exc
 
         model, wmeta = _load_terrafm_b(auto_download=True, cache_dir=cache_dir)
         dev = str(wmeta.get("device", _auto_device(device)))
         infer_bs = self._resolve_infer_batch(dev)
 
-        temporal_used = temporal
+        temporal_used = temporal if uses_provider else None
         sensor_meta = None
         source = None
-        if modality == "s2":
+        if uses_provider and modality == "s2":
             sensor_meta = {
                 "collection": "COPERNICUS/S2_SR_HARMONIZED",
                 "bands": tuple(_S2_SR_12_BANDS),
@@ -856,7 +827,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 "composite": composite,
             }
             source = sensor_meta["collection"]
-        elif modality == "s1":
+        elif uses_provider and modality == "s1":
             sensor_meta = {
                 "collection": (
                     "COPERNICUS/S1_GRD_FLOAT"
@@ -896,12 +867,14 @@ class TerraFMBEmbedder(EmbedderBase):
                     input_time=temporal_midpoint_str(temporal_used),
                     extra={
                         "modality": modality,
-                        "scale_m": scale_m,
-                        "cloudy_pct": cloudy_pct,
-                        "composite": composite,
-                        "orbit": orbit if modality == "s1" else None,
+                        "scale_m": scale_m if uses_provider else None,
+                        "cloudy_pct": cloudy_pct if uses_provider else None,
+                        "composite": composite if uses_provider else None,
+                        "orbit": orbit if (uses_provider and modality == "s1") else None,
                         "use_float_linear": (
-                            use_float_linear if modality == "s1" else None
+                            use_float_linear
+                            if (uses_provider and modality == "s1")
+                            else None
                         ),
                         "start": getattr(temporal_used, "start", None),
                         "end": getattr(temporal_used, "end", None),

@@ -17,6 +17,7 @@ from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
 from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
+    coerce_single_input_chw,
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     load_cached_with_device as _load_cached_with_device,
     resolve_device_auto_torch as _resolve_device_auto,
@@ -368,7 +369,7 @@ class DOFAEmbedder(EmbedderBase):
     DOFA (TorchGeo) embeddings.
 
     - backend="provider"/"auto": ROI -> S2 SR -> resize to 224 -> DOFA -> pooled/grid
-    - backend="tensor": sensor.data (CHW/BCHW) -> resize to 224 -> DOFA
+    - backend="tensor": input_chw (CHW) -> resize to 224 -> DOFA
 
     Output:
       - OutputSpec.pooled(): (D,)
@@ -454,32 +455,18 @@ class DOFAEmbedder(EmbedderBase):
         # Build input + wavelengths
         # -----------------
         if backend_l == "tensor":
-            if sensor is None or not hasattr(sensor, "data"):
+            if input_chw is None:
                 raise ModelError(
-                    "backend='tensor' requires sensor.data as CHW or BCHW."
+                    "backend='tensor' requires input_chw as CHW. "
+                    "Use get_embeddings_batch_from_inputs(...) for batches."
                 )
-            x = sensor.data
-            try:
-                import torch
-
-                if torch.is_tensor(x):
-                    x = x.detach().cpu().numpy()
-            except Exception:
-                pass
-
-            x = np.asarray(x)
-            if x.ndim == 3:
-                x_chw = x.astype(np.float32)
-                x_chw, resize_meta = _resize_chw(x_chw, size=image_size)
-                x_bchw = x_chw[None, ...]
-            elif x.ndim == 4:
-                if x.shape[0] != 1:
-                    raise ModelError("v0.1: tensor backend expects B=1.")
-                x_chw = x[0].astype(np.float32)
-                x_chw, resize_meta = _resize_chw(x_chw, size=image_size)
-                x_bchw = x_chw[None, ...]
-            else:
-                raise ModelError(f"Expected CHW or BCHW, got {x.shape}")
+            x_chw = coerce_single_input_chw(
+                input_chw,
+                expected_channels=None,
+                model_name="DOFA",
+            )
+            x_chw, resize_meta = _resize_chw(x_chw, size=image_size)
+            x_bchw = x_chw[None, ...]
 
             wavelengths_um = getattr(sensor, "wavelengths", None)
             if wavelengths_um is None:
@@ -674,14 +661,9 @@ class DOFAEmbedder(EmbedderBase):
 
         backend_l = backend.lower().strip()
         if backend_l == "tensor":
-            # tensor path stays sequential in v0.1
-            return super().get_embeddings_batch(
-                spatials=spatials,
-                temporal=temporal,
-                sensor=sensor,
-                output=output,
-                backend=backend,
-                device=device,
+            raise ModelError(
+                "backend='tensor' batch inference requires "
+                "get_embeddings_batch_from_inputs(...)."
             )
         provider = self._get_provider(backend)
         if temporal is None:

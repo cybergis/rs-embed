@@ -39,7 +39,8 @@
 ### Backend modes
 
 - `backend="tensor"`:
-  - requires `sensor.data` as `CHW` or `BCHW`
+  - requires `input_chw` as `CHW`
+  - batch tensor inputs should use `get_embeddings_batch_from_inputs(...)`
   - adapter resizes to `224`
 - provider backend (`gee` / provider-compatible, including `auto` via provider resolution):
   - requires `TemporalSpec.range(...)` in v0.1
@@ -86,7 +87,7 @@ Channel sanity:
 
 ### Tensor backend path
 
-1. Read `sensor.data` (`CHW` or `BCHW`)
+1. Read `input_chw` (`CHW`)
 2. Resize to `224x224`
 3. Validate channel count (`2` or `12`)
 4. Load TerraFM-B and run same forward/grid extraction path
@@ -169,7 +170,7 @@ emb = get_embedding(
 
 - using an unsupported backend; use `backend="auto"`, an explicit provider backend, or `tensor`
 - provider path with non-`range` temporal spec
-- tensor backend without `sensor.data`
+- tensor backend without `input_chw`
 - wrong channel count (`C` must be `2` or `12`)
 - S1/S2 modality mismatch between data and `sensor.modality`
 - HF asset download issues (code or `.pth` weights)
