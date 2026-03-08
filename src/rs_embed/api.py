@@ -19,6 +19,7 @@ import numpy as np
 
 from .providers.gee_utils import (
     fetch_gee_patch_raw as _fetch_gee_patch_raw,
+    inspect_input_raw as _inspect_input_raw,
 )
 from .tools.normalization import (
     normalize_backend_name as _normalize_backend_name,
@@ -48,6 +49,7 @@ from .tools.model_defaults import (
 from .tools.output import (
     normalize_embedding_output as _normalize_embedding_output,
 )
+from .tools.progress import create_progress as _create_progress
 from .tools.tiling import (
     _ResolvedInputPrepSpec,
     _resolve_input_prep_spec,
@@ -220,6 +222,29 @@ def _resolve_export_batch_target(
     return ExportTarget(
         layout=ExportLayout.PER_ITEM, out_dir=out_dir, names=point_names
     )
+
+
+def _sync_export_pipeline_hooks() -> None:
+    """Propagate api-level hook variables into refactored pipeline modules.
+
+    Tests and downstream users monkeypatch symbols on ``rs_embed.api``
+    (for example ``_inspect_input_raw`` or ``_create_progress``).
+    The pipeline refactor moved implementations into separate modules, so
+    we mirror those hooks back into pipeline module globals before running
+    batch export to preserve backward-compatible monkeypatch behavior.
+    """
+
+    from .pipelines import combined_flow as _combined_flow_mod
+    from .pipelines import exporter as _exporter_mod
+    from .pipelines import point_payload as _point_payload_mod
+    from .pipelines import prefetch as _prefetch_mod
+
+    _prefetch_mod.fetch_gee_patch_raw = _fetch_gee_patch_raw
+    _prefetch_mod.inspect_input_raw = _inspect_input_raw
+    _point_payload_mod.fetch_gee_patch_raw = _fetch_gee_patch_raw
+    _point_payload_mod.inspect_input_raw = _inspect_input_raw
+    _exporter_mod.create_progress = _create_progress
+    _combined_flow_mod.create_progress = _create_progress
 
 
 # ---------------------------------------------------------------------------
@@ -613,6 +638,8 @@ def export_batch(
         show_progress=show_progress,
         input_prep=input_prep,
     )
+
+    _sync_export_pipeline_hooks()
 
     exporter = BatchExporter(
         spatials=spatials,

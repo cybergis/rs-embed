@@ -102,7 +102,9 @@ class GSEAnnualEmbedder(EmbedderBase):
             elif output.pooling == "max":
                 vec = emb_chw.max(axis=(-2, -1)).astype(np.float32)
             else:
-                raise ModelError(f"Unknown pooling='{output.pooling}' (expected 'mean' or 'max').")
+                raise ModelError(
+                    f"Unknown pooling='{output.pooling}' (expected 'mean' or 'max')."
+                )
             return Embedding(data=vec, meta={**meta, "pooling": output.pooling})
 
         # grid: return xarray with dims (band,y,x)
