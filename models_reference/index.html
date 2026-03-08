@@ -1,0 +1,2747 @@
+
+<!doctype html>
+<html lang="en" class="no-js">
+  <head>
+    
+      <meta charset="utf-8">
+      <meta name="viewport" content="width=device-width,initial-scale=1">
+      
+        <meta name="description" content="A unified Python toolkit for Remote Sensing Foundation Model embeddings">
+      
+      
+      
+      
+        <link rel="prev" href="../models/">
+      
+      
+        <link rel="next" href="../models/gse_annual/">
+      
+      
+        
+      
+      
+      <link rel="icon" href="../assets/images/favicon.png">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.4">
+    
+    
+      
+        <title>Model Reference - rs-embed</title>
+      
+    
+    
+      <link rel="stylesheet" href="../assets/stylesheets/main.484c7ddc.min.css">
+      
+      
+
+  
+  
+  
+  
+  <style>:root{--md-annotation-icon:url('data:image/svg+xml;charset=utf-8,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2024%2024%22%3E%3Cpath%20d%3D%22M22%2012a10%2010%200%200%201-10%2010A10%2010%200%200%201%202%2012%2010%2010%200%200%201%2012%202a10%2010%200%200%201%2010%2010M6%2013h8l-3.5%203.5%201.42%201.42L17.84%2012l-5.92-5.92L10.5%207.5%2014%2011H6z%22/%3E%3C/svg%3E');}</style>
+
+
+    
+    
+      
+    
+    
+      
+        
+        
+        <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+        <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Roboto:300,300i,400,400i,700,700i%7CRoboto+Mono:400,400i,700,700i&display=fallback">
+        <style>:root{--md-text-font:"Roboto";--md-code-font:"Roboto Mono"}</style>
+      
+    
+    
+      <link rel="stylesheet" href="../stylesheets/extra.css">
+    
+    <script>__md_scope=new URL("..",location),__md_hash=e=>[...e].reduce(((e,_)=>(e<<5)-e+_.charCodeAt(0)),0),__md_get=(e,_=localStorage,t=__md_scope)=>JSON.parse(_.getItem(t.pathname+"."+e)),__md_set=(e,_,t=localStorage,a=__md_scope)=>{try{t.setItem(a.pathname+"."+e,JSON.stringify(_))}catch(e){}}</script>
+    
+      
+
+    
+    
+  </head>
+  
+  
+    <body dir="ltr">
+  
+    
+    <input class="md-toggle" data-md-toggle="drawer" type="checkbox" id="__drawer" autocomplete="off">
+    <input class="md-toggle" data-md-toggle="search" type="checkbox" id="__search" autocomplete="off">
+    <label class="md-overlay" for="__drawer"></label>
+    <div data-md-component="skip">
+      
+        
+        <a href="#supported-models-advanced-reference" class="md-skip">
+          Skip to content
+        </a>
+      
+    </div>
+    <div data-md-component="announce">
+      
+    </div>
+    
+    
+      
+
+<header class="md-header" data-md-component="header">
+  <nav class="md-header__inner md-grid" aria-label="Header">
+    <a href=".." title="rs-embed" class="md-header__button md-logo" aria-label="rs-embed" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    <label class="md-header__button md-icon" for="__drawer">
+      
+      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M3 6h18v2H3zm0 5h18v2H3zm0 5h18v2H3z"/></svg>
+    </label>
+    <div class="md-header__title" data-md-component="header-title">
+      <div class="md-header__ellipsis">
+        <div class="md-header__topic">
+          <span class="md-ellipsis">
+            rs-embed
+          </span>
+        </div>
+        <div class="md-header__topic" data-md-component="header-topic">
+          <span class="md-ellipsis">
+            
+              Model Reference
+            
+          </span>
+        </div>
+      </div>
+    </div>
+    
+    
+      <script>var palette=__md_get("__palette");if(palette&&palette.color){if("(prefers-color-scheme)"===palette.color.media){var media=matchMedia("(prefers-color-scheme: light)"),input=document.querySelector(media.matches?"[data-md-color-media='(prefers-color-scheme: light)']":"[data-md-color-media='(prefers-color-scheme: dark)']");palette.color.media=input.getAttribute("data-md-color-media"),palette.color.scheme=input.getAttribute("data-md-color-scheme"),palette.color.primary=input.getAttribute("data-md-color-primary"),palette.color.accent=input.getAttribute("data-md-color-accent")}for(var[key,value]of Object.entries(palette.color))document.body.setAttribute("data-md-color-"+key,value)}</script>
+    
+    
+    
+      
+      
+        <label class="md-header__button md-icon" for="__search">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        </label>
+        <div class="md-search" data-md-component="search" role="dialog">
+  <label class="md-search__overlay" for="__search"></label>
+  <div class="md-search__inner" role="search">
+    <form class="md-search__form" name="search">
+      <input type="text" class="md-search__input" name="query" aria-label="Search" placeholder="Search" autocapitalize="off" autocorrect="off" autocomplete="off" spellcheck="false" data-md-component="search-query" required>
+      <label class="md-search__icon md-icon" for="__search">
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M9.5 3A6.5 6.5 0 0 1 16 9.5c0 1.61-.59 3.09-1.56 4.23l.27.27h.79l5 5-1.5 1.5-5-5v-.79l-.27-.27A6.52 6.52 0 0 1 9.5 16 6.5 6.5 0 0 1 3 9.5 6.5 6.5 0 0 1 9.5 3m0 2C7 5 5 7 5 9.5S7 14 9.5 14 14 12 14 9.5 12 5 9.5 5"/></svg>
+        
+        <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M20 11v2H8l5.5 5.5-1.42 1.42L4.16 12l7.92-7.92L13.5 5.5 8 11z"/></svg>
+      </label>
+      <nav class="md-search__options" aria-label="Search">
+        
+        <button type="reset" class="md-search__icon md-icon" title="Clear" aria-label="Clear" tabindex="-1">
+          
+          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M19 6.41 17.59 5 12 10.59 6.41 5 5 6.41 10.59 12 5 17.59 6.41 19 12 13.41 17.59 19 19 17.59 13.41 12z"/></svg>
+        </button>
+      </nav>
+      
+        <div class="md-search__suggest" data-md-component="search-suggest"></div>
+      
+    </form>
+    <div class="md-search__output">
+      <div class="md-search__scrollwrap" tabindex="0" data-md-scrollfix>
+        <div class="md-search-result" data-md-component="search-result">
+          <div class="md-search-result__meta">
+            Initializing search
+          </div>
+          <ol class="md-search-result__list" role="presentation"></ol>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+      
+    
+    
+      <div class="md-header__source">
+        <a href="https://github.com/cybergis/rs-embed" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cybergis/rs-embed
+  </div>
+</a>
+      </div>
+    
+  </nav>
+  
+</header>
+    
+    <div class="md-container" data-md-component="container">
+      
+      
+        
+          
+            
+<nav class="md-tabs" aria-label="Tabs" data-md-component="tabs">
+  <div class="md-grid">
+    <ul class="md-tabs__list">
+      
+        
+  
+  
+  
+  
+    <li class="md-tabs__item">
+      <a href=".." class="md-tabs__link">
+        
+  
+  
+    
+  
+  Home
+
+      </a>
+    </li>
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../quickstart/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Learn
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+    
+  
+  
+    
+    
+      <li class="md-tabs__item md-tabs__item--active">
+        <a href="../workflows/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Guides
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../api/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Reference
+
+        </a>
+      </li>
+    
+  
+
+      
+        
+  
+  
+  
+  
+    
+    
+      <li class="md-tabs__item">
+        <a href="../extending/" class="md-tabs__link">
+          
+  
+  
+    
+  
+  Development
+
+        </a>
+      </li>
+    
+  
+
+      
+    </ul>
+  </div>
+</nav>
+          
+        
+      
+      <main class="md-main" data-md-component="main">
+        <div class="md-main__inner md-grid">
+          
+            
+              
+              <div class="md-sidebar md-sidebar--primary" data-md-component="sidebar" data-md-type="navigation" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+
+  
+
+
+<nav class="md-nav md-nav--primary md-nav--lifted" aria-label="Navigation" data-md-level="0">
+  <label class="md-nav__title" for="__drawer">
+    <a href=".." title="rs-embed" class="md-nav__button md-logo" aria-label="rs-embed" data-md-component="logo">
+      
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M12 8a3 3 0 0 0 3-3 3 3 0 0 0-3-3 3 3 0 0 0-3 3 3 3 0 0 0 3 3m0 3.54C9.64 9.35 6.5 8 3 8v11c3.5 0 6.64 1.35 9 3.54 2.36-2.19 5.5-3.54 9-3.54V8c-3.5 0-6.64 1.35-9 3.54"/></svg>
+
+    </a>
+    rs-embed
+  </label>
+  
+    <div class="md-nav__source">
+      <a href="https://github.com/cybergis/rs-embed" title="Go to repository" class="md-source" data-md-component="source">
+  <div class="md-source__icon md-icon">
+    
+    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 448 512"><!--! Font Awesome Free 7.1.0 by @fontawesome - https://fontawesome.com License - https://fontawesome.com/license/free (Icons: CC BY 4.0, Fonts: SIL OFL 1.1, Code: MIT License) Copyright 2025 Fonticons, Inc.--><path d="M439.6 236.1 244 40.5c-5.4-5.5-12.8-8.5-20.4-8.5s-15 3-20.4 8.4L162.5 81l51.5 51.5c27.1-9.1 52.7 16.8 43.4 43.7l49.7 49.7c34.2-11.8 61.2 31 35.5 56.7-26.5 26.5-70.2-2.9-56-37.3L240.3 199v121.9c25.3 12.5 22.3 41.8 9.1 55-6.4 6.4-15.2 10.1-24.3 10.1s-17.8-3.6-24.3-10.1c-17.6-17.6-11.1-46.9 11.2-56v-123c-20.8-8.5-24.6-30.7-18.6-45L142.6 101 8.5 235.1C3 240.6 0 247.9 0 255.5s3 15 8.5 20.4l195.6 195.7c5.4 5.4 12.7 8.4 20.4 8.4s15-3 20.4-8.4l194.7-194.7c5.4-5.4 8.4-12.8 8.4-20.4s-3-15-8.4-20.4"/></svg>
+  </div>
+  <div class="md-source__repository">
+    cybergis/rs-embed
+  </div>
+</a>
+    </div>
+  
+  <ul class="md-nav__list" data-md-scrollfix>
+    
+      
+      
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href=".." class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Home
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Learn
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Learn
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../quickstart/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../concepts/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concepts
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+    
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+        
+        
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
+        
+          
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Guides
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
+          <label class="md-nav__title" for="__nav_3">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Guides
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../workflows/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Workflows
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+    
+  
+  
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Reference
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Reference
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-use-this-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How To Use This Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How To Use This Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#quick-chooser-by-goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick chooser by goal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#readability-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Readability tips
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#precomputed-embeddings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precomputed Embeddings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-the-fly-foundation-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On-the-fly Foundation Models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="On-the-fly Foundation Models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#quick-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Comparison
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporal-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporal Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-frame-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-frame Semantics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modality-and-extra-inputs-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modality and Extra Inputs Matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-variables-that-directly-change-preprocessingtemporal-packaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables That Directly Change Preprocessing/Temporal Packaging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#practical-guidance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Practical Guidance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+          
+          
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_4" id="__nav_3_4_label" tabindex="">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Examples
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Model Examples
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_4_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_4_1" id="__nav_3_4_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Precomputed
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_4_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_4_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Precomputed
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/gse_annual/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    gse
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/copernicus_embed/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    copernicus
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/tessera/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    tessera
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_4_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_4_2" id="__nav_3_4_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    On-the-fly
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="3" aria-labelledby="__nav_3_4_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_4_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    On-the-fly
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/remoteclip_s2rgb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    remoteclip
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/satmae_rgb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    satmae
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/satmaepp/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    satmaepp family
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/scalemae_rgb/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    scalemae
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/wildsat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    wildsat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/prithvi_eo_v2_s2_6b/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    prithvi
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/terramind/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    terramind
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/dofa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    dofa
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/fomo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    fomo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/thor_1_0_base/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    thor
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/satvision_toa/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    satvision
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/terrafm_b/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    terrafm
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/anysat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    anysat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/galileo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    galileo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/agrifm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    agrifm
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_4">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Overview
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_specs/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Specs & Data Structures
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_embedding/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_export/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Export API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../api_inspect/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Inspect API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../limitations/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Limitations
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+      
+      
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_5" >
+        
+          
+          <label class="md-nav__link" for="__nav_5" id="__nav_5_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Development
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_5_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_5">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Development
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../extending/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Extending
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../model_detail_template/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Model Template
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+    
+  </ul>
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+            
+              
+              <div class="md-sidebar md-sidebar--secondary" data-md-component="sidebar" data-md-type="toc" >
+                <div class="md-sidebar__scrollwrap">
+                  <div class="md-sidebar__inner">
+                    
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-use-this-page" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How To Use This Page
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="How To Use This Page">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#quick-chooser-by-goal" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick chooser by goal
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#readability-tips" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Readability tips
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#precomputed-embeddings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precomputed Embeddings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#on-the-fly-foundation-models" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        On-the-fly Foundation Models
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="On-the-fly Foundation Models">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#quick-comparison" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Quick Comparison
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporal-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporal Handling
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-frame-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-frame Semantics
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#modality-and-extra-inputs-matrix" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Modality and Extra Inputs Matrix
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#environment-variables-that-directly-change-preprocessingtemporal-packaging" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables That Directly Change Preprocessing/Temporal Packaging
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#practical-guidance" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Practical Guidance
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+                  </div>
+                </div>
+              </div>
+            
+          
+          
+            <div class="md-content" data-md-component="content">
+              
+              <article class="md-content__inner md-typeset">
+                
+                  
+
+
+  
+  
+
+
+<h1 id="supported-models-advanced-reference">Supported Models (Advanced Reference)<a class="headerlink" href="#supported-models-advanced-reference" title="Permanent link">&para;</a></h1>
+<p>This page preserves the <strong>detailed model comparison matrices</strong> and preprocessing notes.</p>
+<p>If you are choosing a model for the first time, start with:</p>
+<ul>
+<li><a href="../models/">Supported Models (Overview)</a></li>
+</ul>
+<p>If you are authoring a new per-model doc page, use:</p>
+<ul>
+<li><a href="../model_detail_template/">Model Detail Template</a></li>
+</ul>
+<hr />
+<p>This page is best used after you already narrowed down candidate models and want to compare:</p>
+<ol>
+<li>preprocessing assumptions</li>
+<li>temporal packaging</li>
+<li>side-input requirements</li>
+<li>environment-variable tuning knobs</li>
+</ol>
+<hr />
+<h2 id="how-to-use-this-page">How To Use This Page<a class="headerlink" href="#how-to-use-this-page" title="Permanent link">&para;</a></h2>
+<h3 id="quick-chooser-by-goal">Quick chooser by goal<a class="headerlink" href="#quick-chooser-by-goal" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Goal</th>
+<th>Start with</th>
+<th>Why</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Fast baseline / simple pipeline</td>
+<td><code>tessera</code>, <code>gse</code>, <code>copernicus</code></td>
+<td>Precomputed embeddings, fewer runtime dependencies</td>
+</tr>
+<tr>
+<td>General on-the-fly RGB experiments</td>
+<td><code>remoteclip</code>, <code>satmae</code>, <code>satmaepp</code>, <code>scalemae</code></td>
+<td>Simple S2 RGB input paths</td>
+</tr>
+<tr>
+<td>Time-series modeling</td>
+<td><code>agrifm</code>, <code>anysat</code>, <code>galileo</code></td>
+<td>Native multi-frame temporal packaging</td>
+</tr>
+<tr>
+<td>Multispectral / strict spectral semantics</td>
+<td><code>satmaepp_s2_10b</code>, <code>dofa</code>, <code>terramind</code>, <code>thor</code>, <code>satvision</code></td>
+<td>Strong channel/schema assumptions</td>
+</tr>
+<tr>
+<td>S1/S2 modality experiments</td>
+<td><code>terrafm</code></td>
+<td>Supports S2 or S1 paths (per call)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="readability-tips">Readability tips<a class="headerlink" href="#readability-tips" title="Permanent link">&para;</a></h3>
+<ul>
+<li>Start with <strong>Quick Comparison</strong> if you are deciding between models</li>
+<li>Read <strong>Temporal Handling</strong> and <strong>Multi-frame Semantics</strong> before comparing temporal models</li>
+<li>Read <strong>Modality and Extra Inputs Matrix</strong> if you need fair cross-model benchmarking</li>
+<li>Read <strong>Environment Variables...</strong> only when tuning preprocessing or reproducing training pipelines</li>
+</ul>
+<h2 id="precomputed-embeddings">Precomputed Embeddings<a class="headerlink" href="#precomputed-embeddings" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th><strong>Model</strong></th>
+<th><strong>ID</strong></th>
+<th><strong>Output</strong></th>
+<th><strong>Resolution</strong></th>
+<th><strong>Dim</strong></th>
+<th><strong>Time Coverage</strong></th>
+<th><strong>Notes</strong></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><strong>Tessera</strong></td>
+<td><code>tessera</code></td>
+<td>pooled / grid</td>
+<td>10m</td>
+<td>128</td>
+<td>2017–2025</td>
+<td>GeoTessera global tile embeddings</td>
+</tr>
+<tr>
+<td><strong>Google Satellite Embedding (Alpha Earth)</strong></td>
+<td><code>gse</code></td>
+<td>pooled / grid</td>
+<td>10 m</td>
+<td>64</td>
+<td>2017–2024</td>
+<td>Annual embeddings via GEE</td>
+</tr>
+<tr>
+<td><strong>Copernicus Embed</strong></td>
+<td><code>copernicus</code></td>
+<td>pooled / grid</td>
+<td>0.25°</td>
+<td>768</td>
+<td>2021</td>
+<td>Official Copernicus embeddings</td>
+</tr>
+</tbody>
+</table>
+<hr />
+<h2 id="on-the-fly-foundation-models">On-the-fly Foundation Models<a class="headerlink" href="#on-the-fly-foundation-models" title="Permanent link">&para;</a></h2>
+<p>Source of truth:</p>
+<ul>
+<li><code>src/rs_embed/embedders/catalog.py</code></li>
+<li><code>src/rs_embed/embedders/onthefly_*.py</code></li>
+<li><code>src/rs_embed/embedders/_vit_mae_utils.py</code></li>
+<li><code>src/rs_embed/embedders/runtime_utils.py</code></li>
+</ul>
+<p>Documented on-the-fly IDs:</p>
+<ul>
+<li><code>remoteclip</code></li>
+<li><code>satmae</code></li>
+<li><code>satmaepp</code></li>
+<li><code>satmaepp_s2_10b</code></li>
+<li><code>scalemae</code></li>
+<li><code>anysat</code></li>
+<li><code>galileo</code></li>
+<li><code>wildsat</code></li>
+<li><code>prithvi</code></li>
+<li><code>terrafm</code></li>
+<li><code>terramind</code></li>
+<li><code>dofa</code></li>
+<li><code>fomo</code></li>
+<li><code>thor</code></li>
+<li><code>agrifm</code></li>
+<li><code>satvision</code></li>
+</ul>
+<h3 id="quick-comparison">Quick Comparison<a class="headerlink" href="#quick-comparison" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Model ID</th>
+<th>Architecture / Backbone</th>
+<th>Input</th>
+<th>Default Preprocessing</th>
+<th>Resize / Crop / Pad</th>
+<th>Output Structure</th>
+<th>Training Alignment</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>remoteclip</code></td>
+<td><code>rshf.remoteclip.RemoteCLIP</code> (open_clip style CLIP ViT)</td>
+<td>S2 RGB (<code>B4,B3,B2</code>)</td>
+<td>raw SR <code>0..10000</code> -&gt; <code>/10000</code> -&gt; RGB <code>uint8</code>; then model transform if available, else CLIP norm</td>
+<td>image size 224; fallback path uses <code>Resize + CenterCrop</code>; no pad</td>
+<td>pooled vector or ViT token grid</td>
+<td>Medium (high if wrapper transform matches training; fallback is generic CLIP pipeline)</td>
+</tr>
+<tr>
+<td><code>satmae</code></td>
+<td><code>rshf.satmae.SatMAE</code></td>
+<td>S2 RGB (<code>B4,B3,B2</code>)</td>
+<td>raw SR -&gt; <code>/10000</code> -&gt; RGB <code>uint8</code>; prefer model transform, else CLIP norm</td>
+<td>default 224; CLIP fallback has <code>Resize + CenterCrop</code>; no pad</td>
+<td>token sequence -&gt; pooled or patch-token grid</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><code>satmaepp</code></td>
+<td><code>rshf.satmaepp.SatMAEPP</code></td>
+<td>S2 RGB (<code>B4,B3,B2</code>)</td>
+<td>raw SR -&gt; <code>/10000</code> -&gt; RGB <code>uint8</code>; SatMAE++ fMoW eval preprocessing (<code>Normalize + Resize(short side) + CenterCrop</code>), default channel order <code>bgr</code></td>
+<td>default 224; source-aligned short-side resize + center crop; no pad</td>
+<td>token sequence -&gt; pooled or patch-token grid</td>
+<td>High</td>
+</tr>
+<tr>
+<td><code>satmaepp_s2_10b</code></td>
+<td>SatMAE++ grouped-channel source branch (<code>models_mae_group_channels.py</code>)</td>
+<td>S2 SR 10-band (<code>B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12</code>)</td>
+<td>clip <code>0..10000</code>; source Sentinel min/max mapping to <code>uint8</code>; <code>ToTensor + Resize(short side) + CenterCrop</code></td>
+<td>default 96 with patch size 8; source-style resize/crop; no pad</td>
+<td>grouped token sequence -&gt; pooled or group-reduced spatial token grid</td>
+<td>High</td>
+</tr>
+<tr>
+<td><code>scalemae</code></td>
+<td><code>rshf.scalemae.ScaleMAE</code> (ViT style)</td>
+<td>S2 RGB (<code>B4,B3,B2</code>) + <code>input_res_m</code></td>
+<td>raw SR -&gt; <code>/10000</code> -&gt; RGB <code>uint8</code>; CLIP norm tensor; pass <code>input_res_m</code></td>
+<td>default 224; CLIP path has <code>Resize + CenterCrop</code>; no pad</td>
+<td>token sequence or pooled vector depending on wrapper output</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><code>anysat</code></td>
+<td>AnySat from upstream <code>hubconf.py</code> (<code>AnySat</code>)</td>
+<td>S2 10-band TCHW (or CHW auto-expanded)</td>
+<td>clip to <code>0..10000</code>; normalize mode default <code>per_tile_zscore</code>; builds per-frame <code>s2_dates</code></td>
+<td>resize TCHW to default 24; no crop, no pad</td>
+<td>patch output <code>[D,H,W]</code>, pooled by spatial mean/max</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><code>galileo</code></td>
+<td><code>Encoder</code> from official <code>single_file_galileo.py</code></td>
+<td>S2 10-band TCHW (or CHW auto-expanded)</td>
+<td>clip to <code>0..10000</code>; normalize mode default <code>unit_scale</code>; constructs Galileo tensors with configurable <code>T</code> + per-frame <code>months</code>, optional NDVI channel</td>
+<td>default 64 with patch 8; bilinear resize; no pad</td>
+<td>pooled token vector and S2-group token grid</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><code>wildsat</code></td>
+<td>WildSAT backbone + optional image head from checkpoint</td>
+<td>S2 RGB CHW</td>
+<td>clip to <code>0..10000</code> then <code>/10000</code>; default normalization <code>minmax</code>; convert to <code>uint8</code> then unit tensor</td>
+<td>default 224; resize RGB; no pad</td>
+<td>pooled branch output and optional grid (token or feature path)</td>
+<td>Medium-Low</td>
+</tr>
+<tr>
+<td><code>prithvi</code></td>
+<td>TerraTorch <code>BACKBONE_REGISTRY</code> Prithvi backbone</td>
+<td>S2 6-band (<code>BLUE,GREEN,RED,NIR_NARROW,SWIR_1,SWIR_2</code>)</td>
+<td>raw SR -&gt; <code>/10000</code> -&gt; clamp <code>[0,1]</code>; prep mode from env</td>
+<td>default mode <code>resize</code> to 224; optional <code>pad</code> to patch multiple (legacy)</td>
+<td>token sequence -&gt; pooled or patch-token grid</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><code>terrafm</code></td>
+<td>TerraFM-B from HF code/weights</td>
+<td>S2 12-band or S1 VV/VH</td>
+<td>S2: <code>/10000</code> to <code>[0,1]</code>; S1: <code>log1p</code> + p99 scaling to <code>[0,1]</code></td>
+<td>resize to 224; no pad</td>
+<td>pooled embedding, optional feature-map grid</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><code>terramind</code></td>
+<td>TerraTorch <code>BACKBONE_REGISTRY</code> TerraMind backbone</td>
+<td>S2 SR 12-band</td>
+<td>raw <code>0..10000</code>; resize 224; z-score with TerraMind v1/v01 pretrained mean/std</td>
+<td>fixed 224; no pad</td>
+<td>token sequence -&gt; pooled or patch-token grid</td>
+<td>High</td>
+</tr>
+<tr>
+<td><code>dofa</code></td>
+<td>TorchGeo DOFA (<code>dofa_base_patch16_224</code> / <code>dofa_large_patch16_224</code>)</td>
+<td>multi-band SR CHW + wavelengths</td>
+<td>raw SR -&gt; <code>/10000</code> to <code>[0,1]</code>; provide/infer wavelengths</td>
+<td>bilinear resize to 224; explicitly no crop/pad</td>
+<td>pooled vector or token grid (usually 14x14)</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td><code>fomo</code></td>
+<td>FoMo <code>MultiSpectralViT</code> (FoMo-Bench)</td>
+<td>S2 SR 12-band</td>
+<td>clip <code>0..10000</code>; default <code>unit_scale</code> (optional minmax/none)</td>
+<td>default 64; bilinear resize; no pad</td>
+<td>token sequence pooled; grid as spectral-mean patch-token map</td>
+<td>Medium</td>
+</tr>
+<tr>
+<td><code>thor</code></td>
+<td>THOR via TerraTorch + <code>thor_terratorch_ext</code></td>
+<td>S2 SR 10-band</td>
+<td>clip <code>0..10000</code>; default <code>thor_stats</code> z-score after reflectance scaling</td>
+<td>default 288; bilinear resize; no pad</td>
+<td>pooled tokens and grouped token grid</td>
+<td>Medium-High</td>
+</tr>
+<tr>
+<td><code>agrifm</code></td>
+<td>AgriFM <code>PretrainingSwinTransformer3DEncoder</code></td>
+<td>S2 10-band time series <code>[T,C,H,W]</code></td>
+<td>clip <code>0..10000</code>; default <code>agrifm_stats</code> z-score using official config stats</td>
+<td>default 224; TCHW resize; no pad</td>
+<td>feature map grid <code>[D,H,W]</code>, pooled by spatial mean/max</td>
+<td>High</td>
+</tr>
+<tr>
+<td><code>satvision</code></td>
+<td><code>timm</code> <code>SwinTransformerV2</code> (SatVision-TOA checkpoints)</td>
+<td>TOA 14 channels in strict order</td>
+<td>channel-aware normalization to <code>[0,1]</code> (<code>auto/raw/unit</code>, reflectance + emissive calibration)</td>
+<td>default 128; bilinear resize; no pad</td>
+<td>model output as pooled or grid depending on tensor shape</td>
+<td>High (if band order and calibration match checkpoint)</td>
+</tr>
+</tbody>
+</table>
+<h3 id="temporal-handling">Temporal Handling<a class="headerlink" href="#temporal-handling" title="Permanent link">&para;</a></h3>
+<ul>
+<li>For most on-the-fly adapters, <code>TemporalSpec.range(start, end)</code> means: filter imagery in <code>[start, end)</code>, then build one composite patch for model input (<code>median</code> by default, or <code>mosaic</code> if configured via <code>SensorSpec.composite</code>).</li>
+<li>In these adapters, <code>meta.input_time</code> is typically the midpoint of the temporal window and is mainly metadata (or an auxiliary time signal for models that require it), not a guaranteed single-scene acquisition date.</li>
+<li>Multi-frame adapters: <code>agrifm</code>, <code>anysat</code>, and <code>galileo</code> fetch TCHW sequences by splitting the requested range into sub-windows and compositing each sub-window into one frame.</li>
+<li>Current single-composite adapters include: <code>remoteclip</code>, <code>satmae</code>, <code>satmaepp</code>, <code>satmaepp_s2_10b</code>, <code>scalemae</code>, <code>wildsat</code>, <code>prithvi</code>, <code>terrafm</code>, <code>terramind</code>, <code>dofa</code>, <code>fomo</code>, <code>thor</code>, and <code>satvision</code>.</li>
+</ul>
+<h3 id="multi-frame-semantics">Multi-frame Semantics<a class="headerlink" href="#multi-frame-semantics" title="Permanent link">&para;</a></h3>
+<p>Shared behavior for current multi-frame adapters (<code>agrifm</code>, <code>anysat</code>, <code>galileo</code>):</p>
+<ul>
+<li>Frame construction: split <code>TemporalSpec.range(start, end)</code> into <code>T</code> equal sub-windows (end-exclusive), then composite each sub-window into one frame.</li>
+<li>Missing-observation fallback: if a sub-window has no valid image, provider path reuses a fallback composite so frame count remains stable.</li>
+<li>Fixed frame count: runtime always ensures exact <code>T</code> frames for model input.
+  For user-provided <code>input_chw</code>, <code>CHW</code> is repeated to <code>T</code>, and <code>TCHW</code> is padded/truncated to <code>T</code>.</li>
+<li>Sensor compositing policy: frame composite mode follows <code>SensorSpec.composite</code> (<code>median</code> default, <code>mosaic</code> optional).</li>
+</ul>
+<p>Per-model temporal packaging:</p>
+<table>
+<thead>
+<tr>
+<th>Model ID</th>
+<th>Frame count env (default)</th>
+<th>Temporal side input</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>agrifm</code></td>
+<td><code>RS_EMBED_AGRIFM_FRAMES</code> (<code>8</code>)</td>
+<td>none (uses <code>TCHW</code> directly)</td>
+<td>Temporal information is encoded only in the frame stack.</td>
+</tr>
+<tr>
+<td><code>anysat</code></td>
+<td><code>RS_EMBED_ANYSAT_FRAMES</code> (<code>8</code>)</td>
+<td><code>s2_dates</code> (per-frame DOY, <code>0..364</code>)</td>
+<td>DOY values are derived from each frame bin midpoint date.</td>
+</tr>
+<tr>
+<td><code>galileo</code></td>
+<td><code>RS_EMBED_GALILEO_FRAMES</code> (<code>8</code>)</td>
+<td><code>months</code> (per-frame month, <code>1..12</code>)</td>
+<td>By default from frame bin midpoints; <code>RS_EMBED_GALILEO_MONTH</code> can force a constant month for all frames.</td>
+</tr>
+</tbody>
+</table>
+<h3 id="modality-and-extra-inputs-matrix">Modality and Extra Inputs Matrix<a class="headerlink" href="#modality-and-extra-inputs-matrix" title="Permanent link">&para;</a></h3>
+<p>Interpretation:</p>
+<ul>
+<li>"Backbone multimodal" means the upstream foundation model family supports multiple modalities.</li>
+<li>"Current rs-embed path" means what this implementation currently feeds in practice.</li>
+<li>"Requires extra metadata" means additional non-image inputs required by the forward path (hard requirement).</li>
+</ul>
+<table>
+<thead>
+<tr>
+<th>Model ID</th>
+<th>Backbone multimodal?</th>
+<th>Current rs-embed path uses multiple modalities?</th>
+<th>Multi-input forward (beyond image tensor)?</th>
+<th>Requires extra metadata?</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>remoteclip</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>satmae</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>satmaepp</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>satmaepp_s2_10b</code></td>
+<td>No (this adapter path)</td>
+<td>No</td>
+<td>No</td>
+<td>No (but strict 10-band order is required)</td>
+</tr>
+<tr>
+<td><code>scalemae</code></td>
+<td>No</td>
+<td>No</td>
+<td>Yes (<code>input_res_m</code>)</td>
+<td>Yes: scale/resolution (<code>sensor.scale_m</code>)</td>
+</tr>
+<tr>
+<td><code>anysat</code></td>
+<td>Yes</td>
+<td>Partially (S2-only imagery, plus temporal date tokens)</td>
+<td>Yes (<code>s2</code>, <code>s2_dates</code>)</td>
+<td>Yes: day-of-year/date signal (derived from temporal range)</td>
+</tr>
+<tr>
+<td><code>galileo</code></td>
+<td>Yes</td>
+<td>Mostly S2 path in current adapter + temporal month tokens</td>
+<td>Yes (multiple tensors + masks + <code>months</code>)</td>
+<td>Yes: month/time signal (derived from temporal range)</td>
+</tr>
+<tr>
+<td><code>wildsat</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>prithvi</code></td>
+<td>No (this adapter path)</td>
+<td>No</td>
+<td>Yes (<code>x</code>, <code>temporal_coords</code>, <code>location_coords</code>)</td>
+<td>Yes: location + time are required</td>
+</tr>
+<tr>
+<td><code>terrafm</code></td>
+<td>Yes (<code>S1</code>/<code>S2</code>)</td>
+<td>Yes (select one modality per call: <code>s1</code> or <code>s2</code>)</td>
+<td>No</td>
+<td>No hard extra metadata (optional S1 options: orbit, linear/DB path)</td>
+</tr>
+<tr>
+<td><code>terramind</code></td>
+<td>Yes</td>
+<td>Usually single selected modality (<code>S2L2A</code> default)</td>
+<td>No (single selected modality tensor in this adapter)</td>
+<td>No hard extra metadata</td>
+</tr>
+<tr>
+<td><code>dofa</code></td>
+<td>Yes (spectral generalization)</td>
+<td>Yes (multi-band spectral input)</td>
+<td>Yes (image + wavelength list)</td>
+<td>Yes: per-band wavelengths (explicit or inferable from bands)</td>
+</tr>
+<tr>
+<td><code>fomo</code></td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>thor</code></td>
+<td>No (this adapter path)</td>
+<td>No</td>
+<td>No</td>
+<td>No</td>
+</tr>
+<tr>
+<td><code>agrifm</code></td>
+<td>No (this adapter path)</td>
+<td>No</td>
+<td>No extra side tensor, but temporal stack <code>[T,C,H,W]</code> required</td>
+<td>Temporal coverage is important (no separate metadata tensor)</td>
+</tr>
+<tr>
+<td><code>satvision</code></td>
+<td>No (this adapter path)</td>
+<td>No</td>
+<td>No separate side tensor</td>
+<td>Yes: strict 14-channel order/calibration schema (band semantics)</td>
+</tr>
+</tbody>
+</table>
+<p>Practically multi-input models:</p>
+<ul>
+<li><code>prithvi</code>: image + temporal coords + location coords</li>
+<li><code>anysat</code>: image/time-series + date tokens (<code>s2_dates</code>)</li>
+<li><code>galileo</code>: image-derived tensors + masks + per-frame month tokens (<code>months</code>)</li>
+<li><code>dofa</code>: image + wavelength vector</li>
+<li><code>scalemae</code>: image + <code>input_res_m</code></li>
+</ul>
+<h3 id="environment-variables-that-directly-change-preprocessingtemporal-packaging">Environment Variables That Directly Change Preprocessing/Temporal Packaging<a class="headerlink" href="#environment-variables-that-directly-change-preprocessingtemporal-packaging" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Model ID</th>
+<th>Main preprocessing env keys</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>remoteclip</code></td>
+<td>fixed <code>image_size=224</code> in code path; no per-model preprocess env switch</td>
+</tr>
+<tr>
+<td><code>satmae</code></td>
+<td><code>RS_EMBED_SATMAE_IMG</code></td>
+</tr>
+<tr>
+<td><code>satmaepp</code></td>
+<td><code>RS_EMBED_SATMAEPP_ID</code>, <code>RS_EMBED_SATMAEPP_IMG</code>, <code>RS_EMBED_SATMAEPP_CHANNEL_ORDER</code>, <code>RS_EMBED_SATMAEPP_BGR</code></td>
+</tr>
+<tr>
+<td><code>satmaepp_s2_10b</code></td>
+<td><code>RS_EMBED_SATMAEPP_S2_CKPT_REPO</code>, <code>RS_EMBED_SATMAEPP_S2_CKPT_FILE</code>, <code>RS_EMBED_SATMAEPP_S2_CODE_REPO</code>, <code>RS_EMBED_SATMAEPP_S2_CODE_REF</code>, <code>RS_EMBED_SATMAEPP_S2_MODEL_FN</code>, <code>RS_EMBED_SATMAEPP_S2_IMG</code>, <code>RS_EMBED_SATMAEPP_S2_PATCH</code>, <code>RS_EMBED_SATMAEPP_S2_GRID_REDUCE</code>, <code>RS_EMBED_SATMAEPP_S2_WEIGHTS_ONLY</code></td>
+</tr>
+<tr>
+<td><code>scalemae</code></td>
+<td><code>RS_EMBED_SCALEMAE_IMG</code></td>
+</tr>
+<tr>
+<td><code>anysat</code></td>
+<td><code>RS_EMBED_ANYSAT_IMG</code>, <code>RS_EMBED_ANYSAT_NORM</code>, <code>RS_EMBED_ANYSAT_FRAMES</code></td>
+</tr>
+<tr>
+<td><code>galileo</code></td>
+<td><code>RS_EMBED_GALILEO_IMG</code>, <code>RS_EMBED_GALILEO_PATCH</code>, <code>RS_EMBED_GALILEO_NORM</code>, <code>RS_EMBED_GALILEO_INCLUDE_NDVI</code>, <code>RS_EMBED_GALILEO_FRAMES</code>, <code>RS_EMBED_GALILEO_MONTH</code></td>
+</tr>
+<tr>
+<td><code>wildsat</code></td>
+<td><code>RS_EMBED_WILDSAT_IMG</code>, <code>RS_EMBED_WILDSAT_NORM</code></td>
+</tr>
+<tr>
+<td><code>prithvi</code></td>
+<td><code>RS_EMBED_PRITHVI_PREP</code>, <code>RS_EMBED_PRITHVI_IMG</code>, <code>RS_EMBED_PRITHVI_PATCH_MULT</code></td>
+</tr>
+<tr>
+<td><code>terrafm</code></td>
+<td>modality and sensor-side options (<code>s2</code>/<code>s1</code>); image size fixed to 224 in implementation</td>
+</tr>
+<tr>
+<td><code>terramind</code></td>
+<td><code>RS_EMBED_TERRAMIND_NORMALIZE</code> (default z-score stats), image size fixed 224</td>
+</tr>
+<tr>
+<td><code>dofa</code></td>
+<td>image size fixed 224; provider/tensor channels and wavelengths drive preprocessing</td>
+</tr>
+<tr>
+<td><code>fomo</code></td>
+<td><code>RS_EMBED_FOMO_IMG</code>, <code>RS_EMBED_FOMO_NORM</code></td>
+</tr>
+<tr>
+<td><code>thor</code></td>
+<td><code>RS_EMBED_THOR_IMG</code>, <code>RS_EMBED_THOR_NORMALIZE</code></td>
+</tr>
+<tr>
+<td><code>agrifm</code></td>
+<td><code>RS_EMBED_AGRIFM_IMG</code>, <code>RS_EMBED_AGRIFM_NORM</code>, <code>RS_EMBED_AGRIFM_FRAMES</code></td>
+</tr>
+<tr>
+<td><code>satvision</code></td>
+<td><code>RS_EMBED_SATVISION_TOA_IMG</code>, <code>RS_EMBED_SATVISION_TOA_NORM</code>, channel-index and calibration env keys</td>
+</tr>
+</tbody>
+</table>
+<h3 id="practical-guidance">Practical Guidance<a class="headerlink" href="#practical-guidance" title="Permanent link">&para;</a></h3>
+<ul>
+<li>For highest reproducibility, keep each model's default normalization mode unless you can match the original training pipeline exactly.</li>
+<li>For strict-schema models (<code>satvision</code>, <code>terramind</code>, <code>thor</code>, <code>agrifm</code>), do not change channel order unless checkpoint metadata explicitly allows it.</li>
+<li>If comparing embeddings across models, standardize ROI and temporal compositing first; model preprocessing differences are substantial.</li>
+</ul>
+
+
+
+
+
+
+
+
+
+
+
+
+                
+              </article>
+            </div>
+          
+          
+  <script>var tabs=__md_get("__tabs");if(Array.isArray(tabs))e:for(var set of document.querySelectorAll(".tabbed-set")){var labels=set.querySelector(".tabbed-labels");for(var tab of tabs)for(var label of labels.getElementsByTagName("label"))if(label.innerText.trim()===tab){var input=document.getElementById(label.htmlFor);input.checked=!0;continue e}}</script>
+
+<script>var target=document.getElementById(location.hash.slice(1));target&&target.name&&(target.checked=target.name.startsWith("__tabbed_"))</script>
+        </div>
+        
+          <button type="button" class="md-top md-icon" data-md-component="top" hidden>
+  
+  <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M13 20h-2V8l-5.5 5.5-1.42-1.42L12 4.16l7.92 7.92-1.42 1.42L13 8z"/></svg>
+  Back to top
+</button>
+        
+      </main>
+      
+        <footer class="md-footer">
+  
+  <div class="md-footer-meta md-typeset">
+    <div class="md-footer-meta__inner md-grid">
+      <div class="md-copyright">
+  
+  
+    Made with
+    <a href="https://squidfunk.github.io/mkdocs-material/" target="_blank" rel="noopener">
+      Material for MkDocs
+    </a>
+  
+</div>
+      
+    </div>
+  </div>
+</footer>
+      
+    </div>
+    <div class="md-dialog" data-md-component="dialog">
+      <div class="md-dialog__inner md-typeset"></div>
+    </div>
+    
+    
+    
+      
+      
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.indexes", "navigation.sections", "navigation.expand", "navigation.top", "toc.follow", "content.code.copy", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": null}</script>
+    
+    
+      <script src="../assets/javascripts/bundle.79ae519e.min.js"></script>
+      
+        <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
+      
+    
+  </body>
+</html>

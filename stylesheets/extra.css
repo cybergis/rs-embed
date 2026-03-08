@@ -1,0 +1,4 @@
+/* Make primary sidebar section headings bolder in Material for MkDocs */
+.md-nav--primary .md-nav__item--nested > .md-nav__link {
+  font-weight: 700;
+}
