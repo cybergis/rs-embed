@@ -1,3 +1,8 @@
+# Implementation based on:
+# SatVision-TOA: A Geospatial Foundation Model for Coarse-Resolution All-Sky Remote Sensing Imagery
+# arXiv 2024
+# https://arxiv.org/abs/2411.17000
+
 from __future__ import annotations
 
 import os

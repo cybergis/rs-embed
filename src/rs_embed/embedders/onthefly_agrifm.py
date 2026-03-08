@@ -1,3 +1,8 @@
+# Implementation based on:
+# AgriFM
+# Remote Sensing of Environment 2026
+# https://www.sciencedirect.com/science/article/pii/S0034425726000040
+
 from __future__ import annotations
 
 import importlib

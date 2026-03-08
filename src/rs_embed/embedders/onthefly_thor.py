@@ -1,3 +1,8 @@
+# Implementation based on:
+# THOR
+# arXiv 2026
+# https://arxiv.org/abs/2601.16011
+
 from __future__ import annotations
 
 import os

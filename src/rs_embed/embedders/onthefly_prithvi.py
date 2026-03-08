@@ -1,3 +1,8 @@
+# Implementation based on:
+# Foundation Models for Generalist Geospatial Artificial Intelligence
+# arXiv 2023
+# https://arxiv.org/abs/2310.18660
+
 from __future__ import annotations
 
 import os

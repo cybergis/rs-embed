@@ -1,3 +1,8 @@
+# Implementation based on:
+# AnySat: An Earth Observation Model for Any Resolutions, Scales, and Modalities
+# CVPR 2025
+# https://arxiv.org/abs/2412.14123
+
 from __future__ import annotations
 
 import importlib.util

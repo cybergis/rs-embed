@@ -1,3 +1,8 @@
+# Implementation based on:
+# Scale-MAE: A Scale-Aware Masked Autoencoder for Multiscale Geospatial Representation Learning
+# ICCV 2023
+# https://arxiv.org/abs/2212.14532
+
 from __future__ import annotations
 
 import os

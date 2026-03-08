@@ -1,3 +1,8 @@
+# Implementation based on:
+# SatMAE: Pre-training Transformers for Temporal and Multi-Spectral Satellite Imagery
+# NeurIPS 2022
+# https://arxiv.org/abs/2207.08051
+
 from __future__ import annotations
 
 import os

@@ -1,4 +1,9 @@
 # src/rs_embed/embedders/onthefly_terrafm.py
+# Implementation based on:
+# TerraFM
+# ICLR 2026
+# https://arxiv.org/abs/2506.06281
+
 from __future__ import annotations
 
 import os

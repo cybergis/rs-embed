@@ -1,3 +1,7 @@
+# Implementation based on:
+# DynamicVis
+# https://huggingface.co/KyanChen/DynamicVis
+
 from __future__ import annotations
 
 import importlib.util

@@ -1,3 +1,8 @@
+# Implementation based on:
+# Google Satellite Embedding (Alpha Earth / GSE)
+# arXiv 2025
+# https://arxiv.org/abs/2507.22291
+
 from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
