@@ -197,14 +197,18 @@ def test_satmaepp_s2_batch_loads_once_and_batches_forward(monkeypatch):
     assert [float(e.data[0]) for e in out] == [30.0, 31.0, 32.0, 33.0, 34.0]
 
 
-def test_dofa_gee_uses_cached_provider_path(monkeypatch):
+def test_dofa_auto_uses_cached_provider_path(monkeypatch):
     import rs_embed.embedders.onthefly_dofa as dofa
 
     emb = DOFAEmbedder()
     fake_provider = object()
-    seen = {"provider_ok": False}
+    seen = {"provider_ok": False, "backend": None}
 
-    monkeypatch.setattr(emb, "_get_provider", lambda _backend: fake_provider)
+    def _fake_get_provider(_backend):
+        seen["backend"] = _backend
+        return fake_provider
+
+    monkeypatch.setattr(emb, "_get_provider", _fake_get_provider)
 
     def _fake_fetch(
         provider,
@@ -250,9 +254,10 @@ def test_dofa_gee_uses_cached_provider_path(monkeypatch):
         temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
         sensor=None,
         output=OutputSpec.pooled(),
-        backend="gee",
+        backend="auto",
         device="auto",
     )
 
     assert seen["provider_ok"] is True
+    assert seen["backend"] == "auto"
     assert out.data.shape == (8,)

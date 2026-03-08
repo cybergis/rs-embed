@@ -18,7 +18,6 @@ from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
-    is_provider_backend,
     load_cached_with_device as _load_cached_with_device,
     resolve_device_auto_torch as _resolve_device_auto,
 )
@@ -403,8 +402,6 @@ class DOFAEmbedder(EmbedderBase):
             },
         }
 
-    _allow_auto_backend = False
-
     @staticmethod
     def _default_sensor() -> SensorSpec:
         return SensorSpec(
@@ -502,7 +499,8 @@ class DOFAEmbedder(EmbedderBase):
 
             provider_meta = {"backend_tensor": True}
 
-        elif is_provider_backend(backend_l, allow_auto=False):
+        else:
+            provider = self._get_provider(backend)
             if temporal is None:
                 raise ModelError(
                     "dofa provider backend requires TemporalSpec.range(start,end)."
@@ -540,8 +538,6 @@ class DOFAEmbedder(EmbedderBase):
             wavelengths_um = [float(v) for v in wavelengths_um]
 
             if input_chw is None:
-                provider = self._get_provider(backend_l)
-
                 x_chw, provider_meta = _fetch_gee_multiband_sr_chw(
                     provider,
                     spatial,
@@ -592,10 +588,6 @@ class DOFAEmbedder(EmbedderBase):
 
             x_chw, resize_meta = _resize_chw(x_chw, size=image_size)
             x_bchw = x_chw[None, ...].astype(np.float32)
-
-        else:
-            raise ModelError("dofa supports a provider backend or 'tensor' only.")
-
         c = int(x_bchw.shape[1])
         if len(wavelengths_um) != c:
             raise ModelError(
@@ -681,7 +673,7 @@ class DOFAEmbedder(EmbedderBase):
             return []
 
         backend_l = backend.lower().strip()
-        if not is_provider_backend(backend_l, allow_auto=False):
+        if backend_l == "tensor":
             # tensor path stays sequential in v0.1
             return super().get_embeddings_batch(
                 spatials=spatials,
@@ -691,6 +683,7 @@ class DOFAEmbedder(EmbedderBase):
                 backend=backend,
                 device=device,
             )
+        provider = self._get_provider(backend)
         if temporal is None:
             raise ModelError(
                 "dofa provider backend requires TemporalSpec.range(start,end)."
@@ -708,7 +701,6 @@ class DOFAEmbedder(EmbedderBase):
         cloudy_pct = int(getattr(ss, "cloudy_pct", 30))
         composite = str(getattr(ss, "composite", "median"))
 
-        provider = self._get_provider(backend_l)
         n = len(spatials)
         prefetched_raw: List[Optional[np.ndarray]] = [None] * n
 
@@ -774,7 +766,7 @@ class DOFAEmbedder(EmbedderBase):
             return []
 
         backend_l = backend.lower().strip()
-        if not is_provider_backend(backend_l, allow_auto=False):
+        if backend_l == "tensor":
             return super().get_embeddings_batch_from_inputs(
                 spatials=spatials,
                 input_chws=input_chws,
@@ -784,6 +776,7 @@ class DOFAEmbedder(EmbedderBase):
                 backend=backend,
                 device=device,
             )
+        self._get_provider(backend)
         if temporal is None:
             raise ModelError(
                 "dofa provider backend requires TemporalSpec.range(start,end)."

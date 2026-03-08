@@ -16,7 +16,6 @@ from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
-    is_provider_backend,
     load_cached_with_device as _load_cached_with_device,
     resolve_device_auto_torch as _resolve_device,
 )
@@ -349,7 +348,6 @@ class TerraMindEmbedder(EmbedderBase):
     DEFAULT_MODALITY = "S2L2A"
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
-    _allow_auto_backend = False
 
     def describe(self) -> Dict[str, Any]:
         return {
@@ -468,11 +466,11 @@ class TerraMindEmbedder(EmbedderBase):
                 )
             x_bchw = np.stack(prepared, axis=0).astype(np.float32)
 
-        elif is_provider_backend(backend_l, allow_auto=False):
+        else:
+            provider = self._get_provider(backend)
             t = temporal_to_range(temporal)
             temporal_used = t
             ss = sensor or self._default_sensor()
-            provider = self._get_provider(backend_l)
 
             scale_m = int(getattr(ss, "scale_m", 10))
             cloudy_pct = int(getattr(ss, "cloudy_pct", 30))
@@ -541,9 +539,6 @@ class TerraMindEmbedder(EmbedderBase):
                 "fill_value": fill_value,
             }
             source = sensor_meta["collection"]
-        else:
-            raise ModelError("terramind supports a provider backend or 'tensor' only.")
-
         model, wmeta, dev = _load_terramind(
             model_key=model_key,
             pretrained=pretrained,
@@ -628,7 +623,7 @@ class TerraMindEmbedder(EmbedderBase):
             return []
 
         backend_l = backend.lower().strip()
-        if not is_provider_backend(backend_l, allow_auto=False):
+        if backend_l == "tensor":
             return super().get_embeddings_batch(
                 spatials=spatials,
                 temporal=temporal,
@@ -638,9 +633,9 @@ class TerraMindEmbedder(EmbedderBase):
                 device=device,
             )
 
+        provider = self._get_provider(backend)
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
-        provider = self._get_provider(backend_l)
 
         scale_m = int(getattr(ss, "scale_m", 10))
         cloudy_pct = int(getattr(ss, "cloudy_pct", 30))

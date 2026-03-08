@@ -19,7 +19,6 @@ from .meta_utils import build_meta, temporal_midpoint_str
 from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
     fetch_s1_vvvh_raw_chw as _fetch_s1_vvvh_raw_chw_shared,
-    is_provider_backend,
     normalize_s1_vvvh_chw as _normalize_s1_vvvh_chw,
     resolve_device_auto_torch as _auto_device,
 )
@@ -348,8 +347,6 @@ class TerraFMBEmbedder(EmbedderBase):
     DEFAULT_FETCH_WORKERS = 8
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 64
-    _allow_auto_backend = False
-
     def describe(self) -> Dict[str, Any]:
         return {
             "type": "on_the_fly",
@@ -409,7 +406,8 @@ class TerraFMBEmbedder(EmbedderBase):
         device: str = "auto",
         input_chw: Optional[np.ndarray] = None,
     ) -> Embedding:
-        backend_l = backend.lower()
+        backend_l = backend.lower().strip()
+        uses_provider = backend_l != "tensor"
 
         # defaults / overrides (match your style: sensor carries overrides)
         modality = getattr(sensor, "modality", "s2") if sensor else "s2"
@@ -464,7 +462,8 @@ class TerraFMBEmbedder(EmbedderBase):
                     [_resize_chw_to_224(xi, size=image_size) for xi in x_bchw], axis=0
                 )
 
-        elif is_provider_backend(backend_l, allow_auto=False):
+        else:
+            provider = self._get_provider(backend)
             if temporal is None:
                 raise ModelError(
                     "terrafm_b_gee requires TemporalSpec.range(start,end)."
@@ -472,9 +471,6 @@ class TerraFMBEmbedder(EmbedderBase):
             temporal.validate()
             if temporal.mode != "range":
                 raise ModelError("terrafm_b_gee requires TemporalSpec.range in v0.1.")
-
-            provider = self._get_provider(backend_l)
-
             if input_chw is None:
                 if modality == "s2":
                     x_chw = _fetch_s2_sr_12_chw(
@@ -545,12 +541,6 @@ class TerraFMBEmbedder(EmbedderBase):
             # resize to 224
             x_chw = _resize_chw_to_224(x_chw, size=image_size)
             x_bchw = x_chw[None, ...].astype(np.float32)
-
-        else:
-            raise ModelError(
-                "terrafm_b_gee supports a provider backend or 'tensor' only."
-            )
-
         # channel sanity: TerraFM HF terrafm.py routes by C==2 (S1) else (S2). Keep it strict.
         c = int(x_bchw.shape[1])
         if c not in (2, 12):
@@ -570,12 +560,10 @@ class TerraFMBEmbedder(EmbedderBase):
             want_grid=(output.mode == "grid"),
         )
 
-        temporal_used = (
-            temporal if is_provider_backend(backend_l, allow_auto=False) else None
-        )
+        temporal_used = temporal if uses_provider else None
         sensor_meta = None
         source = None
-        if is_provider_backend(backend_l, allow_auto=False):
+        if uses_provider:
             if modality == "s2":
                 sensor_meta = {
                     "collection": "COPERNICUS/S2_SR_HARMONIZED",
@@ -612,36 +600,12 @@ class TerraFMBEmbedder(EmbedderBase):
             input_time=temporal_midpoint_str(temporal_used),
             extra={
                 "modality": modality,
-                "scale_m": (
-                    scale_m
-                    if is_provider_backend(backend_l, allow_auto=False)
-                    else None
-                ),
-                "cloudy_pct": (
-                    cloudy_pct
-                    if is_provider_backend(backend_l, allow_auto=False)
-                    else None
-                ),
-                "composite": (
-                    composite
-                    if is_provider_backend(backend_l, allow_auto=False)
-                    else None
-                ),
-                "orbit": (
-                    orbit
-                    if (
-                        is_provider_backend(backend_l, allow_auto=False)
-                        and modality == "s1"
-                    )
-                    else None
-                ),
+                "scale_m": scale_m if uses_provider else None,
+                "cloudy_pct": cloudy_pct if uses_provider else None,
+                "composite": composite if uses_provider else None,
+                "orbit": orbit if (uses_provider and modality == "s1") else None,
                 "use_float_linear": (
-                    use_float_linear
-                    if (
-                        is_provider_backend(backend_l, allow_auto=False)
-                        and modality == "s1"
-                    )
-                    else None
+                    use_float_linear if (uses_provider and modality == "s1") else None
                 ),
                 "start": getattr(temporal_used, "start", None),
                 "end": getattr(temporal_used, "end", None),
@@ -698,7 +662,7 @@ class TerraFMBEmbedder(EmbedderBase):
             return []
 
         backend_l = backend.lower().strip()
-        if not is_provider_backend(backend_l, allow_auto=False):
+        if backend_l == "tensor":
             # tensor path stays sequential in v0.1
             return super().get_embeddings_batch(
                 spatials=spatials,
@@ -708,6 +672,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 backend=backend,
                 device=device,
             )
+        provider = self._get_provider(backend)
 
         if temporal is None:
             raise ModelError("terrafm_b_gee requires TemporalSpec.range(start,end).")
@@ -724,7 +689,6 @@ class TerraFMBEmbedder(EmbedderBase):
             bool(getattr(sensor, "use_float_linear", True)) if sensor else True
         )
 
-        provider = self._get_provider(backend_l)
         n = len(spatials)
         prefetched_raw: List[Optional[np.ndarray]] = [None] * n
 
@@ -819,7 +783,7 @@ class TerraFMBEmbedder(EmbedderBase):
             return []
 
         backend_l = backend.lower().strip()
-        if not is_provider_backend(backend_l, allow_auto=False):
+        if backend_l == "tensor":
             return super().get_embeddings_batch_from_inputs(
                 spatials=spatials,
                 input_chws=input_chws,
@@ -829,6 +793,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 backend=backend,
                 device=device,
             )
+        self._get_provider(backend)
 
         if temporal is None:
             raise ModelError("terrafm_b_gee requires TemporalSpec.range(start,end).")

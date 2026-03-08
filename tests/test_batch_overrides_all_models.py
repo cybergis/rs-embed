@@ -133,7 +133,13 @@ def test_terrafm_batch_prefetch_passes_raw_input(monkeypatch):
 
     emb = TerraFMBEmbedder()
     monkeypatch.setenv("RS_EMBED_TERRAFM_FETCH_WORKERS", "1")
-    monkeypatch.setattr(emb, "_get_provider", lambda _backend: object())
+    seen_backend = {"value": None}
+
+    def _fake_get_provider(_backend):
+        seen_backend["value"] = _backend
+        return object()
+
+    monkeypatch.setattr(emb, "_get_provider", _fake_get_provider)
     monkeypatch.setattr(
         tf,
         "_fetch_s2_sr_12_chw",
@@ -155,10 +161,11 @@ def test_terrafm_batch_prefetch_passes_raw_input(monkeypatch):
         spatials=_spatials(2),
         temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
         output=OutputSpec.pooled(),
-        backend="gee",
+        backend="auto",
     )
 
     assert len(out) == 2
+    assert seen_backend["value"] == "auto"
     assert seen[0][0] == 12
     assert seen[0][1] >= 999.0  # 0.1 * 10000
 
@@ -168,7 +175,13 @@ def test_terramind_batch_prefetch_passes_raw_input(monkeypatch):
 
     emb = TerraMindEmbedder()
     monkeypatch.setenv("RS_EMBED_TERRAMIND_FETCH_WORKERS", "1")
-    monkeypatch.setattr(emb, "_get_provider", lambda _backend: object())
+    seen_backend = {"value": None}
+
+    def _fake_get_provider(_backend):
+        seen_backend["value"] = _backend
+        return object()
+
+    monkeypatch.setattr(emb, "_get_provider", _fake_get_provider)
     monkeypatch.setattr(
         tm,
         "_fetch_s2_sr_12_raw_chw",
@@ -190,10 +203,11 @@ def test_terramind_batch_prefetch_passes_raw_input(monkeypatch):
         spatials=_spatials(2),
         temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
         output=OutputSpec.pooled(),
-        backend="gee",
+        backend="auto",
     )
 
     assert len(out) == 2
+    assert seen_backend["value"] == "auto"
     assert seen[0][0] == 12
     assert seen[0][1] >= 1234.0
 

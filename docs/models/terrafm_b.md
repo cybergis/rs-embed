@@ -30,7 +30,7 @@
 
 - mixing S1 and S2 runs without logging modality and preprocessing path
 - passing tensor backend inputs with wrong channel count (`C` must be `2` or `12`)
-- assuming `backend="auto"` works (this adapter is stricter and expects explicit provider or `tensor`)
+- assuming `backend="auto"` selects a non-provider path; it resolves through the embedder's provider contract unless you use `tensor`
 
 ---
 
@@ -41,7 +41,7 @@
 - `backend="tensor"`:
   - requires `sensor.data` as `CHW` or `BCHW`
   - adapter resizes to `224`
-- provider backend (`gee` / provider-compatible, but not `auto` in current implementation):
+- provider backend (`gee` / provider-compatible, including `auto` via provider resolution):
   - requires `TemporalSpec.range(...)` in v0.1
   - fetches S2 or S1 based on `sensor.modality`
 
@@ -167,7 +167,7 @@ emb = get_embedding(
 
 ## Common Failure Modes / Debugging
 
-- using `backend="auto"` (current adapter expects explicit provider backend or `tensor`)
+- using an unsupported backend; use `backend="auto"`, an explicit provider backend, or `tensor`
 - provider path with non-`range` temporal spec
 - tensor backend without `sensor.data`
 - wrong channel count (`C` must be `2` or `12`)
@@ -198,4 +198,3 @@ Keep fixed and record:
 
 - Registration/catalog: `src/rs_embed/embedders/catalog.py`
 - Adapter implementation: `src/rs_embed/embedders/onthefly_terrafm.py`
-
