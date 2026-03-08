@@ -1,5 +1,5 @@
 # Implementation based on:
-# THOR
+# THOR: A Versatile Foundation Model for Earth Observation Climate and Society Applications
 # arXiv 2026
 # https://arxiv.org/abs/2601.16011
 
