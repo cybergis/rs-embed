@@ -13,10 +13,7 @@ import numpy as np
 
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig
-from ..providers.gee_utils import (
-    fetch_gee_patch_raw,
-    inspect_input_raw,
-)
+from ..providers import gee_utils as _gee_utils
 from ..tools.normalization import normalize_input_chw
 from ..providers.prefetch_plan import (
     build_gee_prefetch_plan,
@@ -55,12 +52,16 @@ class PrefetchManager:
         resolved_sensor: Dict[str, Optional[SensorSpec]],
         model_type: Dict[str, str],
         config: ExportConfig,
+        fetch_fn: Optional[Callable[..., np.ndarray]] = None,
+        inspect_fn: Optional[Callable[..., Dict[str, Any]]] = None,
     ) -> None:
         self.provider = provider
         self.models = models
         self.resolved_sensor = resolved_sensor
         self.model_type = model_type
         self.config = config
+        self.fetch_fn = fetch_fn or _gee_utils.fetch_gee_patch_raw
+        self.inspect_fn = inspect_fn or _gee_utils.inspect_input_raw
 
         # Caches populated by fetch_chunk / restored from checkpoint
         self.cache: Dict[Tuple[int, str], np.ndarray] = {}
@@ -135,7 +136,7 @@ class PrefetchManager:
             i: int, skey: str, sspec: SensorSpec
         ) -> Tuple[int, str, np.ndarray]:
             x = run_with_retry(
-                lambda: fetch_gee_patch_raw(
+                lambda: self.fetch_fn(
                     provider, spatial=spatials[i], temporal=temporal, sensor=sspec
                 ),
                 retries=cfg.max_retries,
@@ -171,7 +172,7 @@ class PrefetchManager:
                     )
                     if cfg.fail_on_bad_input:
                         sspec_member = self.sensor_by_key[member_skey]
-                        rep = inspect_input_raw(
+                        rep = self.inspect_fn(
                             x_member,
                             sensor=sspec_member,
                             name=f"gee_input_{member_skey}",
@@ -231,13 +232,13 @@ class PrefetchManager:
             )
         cfg = self.config
         x = run_with_retry(
-            lambda: fetch_gee_patch_raw(
+            lambda: self.fetch_fn(
                 self.provider, spatial=spatial, temporal=temporal, sensor=sspec
             ),
             retries=cfg.max_retries,
             backoff_s=cfg.retry_backoff_s,
         )
-        rep = inspect_input_raw(x, sensor=sspec, name=f"gee_input_{skey}")
+        rep = self.inspect_fn(x, sensor=sspec, name=f"gee_input_{skey}")
         if cfg.fail_on_bad_input and (not bool(rep.get("ok", True))):
             issues = (rep.get("report", {}) or {}).get("issues", [])
             raise RuntimeError(

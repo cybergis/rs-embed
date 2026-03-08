@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from rs_embed.core.specs import BBox, SensorSpec
 import rs_embed.inspect as inspect_mod
@@ -32,12 +33,13 @@ def test_inspect_gee_patch_uses_shared_fetch_helper(monkeypatch):
     monkeypatch.setattr(inspect_mod, "get_provider", _fake_get_provider)
     monkeypatch.setattr(inspect_mod, "fetch_provider_patch_raw", _fake_fetch)
 
-    out = inspect_mod.inspect_gee_patch(
-        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
-        temporal=None,
-        sensor=SensorSpec(collection="FAKE/COLL", bands=("B1",)),
-        return_array=True,
-    )
+    with pytest.warns(DeprecationWarning, match="inspect_gee_patch is deprecated"):
+        out = inspect_mod.inspect_gee_patch(
+            spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+            temporal=None,
+            sensor=SensorSpec(collection="FAKE/COLL", bands=("B1",)),
+            return_array=True,
+        )
 
     assert calls["helper"] == 1
     assert calls["direct"] == 0

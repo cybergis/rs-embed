@@ -788,7 +788,7 @@ def test_export_batch_backend_resolution_before_assert_supported(tmp_path, monke
 
     # Prevent real GEE initialization — the precomputed model uses backend="auto"
     # after remapping, so no provider is actually needed for inference.
-    monkeypatch.setattr(api, "_provider_factory_for_backend", lambda _b: None)
+    monkeypatch.setattr(api, "provider_factory_for_backend", lambda _b: None)
 
     # _MockPrecomputedLocalEmbedder declares backend=["local", "auto"]
     # User passes backend="gee" → _resolve_embedding_api_backend maps to "auto"

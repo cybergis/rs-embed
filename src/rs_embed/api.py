@@ -22,30 +22,20 @@ Flow summary
 3. Execute single / batch embedding, or delegate batch export to
    :class:`BatchExporter`.
 
-Backward compatibility
-----------------------
-Some tests and downstream integrations monkeypatch symbols on ``rs_embed.api``.
-For batch export, those hook symbols are mirrored into pipeline module globals
-via ``_sync_export_pipeline_hooks`` so monkeypatch behaviour remains stable
-after the pipeline refactor.
 """
 
 from __future__ import annotations
 
 import os
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any, Dict, List, Optional
 
-from .providers.gee_utils import (
-    fetch_gee_patch_raw as _fetch_gee_patch_raw,
-    inspect_input_raw as _inspect_input_raw,
-)
 from .tools.normalization import (
     normalize_backend_name as _normalize_backend_name,
     normalize_device_name as _normalize_device_name,
     normalize_model_name as _normalize_model_name,
     # Re-exported so `from rs_embed.api import ...` in tests/downstream still works.
-    _default_provider_backend_for_api,
-    _probe_model_describe,
+    _default_provider_backend_for_api,  # noqa: F401
+    _probe_model_describe,  # noqa: F401
     _resolve_embedding_api_backend,
 )
 from .tools.checkpoint_utils import (
@@ -54,6 +44,7 @@ from .tools.checkpoint_utils import (
 from .tools.runtime import (
     _EmbeddingRequestContext,
     _prepare_embedding_request_context,
+    provider_factory_for_backend,
     run_embedding_request as _run_embedding_request_shared,
 )
 from .core.validation import (
@@ -80,16 +71,6 @@ from .core.specs import (
 )
 from .core.types import ExportConfig, ExportLayout, ExportTarget, ModelConfig
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
-from .providers import ProviderBase
-
-# Backward-compatibility hook: tests/downstream may monkeypatch api.GEEProvider.
-GEEProvider: Optional[Callable[..., ProviderBase]] = None
-
-
-def _provider_factory_for_backend(backend: str) -> Optional[Callable[[], ProviderBase]]:
-    """Thin delegate that threads the api.GEEProvider monkeypatch hook through."""
-    from .tools.runtime import provider_factory_for_backend
-    return provider_factory_for_backend(backend, gee_provider_cls=GEEProvider)
 
 
 # ---------------------------------------------------------------------------
@@ -151,29 +132,6 @@ def _resolve_export_batch_target(
     )
 
 
-def _sync_export_pipeline_hooks() -> None:
-    """Propagate api-level hook variables into refactored pipeline modules.
-
-    Tests and downstream users monkeypatch symbols on ``rs_embed.api``
-    (for example ``_inspect_input_raw`` or ``_create_progress``).
-    The pipeline refactor moved implementations into separate modules, so
-    we mirror those hooks back into pipeline module globals before running
-    batch export to preserve backward-compatible monkeypatch behavior.
-    """
-
-    from .pipelines import combined_flow as _combined_flow_mod
-    from .pipelines import exporter as _exporter_mod
-    from .pipelines import point_payload as _point_payload_mod
-    from .pipelines import prefetch as _prefetch_mod
-
-    _prefetch_mod.fetch_gee_patch_raw = _fetch_gee_patch_raw
-    _prefetch_mod.inspect_input_raw = _inspect_input_raw
-    _point_payload_mod.fetch_gee_patch_raw = _fetch_gee_patch_raw
-    _point_payload_mod.inspect_input_raw = _inspect_input_raw
-    _exporter_mod.create_progress = _create_progress
-    _combined_flow_mod.create_progress = _create_progress
-
-
 # ---------------------------------------------------------------------------
 # Internal: embedding request helpers (for get_embedding / get_embeddings_batch)
 # ---------------------------------------------------------------------------
@@ -205,7 +163,6 @@ def _run_embedding_request(
         sensor=sensor,
         output=output,
         ctx=ctx,
-        gee_provider_cls=GEEProvider,
     )
 
 
@@ -264,6 +221,12 @@ def get_embedding(
         Target inference device.
     input_prep : InputPrepSpec or str or None
         Optional API-side input preprocessing policy.
+
+    Note on Batching
+    ----------------
+    ``chunk_size`` controls how many spatial points are held in memory/I/O
+    buffers at once. ``infer_batch_size`` controls how many inputs are sent
+    into model inference at once. They are independent controls.
 
     Returns
     -------
@@ -448,9 +411,11 @@ def export_batch(
     fail_on_bad_input : bool
         If ``True``, treat invalid inputs as hard failures.
     chunk_size : int
-        Spatial chunk size for scheduling work.
+        Number of spatial points processed per chunk for memory/I/O scheduling.
+        This controls how much data is held in prefetch and writer buffers.
     infer_batch_size : int or None
-        Optional explicit model inference batch size.
+        Optional explicit model inference micro-batch size used for model calls.
+        This controls compute batching and is independent from ``chunk_size``.
     num_workers : int
         Number of preprocessing/inference workers.
     continue_on_error : bool
@@ -579,8 +544,6 @@ def export_batch(
         input_prep=input_prep,
     )
 
-    _sync_export_pipeline_hooks()
-
     exporter = BatchExporter(
         spatials=spatials,
         temporal=temporal,
@@ -591,6 +554,7 @@ def export_batch(
         backend=backend_n,
         resolved_backend=resolved_backend,
         device=device_n,
-        provider_factory=_provider_factory_for_backend(backend_n),
+        provider_factory=provider_factory_for_backend(backend_n),
+        progress_factory=_create_progress,
     )
     return exporter.run()

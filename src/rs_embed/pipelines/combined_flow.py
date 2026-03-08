@@ -55,6 +55,7 @@ def run_pending_models(
     write_checkpoint_fn: Callable[..., Dict[str, Any]],
     progress: Any,
     inference_engine: Optional[Any] = None,
+    progress_factory: Optional[Callable[..., Any]] = None,
 ) -> Dict[str, Any]:
     """Run inference for each pending model, delegating to *inference_engine*.
 
@@ -87,9 +88,10 @@ def run_pending_models(
         )
 
     _resolved_backend = resolved_backend or {}
+    create_progress_fn = progress_factory or create_progress
     for m in pending_models:
         drop_model_arrays(arrays, m, sanitize_key=sanitize_key)
-        infer_progress = create_progress(
+        infer_progress = create_progress_fn(
             enabled=bool(show_progress and save_embeddings),
             total=len(spatials),
             desc=f"infer[{m}]",

@@ -1,6 +1,6 @@
-"""Tests for backend resolution routing in rs_embed.api.
+"""Tests for backend resolution routing in rs_embed.api/runtime.
 
-Exercises _resolve_embedding_api_backend, _provider_factory_for_backend,
+Exercises _resolve_embedding_api_backend, provider_factory_for_backend,
 and _default_provider_backend_for_api — the logic that maps high-level
 backend names to concrete provider/access paths, particularly for
 precomputed models.
@@ -11,9 +11,9 @@ from unittest.mock import patch
 
 from rs_embed.api import (
     _resolve_embedding_api_backend,
-    _provider_factory_for_backend,
     _default_provider_backend_for_api,
 )
+from rs_embed.tools.runtime import provider_factory_for_backend
 
 # ── _resolve_embedding_api_backend ────────────────────────────────────
 
@@ -94,14 +94,13 @@ class TestResolveBackend:
             assert _resolve_embedding_api_backend("m", "auto") == "auto"
 
 
-# ── _provider_factory_for_backend ────────────────────────────────────
+# ── provider_factory_for_backend ─────────────────────────────────────
 
 
 class TestProviderFactory:
-    """Tests for _provider_factory_for_backend.
+    """Tests for provider_factory_for_backend.
 
-    _provider_factory_for_backend in api.py delegates to
-    tools.runtime.provider_factory_for_backend, which uses
+    provider_factory_for_backend in tools.runtime uses
     default_provider_backend_name() and has_provider() from their
     canonical locations.
     """
@@ -112,7 +111,7 @@ class TestProviderFactory:
             "rs_embed.embedders.runtime_utils.default_provider_backend_name", return_value="gee"
         ):
             with patch("rs_embed.tools.runtime.has_provider", return_value=True):
-                factory = _provider_factory_for_backend("auto")
+                factory = provider_factory_for_backend("auto")
                 assert factory is not None
 
     def test_auto_uses_non_gee_default(self):
@@ -122,17 +121,17 @@ class TestProviderFactory:
             return_value="planetary_computer",
         ):
             with patch("rs_embed.tools.runtime.has_provider", return_value=True):
-                factory = _provider_factory_for_backend("auto")
+                factory = provider_factory_for_backend("auto")
                 assert factory is not None
 
     def test_unknown_backend_returns_none(self):
         with patch("rs_embed.tools.runtime.has_provider", return_value=False):
-            assert _provider_factory_for_backend("nonexistent") is None
+            assert provider_factory_for_backend("nonexistent") is None
 
     def test_gee_returns_monkeypatch_friendly_factory(self):
         """gee → returns the module-level _create_default_gee_provider."""
         with patch("rs_embed.tools.runtime.has_provider", return_value=True):
-            factory = _provider_factory_for_backend("gee")
+            factory = provider_factory_for_backend("gee")
             assert factory is not None
 
 

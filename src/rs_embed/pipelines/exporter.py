@@ -28,7 +28,8 @@ from ..tools.manifest import (
     point_resume_manifest,
     summarize_status,
 )
-from ..tools.progress import create_progress
+from ..tools.progress import create_progress as _default_create_progress
+from ..providers import gee_utils as _gee_utils
 from ..writers import get_extension
 from .checkpoint import CheckpointManager
 from .inference import InferenceEngine
@@ -80,6 +81,9 @@ class BatchExporter:
         resolved_backend: Dict[str, str],
         device: str,
         provider_factory: Optional[Callable[[], Any]] = None,
+        fetch_fn: Optional[Callable[..., np.ndarray]] = None,
+        inspect_fn: Optional[Callable[..., Dict[str, Any]]] = None,
+        progress_factory: Optional[Callable[..., Any]] = None,
     ) -> None:
         self.spatials = spatials
         self.temporal = temporal
@@ -91,6 +95,9 @@ class BatchExporter:
         self.resolved_backend = resolved_backend
         self.device = device
         self.provider_factory = provider_factory
+        self.fetch_fn = fetch_fn or _gee_utils.fetch_gee_patch_raw
+        self.inspect_fn = inspect_fn or _gee_utils.inspect_input_raw
+        self.create_progress = progress_factory or _default_create_progress
 
         # Model name lists for convenience
         self.model_names = [mc.name for mc in models]
@@ -131,7 +138,7 @@ class BatchExporter:
         os.makedirs(out_dir, exist_ok=True)
 
         n = len(self.spatials)
-        progress = create_progress(
+        progress = self.create_progress(
             enabled=bool(cfg.show_progress), total=n, desc="export_batch", unit="point"
         )
 
@@ -252,7 +259,7 @@ class BatchExporter:
         all_idxs = list(range(len(self.spatials)))
         tasks = prefetch.build_tasks(all_idxs, self.spatials)
 
-        progress = create_progress(
+        progress = self.create_progress(
             enabled=bool(cfg.show_progress),
             total=(len(tasks) + len(pending_models)),
             desc="export_batch[combined]",
@@ -337,6 +344,7 @@ class BatchExporter:
             write_checkpoint_fn=_write_ckpt,
             progress=progress,
             inference_engine=self.inference,
+            progress_factory=self.create_progress,
         )
 
         # Drop prefetch checkpoint arrays before final write
@@ -380,6 +388,8 @@ class BatchExporter:
             resolved_sensor=self.resolved_sensor,
             model_type=self.model_type,
             config=self.config,
+            fetch_fn=self.fetch_fn,
+            inspect_fn=self.inspect_fn,
         )
         band_resolver = (
             getattr(provider, "normalize_bands", None) if provider is not None else None
@@ -422,7 +432,7 @@ class BatchExporter:
             return {}, None
 
         model_progress = {
-            m: create_progress(
+            m: self.create_progress(
                 enabled=bool(self.config.show_progress),
                 total=total,
                 desc=f"infer[{m}]",
@@ -450,6 +460,8 @@ class BatchExporter:
             resolved_sensor=self.resolved_sensor,
             model_type=self.model_type,
             config=self.config,
+            fetch_fn=self.fetch_fn,
+            inspect_fn=self.inspect_fn,
         )
         clone.sensor_by_key = src.sensor_by_key
         clone.fetch_sensor_by_key = src.fetch_sensor_by_key
@@ -513,6 +525,8 @@ class BatchExporter:
                         config=per_item_cfg,
                         provider_factory=self.provider_factory,
                         model_progress_cb=(None if use_batch else model_progress_cb),
+                        fetch_fn=self.fetch_fn,
+                        inspect_fn=self.inspect_fn,
                     )
                     if use_batch:
                         self._inject_precomputed_embeddings(

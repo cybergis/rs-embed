@@ -6,6 +6,7 @@ from __future__ import annotations
 """
 
 import os
+import warnings
 from typing import Any, Dict, List, Optional
 
 from .core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
@@ -33,13 +34,19 @@ def export_npz(
     input_prep: Optional[InputPrepSpec | str] = "resize",
 ) -> Dict[str, Any]:
     """Export inputs + embeddings for one spatial query to a single `.npz`."""
-    from .api import export_batch
+    from .api import export_batch as _api_export_batch
+
+    warnings.warn(
+        "rs_embed.export.export_npz is deprecated. Use rs_embed.api.export_batch instead.",
+        DeprecationWarning,
+        stacklevel=2,
+    )
 
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
     if not out_path.endswith(".npz"):
         out_path = out_path + ".npz"
 
-    return export_batch(
+    return _api_export_batch(
         spatials=[spatial],
         temporal=temporal,
         models=models,

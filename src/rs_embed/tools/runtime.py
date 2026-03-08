@@ -154,32 +154,12 @@ def run_with_retry(
     raise AssertionError("unreachable")
 
 
-def _create_default_gee_provider(
-    *,
-    gee_provider_cls: Optional[Callable[..., ProviderBase]] = None,
-) -> ProviderBase:
-    cls = gee_provider_cls
-    if cls is None:
-        try:
-            from ..providers import GEEProvider as _GEEProvider  # type: ignore
-
-            cls = _GEEProvider
-        except Exception:
-            cls = None
-
-    if cls is not None:
-        try:
-            return cls(auto_auth=True)
-        except TypeError:
-            return cls()
-
+def _create_default_gee_provider() -> ProviderBase:
     return get_provider("gee", auto_auth=True)
 
 
 def provider_factory_for_backend(
     backend: str,
-    *,
-    gee_provider_cls: Optional[Callable[..., ProviderBase]] = None,
 ) -> Optional[Callable[[], ProviderBase]]:
     b = normalize_backend_name(backend)
     if b == "auto":
@@ -187,7 +167,7 @@ def provider_factory_for_backend(
     if not has_provider(b):
         return None
     if b == "gee":
-        return lambda: _create_default_gee_provider(gee_provider_cls=gee_provider_cls)
+        return _create_default_gee_provider
     return lambda: get_provider(b)
 
 
@@ -239,17 +219,13 @@ def fetch_api_side_inputs(
     input_prep_resolved: Any,
     embedder: Any,
     model_n: str,
-    gee_provider_cls: Optional[Callable[..., ProviderBase]] = None,
 ) -> Optional[List[np.ndarray]]:
     mode = str(getattr(input_prep_resolved, "mode", "resize")).strip().lower()
     use_api_side_input_prep = mode in {"tile", "auto"}
     if not use_api_side_input_prep:
         return None
 
-    factory = provider_factory_for_backend(
-        backend_n,
-        gee_provider_cls=gee_provider_cls,
-    )
+    factory = provider_factory_for_backend(backend_n)
     if factory is None:
         if mode == "tile":
             raise ModelError(
@@ -291,7 +267,6 @@ def run_embedding_request(
     sensor: Optional[SensorSpec],
     output: OutputSpec,
     ctx: _EmbeddingRequestContext,
-    gee_provider_cls: Optional[Callable[..., ProviderBase]] = None,
 ) -> List[Embedding]:
     from .tiling import _call_embedder_get_embedding_with_input_prep
 
@@ -303,7 +278,6 @@ def run_embedding_request(
         input_prep_resolved=ctx.input_prep_resolved,
         embedder=ctx.embedder,
         model_n=ctx.model_n,
-        gee_provider_cls=gee_provider_cls,
     )
     if prefetched_inputs is not None:
         out: List[Embedding] = []

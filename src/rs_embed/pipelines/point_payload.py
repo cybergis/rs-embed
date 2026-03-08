@@ -7,7 +7,6 @@ fallback chain and records model-level success/failure metadata.
 
 from __future__ import annotations
 
-from dataclasses import replace
 from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import numpy as np
@@ -30,7 +29,7 @@ from ..tools.runtime import (
     run_with_retry,
     sensor_key,
 )
-from ..providers.gee_utils import fetch_gee_patch_raw, inspect_input_raw
+from ..providers import gee_utils as _gee_utils
 
 
 def build_one_point_payload(
@@ -52,6 +51,8 @@ def build_one_point_payload(
     config: ExportConfig,
     provider_factory: Optional[Callable[[], Any]] = None,
     model_progress_cb: Optional[Callable[[str], None]] = None,
+    fetch_fn: Optional[Callable[..., np.ndarray]] = None,
+    inspect_fn: Optional[Callable[..., Dict[str, Any]]] = None,
 ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
     """Build arrays + manifest payload for one point across all models.
 
@@ -67,6 +68,8 @@ def build_one_point_payload(
     continue_on_error = config.continue_on_error
     max_retries = config.max_retries
     retry_backoff_s = config.retry_backoff_s
+    fetch = fetch_fn or _gee_utils.fetch_gee_patch_raw
+    inspect = inspect_fn or _gee_utils.inspect_input_raw
 
     arrays: Dict[str, np.ndarray] = {}
     manifest: Dict[str, Any] = {
@@ -149,7 +152,7 @@ def build_one_point_payload(
                             backoff_s=retry_backoff_s,
                         )
                         input_chw = run_with_retry(
-                            lambda: fetch_gee_patch_raw(
+                            lambda: fetch(
                                 prov,
                                 spatial=spatial,
                                 temporal=temporal,
@@ -162,7 +165,7 @@ def build_one_point_payload(
 
                 report = input_reports.get((point_index, skey))
                 if report is None and input_chw is not None:
-                    report = inspect_input_raw(
+                    report = inspect(
                         input_chw, sensor=sspec, name=f"gee_input_{skey}"
                     )
 
