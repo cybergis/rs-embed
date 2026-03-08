@@ -47,13 +47,17 @@ earthengine authenticate
 from rs_embed import PointBuffer, TemporalSpec, OutputSpec, get_embedding
 
 spatial = PointBuffer(lon=121.5, lat=31.2, buffer_m=2048)
-temporal = TemporalSpec.year(2024)
+temporal = TemporalSpec.range(
+    "2022-06-01",
+    "2022-09-01",
+)
 
 emb = get_embedding(
-    "gse",       # alpha earth
+    "prithvi",       # alpha earth
     spatial=spatial,
     temporal=temporal,
-     output=OutputSpec.grid()
+    output=OutputSpec.grid(),
+    backend='gee'
 )
 
 ```
@@ -64,7 +68,7 @@ from examples.plot_utils import plot_embedding_pseudocolor
 
 plot_embedding_pseudocolor(
     emb,
-    title="gse grid PCA pseudocolor",
+    title="prithvi grid PCA pseudocolor",
 )
 ```
 
