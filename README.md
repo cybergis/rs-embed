@@ -35,7 +35,7 @@ emb = get_embedding("tessera", spatial=..., temporal=..., output=...)
 git clone git@github.com:cybergis/rs-embed.git
 cd rs-embed
 conda env create -f environment.yml
-conda activate rs-embed
+conda activate rsembed
 pip install -e .
 
 # If you are using GEE for the first time, run:
