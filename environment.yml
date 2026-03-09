@@ -19,9 +19,12 @@ dependencies:
       # torchgeo pulls: einops, geopandas, kornia, lightly, lightning, matplotlib,
       #                 numpy, pandas, pillow, rasterio, segmentation-models-pytorch,
       #                 shapely, timm, torchmetrics, torchvision, typing-extensions
-      - torchgeo @ git+https://github.com/torchgeo/torchgeo.git
+      # Pinned to v0.9.0; bump by updating the @tag below and verifying compatibility.
+      - torchgeo @ git+https://github.com/torchgeo/torchgeo.git@v0.9.0
       # thor-terratorch-ext pulls: terratorch==1.2.1, thor (with timm<=1.0.15 constraint)
-      - thor-terratorch-ext @ git+https://github.com/FM4CS/thor_terratorch_ext.git
+      # No release tags exist; pinned to a specific commit SHA.
+      # Bump by replacing the SHA with a newer commit from the upstream repo.
+      - thor-terratorch-ext @ git+https://github.com/FM4CS/thor_terratorch_ext.git@fdbc4c4345adfbdbc41ed5b497a05b56eeec96af
 
       # Foundation models & HuggingFace
       - transformers
