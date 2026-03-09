@@ -21,7 +21,7 @@ git clone https://github.com/Dinghye/rs-embed.git
 # or: git clone git@github.com:Dinghye/rs-embed.git
 cd rs-embed
 conda env create -f environment.yml
-conda activate rs-embed
+conda activate rsembed
 pip install -e .
 ```
 
