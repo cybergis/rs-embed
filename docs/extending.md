@@ -6,12 +6,10 @@ To add a new model, you typically do five things:
 1. **Create an embedder class** in `src/rs_embed/embedders/`
 2. Decorate it with **`@register("your_model_name")`**
 3. Add it to `src/rs_embed/embedders/catalog.py` (`MODEL_SPECS`)
-4. Implement:
-   - `describe()`
-   - `get_embedding(...)`
+4. Implement: `describe()`, `get_embedding(...)`
 5. (Optional, recommended) Override:
-   - `get_embeddings_batch(...)` for true batched inference (no prefetched inputs)
-   - `get_embeddings_batch_from_inputs(...)` for true batched inference with prefetched `input_chw`
+    - `get_embeddings_batch(...)` for true batched inference (no prefetched inputs)
+    - `get_embeddings_batch_from_inputs(...)` for true batched inference with prefetched `input_chw`
 
 ---
 

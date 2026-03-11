@@ -1,7 +1,7 @@
 <div align="center">
 
 # <img src="./docs/assets/icon.png" width="35" alt="icon" />  rs-embed
-**A single line of code to get embeddings from Any Remote Sensing Foundation Model (RSFM) for Any Place and Any Time**
+**One line code to get Any Remote Sensing Foundation Model (RSFM) embeddings for Any Place and Any Time**
 
 
 [![arXiv](https://img.shields.io/badge/arXiv-2602.23678-b31b1b.svg)](https://arxiv.org/abs/2602.23678)
@@ -10,7 +10,7 @@
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=cybergis.rs-embed)
 ![License](https://img.shields.io/github/license/cybergis/rs-embed)
 ![Last Commit](https://img.shields.io/github/last-commit/cybergis/rs-embed)
-!
+
 
 
 [Docs](https://cybergis.github.io/rs-embed/) · [Learn](https://cybergis.github.io/rs-embed/quickstart/) · [Guide](https://cybergis.github.io/rs-embed/workflows/) · [StartNow](./examples/playground.ipynb)  · [UseCase](./examples/demo.ipynb) · [Paper](https://arxiv.org/abs/2602.23678)
