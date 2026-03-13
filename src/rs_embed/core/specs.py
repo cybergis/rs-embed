@@ -188,6 +188,14 @@ class SensorSpec:
         Fill value used for missing data.
     composite : {"median", "mosaic"}
         Compositing strategy for multi-image windows.
+    modality : str or None
+        Optional model-facing modality selector (for example ``"s1"`` or
+        ``"s2"``) when a model exposes multiple input branches.
+    orbit : str or None
+        Optional orbit/pass filter for sensors that support it.
+    use_float_linear : bool
+        Whether the provider path should use linear-scale floating-point
+        values when a sensor family offers both linear and dB products.
     check_input : bool
         If ``True``, run input diagnostics.
     check_raise : bool
@@ -202,6 +210,9 @@ class SensorSpec:
     cloudy_pct: int = 30
     fill_value: float = 0.0
     composite: Literal["median", "mosaic"] = "median"
+    modality: Optional[str] = None
+    orbit: Optional[str] = None
+    use_float_linear: bool = True
 
     # Optional: on-the-fly input inspection for GEE downloads.
     # If enabled, embedders can attach a compact stats report into Embedding.meta

@@ -14,6 +14,7 @@ from rs_embed.tools.serialization import (
 )
 from rs_embed.tools.model_defaults import (
     default_sensor_for_model as _default_sensor_for_model,
+    resolve_sensor_for_model as _resolve_sensor_for_model,
 )
 
 
@@ -247,6 +248,56 @@ def test_default_sensor_for_model_s2_modality():
     assert sensor is not None
     assert sensor.collection == "COPERNICUS/S2_SR_HARMONIZED"
     assert sensor.bands == ("B4", "B3", "B2")
+
+
+def test_default_sensor_for_model_requested_modality():
+    @registry.register("multi_modal")
+    class DummyMulti:
+        def describe(self):
+            return {
+                "type": "on_the_fly",
+                "modalities": {
+                    "s2": {
+                        "collection": "COPERNICUS/S2_SR_HARMONIZED",
+                        "bands": ["B4", "B3", "B2"],
+                    },
+                    "s1": {
+                        "collection": "COPERNICUS/S1_GRD_FLOAT",
+                        "bands": ["VV", "VH"],
+                    },
+                },
+                "defaults": {"modality": "s2", "use_float_linear": True},
+            }
+
+    sensor = _default_sensor_for_model("multi_modal", modality="s1")
+    assert sensor is not None
+    assert sensor.modality == "s1"
+    assert sensor.collection == "COPERNICUS/S1_GRD_FLOAT"
+    assert sensor.bands == ("VV", "VH")
+
+
+def test_resolve_sensor_for_model_merges_modality():
+    @registry.register("multi_modal_resolve")
+    class DummyMulti:
+        def describe(self):
+            return {
+                "type": "on_the_fly",
+                "modalities": {
+                    "s1": {
+                        "collection": "COPERNICUS/S1_GRD_FLOAT",
+                        "bands": ["VV", "VH"],
+                    }
+                },
+                "defaults": {"modality": "s1"},
+            }
+
+    sensor = SensorSpec(collection="COPERNICUS/S1_GRD", bands=("VV", "VH"))
+    out = _resolve_sensor_for_model(
+        "multi_modal_resolve", sensor=sensor, modality="s1"
+    )
+    assert out is not None
+    assert out.modality == "s1"
+    assert out.collection == "COPERNICUS/S1_GRD"
 
 
 def test_default_sensor_for_model_provider_default_block():

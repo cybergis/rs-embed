@@ -12,6 +12,9 @@ Canonical model IDs now use short names (for example `remoteclip`, `prithvi`). L
 This page teaches the **recommended** entry points first (`get_embedding`, `get_embeddings_batch`, `export_batch`, `inspect_provider_patch`).
 Compatibility wrappers such as `export_npz(...)` and `inspect_gee_patch(...)` are documented later for older code and convenience.
 
+For models with multiple input branches, these public embedding/export APIs also accept an optional `modality=...` argument.
+Only models that explicitly expose a given modality can use it; unsupported modality selections raise a `ModelError`.
+
 ---
 
 ## Install (temporary)
@@ -128,6 +131,23 @@ embs = get_embeddings_batch(
     device="auto",
 )
 ```
+
+### 2b. Switch modality on supported models
+
+```python
+from rs_embed import PointBuffer, TemporalSpec, OutputSpec, get_embedding
+
+emb = get_embedding(
+    "terrafm",
+    spatial=PointBuffer(121.5, 31.2, 2048),
+    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+    modality="s1",
+    output=OutputSpec.pooled(),
+    backend="gee",
+)
+```
+
+Use `modality` only on models that document supported modality values in their model detail page.
 
 ### 3. Export at scale (recommended workflow)
 

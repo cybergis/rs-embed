@@ -447,6 +447,13 @@ class TerraMindEmbedder(EmbedderBase):
                     "bands": _S2_SR_12_BANDS,
                 }
             },
+            "modalities": {
+                "s2_l2a": {
+                    "collection": "COPERNICUS/S2_SR_HARMONIZED",
+                    "bands": _S2_SR_12_BANDS,
+                    "defaults": {"modality": self.DEFAULT_MODALITY},
+                }
+            },
             "temporal": {"mode": "range"},
             "output": ["pooled", "grid"],
             "defaults": {
@@ -501,10 +508,13 @@ class TerraMindEmbedder(EmbedderBase):
         model_key = os.environ.get(
             "RS_EMBED_TERRAMIND_MODEL_KEY", self.DEFAULT_MODEL_KEY
         ).strip()
-        modality = (
-            os.environ.get("RS_EMBED_TERRAMIND_MODALITY", self.DEFAULT_MODALITY).strip()
+        modality = str(
+            getattr(sensor, "modality", None)
+            or os.environ.get("RS_EMBED_TERRAMIND_MODALITY", self.DEFAULT_MODALITY).strip()
             or self.DEFAULT_MODALITY
         )
+        if modality.strip().lower().replace("-", "_") == "s2_l2a":
+            modality = self.DEFAULT_MODALITY
         normalize_mode = os.environ.get(
             "RS_EMBED_TERRAMIND_NORMALIZE", "zscore"
         ).strip()
@@ -799,10 +809,13 @@ class TerraMindEmbedder(EmbedderBase):
         model_key = os.environ.get(
             "RS_EMBED_TERRAMIND_MODEL_KEY", self.DEFAULT_MODEL_KEY
         ).strip()
-        modality = (
-            os.environ.get("RS_EMBED_TERRAMIND_MODALITY", self.DEFAULT_MODALITY).strip()
+        modality = str(
+            getattr(sensor, "modality", None)
+            or os.environ.get("RS_EMBED_TERRAMIND_MODALITY", self.DEFAULT_MODALITY).strip()
             or self.DEFAULT_MODALITY
         )
+        if modality.strip().lower().replace("-", "_") == "s2_l2a":
+            modality = self.DEFAULT_MODALITY
         normalize_mode = os.environ.get(
             "RS_EMBED_TERRAMIND_NORMALIZE", "zscore"
         ).strip()

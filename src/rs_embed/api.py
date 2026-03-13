@@ -56,7 +56,7 @@ from .tools.manifest import (
     load_json_dict as _load_json_dict,
 )
 from .tools.model_defaults import (
-    default_sensor_for_model as _default_sensor_for_model,
+    resolve_sensor_for_model as _resolve_sensor_for_model,
 )
 from .tools.progress import create_progress as _create_progress
 from .core.embedding import Embedding
@@ -196,6 +196,7 @@ def get_embedding(
     spatial: SpatialSpec,
     temporal: Optional[TemporalSpec] = None,
     sensor: Optional[SensorSpec] = None,
+    modality: Optional[str] = None,
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
@@ -213,6 +214,9 @@ def get_embedding(
         Optional temporal filter.
     sensor : SensorSpec or None
         Optional sensor override.
+    modality : str or None
+        Optional modality selector for models that expose multiple input
+        branches.
     output : OutputSpec
         Output representation policy.
     backend : str
@@ -247,10 +251,16 @@ def get_embedding(
     repeatedly loading model weights / initializing providers.
     """
     _validate_spatials(spatials=[spatial], temporal=temporal, output=output)
+    sensor_eff = _resolve_sensor_for_model(
+        _normalize_model_name(model),
+        sensor=sensor,
+        modality=modality,
+        default_when_missing=False,
+    )
     ctx = _prepare_embedding_request_context(
         model=model,
         temporal=temporal,
-        sensor=sensor,
+        sensor=sensor_eff,
         output=output,
         backend=backend,
         device=device,
@@ -259,7 +269,7 @@ def get_embedding(
     return _run_embedding_request(
         spatials=[spatial],
         temporal=temporal,
-        sensor=sensor,
+        sensor=sensor_eff,
         output=output,
         ctx=ctx,
     )[0]
@@ -271,6 +281,7 @@ def get_embeddings_batch(
     spatials: List[SpatialSpec],
     temporal: Optional[TemporalSpec] = None,
     sensor: Optional[SensorSpec] = None,
+    modality: Optional[str] = None,
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
@@ -288,6 +299,9 @@ def get_embeddings_batch(
         Optional temporal filter.
     sensor : SensorSpec or None
         Optional sensor override.
+    modality : str or None
+        Optional modality selector for models that expose multiple input
+        branches.
     output : OutputSpec
         Output representation policy.
     backend : str
@@ -311,10 +325,16 @@ def get_embeddings_batch(
         If spatial or temporal specifications fail validation.
     """
     _validate_spatials(spatials=spatials, temporal=temporal, output=output)
+    sensor_eff = _resolve_sensor_for_model(
+        _normalize_model_name(model),
+        sensor=sensor,
+        modality=modality,
+        default_when_missing=False,
+    )
     ctx = _prepare_embedding_request_context(
         model=model,
         temporal=temporal,
-        sensor=sensor,
+        sensor=sensor_eff,
         output=output,
         backend=backend,
         device=device,
@@ -323,7 +343,7 @@ def get_embeddings_batch(
     return _run_embedding_request(
         spatials=spatials,
         temporal=temporal,
-        sensor=sensor,
+        sensor=sensor_eff,
         output=output,
         ctx=ctx,
     )
@@ -348,7 +368,9 @@ def export_batch(
     device: str = "auto",
     output: OutputSpec = OutputSpec.pooled(),
     sensor: Optional[SensorSpec] = None,
+    modality: Optional[str] = None,
     per_model_sensors: Optional[Dict[str, SensorSpec]] = None,
+    per_model_modalities: Optional[Dict[str, str]] = None,
     format: str = "npz",
     save_inputs: bool = True,
     save_embeddings: bool = True,
@@ -398,8 +420,13 @@ def export_batch(
         Embedding output representation policy.
     sensor : SensorSpec or None
         Default sensor for all models unless overridden.
+    modality : str or None
+        Optional global modality selector applied to models that expose
+        public modality switching.
     per_model_sensors : dict[str, SensorSpec] or None
         Per-model sensor overrides keyed by model name.
+    per_model_modalities : dict[str, str] or None
+        Optional per-model modality overrides keyed by model name.
     format : str
         Output serialization format.
     save_inputs : bool
@@ -495,6 +522,7 @@ def export_batch(
                 )
 
     per_model_sensors = per_model_sensors or {}
+    per_model_modalities = per_model_modalities or {}
 
     # Resolve per-model config
     model_configs: List[ModelConfig] = []
@@ -515,12 +543,28 @@ def export_batch(
         except Exception:
             desc = {}
         m_type = str(desc.get("type", "")).lower()
+        modality_eff = per_model_modalities.get(m, modality)
         if m in per_model_sensors:
-            s = per_model_sensors[m]
+            s = _resolve_sensor_for_model(
+                m_n,
+                sensor=per_model_sensors[m],
+                modality=modality_eff,
+                default_when_missing=True,
+            )
         elif sensor is not None:
-            s = sensor
+            s = _resolve_sensor_for_model(
+                m_n,
+                sensor=sensor,
+                modality=modality_eff,
+                default_when_missing=True,
+            )
         else:
-            s = _default_sensor_for_model(m_n)
+            s = _resolve_sensor_for_model(
+                m_n,
+                sensor=None,
+                modality=modality_eff,
+                default_when_missing=True,
+            )
         model_configs.append(
             ModelConfig(name=m, backend=eff_backend, sensor=s, model_type=m_type)
         )

@@ -176,6 +176,25 @@ def run_gee_demo(*, device: str, run_export: bool, out_dir: Path) -> None:
     )
     _show_batch("batch/pooled", batch)
 
+    print("\n=== Modality quickstart (on-the-fly: terrafm / s1) ===")
+    terrafm_s1 = get_embedding(
+        "terrafm",
+        spatial=spatial,
+        temporal=temporal,
+        sensor=SensorSpec(
+            collection="COPERNICUS/S1_GRD_FLOAT",
+            bands=("VV", "VH"),
+            scale_m=10,
+            composite="median",
+            use_float_linear=True,
+        ),
+        modality="s1",
+        output=OutputSpec.pooled(),
+        backend="gee",
+        device=device,
+    )
+    _show_embedding("single/pooled/terrafm_s1", terrafm_s1)
+
     if run_export:
         gee_out = out_dir / "gee_export"
         gee_out.mkdir(parents=True, exist_ok=True)

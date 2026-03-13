@@ -45,9 +45,9 @@
   - adapter resizes to `224`
 - provider backend (`gee` / provider-compatible, including `auto` via provider resolution):
   - requires `TemporalSpec.range(...)` in v0.1
-  - fetches S2 or S1 based on `sensor.modality`
+  - fetches S2 or S1 based on `modality` (or `sensor.modality` if passed through `SensorSpec`)
 
-### Modality selection (`sensor.modality`)
+### Modality selection (`modality` or `sensor.modality`)
 
 - `s2` (default):
   - 12-band Sentinel-2 SR input (`B1,B2,B3,B4,B5,B6,B7,B8,B8A,B9,B11,B12`)
@@ -75,7 +75,7 @@ Channel sanity:
 ### Provider path
 
 1. Validate `TemporalSpec.range(...)`
-2. Select modality from `sensor.modality` (`s2` / `s1`)
+2. Select modality from `modality` (`s2` / `s1`)
 3. Fetch provider patch:
    - S2: 12-band SR -> normalize to `[0,1]`
    - S1: VV/VH raw -> shared S1 normalization helper -> `[0,1]`
@@ -138,21 +138,13 @@ Adapter behavior notes:
 ### Minimal provider-backed S2 example
 
 ```python
-from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec, SensorSpec
-
-sensor = SensorSpec(
-    collection="COPERNICUS/S2_SR_HARMONIZED",
-    bands=("B1","B2","B3","B4","B5","B6","B7","B8","B8A","B9","B11","B12"),
-    scale_m=10,
-)
-# SensorSpec is frozen, so TerraFM side attrs must currently be attached this way.
-object.__setattr__(sensor, "modality", "s2")
+from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec
 
 emb = get_embedding(
     "terrafm",
     spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
     temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
-    sensor=sensor,
+    modality="s2",
     output=OutputSpec.pooled(),
     backend="gee",
 )
@@ -168,16 +160,15 @@ sensor = SensorSpec(
     bands=("VV", "VH"),
     scale_m=10,
     composite="median",
+    use_float_linear=True,
 )
-object.__setattr__(sensor, "modality", "s1")
-object.__setattr__(sensor, "use_float_linear", True)
-# object.__setattr__(sensor, "orbit", "ASCENDING")  # optional
 
 emb = get_embedding(
     "terrafm",
     spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
     temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
     sensor=sensor,
+    modality="s1",
     output=OutputSpec.pooled(),
     backend="gee",
 )
@@ -185,7 +176,7 @@ emb = get_embedding(
 
 Notes:
 
-- The `object.__setattr__(...)` pattern shown here reflects the current experimental/testing-stage adapter interface. A cleaner public API for modality switching is planned for a future update.
+- Prefer passing `modality="s1"` / `modality="s2"` directly at the public API layer.
 - Setting `modality="s1"` is what switches TerraFM onto the S1 path; changing only `collection` / `bands` is not enough.
 - `use_float_linear=True` matches `COPERNICUS/S1_GRD_FLOAT`; set it to `False` for `COPERNICUS/S1_GRD`.
 
@@ -197,7 +188,7 @@ Notes:
 - provider path with non-`range` temporal spec
 - tensor backend without `input_chw`
 - wrong channel count (`C` must be `2` or `12`)
-- S1/S2 modality mismatch between data and `sensor.modality`
+- S1/S2 modality mismatch between data and `modality`
 - HF asset download issues (code or `.pth` weights)
 
 Recommended first checks:

@@ -27,7 +27,9 @@ export_batch(
     device: str = "auto",
     output: OutputSpec = OutputSpec.pooled(),
     sensor: Optional[SensorSpec] = None,
+    modality: Optional[str] = None,
     per_model_sensors: Optional[Dict[str, SensorSpec]] = None,
+    per_model_modalities: Optional[Dict[str, str]] = None,
     format: str = "npz",
     save_inputs: bool = True,
     save_embeddings: bool = True,
@@ -65,7 +67,9 @@ For new code, prefer learning `export_batch(...)` first and use `out + layout` t
 - `names`: used only in `out_dir` mode, for output filenames (length must equal `spatials`)
 - `backend`: recommended to pass `backend="auto"` unless you need an explicit provider override (for example `"gee"`)
 - `sensor`: a shared `SensorSpec` for all models (if models are on-the-fly)
+- `modality`: optional shared modality override for models that expose public modality switching
 - `per_model_sensors`: override `SensorSpec` per model; keys are model strings
+- `per_model_modalities`: override `modality` per model; keys are model strings
 - `format`: `"npz"` or `"netcdf"`
 - `save_inputs`: whether to save model input patches (CHW numpy)
 - `save_embeddings`: whether to save embedding arrays
@@ -82,6 +86,12 @@ For new code, prefer learning `export_batch(...)` first and use `out + layout` t
 - `resume`: skip already-exported outputs and continue from remaining items
 - `show_progress`: show progress during batch export (overall progress + per-model inference progress)
 - `input_prep`: large-ROI input policy (`"resize"` default, `"tile"`, `"auto"`, or `InputPrepSpec(...)`)
+
+Modality contract:
+
+- `export_batch(...)` accepts a global `modality` and optional `per_model_modalities`.
+- Only models that explicitly expose a given modality can use it.
+- Unsupported modality selections raise a `ModelError` during per-model config resolution.
 
 **Automatic inference behavior**
 
@@ -106,6 +116,22 @@ export_batch(
     models=["remoteclip"],
     out="exports/combined_run",
     layout="combined",  # writes exports/combined_run.npz
+)
+```
+
+**Example: per-model modality selection**
+
+```python
+from rs_embed import export_batch, PointBuffer, TemporalSpec
+
+export_batch(
+    spatials=[PointBuffer(121.5, 31.2, 2048)],
+    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+    models=["terrafm"],
+    out="exports/terrafm_s1_run",
+    layout="combined",
+    backend="gee",
+    modality="s1",
 )
 ```
 

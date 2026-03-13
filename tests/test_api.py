@@ -70,6 +70,48 @@ class _MockPrecomputedLocalEmbedder(EmbedderBase):
         )
 
 
+class _MockMultimodalEmbedder(EmbedderBase):
+    def describe(self):
+        return {
+            "type": "on_the_fly",
+            "backend": ["provider"],
+            "output": ["pooled"],
+            "modalities": {
+                "s2": {
+                    "collection": "COPERNICUS/S2_SR_HARMONIZED",
+                    "bands": ["B4", "B3", "B2"],
+                },
+                "s1": {
+                    "collection": "COPERNICUS/S1_GRD_FLOAT",
+                    "bands": ["VV", "VH"],
+                    "defaults": {"use_float_linear": True},
+                },
+            },
+            "defaults": {"modality": "s2", "scale_m": 10},
+        }
+
+    def get_embedding(
+        self,
+        *,
+        spatial,
+        temporal,
+        sensor,
+        output,
+        backend,
+        device="auto",
+        input_chw=None,
+    ):
+        vec = np.arange(4, dtype=np.float32)
+        return Embedding(
+            data=vec,
+            meta={
+                "model": self.model_name,
+                "sensor": sensor,
+                "backend_used": backend,
+            },
+        )
+
+
 @pytest.fixture(autouse=True)
 def register_mock():
     registry._REGISTRY.clear()
@@ -127,6 +169,26 @@ def test_get_embedding_unknown_model():
         get_embedding("nonexistent", spatial=_SPATIAL)
 
 
+def test_get_embedding_modality_resolves_default_sensor():
+    from rs_embed.api import get_embedding
+
+    registry.register("mock_multi")(_MockMultimodalEmbedder)
+
+    emb = get_embedding("mock_multi", spatial=_SPATIAL, modality="s1", backend="gee")
+    sensor = emb.meta["sensor"]
+    assert sensor is not None
+    assert sensor.modality == "s1"
+    assert sensor.collection == "COPERNICUS/S1_GRD_FLOAT"
+    assert sensor.bands == ("VV", "VH")
+
+
+def test_get_embedding_rejects_unsupported_modality():
+    from rs_embed.api import get_embedding
+
+    with pytest.raises(ModelError, match="does not expose modality"):
+        get_embedding("mock_model", spatial=_SPATIAL, modality="s1")
+
+
 # ══════════════════════════════════════════════════════════════════════
 # get_embeddings_batch
 # ══════════════════════════════════════════════════════════════════════
@@ -166,6 +228,25 @@ def test_get_embeddings_batch_with_sensor():
         sensor=sensor,
     )
     assert len(results) == 1
+
+
+def test_get_embeddings_batch_modality_merges_into_sensor():
+    from rs_embed.api import get_embeddings_batch
+
+    registry.register("mock_multi")(_MockMultimodalEmbedder)
+    sensor = SensorSpec(collection="COPERNICUS/S1_GRD", bands=("VV", "VH"), scale_m=20)
+    results = get_embeddings_batch(
+        "mock_multi",
+        spatials=[_SPATIAL],
+        temporal=_TEMPORAL,
+        sensor=sensor,
+        modality="s1",
+        backend="gee",
+    )
+    out_sensor = results[0].meta["sensor"]
+    assert out_sensor.modality == "s1"
+    assert out_sensor.collection == "COPERNICUS/S1_GRD"
+    assert out_sensor.scale_m == 20
 
 
 def test_get_embeddings_batch_precomputed_default_backend_auto_resolves_to_auto():
@@ -343,8 +424,8 @@ def test_sensor_key_none():
 def test_sensor_key_deterministic_and_differs():
     from rs_embed.tools.runtime import sensor_key
 
-    s1 = SensorSpec(collection="A", bands=("B1",))
-    s2 = SensorSpec(collection="B", bands=("B1",))
+    s1 = SensorSpec(collection="A", bands=("B1",), modality="s1")
+    s2 = SensorSpec(collection="A", bands=("B1",), modality="s2")
     assert sensor_key(s1) == sensor_key(s1)
     assert sensor_key(s1) != sensor_key(s2)
 
@@ -352,8 +433,8 @@ def test_sensor_key_deterministic_and_differs():
 def test_sensor_cache_key_deterministic_and_differs():
     from rs_embed.tools.serialization import sensor_cache_key as _sensor_cache_key
 
-    s1 = SensorSpec(collection="A", bands=("B1",))
-    s2 = SensorSpec(collection="B", bands=("B1",))
+    s1 = SensorSpec(collection="A", bands=("B1",), modality="s1")
+    s2 = SensorSpec(collection="A", bands=("B1",), modality="s2")
     assert isinstance(_sensor_cache_key(s1), str)
     assert _sensor_cache_key(s1) == _sensor_cache_key(s1)
     assert _sensor_cache_key(s1) != _sensor_cache_key(s2)
@@ -566,6 +647,35 @@ def test_export_batch_infer_batch_size_is_independent_from_chunk_size(
 
     assert result == {"status": "ok"}
     assert captured == {"chunk_size": 32, "infer_batch_size": 5}
+
+
+def test_export_batch_modality_resolves_model_sensor(monkeypatch, tmp_path):
+    from rs_embed.api import export_batch
+
+    registry.register("mock_multi")(_MockMultimodalEmbedder)
+    captured = {}
+
+    def _fake_run(self):
+        captured["sensor"] = self.models[0].sensor
+        return {"status": "ok"}
+
+    monkeypatch.setattr("rs_embed.pipelines.exporter.BatchExporter.run", _fake_run)
+
+    result = export_batch(
+        spatials=[_SPATIAL],
+        temporal=_TEMPORAL,
+        models=["mock_multi"],
+        out_path=str(tmp_path / "combined"),
+        modality="s1",
+        backend="gee",
+        show_progress=False,
+    )
+
+    assert result == {"status": "ok"}
+    sensor = captured["sensor"]
+    assert sensor is not None
+    assert sensor.modality == "s1"
+    assert sensor.collection == "COPERNICUS/S1_GRD_FLOAT"
 
 
 # ══════════════════════════════════════════════════════════════════════

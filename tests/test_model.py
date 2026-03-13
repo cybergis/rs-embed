@@ -72,6 +72,42 @@ class _MockPrecomputedLocalEmbedder(EmbedderBase):
         )
 
 
+class _MockMultimodalEmbedder(EmbedderBase):
+    def describe(self):
+        return {
+            "type": "on_the_fly",
+            "backend": ["provider"],
+            "output": ["pooled"],
+            "modalities": {
+                "s2": {
+                    "collection": "COPERNICUS/S2_SR_HARMONIZED",
+                    "bands": ["B4", "B3", "B2"],
+                },
+                "s1": {
+                    "collection": "COPERNICUS/S1_GRD_FLOAT",
+                    "bands": ["VV", "VH"],
+                },
+            },
+            "defaults": {"modality": "s2"},
+        }
+
+    def get_embedding(
+        self,
+        *,
+        spatial,
+        temporal,
+        sensor,
+        output,
+        backend,
+        device="auto",
+        input_chw=None,
+    ):
+        return Embedding(
+            data=np.arange(3, dtype=np.float32),
+            meta={"sensor": sensor, "backend_used": backend},
+        )
+
+
 @pytest.fixture(autouse=True)
 def _setup():
     registry._REGISTRY.clear()
@@ -101,6 +137,19 @@ def test_model_init_happy_path():
 def test_model_init_unknown_model_raises():
     with pytest.raises(ModelError, match="Unknown model"):
         Model("nonexistent_xyz")
+
+
+def test_model_init_with_modality_resolves_sensor():
+    registry.register("mock_multi")(_MockMultimodalEmbedder)
+    m = Model("mock_multi", modality="s1", backend="gee")
+    assert m._sensor is not None
+    assert m._sensor.modality == "s1"
+    assert m._sensor.collection == "COPERNICUS/S1_GRD_FLOAT"
+
+
+def test_model_init_rejects_unsupported_modality():
+    with pytest.raises(ModelError, match="does not expose modality"):
+        Model("mock_model", modality="s1")
 
 
 def test_model_list_models_returns_sorted_list():

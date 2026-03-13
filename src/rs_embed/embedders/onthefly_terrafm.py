@@ -388,6 +388,20 @@ class TerraFMBEmbedder(EmbedderBase):
                     "bands": ["VV", "VH"],
                 },
             },
+            "modalities": {
+                "s2": {
+                    "collection": "COPERNICUS/S2_SR_HARMONIZED",
+                    "bands": _S2_SR_12_BANDS,
+                },
+                "s1": {
+                    "collection": "COPERNICUS/S1_GRD_FLOAT",
+                    "bands": ["VV", "VH"],
+                    "defaults": {
+                        "orbit": None,
+                        "use_float_linear": True,
+                    },
+                },
+            },
             "temporal": {"mode": "range"},
             "output": ["pooled", "grid"],
             "defaults": {

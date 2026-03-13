@@ -25,7 +25,10 @@ from .tools.normalization import (
     normalize_device_name,
     normalize_model_name,
 )
-from .tools.model_defaults import default_sensor_for_model
+from .tools.model_defaults import (
+    default_sensor_for_model,
+    resolve_sensor_for_model,
+)
 from .tools.runtime import (
     _EmbeddingRequestContext,
     get_embedder_bundle_cached,
@@ -51,6 +54,9 @@ class Model:
         Target device (``"auto"`` / ``"cpu"`` / ``"cuda"`` / …).
     sensor : SensorSpec or None
         Sensor spec override.
+    modality : str or None
+        Optional modality selector for models that expose multiple input
+        branches.
     output : OutputSpec
         Embedding output spec (default: pooled).
     input_prep : str or InputPrepSpec or None
@@ -64,6 +70,7 @@ class Model:
         backend: str = "auto",
         device: str = "auto",
         sensor: Optional[SensorSpec] = None,
+        modality: Optional[str] = None,
         output: OutputSpec = OutputSpec.pooled(),
         input_prep: Optional[InputPrepSpec | str] = "resize",
     ) -> None:
@@ -76,7 +83,12 @@ class Model:
         self._input_prep = input_prep
         self._input_prep_resolved = _resolve_input_prep_spec(input_prep)
 
-        self._sensor = sensor
+        self._sensor = resolve_sensor_for_model(
+            self._model_n,
+            sensor=sensor,
+            modality=modality,
+            default_when_missing=(self._input_prep_resolved.mode == "tile"),
+        )
         if self._input_prep_resolved.mode == "tile" and self._sensor is None:
             self._sensor = default_sensor_for_model(self._model_n)
 
@@ -203,4 +215,3 @@ class Model:
         if include_aliases:
             model_ids.update(MODEL_ALIASES.keys())
         return sorted(model_ids)
-

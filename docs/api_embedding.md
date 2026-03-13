@@ -41,6 +41,7 @@ get_embedding(
     spatial: SpatialSpec,
     temporal: Optional[TemporalSpec] = None,
     sensor: Optional[SensorSpec] = None,
+    modality: Optional[str] = None,
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
@@ -56,12 +57,17 @@ Computes the embedding for a single ROI.
 - `spatial`: `BBox` or `PointBuffer`
 - `temporal`: `TemporalSpec` or `None`
 - `sensor`: input descriptor for on-the-fly models; for most precomputed models this can be `None`
+- `modality`: optional model-facing modality selector (for example `s1`, `s2`, `s2_l2a`) for models that expose multiple input branches
 - `output`: `OutputSpec.pooled()` or `OutputSpec.grid(...)`
 - `backend`: access backend. `backend="auto"` is the public default and the recommended choice. For provider-backed on-the-fly models it resolves to a compatible provider backend; for precomputed models it lets rs-embed choose the model-compatible access path.
 - `device`: `"auto" / "cpu" / "cuda"` (if the model depends on torch)
 - `input_prep`: `"resize"` (default), `"tile"`, `"auto"`, or `InputPrepSpec(...)`
 
+Modality contract:
 
+- All public embedding APIs accept `modality`.
+- Only models that explicitly expose a given modality can use it.
+- Unsupported modality selections raise a `ModelError`.
 
 **Returns**
 
@@ -84,9 +90,6 @@ emb = get_embedding(
 vec = emb.data  # (D,)
 ```
 
-!!! tip "Performance tip"
-    `get_embedding` tries to reuse a **cached embedder instance** internally to avoid repeatedly initializing the provider / loading model weights (especially for torch models).
-
 ---
 
 ### get_embeddings_batch
@@ -98,6 +101,7 @@ get_embeddings_batch(
     spatials: List[SpatialSpec],
     temporal: Optional[TemporalSpec] = None,
     sensor: Optional[SensorSpec] = None,
+    modality: Optional[str] = None,
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",

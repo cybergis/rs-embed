@@ -91,6 +91,9 @@ def sensor_cache_key(sensor: SensorSpec) -> str:
         "cloudy_pct": int(sensor.cloudy_pct),
         "fill_value": float(sensor.fill_value),
         "composite": str(sensor.composite),
+        "modality": getattr(sensor, "modality", None),
+        "orbit": getattr(sensor, "orbit", None),
+        "use_float_linear": bool(getattr(sensor, "use_float_linear", True)),
     }
     data = json.dumps(obj, sort_keys=True).encode("utf-8")
     return sanitize_key(hashlib.sha1(data).hexdigest()[:12])

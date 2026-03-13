@@ -95,6 +95,9 @@ SensorSpec(
     cloudy_pct: int = 30,
     fill_value: float = 0.0,
     composite: Literal["median", "mosaic"] = "median",
+    modality: Optional[str] = None,
+    orbit: Optional[str] = None,
+    use_float_linear: bool = True,
     check_input: bool = False,
     check_raise: bool = True,
     check_save_dir: Optional[str] = None,
@@ -107,10 +110,17 @@ SensorSpec(
 - `cloudy_pct`: cloud filter (best-effort; depends on collection properties)
 - `fill_value`: no-data fill value
 - `composite`: image compositing method over the temporal window (median/mosaic)
+- `modality`: optional model-facing modality selector used by models with multiple input branches
+- `orbit`: optional orbit/pass filter for sensor families that support it
+- `use_float_linear`: selects linear-scale floating-point products when a sensor family offers both linear and dB variants
 - `check_*`: optional input checks and quicklook saving (see [`inspect_gee_patch`](api_inspect.md#inspect_gee_patch))
 
 !!! note
     For **precomputed** models (e.g., directly reading offline embedding products), `sensor` is usually ignored or set to `None`.
+
+!!! note
+    Public embedding/export APIs also accept a top-level `modality=...` convenience argument.
+    When provided, rs-embed resolves it into the model's sensor/input contract and validates that the model explicitly supports that modality.
 
 ---
 
