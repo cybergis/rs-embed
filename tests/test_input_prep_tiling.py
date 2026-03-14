@@ -56,9 +56,7 @@ class _FakeTileEmbedder:
     ):
         self.batch_calls += 1
         self.batch_input_shapes.extend([tuple(np.asarray(x).shape) for x in input_chws])
-        self.batch_input_topleft.extend(
-            [float(np.asarray(x)[0, 0, 0]) for x in input_chws]
-        )
+        self.batch_input_topleft.extend([float(np.asarray(x)[0, 0, 0]) for x in input_chws])
         return [
             self.get_embedding(
                 spatial=sp,

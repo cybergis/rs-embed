@@ -1,10 +1,11 @@
 from __future__ import annotations
-from typing import Any, Dict, Optional
+
+from typing import Any
 
 import numpy as np
 
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
 from ..core.embedding import Embedding
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers.base import ProviderBase
 
 
@@ -19,7 +20,7 @@ class EmbedderBase:
     _allow_auto_backend: bool = True
 
     def __init__(self) -> None:
-        self._providers: Dict[str, ProviderBase] = {}
+        self._providers: dict[str, ProviderBase] = {}
 
     def _get_provider(self, backend: str) -> ProviderBase:
         from .runtime_utils import get_cached_provider
@@ -28,7 +29,7 @@ class EmbedderBase:
             self._providers, backend=backend, allow_auto=self._allow_auto_backend
         )
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         """Return model capabilities and input/output requirements.
 
         Returns
@@ -47,12 +48,12 @@ class EmbedderBase:
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         """Compute a single embedding.
 
@@ -90,8 +91,8 @@ class EmbedderBase:
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -137,8 +138,8 @@ class EmbedderBase:
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -190,5 +191,5 @@ class EmbedderBase:
                 device=device,
                 input_chw=x,
             )
-            for s, x in zip(spatials, input_chws)
+            for s, x in zip(spatials, input_chws, strict=False)
         ]

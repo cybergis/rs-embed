@@ -17,11 +17,11 @@ Use this module for high-level process control, performance optimisation, and
 loop management.
 """
 
-from .runner import ParallelRunner, run_with_retry
-from .inference import InferenceEngine
-from .prefetch import PrefetchManager
 from .checkpoint import CheckpointManager
 from .exporter import BatchExporter
+from .inference import InferenceEngine
+from .prefetch import PrefetchManager
+from .runner import ParallelRunner, run_with_retry
 
 __all__ = [
     "BatchExporter",

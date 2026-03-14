@@ -1,16 +1,15 @@
 from __future__ import annotations
 
 import math
-from typing import Any, Dict, Optional
+from typing import Any
 
 import numpy as np
 
 from ..core.errors import ModelError
-from ..tools.serialization import jsonable as _jsonable
 from ..core.specs import BBox, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers.base import ProviderBase
 from ..tools.normalization import normalize_input_chw
-
+from ..tools.serialization import jsonable as _jsonable
 
 _WEB_MERCATOR_R = 6378137.0
 _WEB_MERCATOR_MAX_LAT = 85.05112878
@@ -20,39 +19,36 @@ _GEE_SAMPLE_RECT_MUST_BE = "must be <="
 _MAX_GEE_BBOX_SPLIT_DEPTH = 12
 _GEE_BBOX_STITCH_LEN_TOLERANCE_PX = 4
 
-
 def _iter_exception_messages(exc: BaseException) -> tuple[str, ...]:
     msgs: list[str] = []
     seen: set[int] = set()
-    cur: Optional[BaseException] = exc
+    cur: BaseException | None = exc
     depth = 0
     while cur is not None and id(cur) not in seen and depth < 6:
         seen.add(id(cur))
         try:
             msgs.append(str(cur))
-        except Exception:
+        except Exception as _e:
             pass
         try:
             msgs.append(repr(cur))
-        except Exception:
+        except Exception as _e:
             pass
         try:
             for a in getattr(cur, "args", ()) or ():
                 msgs.append(str(a))
-        except Exception:
+        except Exception as _e:
             pass
         nxt = getattr(cur, "__cause__", None) or getattr(cur, "__context__", None)
         cur = nxt if isinstance(nxt, BaseException) else None
         depth += 1
     return tuple(m for m in msgs if m)
 
-
 def _looks_like_gee_sample_too_many_pixels(exc: BaseException) -> bool:
     msgs = " | ".join(_iter_exception_messages(exc))
     if _GEE_SAMPLE_RECT_TOO_MANY_PIXELS not in msgs:
         return False
     return (_GEE_SAMPLE_RECT_OP in msgs) or (_GEE_SAMPLE_RECT_MUST_BE in msgs)
-
 
 def _looks_like_bbox_spatial(spatial: SpatialSpec) -> bool:
     if isinstance(spatial, BBox):
@@ -62,26 +58,21 @@ def _looks_like_bbox_spatial(spatial: SpatialSpec) -> bool:
         getattr(spatial, "crs", "EPSG:4326") == "EPSG:4326"
     )
 
-
 def _coerce_bbox_like(spatial: SpatialSpec) -> BBox:
     if isinstance(spatial, BBox):
         return spatial
     if not _looks_like_bbox_spatial(spatial):
-        raise ModelError(
-            f"Expected BBox-like spatial for GEE fallback, got {type(spatial)}"
-        )
+        raise ModelError(f"Expected BBox-like spatial for GEE fallback, got {type(spatial)}")
     return BBox(
-        minlon=float(getattr(spatial, "minlon")),
-        minlat=float(getattr(spatial, "minlat")),
-        maxlon=float(getattr(spatial, "maxlon")),
-        maxlat=float(getattr(spatial, "maxlat")),
+        minlon=float(spatial.minlon),
+        minlat=float(spatial.minlat),
+        maxlon=float(spatial.maxlon),
+        maxlat=float(spatial.maxlat),
         crs=str(getattr(spatial, "crs", "EPSG:4326")),
     )
 
-
 def _clamp_lat_for_web_mercator(lat_deg: float) -> float:
     return max(-_WEB_MERCATOR_MAX_LAT, min(_WEB_MERCATOR_MAX_LAT, float(lat_deg)))
-
 
 def _lonlat_to_web_mercator_xy(lon_deg: float, lat_deg: float) -> tuple[float, float]:
     lon = math.radians(float(lon_deg))
@@ -90,15 +81,11 @@ def _lonlat_to_web_mercator_xy(lon_deg: float, lat_deg: float) -> tuple[float, f
     y = _WEB_MERCATOR_R * math.log(math.tan((math.pi / 4.0) + (lat / 2.0)))
     return (float(x), float(y))
 
-
 def _web_mercator_xy_to_lonlat(x_m: float, y_m: float) -> tuple[float, float]:
     lon = math.degrees(float(x_m) / _WEB_MERCATOR_R)
-    lat = math.degrees(
-        (2.0 * math.atan(math.exp(float(y_m) / _WEB_MERCATOR_R))) - (math.pi / 2.0)
-    )
+    lat = math.degrees((2.0 * math.atan(math.exp(float(y_m) / _WEB_MERCATOR_R))) - (math.pi / 2.0))
     lat = _clamp_lat_for_web_mercator(lat)
     return (float(lon), float(lat))
-
 
 def _bbox_span_pixels_estimate(bbox: BBox, *, scale_m: int) -> tuple[int, int]:
     x0, y0 = _lonlat_to_web_mercator_xy(bbox.minlon, bbox.minlat)
@@ -108,10 +95,7 @@ def _bbox_span_pixels_estimate(bbox: BBox, *, scale_m: int) -> tuple[int, int]:
     h = max(1, int(math.ceil(abs(y1 - y0) / s)))
     return (h, w)
 
-
-def _split_bbox_for_recursive_fetch(
-    bbox: BBox, *, prefer_axis: str
-) -> tuple[BBox, BBox, str]:
+def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BBox, BBox, str]:
     x0, y0 = _lonlat_to_web_mercator_xy(bbox.minlon, bbox.minlat)
     x1, y1 = _lonlat_to_web_mercator_xy(bbox.maxlon, bbox.maxlat)
     dx = abs(x1 - x0)
@@ -161,9 +145,7 @@ def _split_bbox_for_recursive_fetch(
     if not (float(bbox.minlat) < lat_mid < float(bbox.maxlat)):
         lat_mid = 0.5 * (float(bbox.minlat) + float(bbox.maxlat))
     if not (float(bbox.minlat) < lat_mid < float(bbox.maxlat)):
-        raise ModelError(
-            "Failed to split BBox along latitude for GEE sampleRectangle fallback."
-        )
+        raise ModelError("Failed to split BBox along latitude for GEE sampleRectangle fallback.")
 
     north = BBox(
         minlon=float(bbox.minlon),
@@ -181,16 +163,12 @@ def _split_bbox_for_recursive_fetch(
     )
     return (north, south, "y")
 
-
 def _flip_sample_tile_y(arr: np.ndarray) -> np.ndarray:
     """Normalize a fetched tile to north-up row order once at the leaf fetch."""
     a = np.asarray(arr, dtype=np.float32)
     if a.ndim < 2:
-        raise ModelError(
-            f"Expected fetched tile with spatial last2 dims, got shape={a.shape}"
-        )
+        raise ModelError(f"Expected fetched tile with spatial last2 dims, got shape={a.shape}")
     return np.flip(a, axis=a.ndim - 2).astype(np.float32, copy=False)
-
 
 def _fetch_provider_array_chw_with_bbox_fallback(
     provider: ProviderBase,
@@ -200,7 +178,7 @@ def _fetch_provider_array_chw_with_bbox_fallback(
     bands: tuple[str, ...],
     scale_m: int,
     fill_value: float,
-    collection: Optional[str],
+    collection: str | None,
     split_depth: int = 0,
 ) -> np.ndarray:
     region = provider.get_region(spatial)
@@ -213,12 +191,11 @@ def _fetch_provider_array_chw_with_bbox_fallback(
             fill_value=float(fill_value),
             collection=collection,
         )
-        return _flip_sample_tile_y(np.asarray(arr, dtype=np.float32))#_flip_sample_tile_y(np.asarray(arr, dtype=np.float32))
+        return _flip_sample_tile_y(
+            np.asarray(arr, dtype=np.float32)
+        )  # _flip_sample_tile_y(np.asarray(arr, dtype=np.float32))
     except Exception as e:
-        if not (
-            _looks_like_gee_sample_too_many_pixels(e)
-            and _looks_like_bbox_spatial(spatial)
-        ):
+        if not (_looks_like_gee_sample_too_many_pixels(e) and _looks_like_bbox_spatial(spatial)):
             raise
         if int(split_depth) >= _MAX_GEE_BBOX_SPLIT_DEPTH:
             raise ModelError(
@@ -229,9 +206,7 @@ def _fetch_provider_array_chw_with_bbox_fallback(
         spatial_bbox = _coerce_bbox_like(spatial)
         h_est, w_est = _bbox_span_pixels_estimate(spatial_bbox, scale_m=int(scale_m))
         prefer_axis = "x" if int(w_est) >= int(h_est) else "y"
-        a_sp, b_sp, axis = _split_bbox_for_recursive_fetch(
-            spatial_bbox, prefer_axis=prefer_axis
-        )
+        a_sp, b_sp, axis = _split_bbox_for_recursive_fetch(spatial_bbox, prefer_axis=prefer_axis)
 
         arr_a = _fetch_provider_array_chw_with_bbox_fallback(
             provider,
@@ -262,7 +237,6 @@ def _fetch_provider_array_chw_with_bbox_fallback(
             scale_m=int(scale_m),
             fill_value=float(fill_value),
         )
-
 
 def _stitch_bbox_split_arrays(
     *,
@@ -342,16 +316,13 @@ def _stitch_bbox_split_arrays(
             np.float32, copy=False
         )
 
-    return np.concatenate([arr_a, arr_b], axis=split_axis).astype(
-        np.float32, copy=False
-    )
-
+    return np.concatenate([arr_a, arr_b], axis=split_axis).astype(np.float32, copy=False)
 
 def fetch_provider_patch_raw(
     provider: ProviderBase,
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
+    temporal: TemporalSpec | None,
     sensor: SensorSpec,
     to_float_image: bool = False,
 ) -> np.ndarray:
@@ -360,7 +331,7 @@ def fetch_provider_patch_raw(
     if bool(to_float_image):
         try:
             img = img.toFloat()
-        except Exception:
+        except Exception as _e:
             pass
     x = _fetch_provider_array_chw_with_bbox_fallback(
         provider,
@@ -376,18 +347,12 @@ def fetch_provider_patch_raw(
         expected_channels=len(sensor.bands),
         name=f"gee_input[{sensor.collection}]",
     )
-    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(
-        np.float32, copy=False
-    )
-
+    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32, copy=False)
 
 # Backwards-compatible alias kept for existing imports/tests.
 fetch_gee_patch_raw = fetch_provider_patch_raw
 
-
-def inspect_input_raw(
-    x_chw: np.ndarray, *, sensor: SensorSpec, name: str
-) -> Dict[str, Any]:
+def inspect_input_raw(x_chw: np.ndarray, *, sensor: SensorSpec, name: str) -> dict[str, Any]:
     from ..tools.inspection import inspect_chw
 
     x = normalize_input_chw(

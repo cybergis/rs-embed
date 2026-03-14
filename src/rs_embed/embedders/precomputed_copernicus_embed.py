@@ -2,29 +2,27 @@ from __future__ import annotations
 
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
+from ..core.registry import register
 from ..core.specs import (
     BBox,
+    OutputSpec,
     PointBuffer,
+    SensorSpec,
     SpatialSpec,
     TemporalSpec,
-    SensorSpec,
-    OutputSpec,
 )
 from .base import EmbedderBase
 from .meta_utils import build_meta
 
-
 SUPPORTED_YEARS = {2021}
 
-
-def _buffer_m_to_deg(lat: float, buffer_m: float) -> Tuple[float, float]:
+def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
     """
     Approximate meters to degrees at given latitude.
     Good enough for precomputed tile selection / dataset slicing (v0.1).
@@ -40,7 +38,6 @@ def _buffer_m_to_deg(lat: float, buffer_m: float) -> Tuple[float, float]:
     m_per_deg_lon = m_per_deg_lat * cos_lat
     dlon = buffer_m / m_per_deg_lon
     return dlon, dlat
-
 
 def _spatial_to_bbox_4326(spatial: SpatialSpec) -> BBox:
     if isinstance(spatial, BBox):
@@ -58,14 +55,12 @@ def _spatial_to_bbox_4326(spatial: SpatialSpec) -> BBox:
         )
     raise ModelError(f"Unsupported SpatialSpec type: {type(spatial)}")
 
-
 def _pool_chw(chw: np.ndarray, pooling: str) -> np.ndarray:
     if pooling == "mean":
         return chw.mean(axis=(1, 2)).astype(np.float32)
     if pooling == "max":
         return chw.max(axis=(1, 2)).astype(np.float32)
     raise ModelError(f"Unknown pooling='{pooling}' (expected 'mean' or 'max').")
-
 
 @register("copernicus")
 class CopernicusEmbedder(EmbedderBase):
@@ -79,7 +74,7 @@ class CopernicusEmbedder(EmbedderBase):
 
     DEFAULT_BATCH_WORKERS = 4
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "precomputed",
             "backend": ["auto"],
@@ -103,7 +98,7 @@ class CopernicusEmbedder(EmbedderBase):
 
     def __init__(self) -> None:
         super().__init__()
-        self._ds_cache: Dict[str, Any] = {}
+        self._ds_cache: dict[str, Any] = {}
 
     def _get_dataset(self, *, data_dir: str, download: bool):
         # TorchGeo dataset does indexing/metadata checks; cache per data_dir.
@@ -129,12 +124,12 @@ class CopernicusEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
 
         if temporal is None:
@@ -225,9 +220,7 @@ class CopernicusEmbedder(EmbedderBase):
             try:
                 import xarray as xr
             except Exception as e:
-                raise ModelError(
-                    "grid output requires xarray. Install: pip install xarray"
-                ) from e
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
             da = xr.DataArray(
                 chw,
@@ -248,8 +241,8 @@ class CopernicusEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -258,9 +251,9 @@ class CopernicusEmbedder(EmbedderBase):
             return []
 
         n = len(spatials)
-        out: List[Optional[Embedding]] = [None] * n
+        out: list[Embedding | None] = [None] * n
 
-        def _one(i: int, sp: SpatialSpec) -> Tuple[int, Embedding]:
+        def _one(i: int, sp: SpatialSpec) -> tuple[int, Embedding]:
             emb = self.get_embedding(
                 spatial=sp,
                 temporal=temporal,

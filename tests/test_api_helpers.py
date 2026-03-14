@@ -29,9 +29,7 @@ class _FakeBBoxSplitProvider(ProviderBase):
         self.build_calls += 1
         return object()
 
-    def fetch_array_chw(
-        self, *, image, bands, region, scale_m, fill_value, collection=None
-    ):  # noqa: ARG002
+    def fetch_array_chw(self, *, image, bands, region, scale_m, fill_value, collection=None):  # noqa: ARG002
         self.fetch_calls += 1
         bbox = region
         assert isinstance(bbox, BBox)
@@ -52,28 +50,16 @@ class _FakeBBoxSplitProvider(ProviderBase):
         lon_span = float(self.full_bbox.maxlon - self.full_bbox.minlon)
         lat_span = float(self.full_bbox.maxlat - self.full_bbox.minlat)
         x0 = int(
-            round(
-                ((float(bbox.minlon) - float(self.full_bbox.minlon)) / lon_span)
-                * self.full_w
-            )
+            round(((float(bbox.minlon) - float(self.full_bbox.minlon)) / lon_span) * self.full_w)
         )
         x1 = int(
-            round(
-                ((float(bbox.maxlon) - float(self.full_bbox.minlon)) / lon_span)
-                * self.full_w
-            )
+            round(((float(bbox.maxlon) - float(self.full_bbox.minlon)) / lon_span) * self.full_w)
         )
         y0 = int(
-            round(
-                ((float(self.full_bbox.maxlat) - float(bbox.maxlat)) / lat_span)
-                * self.full_h
-            )
+            round(((float(self.full_bbox.maxlat) - float(bbox.maxlat)) / lat_span) * self.full_h)
         )
         y1 = int(
-            round(
-                ((float(self.full_bbox.maxlat) - float(bbox.minlat)) / lat_span)
-                * self.full_h
-            )
+            round(((float(self.full_bbox.maxlat) - float(bbox.minlat)) / lat_span) * self.full_h)
         )
         h = max(1, y1 - y0)
         w = max(1, x1 - x0)
@@ -83,9 +69,7 @@ class _FakeBBoxSplitProvider(ProviderBase):
 class _FakeBoundaryOverlapProvider(_FakeBBoxSplitProvider):
     """Simulate GEE returning one duplicated boundary column on the left child tile."""
 
-    def fetch_array_chw(
-        self, *, image, bands, region, scale_m, fill_value, collection=None
-    ):  # noqa: ARG002
+    def fetch_array_chw(self, *, image, bands, region, scale_m, fill_value, collection=None):  # noqa: ARG002
         self.fetch_calls += 1
         bbox = region
         assert isinstance(bbox, BBox)
@@ -139,9 +123,7 @@ class _FakeDeepVerticalSouthUpProvider(_FakeBBoxSplitProvider):
 
 def test_fetch_provider_patch_raw_recursively_splits_bbox_on_gee_pixel_limit():
     provider = _FakeBBoxSplitProvider()
-    sensor = SensorSpec(
-        collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0
-    )
+    sensor = SensorSpec(collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0)
 
     arr = fetch_provider_patch_raw(
         provider,
@@ -163,9 +145,7 @@ def test_fetch_provider_patch_raw_recursively_splits_bbox_on_gee_pixel_limit():
 
 def test_fetch_provider_patch_raw_flips_single_south_up_tile_before_return():
     provider = _FakeBBoxSplitProvider()
-    sensor = SensorSpec(
-        collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0
-    )
+    sensor = SensorSpec(collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0)
     spatial = BBox(minlon=0.0, minlat=0.0, maxlon=2.0, maxlat=1.0)
 
     arr = fetch_provider_patch_raw(
@@ -182,9 +162,7 @@ def test_fetch_provider_patch_raw_flips_single_south_up_tile_before_return():
 
 def test_fetch_provider_patch_raw_trims_boundary_overlap_when_stitching():
     provider = _FakeBoundaryOverlapProvider()
-    sensor = SensorSpec(
-        collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0
-    )
+    sensor = SensorSpec(collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0)
 
     arr = fetch_provider_patch_raw(
         provider,
@@ -203,9 +181,7 @@ def test_fetch_provider_patch_raw_trims_boundary_overlap_when_stitching():
 
 def test_fetch_provider_patch_raw_flips_south_up_tiles_for_y_stitch():
     provider = _FakeVerticalSouthUpProvider()
-    sensor = SensorSpec(
-        collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0
-    )
+    sensor = SensorSpec(collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0)
 
     arr = fetch_provider_patch_raw(
         provider,
@@ -224,9 +200,7 @@ def test_fetch_provider_patch_raw_flips_south_up_tiles_for_y_stitch():
 
 def test_fetch_provider_patch_raw_flips_south_up_tiles_across_recursive_y_stitch():
     provider = _FakeDeepVerticalSouthUpProvider()
-    sensor = SensorSpec(
-        collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0
-    )
+    sensor = SensorSpec(collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0)
 
     arr = fetch_provider_patch_raw(
         provider,
@@ -235,9 +209,10 @@ def test_fetch_provider_patch_raw_flips_south_up_tiles_across_recursive_y_stitch
         sensor=sensor,
     )
 
-    expected = np.arange(provider.full_h, dtype=np.float32).reshape(
-        1, provider.full_h, provider.full_w
-    ) * 100.0
+    expected = (
+        np.arange(provider.full_h, dtype=np.float32).reshape(1, provider.full_h, provider.full_w)
+        * 100.0
+    )
     assert arr.shape == expected.shape
     np.testing.assert_allclose(arr, expected)
 

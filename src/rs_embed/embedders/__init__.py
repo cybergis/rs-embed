@@ -16,6 +16,7 @@ Rules
 - Lazy-loading: embedder classes are imported on first access via
   ``__getattr__`` so unused models incur no startup cost.
 """
+
 from __future__ import annotations
 
 import importlib
@@ -35,6 +36,4 @@ def __getattr__(name: str) -> Any:
     try:
         return getattr(mod, name)
     except AttributeError as e:
-        raise AttributeError(
-            f"module {mod.__name__!r} has no attribute {name!r}"
-        ) from e
+        raise AttributeError(f"module {mod.__name__!r} has no attribute {name!r}") from e

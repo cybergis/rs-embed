@@ -152,9 +152,7 @@ def run_gee_demo(*, device: str, run_export: bool, out_dir: Path) -> None:
     )
     report = check.get("report") or {}
     print("\n[inspect_provider_patch]")
-    print(
-        f"ok={check.get('ok')}, shape={report.get('shape')}, dtype={report.get('dtype')}"
-    )
+    print(f"ok={check.get('ok')}, shape={report.get('shape')}, dtype={report.get('dtype')}")
 
     pooled = get_embedding(
         "remoteclip",
@@ -257,9 +255,7 @@ def main() -> None:
     if args.mode in ("auto", "all"):
         run_auto_demo(run_export=args.run_export, out_dir=args.out_dir)
     if args.mode in ("gee", "all"):
-        run_gee_demo(
-            device=args.device, run_export=args.run_export, out_dir=args.out_dir
-        )
+        run_gee_demo(device=args.device, run_export=args.run_export, out_dir=args.out_dir)
 
     print("\nQuickstart finished.")
 

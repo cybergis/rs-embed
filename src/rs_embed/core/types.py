@@ -8,15 +8,13 @@ from __future__ import annotations
 
 import enum
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 import numpy as np
 
-from .specs import InputPrepSpec, OutputSpec, SensorSpec
-
+from .specs import InputPrepSpec, SensorSpec
 
 # ── Enums ──────────────────────────────────────────────────────────
-
 
 class Status(enum.Enum):
     """Execution status for a single task."""
@@ -25,13 +23,11 @@ class Status(enum.Enum):
     PARTIAL = "partial"
     FAILED = "failed"
 
-
 class ExportLayout(enum.Enum):
     """Batch export layout policy."""
 
     COMBINED = "combined"
     PER_ITEM = "per_item"
-
 
 class InferenceStrategy(enum.Enum):
     """Inference dispatch policy for single vs. batch execution."""
@@ -40,9 +36,7 @@ class InferenceStrategy(enum.Enum):
     BATCH = "batch"
     SINGLE = "single"
 
-
 # ── Typed results ──────────────────────────────────────────────────
-
 
 @dataclass(frozen=True)
 class TaskResult:
@@ -61,14 +55,12 @@ class TaskResult:
     """
 
     status: Status
-    embedding: Optional[np.ndarray] = None
-    meta: Optional[Dict[str, Any]] = None
-    error: Optional[str] = None
+    embedding: np.ndarray | None = None
+    meta: dict[str, Any] | None = None
+    error: str | None = None
 
     @classmethod
-    def ok(
-        cls, embedding: np.ndarray, meta: Optional[Dict[str, Any]] = None
-    ) -> TaskResult:
+    def ok(cls, embedding: np.ndarray, meta: dict[str, Any] | None = None) -> TaskResult:
         """Create a successful task result.
 
         Parameters
@@ -104,9 +96,7 @@ class TaskResult:
             error=repr(error) if isinstance(error, Exception) else str(error),
         )
 
-
 # ── Model configuration ───────────────────────────────────────────
-
 
 @dataclass(frozen=True)
 class ModelConfig:
@@ -126,7 +116,7 @@ class ModelConfig:
 
     name: str
     backend: str
-    sensor: Optional[SensorSpec] = None
+    sensor: SensorSpec | None = None
     model_type: str = ""
 
     @property
@@ -140,9 +130,7 @@ class ModelConfig:
         """
         return "precomputed" in self.model_type.lower()
 
-
 # ── Public export request objects ──────────────────────────────────
-
 
 @dataclass(frozen=True)
 class ExportModelRequest:
@@ -161,12 +149,10 @@ class ExportModelRequest:
     """
 
     name: str
-    sensor: Optional[SensorSpec] = None
-    modality: Optional[str] = None
-
+    sensor: SensorSpec | None = None
+    modality: str | None = None
 
 # ── Export target ──────────────────────────────────────────────────
-
 
 @dataclass(frozen=True)
 class ExportTarget:
@@ -185,25 +171,21 @@ class ExportTarget:
     """
 
     layout: ExportLayout
-    out_file: Optional[str] = None
-    out_dir: Optional[str] = None
-    names: Optional[List[str]] = None
+    out_file: str | None = None
+    out_dir: str | None = None
+    names: list[str] | None = None
 
     @classmethod
-    def combined(cls, out_file: str) -> "ExportTarget":
+    def combined(cls, out_file: str) -> ExportTarget:
         """Build a combined-file export target."""
         return cls(layout=ExportLayout.COMBINED, out_file=out_file)
 
     @classmethod
-    def per_item(
-        cls, out_dir: str, *, names: Optional[List[str]] = None
-    ) -> "ExportTarget":
+    def per_item(cls, out_dir: str, *, names: list[str] | None = None) -> ExportTarget:
         """Build a per-item export target."""
         return cls(layout=ExportLayout.PER_ITEM, out_dir=out_dir, names=names)
 
-
 # ── Export configuration ───────────────────────────────────────────
-
 
 @dataclass(frozen=True)
 class ExportConfig:
@@ -253,7 +235,7 @@ class ExportConfig:
     save_manifest: bool = True
     fail_on_bad_input: bool = False
     chunk_size: int = 16
-    infer_batch_size: Optional[int] = None
+    infer_batch_size: int | None = None
     num_workers: int = 8
     continue_on_error: bool = False
     max_retries: int = 0
@@ -262,7 +244,7 @@ class ExportConfig:
     writer_workers: int = 2
     resume: bool = False
     show_progress: bool = True
-    input_prep: Optional[InputPrepSpec | str] = "resize"
+    input_prep: InputPrepSpec | str | None = "resize"
 
     @property
     def effective_infer_batch_size(self) -> int:

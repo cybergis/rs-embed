@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -15,22 +15,28 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..tools.temporal import temporal_frame_midpoints
 from ..providers import ProviderBase
+from ..tools.temporal import temporal_frame_midpoints
 from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
+from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .runtime_utils import (
     coerce_input_to_tchw as _coerce_input_to_tchw,
+)
+from .runtime_utils import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device,
 )
-from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
-
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
-
 
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
@@ -40,11 +46,8 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
     x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
-    y = F.interpolate(
-        x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False
-    )
+    y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y.detach().cpu().numpy().astype(np.float32)
-
 
 def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
     x = np.asarray(raw, dtype=np.float32)
@@ -75,7 +78,6 @@ def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
         )
     return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-
 def _fetch_s2_10_raw_tchw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -103,10 +105,10 @@ def _fetch_s2_10_raw_tchw(
 
 def _resolve_model_folder(
     *,
-    model_path: Optional[str],
+    model_path: str | None,
     model_size: str,
     hf_repo: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
     auto_download: bool,
 ) -> str:
     if model_path:
@@ -131,12 +133,11 @@ def _resolve_model_folder(
         )
     return p
 
-
 @lru_cache(maxsize=8)
 def _load_galileo_module():
     try:
         mod = importlib.import_module("rs_embed.embedders._vendor.galileo_single_file")
-        getattr(mod, "Encoder")
+        _ = mod.Encoder
     except Exception as e:
         raise ModelError(
             "Failed to import vendored Galileo runtime. "
@@ -144,20 +145,18 @@ def _load_galileo_module():
         ) from e
     return mod
 
-
 @lru_cache(maxsize=8)
 def _download_galileo_model_folder(
     *,
     model_size: str,
     hf_repo: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
 ) -> str:
     try:
         from huggingface_hub import snapshot_download
     except Exception as e:
         raise ModelError(
-            "Galileo auto-download requires huggingface_hub. "
-            "Install: pip install huggingface_hub"
+            "Galileo auto-download requires huggingface_hub. Install: pip install huggingface_hub"
         ) from e
 
     snap = snapshot_download(
@@ -178,11 +177,9 @@ def _download_galileo_model_folder(
         )
     return model_root
 
-
 def _month_from_iso(iso_date: str) -> int:
     d = date.fromisoformat(str(iso_date))
     return max(1, min(12, int(d.month)))
-
 
 def _frame_month_sequence(temporal: TemporalSpec, *, n_frames: int) -> np.ndarray:
     mids = temporal_frame_midpoints(temporal, max(1, int(n_frames)))
@@ -190,17 +187,16 @@ def _frame_month_sequence(temporal: TemporalSpec, *, n_frames: int) -> np.ndarra
         return np.full((max(1, int(n_frames)),), 6, dtype=np.int64)
     return np.array([_month_from_iso(v) for v in mids], dtype=np.int64)
 
-
 @lru_cache(maxsize=6)
 def _load_galileo_cached(
     *,
     model_size: str,
-    model_path: Optional[str],
+    model_path: str | None,
     hf_repo: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
     auto_download: bool,
     dev: str,
-) -> Tuple[Any, Dict[str, Any], Any]:
+) -> tuple[Any, dict[str, Any], Any]:
     ensure_torch()
     import torch
 
@@ -229,7 +225,7 @@ def _load_galileo_cached(
 
     try:
         encoder = encoder.to(dev).eval()
-    except Exception:
+    except Exception as _e:
         pass
 
     p0 = None
@@ -246,11 +242,7 @@ def _load_galileo_cached(
     meta = {
         "model_size": str(model_size),
         "model_root": model_root,
-        "model_source": (
-            model_root
-            if model_path
-            else f"hf://{hf_repo}/models/{model_size}"
-        ),
+        "model_source": (model_root if model_path else f"hf://{hf_repo}/models/{model_size}"),
         "device": str(dev),
         "param_mean": float(p0f.mean().cpu()),
         "param_std": float(p0f.std().cpu()),
@@ -258,16 +250,15 @@ def _load_galileo_cached(
     }
     return encoder, meta, mod
 
-
 def _load_galileo(
     *,
     model_size: str,
-    model_path: Optional[str],
+    model_path: str | None,
     hf_repo: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
     auto_download: bool,
     device: str,
-) -> Tuple[Any, Dict[str, Any], Any, str]:
+) -> tuple[Any, dict[str, Any], Any, str]:
     (loaded, dev) = _load_cached_with_device(
         _load_galileo_cached,
         device=device,
@@ -280,7 +271,6 @@ def _load_galileo(
     encoder, meta, mod = loaded
     return encoder, meta, mod, dev
 
-
 def _prepare_galileo_encoder_inputs(
     raw_tchw: np.ndarray,
     *,
@@ -291,7 +281,7 @@ def _prepare_galileo_encoder_inputs(
     include_ndvi: bool,
     mod: Any,
     device: str,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -318,9 +308,9 @@ def _prepare_galileo_encoder_inputs(
     t = int(s2_hwtd.shape[2])
 
     # create Galileo space_time tensor [B,H,W,T,len(SPACE_TIME_BANDS)]
-    space_time_bands = list(getattr(mod, "SPACE_TIME_BANDS"))
-    s2_bands = list(getattr(mod, "S2_BANDS"))
-    s_t_groups = list(getattr(mod, "SPACE_TIME_BANDS_GROUPS_IDX").keys())
+    space_time_bands = list(mod.SPACE_TIME_BANDS)
+    s2_bands = list(mod.S2_BANDS)
+    s_t_groups = list(mod.SPACE_TIME_BANDS_GROUPS_IDX.keys())
 
     h, w = int(s2_hwtd.shape[0]), int(s2_hwtd.shape[1])
     s_t_x = np.zeros((1, h, w, t, len(space_time_bands)), dtype=np.float32)
@@ -339,7 +329,7 @@ def _prepare_galileo_encoder_inputs(
             ndvi = (nir - red) / np.maximum(nir + red, 1e-6)
             s_t_x[0, :, :, :, space_time_bands.index("NDVI")] = ndvi.astype(np.float32)
             ndvi_set = True
-        except Exception:
+        except Exception as _e:
             ndvi_set = False
 
     # masks: 0 means seen by encoder, 1 means masked/ignored
@@ -353,12 +343,12 @@ def _prepare_galileo_encoder_inputs(
             if str(key) == "NDVI":
                 s_t_m[0, :, :, :, i] = 0.0
 
-    sp_len = len(getattr(mod, "SPACE_BANDS"))
-    t_len = len(getattr(mod, "TIME_BANDS"))
-    st_len = len(getattr(mod, "STATIC_BANDS"))
-    sp_group_len = len(getattr(mod, "SPACE_BAND_GROUPS_IDX"))
-    t_group_len = len(getattr(mod, "TIME_BAND_GROUPS_IDX"))
-    st_group_len = len(getattr(mod, "STATIC_BAND_GROUPS_IDX"))
+    sp_len = len(mod.SPACE_BANDS)
+    t_len = len(mod.TIME_BANDS)
+    st_len = len(mod.STATIC_BANDS)
+    sp_group_len = len(mod.SPACE_BAND_GROUPS_IDX)
+    t_group_len = len(mod.TIME_BAND_GROUPS_IDX)
+    st_group_len = len(mod.STATIC_BAND_GROUPS_IDX)
 
     sp_x = np.zeros((1, h, w, sp_len), dtype=np.float32)
     t_x = np.zeros((1, t, t_len), dtype=np.float32)
@@ -407,23 +397,22 @@ def _prepare_galileo_encoder_inputs(
     }
     return data, meta
 
-
 def _galileo_forward(
     encoder: Any,
-    data: Dict[str, Any],
+    data: dict[str, Any],
     *,
     mod: Any,
     patch_size: int,
     add_layernorm_on_exit: bool,
     device: str,
-) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
     dev = _resolve_device(device)
     try:
         encoder = encoder.to(dev).eval()
-    except Exception:
+    except Exception as _e:
         pass
 
     with torch.no_grad():
@@ -449,26 +438,20 @@ def _galileo_forward(
     # pooled features from all visible tokens
     vec_t = encoder.average_tokens(s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m)
     if vec_t.ndim != 2 or int(vec_t.shape[0]) != 1:
-        raise ModelError(
-            f"Unexpected Galileo pooled output shape: {tuple(vec_t.shape)}"
-        )
+        raise ModelError(f"Unexpected Galileo pooled output shape: {tuple(vec_t.shape)}")
     vec = vec_t[0].detach().float().cpu().numpy().astype(np.float32)
 
     # grid features from S2-related space-time groups only
-    s_t_groups = list(getattr(mod, "SPACE_TIME_BANDS_GROUPS_IDX").keys())
+    s_t_groups = list(mod.SPACE_TIME_BANDS_GROUPS_IDX.keys())
     s2_group_indices = [i for i, key in enumerate(s_t_groups) if "S2" in str(key)]
     if not s2_group_indices:
-        raise ModelError(
-            "Failed to locate Galileo S2 group indices in SPACE_TIME_BANDS_GROUPS_IDX"
-        )
+        raise ModelError("Failed to locate Galileo S2 group indices in SPACE_TIME_BANDS_GROUPS_IDX")
 
     # s_t_x shape: [B,H,W,T,Cg,D]
     s_t_sel = s_t_x[:, :, :, :, s2_group_indices, :]
     # average over time and channel-groups -> [B,H,W,D]
     grid_hwd = s_t_sel.mean(dim=3).mean(dim=3)[0]
-    grid = (
-        grid_hwd.detach().float().cpu().numpy().transpose(2, 0, 1).astype(np.float32)
-    )  # [D,H,W]
+    grid = grid_hwd.detach().float().cpu().numpy().transpose(2, 0, 1).astype(np.float32)  # [D,H,W]
 
     fmeta = {
         "feature_dim": int(vec.shape[0]),
@@ -479,7 +462,6 @@ def _galileo_forward(
     }
     return vec, grid, fmeta
 
-
 @register("galileo")
 class GalileoEmbedder(EmbedderBase):
     DEFAULT_MODEL_SIZE = "nano"
@@ -489,7 +471,7 @@ class GalileoEmbedder(EmbedderBase):
     DEFAULT_FETCH_WORKERS = 8
     _allow_auto_backend = False
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
             "backend": ["provider"],
@@ -542,12 +524,12 @@ class GalileoEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=False):
             raise ModelError("galileo expects a provider backend.")
@@ -555,9 +537,7 @@ class GalileoEmbedder(EmbedderBase):
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
 
-        model_size = os.environ.get(
-            "RS_EMBED_GALILEO_MODEL_SIZE", self.DEFAULT_MODEL_SIZE
-        ).strip()
+        model_size = os.environ.get("RS_EMBED_GALILEO_MODEL_SIZE", self.DEFAULT_MODEL_SIZE).strip()
         model_path = os.environ.get("RS_EMBED_GALILEO_MODEL_PATH")
         hf_repo = os.environ.get("RS_EMBED_GALILEO_HF_REPO", "nasaharvest/galileo").strip()
         cache_dir = os.environ.get(
@@ -570,24 +550,16 @@ class GalileoEmbedder(EmbedderBase):
             "False",
         }
 
-        image_size = int(
-            os.environ.get("RS_EMBED_GALILEO_IMG", str(self.DEFAULT_IMAGE_SIZE))
-        )
-        patch_size = int(
-            os.environ.get("RS_EMBED_GALILEO_PATCH", str(self.DEFAULT_PATCH))
-        )
-        n_frames = max(
-            1, int(os.environ.get("RS_EMBED_GALILEO_FRAMES", str(self.DEFAULT_FRAMES)))
-        )
+        image_size = int(os.environ.get("RS_EMBED_GALILEO_IMG", str(self.DEFAULT_IMAGE_SIZE)))
+        patch_size = int(os.environ.get("RS_EMBED_GALILEO_PATCH", str(self.DEFAULT_PATCH)))
+        n_frames = max(1, int(os.environ.get("RS_EMBED_GALILEO_FRAMES", str(self.DEFAULT_FRAMES))))
         norm_mode = os.environ.get("RS_EMBED_GALILEO_NORM", "unit_scale").strip()
         add_layernorm = os.environ.get("RS_EMBED_GALILEO_ADD_LN", "1").strip() not in {
             "0",
             "false",
             "False",
         }
-        include_ndvi = os.environ.get(
-            "RS_EMBED_GALILEO_INCLUDE_NDVI", "1"
-        ).strip() not in {
+        include_ndvi = os.environ.get("RS_EMBED_GALILEO_INCLUDE_NDVI", "1").strip() not in {
             "0",
             "false",
             "False",
@@ -716,8 +688,8 @@ class GalileoEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -731,14 +703,12 @@ class GalileoEmbedder(EmbedderBase):
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
         provider = self._get_provider(backend)
-        n_frames = max(
-            1, int(os.environ.get("RS_EMBED_GALILEO_FRAMES", str(self.DEFAULT_FRAMES)))
-        )
+        n_frames = max(1, int(os.environ.get("RS_EMBED_GALILEO_FRAMES", str(self.DEFAULT_FRAMES))))
 
         n = len(spatials)
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             raw = _fetch_s2_10_raw_tchw(
                 provider,
                 sp,
@@ -763,7 +733,7 @@ class GalileoEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        out: List[Embedding] = []
+        out: list[Embedding] = []
         for i, sp in enumerate(spatials):
             raw = prefetched_raw[i]
             if raw is None:

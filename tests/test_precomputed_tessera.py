@@ -71,9 +71,7 @@ def test_tessera_pooled_uses_crop_canvas_not_full_mosaic(monkeypatch):
 
     embedder = TesseraEmbedder()
     embedder.model_name = "tessera"
-    monkeypatch.setattr(
-        embedder, "_get_gt", lambda _cache: _FakeGeoTessera(_fake_rows())
-    )
+    monkeypatch.setattr(embedder, "_get_gt", lambda _cache: _FakeGeoTessera(_fake_rows()))
 
     zeros_calls = []
     real_zeros = tessera_mod.np.zeros

@@ -66,9 +66,7 @@ def test_coerce_fetch_result_supports_array_and_tuple():
     assert meta0["fallback_used"] is False
     assert meta0["already_unit_scaled"] is False
 
-    arr1, meta1 = _coerce_fetch_result(
-        (raw, {"fallback_used": True, "already_unit_scaled": True})
-    )
+    arr1, meta1 = _coerce_fetch_result((raw, {"fallback_used": True, "already_unit_scaled": True}))
     assert arr1.shape == (14, 4, 4)
     assert meta1["fallback_used"] is True
     assert meta1["already_unit_scaled"] is True

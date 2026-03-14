@@ -52,5 +52,5 @@ def create_progress(*, enabled: bool, total: int, desc: str, unit: str = "item")
         from tqdm.auto import tqdm
 
         return tqdm(total=int(total), desc=desc, unit=unit, leave=False)
-    except Exception:
+    except Exception as _e:
         return SimpleProgress(total=int(total), desc=desc)

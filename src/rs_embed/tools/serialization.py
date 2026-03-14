@@ -14,7 +14,7 @@ from ..core.specs import SensorSpec
 
 
 def utc_ts() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat() + "Z"
+    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat() + "Z"
 
 
 def sanitize_key(s: str) -> str:
@@ -65,7 +65,7 @@ def jsonable(obj: Any) -> Any:
                 "shape": list(obj.shape),
                 "dims": list(obj.dims),
             }
-    except Exception:
+    except Exception as _e:
         pass
     return repr(obj)
 
@@ -78,7 +78,7 @@ def embedding_to_numpy(emb: Embedding) -> np.ndarray:
 
         if isinstance(emb.data, xr.DataArray):
             return np.asarray(emb.data.values, dtype=np.float32)
-    except Exception:
+    except Exception as _e:
         pass
     return np.asarray(emb.data, dtype=np.float32)
 

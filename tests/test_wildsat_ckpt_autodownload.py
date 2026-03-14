@@ -30,9 +30,7 @@ def test_resolve_wildsat_ckpt_uses_local_env_path(monkeypatch, tmp_path):
     monkeypatch.setenv("RS_EMBED_WILDSAT_CKPT", str(p))
 
     def _should_not_be_called(**_kw):
-        raise AssertionError(
-            "auto-download should not be called when RS_EMBED_WILDSAT_CKPT is set"
-        )
+        raise AssertionError("auto-download should not be called when RS_EMBED_WILDSAT_CKPT is set")
 
     monkeypatch.setattr(ws, "_download_wildsat_ckpt_from_hf", _should_not_be_called)
     monkeypatch.setattr(ws, "_download_wildsat_ckpt_from_gdrive", _should_not_be_called)

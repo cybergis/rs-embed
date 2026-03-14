@@ -93,9 +93,7 @@ def test_write_npz_creates_files(tmp_path):
 def test_write_npz_no_manifest(tmp_path):
     arrays = {"x": np.zeros(4, dtype=np.float32)}
     out = str(tmp_path / "t.npz")
-    result = write_arrays(
-        fmt="npz", out_path=out, arrays=arrays, manifest={}, save_manifest=False
-    )
+    result = write_arrays(fmt="npz", out_path=out, arrays=arrays, manifest={}, save_manifest=False)
     assert os.path.isfile(out)
     assert not os.path.isfile(str(tmp_path / "t.json"))
     assert "manifest_path" not in result
@@ -146,9 +144,7 @@ def test_write_netcdf_roundtrip(tmp_path):
         "input_chw__mx": inp,
     }
     out = str(tmp_path / "rt.nc")
-    write_arrays(
-        fmt="netcdf", out_path=out, arrays=arrays, manifest={}, save_manifest=False
-    )
+    write_arrays(fmt="netcdf", out_path=out, arrays=arrays, manifest={}, save_manifest=False)
 
     ds = xr.open_dataset(out)
     np.testing.assert_array_almost_equal(ds["embedding__mx"].values, emb)
@@ -210,9 +206,7 @@ def test_write_netcdf_batch_embeddings(tmp_path):
     batch = np.random.rand(5, 32).astype(np.float32)
     arrays = {"embeddings__model_a": batch}
     out = str(tmp_path / "batch.nc")
-    write_arrays(
-        fmt="netcdf", out_path=out, arrays=arrays, manifest={}, save_manifest=False
-    )
+    write_arrays(fmt="netcdf", out_path=out, arrays=arrays, manifest={}, save_manifest=False)
 
     ds = xr.open_dataset(out)
     np.testing.assert_array_almost_equal(ds["embeddings__model_a"].values, batch)
@@ -229,9 +223,7 @@ def test_write_netcdf_resolves_dim_name_conflicts(tmp_path):
         "inputs_bchw__model_d": np.zeros((2, 5, 4, 4), dtype=np.float32),
     }
     out = str(tmp_path / "conflict.nc")
-    write_arrays(
-        fmt="netcdf", out_path=out, arrays=arrays, manifest={}, save_manifest=False
-    )
+    write_arrays(fmt="netcdf", out_path=out, arrays=arrays, manifest={}, save_manifest=False)
 
     ds = xr.open_dataset(out)
     try:

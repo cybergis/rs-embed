@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -8,7 +8,7 @@ from ..core.embedding import Embedding
 from ..core.specs import OutputSpec
 
 
-def _infer_native_y_axis_direction(meta: Dict[str, Any]) -> Tuple[str, str]:
+def _infer_native_y_axis_direction(meta: dict[str, Any]) -> tuple[str, str]:
     """Infer native y-axis direction from metadata.
 
     Returns:
@@ -27,7 +27,7 @@ def _infer_native_y_axis_direction(meta: Dict[str, Any]) -> Tuple[str, str]:
                 return "north_to_south", f"transform.e={e:.6g} (<0)"
             if e > 0:
                 return "south_to_north", f"transform.e={e:.6g} (>0)"
-        except Exception:
+        except Exception as _e:
             pass
 
     y_axis = str(meta.get("y_axis_direction", "")).strip().lower()
@@ -38,8 +38,7 @@ def _infer_native_y_axis_direction(meta: Dict[str, Any]) -> Tuple[str, str]:
 
     return "unknown", "no orientation metadata"
 
-
-def _flip_data_y(data: Any) -> Tuple[Any, bool, str]:
+def _flip_data_y(data: Any) -> tuple[Any, bool, str]:
     # xarray.DataArray path (no hard dependency import; duck typing only).
     if hasattr(data, "dims") and hasattr(data, "isel"):
         dims = tuple(str(d) for d in getattr(data, "dims", ()))
@@ -53,7 +52,7 @@ def _flip_data_y(data: Any) -> Tuple[Any, bool, str]:
                     True,
                     f"xarray isel({dim}=reverse)",
                 )
-            except Exception:
+            except Exception as _e:
                 pass
 
     arr = np.asarray(getattr(data, "values", data))
@@ -62,7 +61,6 @@ def _flip_data_y(data: Any) -> Tuple[Any, bool, str]:
 
     axis = arr.ndim - 2
     return np.flip(arr, axis=axis), True, f"numpy flip axis={axis}"
-
 
 def normalize_embedding_output(*, emb: Embedding, output: OutputSpec) -> Embedding:
     """Normalize embedding outputs according to OutputSpec-level conventions."""

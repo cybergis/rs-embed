@@ -64,9 +64,7 @@ def test_export_batch_prefetch_dedup_across_models(tmp_path, monkeypatch):
             DummyA.calls += 1
             assert backend == "gee"
             assert input_chw is not None
-            return Embedding(
-                data=np.array([float(np.sum(input_chw))], dtype=np.float32), meta={}
-            )
+            return Embedding(data=np.array([float(np.sum(input_chw))], dtype=np.float32), meta={})
 
     class DummyB:
         calls = 0
@@ -117,9 +115,13 @@ def test_export_batch_prefetch_dedup_across_models(tmp_path, monkeypatch):
         fetch_calls["n"] += 1
         return np.ones((3, 4, 4), dtype=np.float32)
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x_chw, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw",
+        lambda x_chw, *, sensor, name: {"ok": True},
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -225,9 +227,7 @@ def test_export_batch_prefetch_reuses_superset_and_slices_subset(tmp_path, monke
         ):
             assert input_chw is not None
             assert tuple(input_chw.shape) == (4, 2, 2)
-            DummyS2Superset.seen.append(
-                tuple(float(input_chw[i, 0, 0]) for i in range(4))
-            )
+            DummyS2Superset.seen.append(tuple(float(input_chw[i, 0, 0]) for i in range(4)))
             return Embedding(data=np.array([2.0], dtype=np.float32), meta={})
 
     registry.register("dummy_rgb_subset")(DummyRGB)
@@ -253,9 +253,13 @@ def test_export_batch_prefetch_reuses_superset_and_slices_subset(tmp_path, monke
             x[j] = band_value[b]
         return x
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x_chw, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw",
+        lambda x_chw, *, sensor, name: {"ok": True},
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -328,9 +332,13 @@ def test_export_batch_combined_npz_dedup(tmp_path, monkeypatch):
         fetch_calls["n"] += 1
         return np.zeros((3, 2, 2), dtype=np.float32)
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x_chw, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw",
+        lambda x_chw, *, sensor, name: {"ok": True},
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -394,9 +402,7 @@ def test_export_batch_combined_prefetch_checkpoint_handles_variable_input_shapes
             input_chw=None,
         ):
             assert input_chw is not None
-            return Embedding(
-                data=np.array([float(input_chw.shape[1])], dtype=np.float32), meta={}
-            )
+            return Embedding(data=np.array([float(input_chw.shape[1])], dtype=np.float32), meta={})
 
     registry.register("dummy_var_shape")(DummyVarShape)
 
@@ -413,9 +419,13 @@ def test_export_batch_combined_prefetch_checkpoint_handles_variable_input_shapes
         side = 2 if float(spatial.lon) < 0.5 else 3
         return np.zeros((3, side, side), dtype=np.float32)
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x_chw, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw",
+        lambda x_chw, *, sensor, name: {"ok": True},
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -442,9 +452,7 @@ def test_export_batch_combined_prefetch_checkpoint_handles_variable_input_shapes
     assert manifest.get("status") == "ok"
 
 
-def test_export_batch_combined_falls_back_to_single_when_batch_api_fails(
-    tmp_path, monkeypatch
-):
+def test_export_batch_combined_falls_back_to_single_when_batch_api_fails(tmp_path, monkeypatch):
     class DummyBatchFail:
         single_calls = 0
         batch_calls = 0
@@ -474,9 +482,7 @@ def test_export_batch_combined_falls_back_to_single_when_batch_api_fails(
         ):
             DummyBatchFail.single_calls += 1
             assert input_chw is not None
-            return Embedding(
-                data=np.array([float(spatial.lon)], dtype=np.float32), meta={}
-            )
+            return Embedding(data=np.array([float(spatial.lon)], dtype=np.float32), meta={})
 
         def get_embeddings_batch_from_inputs(
             self,
@@ -506,9 +512,13 @@ def test_export_batch_combined_falls_back_to_single_when_batch_api_fails(
     def fake_fetch(provider, *, spatial, temporal, sensor):
         return np.zeros((3, 2, 2), dtype=np.float32)
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x_chw, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw",
+        lambda x_chw, *, sensor, name: {"ok": True},
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -536,9 +546,7 @@ def test_export_batch_combined_falls_back_to_single_when_batch_api_fails(
     assert DummyBatchFail.single_calls == 2
 
 
-def test_export_batch_combined_prefetch_reuses_superset_and_slices_subset(
-    tmp_path, monkeypatch
-):
+def test_export_batch_combined_prefetch_reuses_superset_and_slices_subset(tmp_path, monkeypatch):
     class DummyRGB:
         seen = []
 
@@ -596,9 +604,7 @@ def test_export_batch_combined_prefetch_reuses_superset_and_slices_subset(
             input_chw=None,
         ):
             assert input_chw is not None
-            DummyS2Superset.seen.append(
-                tuple(float(input_chw[i, 0, 0]) for i in range(4))
-            )
+            DummyS2Superset.seen.append(tuple(float(input_chw[i, 0, 0]) for i in range(4)))
             return Embedding(data=np.array([2.0], dtype=np.float32), meta={})
 
     registry.register("dummy_rgb_subset_combined")(DummyRGB)
@@ -623,9 +629,13 @@ def test_export_batch_combined_prefetch_reuses_superset_and_slices_subset(
             x[j] = band_value[b]
         return x
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x_chw, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw",
+        lambda x_chw, *, sensor, name: {"ok": True},
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -673,9 +683,7 @@ def test_export_batch_per_item_prefers_batch_inference_on_gpu(tmp_path, monkeypa
             input_chw=None,
         ):
             DummyBatchGPU.single_calls += 1
-            return Embedding(
-                data=np.array([float(spatial.lon)], dtype=np.float32), meta={}
-            )
+            return Embedding(data=np.array([float(spatial.lon)], dtype=np.float32), meta={})
 
         def get_embeddings_batch(
             self,
@@ -756,10 +764,7 @@ def test_export_batch_per_item_cpu_defaults_to_single_inference(tmp_path, monkey
             device="auto",
         ):
             DummyBatchGPUOff.batch_calls += 1
-            return [
-                Embedding(data=np.array([1.0], dtype=np.float32), meta={})
-                for _ in spatials
-            ]
+            return [Embedding(data=np.array([1.0], dtype=np.float32), meta={}) for _ in spatials]
 
     registry.register("dummy_batch_gpu_dir_single")(DummyBatchGPUOff)
 
@@ -829,11 +834,15 @@ def test_export_batch_netcdf_per_item(tmp_path, monkeypatch):
         def ensure_ready(self):
             return None
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
-    monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw",
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.fetch_gee_patch_raw",
         lambda prov, *, spatial, temporal, sensor: np.ones((2, 4, 4), dtype=np.float32),
     )
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -918,11 +927,15 @@ def test_export_batch_netcdf_combined(tmp_path, monkeypatch):
         def ensure_ready(self):
             return None
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
-    monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw",
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.fetch_gee_patch_raw",
         lambda prov, *, spatial, temporal, sensor: np.ones((1, 2, 2), dtype=np.float32),
     )
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -997,13 +1010,15 @@ def test_export_batch_combined_fail_on_bad_input(tmp_path, monkeypatch):
         def ensure_ready(self):
             return None
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
-    monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw",
-        lambda prov, *, spatial, temporal, sensor: np.zeros(
-            (1, 2, 2), dtype=np.float32
-        ),
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
     )
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw",
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.fetch_gee_patch_raw",
+        lambda prov, *, spatial, temporal, sensor: np.zeros((1, 2, 2), dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw",
         lambda x, *, sensor, name: {"ok": False, "report": {"issues": ["all fill"]}},
     )
     get_embedder_bundle_cached.cache_clear()
@@ -1066,9 +1081,12 @@ def test_export_batch_combined_partial_inputs_include_indices(tmp_path, monkeypa
             raise RuntimeError("prefetch fail")
         return np.ones((1, 2, 2), dtype=np.float32)
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -1127,9 +1145,7 @@ def test_export_batch_prefetch_used_even_without_saving_inputs(tmp_path, monkeyp
             input_chw=None,
         ):
             assert input_chw is not None
-            return Embedding(
-                data=np.array([float(np.sum(input_chw))], dtype=np.float32), meta={}
-            )
+            return Embedding(data=np.array([float(np.sum(input_chw))], dtype=np.float32), meta={})
 
     registry.register("dummy_need_input")(DummyNeedInput)
 
@@ -1148,9 +1164,12 @@ def test_export_batch_prefetch_used_even_without_saving_inputs(tmp_path, monkeyp
         calls["fetch"] += 1
         return np.ones((2, 3, 3), dtype=np.float32)
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -1241,11 +1260,15 @@ def test_export_batch_continue_on_error_partial_manifest(tmp_path, monkeypatch):
         def ensure_ready(self):
             return None
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
-    monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw",
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.fetch_gee_patch_raw",
         lambda prov, *, spatial, temporal, sensor: np.ones((1, 2, 2), dtype=np.float32),
     )
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -1265,9 +1288,7 @@ def test_export_batch_continue_on_error_partial_manifest(tmp_path, monkeypatch):
 
     assert len(res) == 1
     assert res[0]["status"] == "partial"
-    assert any(
-        m["model"] == "dummy_bad2" and m["status"] == "failed" for m in res[0]["models"]
-    )
+    assert any(m["model"] == "dummy_bad2" and m["status"] == "failed" for m in res[0]["models"])
     assert (out_dir / "p00000.npz").exists()
 
 
@@ -1401,11 +1422,15 @@ def test_export_batch_dedup_inputs_across_models_in_file(tmp_path, monkeypatch):
         def ensure_ready(self):
             return None
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
-    monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw",
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.fetch_gee_patch_raw",
         lambda prov, *, spatial, temporal, sensor: np.ones((1, 2, 2), dtype=np.float32),
     )
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -1558,9 +1583,7 @@ def test_export_batch_resume_out_path_skips_existing(tmp_path):
     assert DummyResumeCombined.calls == len(spatials)
 
 
-def test_export_batch_combined_saves_prefetch_checkpoint_before_inference(
-    tmp_path, monkeypatch
-):
+def test_export_batch_combined_saves_prefetch_checkpoint_before_inference(tmp_path, monkeypatch):
     class DummyCrashAfterFetch:
         def describe(self):
             return {
@@ -1598,11 +1621,15 @@ def test_export_batch_combined_saves_prefetch_checkpoint_before_inference(
         def ensure_ready(self):
             return None
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
-    monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw",
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.fetch_gee_patch_raw",
         lambda prov, *, spatial, temporal, sensor: np.ones((2, 2, 2), dtype=np.float32),
     )
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -1717,9 +1744,12 @@ def test_export_batch_combined_resume_continues_remaining_models(tmp_path, monke
         fetch_calls["n"] += 1
         return np.ones((2, 2, 2), dtype=np.float32)
 
-    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider())
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
     monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
-    monkeypatch.setattr("rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
+    monkeypatch.setattr(
+        "rs_embed.providers.gee_utils.inspect_input_raw", lambda x, *, sensor, name: {"ok": True}
     )
     get_embedder_bundle_cached.cache_clear()
 
@@ -1826,9 +1856,7 @@ def test_export_batch_progress_updates_point_and_model_bars(tmp_path, monkeypatc
     monkeypatch.setattr(
         api,
         "_create_progress",
-        lambda *, enabled, total, desc, unit="item": _FakeProgress(
-            total=total, desc=desc
-        ),
+        lambda *, enabled, total, desc, unit="item": _FakeProgress(total=total, desc=desc),
     )
 
     spatials = [
@@ -1877,10 +1905,7 @@ def test_export_batch_combined_progress_updates_model_inference(tmp_path, monkey
         def get_embeddings_batch(
             self, *, spatials, temporal, sensor, output, backend, device="auto"
         ):
-            return [
-                Embedding(data=np.array([1.0], dtype=np.float32), meta={})
-                for _ in spatials
-            ]
+            return [Embedding(data=np.array([1.0], dtype=np.float32), meta={}) for _ in spatials]
 
     class DummySingleProgressModel:
         def describe(self):
@@ -1929,9 +1954,7 @@ def test_export_batch_combined_progress_updates_model_inference(tmp_path, monkey
     monkeypatch.setattr(
         api,
         "_create_progress",
-        lambda *, enabled, total, desc, unit="item": _FakeProgress(
-            total=total, desc=desc
-        ),
+        lambda *, enabled, total, desc, unit="item": _FakeProgress(total=total, desc=desc),
     )
 
     spatials = [
@@ -1964,9 +1987,7 @@ def test_export_batch_combined_progress_updates_model_inference(tmp_path, monkey
     assert state["infer[dummy_single_progress]"]["closed"] is True
 
 
-def test_export_batch_combined_progress_fills_on_model_init_failure(
-    tmp_path, monkeypatch
-):
+def test_export_batch_combined_progress_fills_on_model_init_failure(tmp_path, monkeypatch):
     class DummyInitFailModel:
         def __init__(self):
             raise RuntimeError("init failed")
@@ -2000,9 +2021,7 @@ def test_export_batch_combined_progress_fills_on_model_init_failure(
     monkeypatch.setattr(
         api,
         "_create_progress",
-        lambda *, enabled, total, desc, unit="item": _FakeProgress(
-            total=total, desc=desc
-        ),
+        lambda *, enabled, total, desc, unit="item": _FakeProgress(total=total, desc=desc),
     )
 
     spatials = [
@@ -2035,9 +2054,7 @@ def test_export_batch_combined_embedder_without_input_chw_kwarg(tmp_path):
         def describe(self):
             return {"type": "precomputed", "backend": ["local"], "output": ["pooled"]}
 
-        def get_embedding(
-            self, *, spatial, temporal, sensor, output, backend, device="auto"
-        ):
+        def get_embedding(self, *, spatial, temporal, sensor, output, backend, device="auto"):
             DummyNoInputKwarg.calls += 1
             return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
 

@@ -167,9 +167,7 @@ class _SingleEmbedder:
     def describe(self):
         return {"type": "onthefly"}
 
-    def get_embedding(
-        self, *, spatial, temporal, sensor, output, backend, device, input_chw=None
-    ):
+    def get_embedding(self, *, spatial, temporal, sensor, output, backend, device, input_chw=None):
         _SingleEmbedder.calls += 1
         return Embedding(data=np.array([1.0, 2.0], dtype=np.float32), meta={})
 
@@ -208,9 +206,7 @@ class _BatchEmbedder:
         _BatchEmbedder.single_calls += 1
         return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
 
-    def get_embeddings_batch(
-        self, *, spatials, temporal, sensor, output, backend, device
-    ):
+    def get_embeddings_batch(self, *, spatials, temporal, sensor, output, backend, device):
         _BatchEmbedder.batch_calls += 1
         return [
             Embedding(data=np.array([float(i)], dtype=np.float32), meta={})
@@ -376,9 +372,7 @@ class _PartialFailEmbedder:
     def describe(self):
         return {"type": "onthefly"}
 
-    def get_embedding(
-        self, *, spatial, temporal, sensor, output, backend, device, input_chw=None
-    ):
+    def get_embedding(self, *, spatial, temporal, sensor, output, backend, device, input_chw=None):
         # Use lon to determine which index this is (our spatials have distinct lons)
         if round(spatial.lon, 1) == -88.0:  # index 0
             raise RuntimeError("fail on index 0")

@@ -2,9 +2,9 @@ from __future__ import annotations
 
 import os
 from dataclasses import replace
-from typing import Dict, List, Optional
 
 from ..core.errors import ModelError
+from ..core.registry import get_embedder_cls
 from ..core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import (
     ExportConfig,
@@ -14,11 +14,10 @@ from ..core.types import (
     ModelConfig,
 )
 from ..core.validation import assert_supported
-from ..core.registry import get_embedder_cls
 from .checkpoint_utils import is_incomplete_combined_manifest
 from .manifest import combined_resume_manifest, load_json_dict
 from .model_defaults import resolve_sensor_for_model
-from .normalization import normalize_model_name, _resolve_embedding_api_backend
+from .normalization import _resolve_embedding_api_backend, normalize_model_name
 
 
 def normalize_export_layout(layout: str) -> ExportLayout:
@@ -27,10 +26,7 @@ def normalize_export_layout(layout: str) -> ExportLayout:
         return ExportLayout.COMBINED
     if layout_n in {"per_item", "dir", "directory"}:
         return ExportLayout.PER_ITEM
-    raise ModelError(
-        f"Unsupported export layout: {layout!r}. Supported: 'combined', 'per_item'."
-    )
-
+    raise ModelError(f"Unsupported export layout: {layout!r}. Supported: 'combined', 'per_item'.")
 
 def normalize_export_format(format_name: str) -> tuple[str, str]:
     fmt = str(format_name).strip().lower()
@@ -42,22 +38,19 @@ def normalize_export_format(format_name: str) -> tuple[str, str]:
         )
     return fmt, get_extension(fmt)
 
-
 def _resolve_export_batch_target(
     *,
     n_spatials: int,
     ext: str,
-    out: Optional[str],
-    layout: Optional[str],
-    out_dir: Optional[str],
-    out_path: Optional[str],
-    names: Optional[List[str]],
+    out: str | None,
+    layout: str | None,
+    out_dir: str | None,
+    out_path: str | None,
+    names: list[str] | None,
 ) -> ExportTarget:
     if (out is not None) or (layout is not None):
         if out is None or layout is None:
-            raise ModelError(
-                "Provide both out and layout when using the decoupled output API."
-            )
+            raise ModelError("Provide both out and layout when using the decoupled output API.")
         if out_dir is not None or out_path is not None:
             raise ModelError("Use either out+layout or out_dir/out_path, not both.")
         layout_enum = normalize_export_layout(layout)
@@ -76,26 +69,21 @@ def _resolve_export_batch_target(
         return ExportTarget(layout=ExportLayout.COMBINED, out_file=out_file)
 
     assert out_dir is not None
-    point_names = (
-        names if names is not None else [f"p{i:05d}" for i in range(n_spatials)]
-    )
+    point_names = names if names is not None else [f"p{i:05d}" for i in range(n_spatials)]
     if len(point_names) != n_spatials:
         raise ModelError("names must have the same length as spatials.")
-    return ExportTarget(
-        layout=ExportLayout.PER_ITEM, out_dir=out_dir, names=point_names
-    )
-
+    return ExportTarget(layout=ExportLayout.PER_ITEM, out_dir=out_dir, names=point_names)
 
 def normalize_export_target(
     *,
     n_spatials: int,
     ext: str,
-    target: Optional[ExportTarget],
-    out: Optional[str],
-    layout: Optional[str],
-    out_dir: Optional[str],
-    out_path: Optional[str],
-    names: Optional[List[str]],
+    target: ExportTarget | None,
+    out: str | None,
+    layout: str | None,
+    out_dir: str | None,
+    out_path: str | None,
+    names: list[str] | None,
 ) -> ExportTarget:
     if target is not None:
         if not isinstance(target, ExportTarget):
@@ -107,11 +95,7 @@ def normalize_export_target(
         if target.layout == ExportLayout.COMBINED:
             if not target.out_file:
                 raise ModelError("ExportTarget.COMBINED requires out_file.")
-            out_file = (
-                target.out_file
-                if target.out_file.endswith(ext)
-                else (target.out_file + ext)
-            )
+            out_file = target.out_file if target.out_file.endswith(ext) else (target.out_file + ext)
             return ExportTarget.combined(out_file)
         if target.layout == ExportLayout.PER_ITEM:
             if not target.out_dir:
@@ -136,17 +120,16 @@ def normalize_export_target(
         names=names,
     )
 
-
 def normalize_export_config(
     *,
-    config: Optional[ExportConfig],
+    config: ExportConfig | None,
     format: str,
     save_inputs: bool,
     save_embeddings: bool,
     save_manifest: bool,
     fail_on_bad_input: bool,
     chunk_size: int,
-    infer_batch_size: Optional[int],
+    infer_batch_size: int | None,
     num_workers: int,
     continue_on_error: bool,
     max_retries: int,
@@ -155,7 +138,7 @@ def normalize_export_config(
     writer_workers: int,
     resume: bool,
     show_progress: bool,
-    input_prep: Optional[InputPrepSpec | str],
+    input_prep: InputPrepSpec | str | None,
 ) -> ExportConfig:
     default_cfg = ExportConfig()
     legacy_config_used = any(
@@ -207,39 +190,34 @@ def normalize_export_config(
         input_prep=input_prep,
     )
 
-
 def resolve_export_model_configs(
     *,
-    models: List[str | ExportModelRequest],
+    models: list[str | ExportModelRequest],
     backend_n: str,
-    temporal: Optional[TemporalSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
-    sensor: Optional[SensorSpec],
-    modality: Optional[str],
-    per_model_sensors: Optional[Dict[str, SensorSpec]],
-    per_model_modalities: Optional[Dict[str, str]],
-) -> tuple[List[ModelConfig], Dict[str, str]]:
+    sensor: SensorSpec | None,
+    modality: str | None,
+    per_model_sensors: dict[str, SensorSpec] | None,
+    per_model_modalities: dict[str, str] | None,
+) -> tuple[list[ModelConfig], dict[str, str]]:
     if not isinstance(models, list) or len(models) == 0:
-        raise ModelError(
-            "models must be a non-empty List[str] or List[ExportModelRequest]."
-        )
+        raise ModelError("models must be a non-empty list[str] or list[ExportModelRequest].")
 
     per_model_sensors = per_model_sensors or {}
     per_model_modalities = per_model_modalities or {}
 
-    requests: List[ExportModelRequest] = []
+    requests: list[ExportModelRequest] = []
     for item in models:
         if isinstance(item, ExportModelRequest):
             requests.append(item)
         elif isinstance(item, str):
             requests.append(ExportModelRequest(name=item))
         else:
-            raise ModelError(
-                "models entries must be strings or ExportModelRequest instances."
-            )
+            raise ModelError("models entries must be strings or ExportModelRequest instances.")
 
-    model_configs: List[ModelConfig] = []
-    resolved_backend: Dict[str, str] = {}
+    model_configs: list[ModelConfig] = []
+    resolved_backend: dict[str, str] = {}
     for req in requests:
         model_name = req.name
         model_n = normalize_model_name(model_name)
@@ -248,13 +226,11 @@ def resolve_export_model_configs(
         cls = get_embedder_cls(model_n)
         try:
             emb_check = cls()
-            assert_supported(
-                emb_check, backend=eff_backend, output=output, temporal=temporal
-            )
+            assert_supported(emb_check, backend=eff_backend, output=output, temporal=temporal)
             desc = emb_check.describe() or {}
         except ModelError:
             raise
-        except Exception:
+        except Exception as _e:
             desc = {}
 
         modality_eff = req.modality
@@ -281,17 +257,16 @@ def resolve_export_model_configs(
 
     return model_configs, resolved_backend
 
-
 def maybe_return_completed_combined_resume(
     *,
     target: ExportTarget,
     config: ExportConfig,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
     backend: str,
     device: str,
-) -> Optional[Dict[str, object]]:
+) -> dict[str, object] | None:
     if target.layout != ExportLayout.COMBINED or not config.resume or not target.out_file:
         return None
     if not os.path.exists(target.out_file):

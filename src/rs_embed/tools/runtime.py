@@ -9,10 +9,11 @@ from __future__ import annotations
 
 import inspect
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from threading import RLock
-from typing import Any, Callable, Dict, List, Optional, Tuple, TypeVar
+from typing import Any, TypeVar
 
 import numpy as np
 
@@ -35,28 +36,25 @@ from .output import normalize_embedding_output
 
 _T = TypeVar("_T")
 
-
 @dataclass(frozen=True)
 class _EmbeddingRequestContext:
     model_n: str
     backend_n: str
     device: str
-    sensor_eff: Optional[SensorSpec]
-    input_prep: Optional[Any]
+    sensor_eff: SensorSpec | None
+    input_prep: Any | None
     input_prep_resolved: Any
     embedder: Any
     lock: Any
 
-
 @lru_cache(maxsize=32)
-def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: Tuple):
+def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple):
     """Return (embedder instance, instance lock)."""
     cls = get_embedder_cls(model)
     emb = cls()
     return emb, RLock()
 
-
-def sensor_key(sensor: Optional[SensorSpec]) -> Tuple:
+def sensor_key(sensor: SensorSpec | None) -> tuple:
     if sensor is None:
         return ("__none__",)
     return (
@@ -74,7 +72,6 @@ def sensor_key(sensor: Optional[SensorSpec]) -> Tuple:
         getattr(sensor, "check_save_dir", None),
     )
 
-
 def _overrides_base_method(embedder: Any, method_name: str) -> bool:
     """Return True when *embedder* overrides *method_name* from EmbedderBase."""
     fn = getattr(type(embedder), method_name, None)
@@ -84,16 +81,13 @@ def _overrides_base_method(embedder: Any, method_name: str) -> bool:
 
     return fn is not getattr(EmbedderBase, method_name, None)
 
-
 def supports_batch_api(embedder: Any) -> bool:
     """Return True when embedder overrides EmbedderBase.get_embeddings_batch."""
     return _overrides_base_method(embedder, "get_embeddings_batch")
 
-
 def supports_prefetched_batch_api(embedder: Any) -> bool:
     """Return True when embedder overrides batch-from-inputs fast path."""
     return _overrides_base_method(embedder, "get_embeddings_batch_from_inputs")
-
 
 @lru_cache(maxsize=128)
 def embedder_accepts_input_chw(embedder_cls: type) -> bool:
@@ -102,25 +96,24 @@ def embedder_accepts_input_chw(embedder_cls: type) -> bool:
         return False
     try:
         sig = inspect.signature(fn)
-    except Exception:
+    except Exception as _e:
         return False
     if "input_chw" in sig.parameters:
         return True
     return any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values())
 
-
 def call_embedder_get_embedding(
     *,
     embedder: Any,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
-    sensor: Optional[SensorSpec],
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec | None,
     output: OutputSpec,
     backend: str,
     device: str,
-    input_chw: Optional[np.ndarray] = None,
+    input_chw: np.ndarray | None = None,
 ) -> Embedding:
-    kwargs: Dict[str, Any] = {
+    kwargs: dict[str, Any] = {
         "spatial": spatial,
         "temporal": temporal,
         "sensor": sensor,
@@ -133,7 +126,6 @@ def call_embedder_get_embedding(
     out = embedder.get_embedding(**kwargs)
     return normalize_embedding_output(emb=out, output=output)
 
-
 def run_with_retry(
     fn: Callable[[], _T],
     *,
@@ -143,12 +135,11 @@ def run_with_retry(
     """Run a callable with bounded retries and optional exponential backoff."""
     tries = max(0, int(retries))
     backoff = max(0.0, float(backoff_s))
-    last_err: Optional[Exception] = None
+    last_err: Exception | None = None
     for attempt in range(tries + 1):
         try:
             return fn()
         except Exception as e:  # pragma: no cover - exercised by call-sites
-            last_err = e
             if attempt >= tries:
                 raise
             if backoff > 0:
@@ -156,14 +147,12 @@ def run_with_retry(
     # Loop always returns on success or raises on last attempt; this is unreachable.
     raise AssertionError("unreachable")
 
-
 def _create_default_gee_provider() -> ProviderBase:
     return get_provider("gee", auto_auth=True)
 
-
 def provider_factory_for_backend(
     backend: str,
-) -> Optional[Callable[[], ProviderBase]]:
+) -> Callable[[], ProviderBase] | None:
     b = normalize_backend_name(backend)
     if b == "auto":
         b = default_provider_backend_name() or "gee"
@@ -173,23 +162,20 @@ def provider_factory_for_backend(
         return _create_default_gee_provider
     return lambda: get_provider(b)
 
-
 def _prepare_embedding_request_context(
     *,
     model: str,
-    temporal: Optional[TemporalSpec],
-    sensor: Optional[SensorSpec],
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec | None,
     output: OutputSpec,
     backend: str,
     device: str,
-    input_prep: Optional[Any],
+    input_prep: Any | None,
 ) -> _EmbeddingRequestContext:
     from .tiling import _resolve_input_prep_spec
 
     model_n = normalize_model_name(model)
-    backend_n = _resolve_embedding_api_backend(
-        model_n, normalize_backend_name(backend)
-    )
+    backend_n = _resolve_embedding_api_backend(model_n, normalize_backend_name(backend))
     device_n = normalize_device_name(device)
     input_prep_resolved = _resolve_input_prep_spec(input_prep)
 
@@ -212,17 +198,16 @@ def _prepare_embedding_request_context(
         lock=lock,
     )
 
-
 def fetch_api_side_inputs(
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
     backend_n: str,
-    sensor_eff: Optional[SensorSpec],
+    sensor_eff: SensorSpec | None,
     input_prep_resolved: Any,
     embedder: Any,
     model_n: str,
-) -> Optional[List[np.ndarray]]:
+) -> list[np.ndarray] | None:
     mode = str(getattr(input_prep_resolved, "mode", "resize")).strip().lower()
     use_api_side_input_prep = mode in {"tile", "auto"}
     if not use_api_side_input_prep:
@@ -262,15 +247,14 @@ def fetch_api_side_inputs(
         for spatial in spatials
     ]
 
-
 def run_embedding_request(
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
-    sensor: Optional[SensorSpec],
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec | None,
     output: OutputSpec,
     ctx: _EmbeddingRequestContext,
-) -> List[Embedding]:
+) -> list[Embedding]:
     from .tiling import _call_embedder_get_embedding_with_input_prep
 
     prefetched_inputs = fetch_api_side_inputs(
@@ -283,8 +267,8 @@ def run_embedding_request(
         model_n=ctx.model_n,
     )
     if prefetched_inputs is not None:
-        out: List[Embedding] = []
-        for spatial, raw in zip(spatials, prefetched_inputs):
+        out: list[Embedding] = []
+        for spatial, raw in zip(spatials, prefetched_inputs, strict=False):
             with ctx.lock:
                 emb = _call_embedder_get_embedding_with_input_prep(
                     embedder=ctx.embedder,

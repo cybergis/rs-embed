@@ -28,9 +28,7 @@ def test_resolve_agrifm_ckpt_uses_local_env_path(monkeypatch, tmp_path):
     monkeypatch.setenv("RS_EMBED_AGRIFM_CKPT", str(p))
 
     def _should_not_be_called(**_kw):
-        raise AssertionError(
-            "auto-download should not be called when RS_EMBED_AGRIFM_CKPT is set"
-        )
+        raise AssertionError("auto-download should not be called when RS_EMBED_AGRIFM_CKPT is set")
 
     monkeypatch.setattr(ag, "_download_agrifm_ckpt", _should_not_be_called)
     assert ag._resolve_ckpt_path() == os.path.expanduser(str(p))

@@ -19,9 +19,7 @@ from rs_embed.providers.gee import GEEProvider, _resolve_band_aliases
 
 
 def test_s2_rgb_aliases():
-    result = _resolve_band_aliases(
-        "COPERNICUS/S2_SR_HARMONIZED", ("RED", "GREEN", "BLUE")
-    )
+    result = _resolve_band_aliases("COPERNICUS/S2_SR_HARMONIZED", ("RED", "GREEN", "BLUE"))
     assert result == ("B4", "B3", "B2")
 
 
@@ -36,9 +34,7 @@ def test_s2_swir_aliases():
 
 
 def test_s2_red_edge_aliases():
-    result = _resolve_band_aliases(
-        "COPERNICUS/S2_SR_HARMONIZED", ("RE1", "RE2", "RE3", "RE4")
-    )
+    result = _resolve_band_aliases("COPERNICUS/S2_SR_HARMONIZED", ("RE1", "RE2", "RE3", "RE4"))
     assert result == ("B5", "B6", "B7", "B8A")
 
 
@@ -104,9 +100,7 @@ def test_empty_bands():
 
 
 def test_alias_case_insensitive():
-    result = _resolve_band_aliases(
-        "COPERNICUS/S2_SR_HARMONIZED", ("red", "green", "blue")
-    )
+    result = _resolve_band_aliases("COPERNICUS/S2_SR_HARMONIZED", ("red", "green", "blue"))
     assert result == ("B4", "B3", "B2")
 
 
@@ -139,9 +133,7 @@ def test_build_image_empty_collection_raises_clear_error(monkeypatch):
     monkeypatch.setitem(sys.modules, "ee", fake_ee)
 
     provider = GEEProvider(auto_auth=False)
-    sensor = SensorSpec(
-        collection="COPERNICUS/S2_SR_HARMONIZED", bands=("B4",), cloudy_pct=None
-    )
+    sensor = SensorSpec(collection="COPERNICUS/S2_SR_HARMONIZED", bands=("B4",), cloudy_pct=None)
     temporal = TemporalSpec.range("2024-01-01", "2024-02-01")
 
     with pytest.raises(ProviderError, match="No images found"):
@@ -170,9 +162,7 @@ def test_fetch_array_chw_empty_sample_props_raises_clear_error(monkeypatch):
         def sampleRectangle(self, *, region, defaultValue):  # noqa: ARG002
             return _FakeRect()
 
-    fake_ee = types.SimpleNamespace(
-        Projection=lambda *_args, **_kwargs: _FakeProjection()
-    )
+    fake_ee = types.SimpleNamespace(Projection=lambda *_args, **_kwargs: _FakeProjection())
     monkeypatch.setitem(sys.modules, "ee", fake_ee)
 
     provider = GEEProvider(auto_auth=False)

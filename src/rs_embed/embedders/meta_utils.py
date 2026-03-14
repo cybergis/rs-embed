@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, is_dataclass
 from datetime import datetime
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 from ..core.errors import ModelError
 from ..core.specs import SensorSpec, TemporalSpec
@@ -11,10 +11,9 @@ from ..core.specs import SensorSpec, TemporalSpec
 # Temporal helpers
 # ---------------------------------------------------------------------------
 
-
 def temporal_to_range(
-    temporal: Optional[TemporalSpec],
-    default: Tuple[str, str] = ("2022-06-01", "2022-09-01"),
+    temporal: TemporalSpec | None,
+    default: tuple[str, str] = ("2022-06-01", "2022-09-01"),
 ) -> TemporalSpec:
     """
     Normalize TemporalSpec to a start/end range.
@@ -32,8 +31,7 @@ def temporal_to_range(
         return TemporalSpec.range(f"{y}-01-01", f"{y + 1}-01-01")
     raise ModelError(f"Unknown TemporalSpec mode: {temporal.mode}")
 
-
-def temporal_to_dict(temporal: Optional[TemporalSpec]) -> Dict[str, Any]:
+def temporal_to_dict(temporal: TemporalSpec | None) -> dict[str, Any]:
     """
     Convert TemporalSpec into a serializable dictionary.
     """
@@ -51,8 +49,7 @@ def temporal_to_dict(temporal: Optional[TemporalSpec]) -> Dict[str, Any]:
         }
     return {"mode": temporal.mode}
 
-
-def temporal_midpoint_str(temporal: Optional[TemporalSpec]) -> Optional[str]:
+def temporal_midpoint_str(temporal: TemporalSpec | None) -> str | None:
     """
     Return an ISO date string representing the midpoint of the temporal window.
     For yearly mode, returns the mid-year date.
@@ -69,15 +66,13 @@ def temporal_midpoint_str(temporal: Optional[TemporalSpec]) -> Optional[str]:
         return f"{int(temporal.year)}-07-01"
     return None
 
-
 # ---------------------------------------------------------------------------
 # Meta builder
 # ---------------------------------------------------------------------------
 
-
 def _sensor_to_dict(
-    sensor: Optional[SensorSpec | Dict[str, Any]],
-) -> Optional[Dict[str, Any]]:
+    sensor: SensorSpec | dict[str, Any] | None,
+) -> dict[str, Any] | None:
     if sensor is None:
         return None
     if is_dataclass(sensor):
@@ -89,19 +84,18 @@ def _sensor_to_dict(
     except Exception as exc:
         raise ModelError(f"Unsupported sensor meta type: {type(sensor)}") from exc
 
-
 def build_meta(
     *,
     model: str,
     kind: str,
     backend: str,
-    source: Optional[str],
-    sensor: Optional[SensorSpec | Dict[str, Any]],
-    temporal: Optional[TemporalSpec],
-    image_size: Optional[int],
-    input_time: Optional[str] = None,
-    extra: Optional[Dict[str, Any]] = None,
-) -> Dict[str, Any]:
+    source: str | None,
+    sensor: SensorSpec | dict[str, Any] | None,
+    temporal: TemporalSpec | None,
+    image_size: int | None,
+    input_time: str | None = None,
+    extra: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """
     Construct a consistent meta dictionary across embedders.
     Standard keys:
@@ -110,7 +104,7 @@ def build_meta(
     t_dict = temporal_to_dict(temporal)
     resolved_input_time = input_time or temporal_midpoint_str(temporal)
 
-    meta: Dict[str, Any] = {
+    meta: dict[str, Any] = {
         "model": model,
         "type": kind,
         "backend": backend,

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Lightweight, on-the-fly input image inspection.
 
 This module is intentionally dependency-light (numpy only by default).
@@ -20,8 +18,10 @@ When enabled, we return a report dict that can be attached into embedding meta.
 If `check_raise` is enabled and issues are detected, embedders may raise.
 """
 
+from __future__ import annotations
+
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -30,13 +30,11 @@ def _env_flag(name: str, default: str = "0") -> bool:
     v = os.environ.get(name, default)
     return str(v).strip().lower() not in ("", "0", "false", "no", "off")
 
-
 def checks_enabled(sensor: Any = None) -> bool:
     """Return True if input checks should run."""
     if _env_flag("RS_EMBED_CHECK_INPUT", "0"):
         return True
     return bool(getattr(sensor, "check_input", False))
-
 
 def checks_should_raise(sensor: Any = None) -> bool:
     """Return True if embedders should raise on detected issues."""
@@ -44,37 +42,34 @@ def checks_should_raise(sensor: Any = None) -> bool:
         return _env_flag("RS_EMBED_CHECK_RAISE", "1")
     return bool(getattr(sensor, "check_raise", True))
 
-
-def checks_save_dir(sensor: Any = None) -> Optional[str]:
+def checks_save_dir(sensor: Any = None) -> str | None:
     """Optional directory to save quicklooks/stat dumps."""
     d = os.environ.get("RS_EMBED_CHECK_SAVE_DIR")
     if d:
         return str(d)
     return getattr(sensor, "check_save_dir", None)
 
-
-def _safe_float(x: Any) -> Optional[float]:
+def _safe_float(x: Any) -> float | None:
     try:
         if x is None:
             return None
         return float(x)
-    except Exception:
+    except Exception as _e:
         return None
-
 
 def inspect_chw(
     x_chw: np.ndarray,
     *,
     name: str = "input",
-    expected_channels: Optional[int] = None,
-    value_range: Optional[Tuple[float, float]] = None,
-    fill_value: Optional[float] = None,
+    expected_channels: int | None = None,
+    value_range: tuple[float, float] | None = None,
+    fill_value: float | None = None,
     max_pixels_for_full_stats: int = 1_500_000,
-    quantiles: Tuple[float, ...] = (0.01, 0.5, 0.99),
+    quantiles: tuple[float, ...] = (0.01, 0.5, 0.99),
     hist_bins: int = 32,
-    hist_clip_range: Optional[Tuple[float, float]] = None,
+    hist_clip_range: tuple[float, float] | None = None,
     max_bands_for_hist: int = 16,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Inspect a CHW numpy array and return a compact report.
 
     Parameters
@@ -91,7 +86,7 @@ def inspect_chw(
         To keep inspection cheap, if C*H*W exceeds this value we downsample
         (strided sampling) for per-band stats.
     """
-    report: Dict[str, Any] = {
+    report: dict[str, Any] = {
         "name": name,
         "ok": True,
         "issues": [],
@@ -107,17 +102,13 @@ def inspect_chw(
 
     if x_chw.ndim != 3:
         report["ok"] = False
-        report["issues"].append(
-            f"{name}: expected CHW with ndim=3, got ndim={x_chw.ndim}"
-        )
+        report["issues"].append(f"{name}: expected CHW with ndim=3, got ndim={x_chw.ndim}")
         return report
 
     c, h, w = (int(x_chw.shape[0]), int(x_chw.shape[1]), int(x_chw.shape[2]))
     if expected_channels is not None and c != int(expected_channels):
         report["ok"] = False
-        report["issues"].append(
-            f"{name}: channel mismatch (C={c}, expected {expected_channels})"
-        )
+        report["issues"].append(f"{name}: channel mismatch (C={c}, expected {expected_channels})")
 
     if h <= 0 or w <= 0:
         report["ok"] = False
@@ -141,9 +132,7 @@ def inspect_chw(
     if finite_frac < 0.999:
         report["ok"] = False
         n_bad = int((~finite).sum())
-        report["issues"].append(
-            f"{name}: contains NaN/Inf (count≈{n_bad} on sampled data)"
-        )
+        report["issues"].append(f"{name}: contains NaN/Inf (count≈{n_bad} on sampled data)")
 
     # Replace non-finite for stats
     xf2 = np.where(finite, xf, np.nan)
@@ -166,17 +155,14 @@ def inspect_chw(
         try:
             qv = np.nanquantile(xf2, qs, axis=(1, 2))  # [Q, C]
             report["band_quantiles"] = {
-                f"p{int(round(q * 100)):02d}": [float(v) for v in qv[i]]
-                for i, q in enumerate(qs)
+                f"p{int(round(q * 100)):02d}": [float(v) for v in qv[i]] for i, q in enumerate(qs)
             }
             for qi, q in enumerate(qs):
                 key = f"band_p{int(round(q * 100)):02d}"
                 report[key] = [float(v) for v in qv[qi]]
             report["quantiles"] = list(qs)
         except Exception as e:
-            report.setdefault("warnings", []).append(
-                f"{name}: failed to compute quantiles: {e!r}"
-            )
+            report.setdefault("warnings", []).append(f"{name}: failed to compute quantiles: {e!r}")
 
     # Histograms (computed once; export both legacy and compact fields).
     if int(hist_bins) > 0 and c <= int(max_bands_for_hist):
@@ -256,17 +242,16 @@ def inspect_chw(
 
     return report
 
-
 def maybe_inspect_chw(
     x_chw: np.ndarray,
     *,
     sensor: Any = None,
     name: str = "input",
-    expected_channels: Optional[int] = None,
-    value_range: Optional[Tuple[float, float]] = None,
-    fill_value: Optional[float] = None,
-    meta: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    expected_channels: int | None = None,
+    value_range: tuple[float, float] | None = None,
+    fill_value: float | None = None,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Run inspect_chw if enabled; optionally attach report to meta.
 
     Returns the report dict (or None if checks disabled).
@@ -299,7 +284,6 @@ def maybe_inspect_chw(
 
     return report
 
-
 def save_quicklook_rgb(
     x_chw: np.ndarray,
     *,
@@ -307,12 +291,13 @@ def save_quicklook_rgb(
     bands=(0, 1, 2),
     pmin: float = 2.0,
     pmax: float = 98.0,
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
 ) -> None:
     import os
-    import numpy as np
+
     import matplotlib.pyplot as plt
+    import numpy as np
 
     if x_chw.ndim != 3:
         raise ValueError(f"Expected CHW, got {x_chw.shape}")

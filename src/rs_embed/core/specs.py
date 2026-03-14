@@ -1,7 +1,8 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
 from .errors import SpecError
 
@@ -43,7 +44,6 @@ class BBox:
         if not (self.minlon < self.maxlon and self.minlat < self.maxlat):
             raise SpecError("Invalid bbox bounds.")
 
-
 @dataclass(frozen=True)
 class PointBuffer:
     """Point-centered spatial request with radius in meters.
@@ -78,9 +78,7 @@ class PointBuffer:
         if self.buffer_m <= 0:
             raise SpecError("buffer_m must be positive.")
 
-
 SpatialSpec = BBox | PointBuffer
-
 
 @dataclass(frozen=True)
 class TemporalSpec:
@@ -99,12 +97,12 @@ class TemporalSpec:
     """
 
     mode: Literal["year", "range"]
-    year: Optional[int] = None
-    start: Optional[str] = None
-    end: Optional[str] = None
+    year: int | None = None
+    start: str | None = None
+    end: str | None = None
 
     @staticmethod
-    def year(y: int) -> "TemporalSpec":
+    def year(y: int) -> TemporalSpec:
         """Build a year-mode temporal spec.
 
         Parameters
@@ -120,7 +118,7 @@ class TemporalSpec:
         return TemporalSpec(mode="year", year=y)
 
     @staticmethod
-    def range(start: str, end: str) -> "TemporalSpec":
+    def range(start: str, end: str) -> TemporalSpec:
         """Build a range-mode temporal spec.
 
         Parameters
@@ -161,14 +159,11 @@ class TemporalSpec:
                 start_d = date.fromisoformat(str(self.start))
                 end_d = date.fromisoformat(str(self.end))
             except Exception as e:
-                raise SpecError(
-                    "TemporalSpec.range expects ISO dates 'YYYY-MM-DD'."
-                ) from e
+                raise SpecError("TemporalSpec.range expects ISO dates 'YYYY-MM-DD'.") from e
             if start_d >= end_d:
                 raise SpecError("TemporalSpec.range requires start < end.")
         else:
             raise SpecError(f"Unknown TemporalSpec mode: {self.mode}")
-
 
 @dataclass(frozen=True)
 class SensorSpec:
@@ -205,13 +200,13 @@ class SensorSpec:
     """
 
     collection: str
-    bands: Tuple[str, ...]
+    bands: tuple[str, ...]
     scale_m: int = 10
     cloudy_pct: int = 30
     fill_value: float = 0.0
     composite: Literal["median", "mosaic"] = "median"
-    modality: Optional[str] = None
-    orbit: Optional[str] = None
+    modality: str | None = None
+    orbit: str | None = None
     use_float_linear: bool = True
 
     # Optional: on-the-fly input inspection for GEE downloads.
@@ -219,8 +214,7 @@ class SensorSpec:
     # (and optionally raise if issues are detected).
     check_input: bool = False
     check_raise: bool = True
-    check_save_dir: Optional[str] = None
-
+    check_save_dir: str | None = None
 
 @dataclass(frozen=True)
 class OutputSpec:
@@ -251,7 +245,7 @@ class OutputSpec:
         scale_m: int = 10,
         *,
         grid_orientation: Literal["north_up", "native"] = "north_up",
-    ) -> "OutputSpec":
+    ) -> OutputSpec:
         """Build a grid-output specification.
 
         Parameters
@@ -266,12 +260,10 @@ class OutputSpec:
         OutputSpec
             Output specification with ``mode="grid"``.
         """
-        return OutputSpec(
-            mode="grid", scale_m=scale_m, grid_orientation=grid_orientation
-        )
+        return OutputSpec(mode="grid", scale_m=scale_m, grid_orientation=grid_orientation)
 
     @staticmethod
-    def pooled(pooling: Literal["mean", "max"] = "mean") -> "OutputSpec":
+    def pooled(pooling: Literal["mean", "max"] = "mean") -> OutputSpec:
         """Build a pooled-output specification.
 
         Parameters
@@ -284,10 +276,7 @@ class OutputSpec:
         OutputSpec
             Output specification with ``mode="pooled"``.
         """
-        return OutputSpec(
-            mode="pooled", scale_m=10, pooling=pooling, grid_orientation="north_up"
-        )
-
+        return OutputSpec(mode="pooled", scale_m=10, pooling=pooling, grid_orientation="north_up")
 
 @dataclass(frozen=True)
 class InputPrepSpec:
@@ -308,19 +297,19 @@ class InputPrepSpec:
     """
 
     mode: Literal["auto", "resize", "tile"] = "resize"
-    tile_size: Optional[int] = None
-    tile_stride: Optional[int] = None
+    tile_size: int | None = None
+    tile_stride: int | None = None
     max_tiles: int = 9
     pad_edges: bool = True
 
     @staticmethod
     def auto(
         *,
-        tile_size: Optional[int] = None,
-        tile_stride: Optional[int] = None,
+        tile_size: int | None = None,
+        tile_stride: int | None = None,
         max_tiles: int = 9,
         pad_edges: bool = True,
-    ) -> "InputPrepSpec":
+    ) -> InputPrepSpec:
         """Build an adaptive preprocessing policy.
 
         Parameters
@@ -348,7 +337,7 @@ class InputPrepSpec:
         )
 
     @staticmethod
-    def resize() -> "InputPrepSpec":
+    def resize() -> InputPrepSpec:
         """Build a resize-only preprocessing policy.
 
         Returns
@@ -361,11 +350,11 @@ class InputPrepSpec:
     @staticmethod
     def tile(
         *,
-        tile_size: Optional[int] = None,
-        tile_stride: Optional[int] = None,
+        tile_size: int | None = None,
+        tile_stride: int | None = None,
         max_tiles: int = 9,
         pad_edges: bool = True,
-    ) -> "InputPrepSpec":
+    ) -> InputPrepSpec:
         """Build a tile-based preprocessing policy.
 
         Parameters

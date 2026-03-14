@@ -21,9 +21,7 @@ def _install_fake_rshf_remoteclip(monkeypatch, messages):
     monkeypatch.setitem(sys.modules, "rshf", rshf_mod)
     monkeypatch.setitem(sys.modules, "rshf.remoteclip", remoteclip_mod)
 
-    monkeypatch.setattr(
-        rc, "_ensure_hf_weights", lambda *a, **k: ("/nonexistent/local_dir", None)
-    )
+    monkeypatch.setattr(rc, "_ensure_hf_weights", lambda *a, **k: ("/nonexistent/local_dir", None))
     monkeypatch.setattr(
         rc,
         "_assert_weights_loaded",
@@ -35,9 +33,7 @@ def _install_fake_rshf_remoteclip(monkeypatch, messages):
 def test_remoteclip_suppresses_known_misleading_weight_warning(monkeypatch, caplog):
     rc = _install_fake_rshf_remoteclip(
         monkeypatch,
-        [
-            "No pretrained weights loaded for model 'ViT-B-32'. Model initialized randomly."
-        ],
+        ["No pretrained weights loaded for model 'ViT-B-32'. Model initialized randomly."],
     )
 
     with caplog.at_level(logging.WARNING):

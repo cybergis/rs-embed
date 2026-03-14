@@ -1,28 +1,28 @@
 from __future__ import annotations
 
 import os
+from collections.abc import Callable, Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, Optional, Tuple, List, Iterable, Callable
+from typing import Any
 
 import numpy as np
 
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
+from ..core.registry import register
 from ..core.specs import (
     BBox,
+    OutputSpec,
     PointBuffer,
+    SensorSpec,
     SpatialSpec,
     TemporalSpec,
-    SensorSpec,
-    OutputSpec,
 )
 from .base import EmbedderBase
 
 _EMBED_DIMS = (64, 128, 256, 512, 768, 1024)
 
-
-def _buffer_m_to_deg(lat: float, buffer_m: float) -> Tuple[float, float]:
+def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
     import math
 
     m_per_deg_lat = 111_320.0
@@ -30,7 +30,6 @@ def _buffer_m_to_deg(lat: float, buffer_m: float) -> Tuple[float, float]:
     cos_lat = max(1e-6, math.cos(math.radians(lat)))
     dlon = buffer_m / (m_per_deg_lat * cos_lat)
     return dlon, dlat
-
 
 def _to_bbox_4326(spatial: SpatialSpec) -> BBox:
     if isinstance(spatial, BBox):
@@ -48,10 +47,7 @@ def _to_bbox_4326(spatial: SpatialSpec) -> BBox:
         )
     raise ModelError(f"Unsupported SpatialSpec: {type(spatial)}")
 
-
-def _year_from_temporal(
-    temporal: Optional[TemporalSpec], default_year: int = 2021
-) -> int:
+def _year_from_temporal(temporal: TemporalSpec | None, default_year: int = 2021) -> int:
     if temporal is None:
         return default_year
     temporal.validate()
@@ -61,14 +57,12 @@ def _year_from_temporal(
         return int(str(temporal.start)[:4])
     return default_year
 
-
 def _pool(chw: np.ndarray, pooling: str) -> np.ndarray:
     if pooling == "mean":
         return chw.mean(axis=(1, 2)).astype(np.float32)
     if pooling == "max":
         return chw.max(axis=(1, 2)).astype(np.float32)
     raise ModelError(f"Unknown pooling: {pooling}")
-
 
 def _to_hwc(arr: np.ndarray) -> np.ndarray:
     a = np.asarray(arr)
@@ -82,8 +76,7 @@ def _to_hwc(arr: np.ndarray) -> np.ndarray:
         return np.moveaxis(a, 0, -1).astype(np.float32)
     raise ModelError(f"Unexpected embedding shape: {a.shape}")
 
-
-def _infer_hwc_shape(arr: np.ndarray) -> Tuple[int, int, int]:
+def _infer_hwc_shape(arr: np.ndarray) -> tuple[int, int, int]:
     """Return (h, w, d) without materializing a float32 copy."""
     a = np.asarray(arr)
     if a.ndim != 3:
@@ -94,7 +87,6 @@ def _infer_hwc_shape(arr: np.ndarray) -> Tuple[int, int, int]:
         return int(a.shape[1]), int(a.shape[2]), int(a.shape[0])
     raise ModelError(f"Unexpected embedding shape: {a.shape}")
 
-
 def _assert_north_up(transform):
     # 期望：无旋转 b=d=0，且 a>0, e<0
     b = float(getattr(transform, "b", 0.0))
@@ -104,8 +96,7 @@ def _assert_north_up(transform):
             "Tile transform has rotation/shear; mosaic+crop requires north-up (b=d=0)."
         )
 
-
-def _tile_bounds(transform, w: int, h: int) -> Tuple[float, float, float, float]:
+def _tile_bounds(transform, w: int, h: int) -> tuple[float, float, float, float]:
     # (left, bottom, right, top) in tile CRS
     x0, y0 = transform * (0, 0)  # top-left
     x1, y1 = transform * (w, h)  # bottom-right (for north-up, y decreases)
@@ -113,10 +104,7 @@ def _tile_bounds(transform, w: int, h: int) -> Tuple[float, float, float, float]
     bottom, top = (min(y0, y1), max(y0, y1))
     return left, bottom, right, top
 
-
-def _reproject_bbox_4326_to(
-    tile_crs_str: str, bbox: BBox
-) -> Tuple[float, float, float, float]:
+def _reproject_bbox_4326_to(tile_crs_str: str, bbox: BBox) -> tuple[float, float, float, float]:
     # returns (xmin, ymin, xmax, ymax) in tile CRS
     if str(tile_crs_str).upper() in ("EPSG:4326", "WGS84", "CRS:84"):
         return bbox.minlon, bbox.minlat, bbox.maxlon, bbox.maxlat
@@ -124,22 +112,17 @@ def _reproject_bbox_4326_to(
     try:
         from pyproj import Transformer
     except Exception as e:
-        raise ModelError(
-            f"Need pyproj for CRS={tile_crs_str}. Install: pip install pyproj"
-        ) from e
+        raise ModelError(f"Need pyproj for CRS={tile_crs_str}. Install: pip install pyproj") from e
 
     tfm = Transformer.from_crs("EPSG:4326", str(tile_crs_str), always_xy=True)
     x0, y0 = tfm.transform(bbox.minlon, bbox.minlat)
     x1, y1 = tfm.transform(bbox.maxlon, bbox.maxlat)
     return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
 
-
 def _mosaic_and_crop_strict_roi(
-    tiles_rows_factory: Callable[
-        [], Iterable[Tuple[int, float, float, np.ndarray, Any, Any]]
-    ],
+    tiles_rows_factory: Callable[[], Iterable[tuple[int, float, float, np.ndarray, Any, Any]]],
     bbox_4326: BBox,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     """
     tiles_rows_factory: returns iterable of
       (year, tile_lon, tile_lat, embedding_array, crs, transform)
@@ -153,7 +136,7 @@ def _mosaic_and_crop_strict_roi(
     left = bottom = float("inf")
     right = top = float("-inf")
 
-    for year, tlon, tlat, emb, crs, transform in tiles_rows_factory():
+    for _year, _tlon, _tlat, emb, crs, transform in tiles_rows_factory():
         _assert_north_up(transform)
         h, w, d = _infer_hwc_shape(emb)
         t_left, t_bottom, t_right, t_top = _tile_bounds(transform, w, h)
@@ -167,17 +150,12 @@ def _mosaic_and_crop_strict_roi(
         else:
             if crs != crs0:
                 raise ModelError("Tiles have different CRS; cannot mosaic.")
-            if (
-                abs(float(transform.a) - a0) > 1e-12
-                or abs(float(transform.e) - e0) > 1e-12
-            ):
+            if abs(float(transform.a) - a0) > 1e-12 or abs(float(transform.e) - e0) > 1e-12:
                 raise ModelError(
                     "Tiles have different resolution; cannot mosaic without resampling."
                 )
             if int(d) != int(d0):
-                raise ModelError(
-                    "Tiles have different embedding dimensions; cannot mosaic."
-                )
+                raise ModelError("Tiles have different embedding dimensions; cannot mosaic.")
 
         left = min(left, t_left)
         bottom = min(bottom, t_bottom)
@@ -224,7 +202,7 @@ def _mosaic_and_crop_strict_roi(
     cropped_hwc = np.zeros((crop_h, crop_w, int(d0)), dtype=np.float32)
 
     # Pass 2: paste tiles directly into crop canvas (avoid full mosaic allocation).
-    for year, tlon, tlat, emb, crs, transform in tiles_rows_factory():
+    for _year, _tlon, _tlat, emb, _crs, transform in tiles_rows_factory():
         _assert_north_up(transform)
         hwc = _to_hwc(emb)
         h, w, _ = hwc.shape
@@ -261,12 +239,11 @@ def _mosaic_and_crop_strict_roi(
     }
     return chw, meta
 
-
 @register("tessera")
 class TesseraEmbedder(EmbedderBase):
     DEFAULT_BATCH_WORKERS = 4
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "precomputed",
             "backend": ["auto"],
@@ -286,7 +263,7 @@ class TesseraEmbedder(EmbedderBase):
     def __init__(self) -> None:
         super().__init__()
         # Cache GeoTessera instances per cache_dir to avoid repeated index scans.
-        self._gt_cache: Dict[str, Any] = {}
+        self._gt_cache: dict[str, Any] = {}
 
     def _get_gt(self, cache_dir: str):
         if cache_dir not in self._gt_cache:
@@ -312,12 +289,12 @@ class TesseraEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         backend_n = str(backend).strip().lower()
         if backend_n == "local":
@@ -329,11 +306,7 @@ class TesseraEmbedder(EmbedderBase):
         year = _year_from_temporal(temporal, default_year=2021)
 
         cache_dir = os.environ.get("RS_EMBED_TESSERA_CACHE")
-        if (
-            sensor
-            and isinstance(sensor.collection, str)
-            and sensor.collection.startswith("cache:")
-        ):
+        if sensor and isinstance(sensor.collection, str) and sensor.collection.startswith("cache:"):
             cache_dir = sensor.collection.replace("cache:", "", 1).strip() or cache_dir
 
         # GeoTessera cache keyed by cache_dir path (empty string for default).
@@ -370,9 +343,7 @@ class TesseraEmbedder(EmbedderBase):
             try:
                 import xarray as xr
             except Exception as e:
-                raise ModelError(
-                    "grid output requires xarray: pip install xarray"
-                ) from e
+                raise ModelError("grid output requires xarray: pip install xarray") from e
 
             da = xr.DataArray(
                 chw,
@@ -393,8 +364,8 @@ class TesseraEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -403,9 +374,9 @@ class TesseraEmbedder(EmbedderBase):
             return []
 
         n = len(spatials)
-        out: List[Optional[Embedding]] = [None] * n
+        out: list[Embedding | None] = [None] * n
 
-        def _one(i: int, sp: SpatialSpec) -> Tuple[int, Embedding]:
+        def _one(i: int, sp: SpatialSpec) -> tuple[int, Embedding]:
             emb = self.get_embedding(
                 spatial=sp,
                 temporal=temporal,

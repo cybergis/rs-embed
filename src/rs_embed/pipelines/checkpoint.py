@@ -6,17 +6,14 @@ write/load operations for per-item and combined layouts.
 
 from __future__ import annotations
 
-import json
 import os
-from typing import Any, Callable, Dict, List, Optional, Set, Tuple
+from typing import Any
 
 import numpy as np
 
-from ..tools.serialization import jsonable, sensor_cache_key, utc_ts
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..core.types import ExportConfig, ExportLayout, ExportTarget
+from ..core.types import ExportConfig, ExportTarget
 from ..tools.checkpoint_utils import (
-    drop_model_arrays,
     drop_prefetch_checkpoint_arrays,
     is_incomplete_combined_manifest,
     load_saved_arrays,
@@ -25,9 +22,12 @@ from ..tools.checkpoint_utils import (
 )
 from ..tools.manifest import (
     load_json_dict as _load_json_dict,
+)
+from ..tools.manifest import (
     summarize_status,
 )
-from ..writers import get_extension, write_arrays
+from ..tools.serialization import jsonable, sensor_cache_key, utc_ts
+from ..writers import write_arrays
 from .runner import run_with_retry
 
 
@@ -56,12 +56,12 @@ class CheckpointManager:
         *,
         point_index: int,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
+        temporal: TemporalSpec | None,
         output: OutputSpec,
         backend: str,
         device: str,
         out_file: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         from ..tools.manifest import point_resume_manifest
 
         return point_resume_manifest(
@@ -79,13 +79,13 @@ class CheckpointManager:
         *,
         point_index: int,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
+        temporal: TemporalSpec | None,
         output: OutputSpec,
         backend: str,
         device: str,
         stage: str,
         error: Exception,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         from ..tools.manifest import point_failure_manifest
 
         return point_failure_manifest(
@@ -104,20 +104,20 @@ class CheckpointManager:
     def combined_init_state(
         self,
         *,
-        spatials: List[SpatialSpec],
-        temporal: Optional[TemporalSpec],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
         output: OutputSpec,
         backend: str,
         device: str,
-        models: List[str],
+        models: list[str],
         out_path: str,
-    ) -> Tuple[Dict[str, np.ndarray], Dict[str, Any], List[str], str]:
+    ) -> tuple[dict[str, np.ndarray], dict[str, Any], list[str], str]:
         """Initialize combined export state, handling resume if applicable."""
         fmt = self.config.format
         resume = self.config.resume
 
-        arrays: Dict[str, np.ndarray] = {}
-        manifest: Dict[str, Any] = {
+        arrays: dict[str, np.ndarray] = {}
+        manifest: dict[str, Any] = {
             "created_at": utc_ts(),
             "status": "running",
             "stage": "init",
@@ -131,19 +131,19 @@ class CheckpointManager:
             "spatials": [jsonable(s) for s in spatials],
         }
         json_path = os.path.splitext(out_path)[0] + ".json"
-        completed_models: Set[str] = set()
+        completed_models: set[str] = set()
 
         if bool(resume) and os.path.exists(out_path):
             resume_manifest = _load_json_dict(json_path)
             if is_incomplete_combined_manifest(resume_manifest):
                 try:
                     arrays = load_saved_arrays(fmt=fmt, out_path=out_path)
-                except Exception:
+                except Exception as _e:
                     arrays = {}
                 if resume_manifest is not None:
                     manifest = dict(resume_manifest)
                     old_models = manifest.get("models")
-                    kept: List[Dict[str, Any]] = []
+                    kept: list[dict[str, Any]] = []
                     if isinstance(old_models, list):
                         for m in models:
                             for item in old_models:
@@ -177,13 +177,13 @@ class CheckpointManager:
     def combined_write_checkpoint(
         self,
         *,
-        manifest: Dict[str, Any],
-        arrays: Dict[str, np.ndarray],
+        manifest: dict[str, Any],
+        arrays: dict[str, np.ndarray],
         stage: str,
         final: bool,
         out_path: str,
         json_path: str,
-    ) -> Dict[str, Any]:
+    ) -> dict[str, Any]:
         """Write a combined checkpoint to disk."""
         cfg = self.config
         manifest["stage"] = stage
@@ -208,7 +208,7 @@ class CheckpointManager:
             try:
                 if os.path.exists(json_path):
                     os.remove(json_path)
-            except Exception:
+            except Exception as _e:
                 pass
         return written
 
@@ -216,25 +216,23 @@ class CheckpointManager:
 
     @staticmethod
     def restore_prefetch_cache(
-        manifest: Dict[str, Any], arrays: Dict[str, np.ndarray]
-    ) -> Dict[Tuple[int, str], np.ndarray]:
-        cache: Dict[Tuple[int, str], np.ndarray] = {}
+        manifest: dict[str, Any], arrays: dict[str, np.ndarray]
+    ) -> dict[tuple[int, str], np.ndarray]:
+        cache: dict[tuple[int, str], np.ndarray] = {}
         prefetch_meta = manifest.get("prefetch")
         if isinstance(prefetch_meta, dict):
             cache.update(
-                restore_prefetch_checkpoint_cache(
-                    arrays=arrays, prefetch_meta=prefetch_meta
-                )
+                restore_prefetch_checkpoint_cache(arrays=arrays, prefetch_meta=prefetch_meta)
             )
         return cache
 
     @staticmethod
     def store_prefetch_arrays(
         *,
-        arrays: Dict[str, np.ndarray],
-        manifest: Dict[str, Any],
-        sensor_by_key: Dict[str, SensorSpec],
-        inputs_cache: Dict[Tuple[int, str], np.ndarray],
+        arrays: dict[str, np.ndarray],
+        manifest: dict[str, Any],
+        sensor_by_key: dict[str, SensorSpec],
+        inputs_cache: dict[tuple[int, str], np.ndarray],
         n_items: int,
     ) -> None:
         store_prefetch_checkpoint_arrays(
@@ -246,15 +244,15 @@ class CheckpointManager:
         )
 
     @staticmethod
-    def drop_prefetch_arrays(arrays: Dict[str, np.ndarray]) -> None:
+    def drop_prefetch_arrays(arrays: dict[str, np.ndarray]) -> None:
         drop_prefetch_checkpoint_arrays(arrays)
 
     @staticmethod
     def collect_input_refs(
-        manifest: Dict[str, Any],
-        resolved_sensor: Dict[str, Optional[SensorSpec]],
-    ) -> Dict[str, Dict[str, Any]]:
-        refs: Dict[str, Dict[str, Any]] = {}
+        manifest: dict[str, Any],
+        resolved_sensor: dict[str, SensorSpec | None],
+    ) -> dict[str, dict[str, Any]]:
+        refs: dict[str, dict[str, Any]] = {}
         for prev in manifest.get("models", []):
             if not isinstance(prev, dict):
                 continue
@@ -274,8 +272,8 @@ class CheckpointManager:
 
     @staticmethod
     def summarize_models(
-        entries: List[Dict[str, Any]],
-    ) -> Tuple[str, Dict[str, int]]:
+        entries: list[dict[str, Any]],
+    ) -> tuple[str, dict[str, int]]:
         n_failed = sum(1 for x in entries if x.get("status") == "failed")
         n_partial = sum(1 for x in entries if x.get("status") == "partial")
         status = summarize_status(entries)

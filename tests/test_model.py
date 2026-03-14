@@ -250,7 +250,9 @@ def test_model_describe_returns_dict():
 
 def test_model_describe_graceful_on_exception(monkeypatch):
     m = Model("mock_model")
-    monkeypatch.setattr(m._embedder, "describe", lambda: (_ for _ in ()).throw(RuntimeError("oops")))
+    monkeypatch.setattr(
+        m._embedder, "describe", lambda: (_ for _ in ()).throw(RuntimeError("oops"))
+    )
     assert m.describe() == {}
 
 

@@ -1,20 +1,22 @@
 from __future__ import annotations
+
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
 
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
-from ..providers import ProviderBase
+from ..core.registry import register
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from .base import EmbedderBase
 from .meta_utils import build_meta, temporal_midpoint_str
 from .runtime_utils import (
     fetch_collection_patch_all_bands_chw as _fetch_collection_patch_all_bands_chw,
+)
+from .runtime_utils import (
     is_provider_backend,
 )
 
@@ -29,7 +31,7 @@ class GSEAnnualEmbedder(EmbedderBase):
     DEFAULT_BATCH_WORKERS = 4
     _allow_auto_backend = False
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "precomputed",
             "backend": ["provider"],
@@ -53,12 +55,12 @@ class GSEAnnualEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=False):
             raise ModelError("gse_annual only supports a provider backend in v0.1.")
@@ -103,9 +105,7 @@ class GSEAnnualEmbedder(EmbedderBase):
             elif output.pooling == "max":
                 vec = emb_chw.max(axis=(-2, -1)).astype(np.float32)
             else:
-                raise ModelError(
-                    f"Unknown pooling='{output.pooling}' (expected 'mean' or 'max')."
-                )
+                raise ModelError(f"Unknown pooling='{output.pooling}' (expected 'mean' or 'max').")
             return Embedding(data=vec, meta={**meta, "pooling": output.pooling})
 
         # grid: return xarray with dims (band,y,x)
@@ -122,8 +122,8 @@ class GSEAnnualEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -134,9 +134,9 @@ class GSEAnnualEmbedder(EmbedderBase):
             raise ModelError("gse_annual only supports a provider backend in v0.1.")
 
         n = len(spatials)
-        out: List[Optional[Embedding]] = [None] * n
+        out: list[Embedding | None] = [None] * n
 
-        def _one(i: int, sp: SpatialSpec) -> Tuple[int, Embedding]:
+        def _one(i: int, sp: SpatialSpec) -> tuple[int, Embedding]:
             emb = self.get_embedding(
                 spatial=sp,
                 temporal=temporal,

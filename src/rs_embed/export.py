@@ -1,12 +1,12 @@
-from __future__ import annotations
-
 """High-level export entrypoints.
 
 `export_npz` is a convenience wrapper around `rs_embed.api.export_batch`.
 """
 
+from __future__ import annotations
+
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 
@@ -14,24 +14,24 @@ from .core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, Temp
 def export_npz(
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
-    models: List[str],
+    temporal: TemporalSpec | None,
+    models: list[str],
     out_path: str,
     backend: str = "auto",
     device: str = "auto",
     output: OutputSpec = OutputSpec.pooled(),
-    sensor: Optional[SensorSpec] = None,
-    per_model_sensors: Optional[Dict[str, SensorSpec]] = None,
+    sensor: SensorSpec | None = None,
+    per_model_sensors: dict[str, SensorSpec] | None = None,
     save_inputs: bool = True,
     save_embeddings: bool = True,
     save_manifest: bool = True,
     fail_on_bad_input: bool = False,
-    infer_batch_size: Optional[int] = None,
+    infer_batch_size: int | None = None,
     continue_on_error: bool = False,
     max_retries: int = 0,
     retry_backoff_s: float = 0.0,
-    input_prep: Optional[InputPrepSpec | str] = "resize",
-) -> Dict[str, Any]:
+    input_prep: InputPrepSpec | str | None = "resize",
+) -> dict[str, Any]:
     """Export inputs + embeddings for one spatial query to a single `.npz`."""
     from .api import export_batch as _api_export_batch
 

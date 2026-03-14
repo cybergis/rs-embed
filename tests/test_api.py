@@ -36,9 +36,7 @@ class _MockEmbedder(EmbedderBase):
         input_chw=None,
     ):
         vec = np.arange(8, dtype=np.float32)
-        return Embedding(
-            data=vec, meta={"model": self.model_name, "output": output.mode}
-        )
+        return Embedding(data=vec, meta={"model": self.model_name, "output": output.mode})
 
 
 class _MockPrecomputedLocalEmbedder(EmbedderBase):
@@ -144,9 +142,7 @@ def test_get_embedding_returns_embedding():
 def test_get_embedding_output_modes():
     from rs_embed.api import get_embedding
 
-    emb_pooled = get_embedding(
-        "mock_model", spatial=_SPATIAL, output=OutputSpec.pooled()
-    )
+    emb_pooled = get_embedding("mock_model", spatial=_SPATIAL, output=OutputSpec.pooled())
     assert emb_pooled.meta["output"] == "pooled"
 
     emb_grid = get_embedding("mock_model", spatial=_SPATIAL, output=OutputSpec.grid())
@@ -272,9 +268,7 @@ def test_validate_specs_invalid_spatial_type():
     from rs_embed.api import _validate_specs
 
     with pytest.raises(ModelError, match="Invalid spatial spec type"):
-        _validate_specs(
-            spatial="not-spatial", temporal=None, output=OutputSpec.pooled()
-        )
+        _validate_specs(spatial="not-spatial", temporal=None, output=OutputSpec.pooled())
 
 
 def test_validate_specs_bad_output_mode():
@@ -364,9 +358,7 @@ def test_assert_supported_wrong_backend():
     emb = _BackendLimitedEmbedder()
     emb.model_name = "limited"
     with pytest.raises(ModelError, match="does not support backend"):
-        _assert_supported(
-            emb, backend="local", output=OutputSpec.pooled(), temporal=None
-        )
+        _assert_supported(emb, backend="local", output=OutputSpec.pooled(), temporal=None)
 
 
 def test_assert_supported_wrong_output():
@@ -450,9 +442,7 @@ def test_export_batch_empty_spatials():
     from rs_embed.api import export_batch
 
     with pytest.raises(ModelError, match="non-empty"):
-        export_batch(
-            spatials=[], temporal=_TEMPORAL, models=["mock_model"], out_dir="/tmp"
-        )
+        export_batch(spatials=[], temporal=_TEMPORAL, models=["mock_model"], out_dir="/tmp")
 
 
 def test_export_batch_rejects_non_list_spatials():
@@ -468,9 +458,7 @@ def test_export_batch_rejects_non_list_spatials():
         )
 
     with pytest.raises(ModelError, match="non-empty"):
-        export_batch(
-            spatials=_SPATIAL, temporal=_TEMPORAL, models=["mock_model"], out_dir="/tmp"
-        )
+        export_batch(spatials=_SPATIAL, temporal=_TEMPORAL, models=["mock_model"], out_dir="/tmp")
 
 
 def test_export_batch_empty_models():
@@ -504,9 +492,7 @@ def test_export_batch_decoupled_output_api_requires_out_and_layout():
     from rs_embed.api import export_batch
 
     with pytest.raises(ModelError, match="both out and layout"):
-        export_batch(
-            spatials=[_SPATIAL], temporal=_TEMPORAL, models=["mock_model"], out="/tmp/x"
-        )
+        export_batch(spatials=[_SPATIAL], temporal=_TEMPORAL, models=["mock_model"], out="/tmp/x")
 
 
 def test_export_batch_decoupled_output_api_disallows_mixing_with_legacy_args():
@@ -668,9 +654,7 @@ def test_public_list_models_can_include_aliases():
     assert "remoteclip_s2rgb" in models
 
 
-def test_export_batch_infer_batch_size_is_independent_from_chunk_size(
-    monkeypatch, tmp_path
-):
+def test_export_batch_infer_batch_size_is_independent_from_chunk_size(monkeypatch, tmp_path):
     from rs_embed.api import export_batch
 
     captured = {}
@@ -725,9 +709,7 @@ def test_export_batch_modality_resolves_model_sensor(monkeypatch, tmp_path):
     assert sensor.collection == "COPERNICUS/S1_GRD_FLOAT"
 
 
-def test_export_batch_export_model_request_applies_per_model_overrides(
-    monkeypatch, tmp_path
-):
+def test_export_batch_export_model_request_applies_per_model_overrides(monkeypatch, tmp_path):
     from rs_embed.api import export_batch
 
     registry.register("mock_multi")(_MockMultimodalEmbedder)

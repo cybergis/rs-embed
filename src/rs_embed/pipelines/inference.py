@@ -6,12 +6,12 @@ single-point or batch mode, with consistent retry/error shaping.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, NamedTuple, Optional, Set, Tuple
+from collections.abc import Callable
+from typing import Any, NamedTuple
 
 import numpy as np
 
 from ..core.embedding import Embedding
-from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ModelConfig, TaskResult
 from ..tools.output import normalize_embedding_output
@@ -22,6 +22,7 @@ from ..tools.runtime import (
     supports_batch_api,
     supports_prefetched_batch_api,
 )
+from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..tools.tiling import (
     _call_embedder_get_embedding_with_input_prep,
     _resolve_input_prep_spec,
@@ -35,9 +36,8 @@ class _ModelContext(NamedTuple):
     embedder: Any
     lock: Any
     sensor_k: str
-    skey: Optional[str]
+    skey: str | None
     needs_provider_input: bool
-
 
 class InferenceEngine:
     """Manages embedder lifecycle and dispatches single/batch inference.
@@ -79,10 +79,10 @@ class InferenceEngine:
         embedder: Any,
         lock: Any,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         backend: str,
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         """Run a single embedding with retry + optional tiling."""
         cfg = self.config
@@ -105,16 +105,14 @@ class InferenceEngine:
     def _embedding_to_result(self, emb: Embedding) -> TaskResult:
         """Normalize an embedding and convert it into a successful TaskResult."""
         emb_n = normalize_embedding_output(emb=emb, output=self.output)
-        return TaskResult.ok(
-            embedding_to_numpy(emb_n), jsonable(getattr(emb_n, "meta", None))
-        )
+        return TaskResult.ok(embedding_to_numpy(emb_n), jsonable(getattr(emb_n, "meta", None)))
 
     def _resolve_model_context(
         self,
         *,
         name: str,
         backend: str,
-        sensor: Optional[SensorSpec],
+        sensor: SensorSpec | None,
         is_precomputed: bool,
         provider_enabled: bool,
     ) -> _ModelContext:
@@ -143,11 +141,11 @@ class InferenceEngine:
         *,
         embedder: Any,
         needs_provider_input: bool,
-        sensor: Optional[SensorSpec],
-        skey: Optional[str],
+        sensor: SensorSpec | None,
+        skey: str | None,
         prefer_batch: bool,
         allow_nonresize: bool,
-    ) -> Tuple[bool, bool]:
+    ) -> tuple[bool, bool]:
         """Return tier-1/2 batch eligibility booleans for current model context."""
         can_batch_prefetched = (
             prefer_batch
@@ -168,10 +166,10 @@ class InferenceEngine:
     def _run_batch_prefetched(
         self,
         *,
-        idxs: List[int],
-        spatials: List[SpatialSpec],
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        idxs: list[int],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         embedder: Any,
         lock: Any,
         backend: str,
@@ -181,12 +179,12 @@ class InferenceEngine:
         on_done: Callable[[int], None],
         use_lock: bool,
         model_name: str,
-    ) -> Tuple[Dict[int, TaskResult], bool]:
+    ) -> tuple[dict[int, TaskResult], bool]:
         """Run tier-1 batch inference using prefetched provider inputs."""
         cfg = self.config
-        out: Dict[int, TaskResult] = {}
+        out: dict[int, TaskResult] = {}
         try:
-            ready: List[Tuple[int, SpatialSpec, np.ndarray]] = []
+            ready: list[tuple[int, SpatialSpec, np.ndarray]] = []
             for i in idxs:
                 try:
                     inp = get_input_fn(i)
@@ -241,16 +239,16 @@ class InferenceEngine:
                     out[sub_idx[j]] = self._embedding_to_result(emb)
                     on_done(sub_idx[j])
             return out, True
-        except Exception:
+        except Exception as _e:
             return out, False
 
     def _run_batch_no_input(
         self,
         *,
-        idxs: List[int],
-        spatials: List[SpatialSpec],
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        idxs: list[int],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         embedder: Any,
         lock: Any,
         backend: str,
@@ -258,10 +256,10 @@ class InferenceEngine:
         on_done: Callable[[int], None],
         use_lock: bool,
         model_name: str,
-    ) -> Tuple[Dict[int, TaskResult], bool]:
+    ) -> tuple[dict[int, TaskResult], bool]:
         """Run tier-2 batch inference that does not require provider inputs."""
         cfg = self.config
-        out: Dict[int, TaskResult] = {}
+        out: dict[int, TaskResult] = {}
         try:
             for start in range(0, len(idxs), batch_size):
                 sub_idx = idxs[start : start + batch_size]
@@ -301,20 +299,20 @@ class InferenceEngine:
                     out[sub_idx[j]] = self._embedding_to_result(emb)
                     on_done(sub_idx[j])
             return out, True
-        except Exception:
+        except Exception as _e:
             return out, False
 
     def _run_single_fallback(
         self,
         *,
-        idxs: List[int],
-        already_done: Set[int],
+        idxs: list[int],
+        already_done: set[int],
         infer_one_fn: Callable[[int], Embedding],
         continue_on_error: bool,
         on_done: Callable[[int], None],
-    ) -> Dict[int, TaskResult]:
+    ) -> dict[int, TaskResult]:
         """Run tier-3 single-item fallback for unfinished indices."""
-        out: Dict[int, TaskResult] = {}
+        out: dict[int, TaskResult] = {}
         for i in idxs:
             if i in already_done:
                 continue
@@ -333,19 +331,19 @@ class InferenceEngine:
     def infer_chunk(
         self,
         *,
-        idxs: List[int],
-        spatials: List[SpatialSpec],
-        temporal: Optional[TemporalSpec],
-        models: List[ModelConfig],
-        prefetch_cache: Dict[Tuple[int, str], np.ndarray],
-        prefetch_errors: Dict[Tuple[int, str], str],
-        model_progress_cb: Optional[Any] = None,
-    ) -> Dict[Tuple[int, str], TaskResult]:
+        idxs: list[int],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
+        models: list[ModelConfig],
+        prefetch_cache: dict[tuple[int, str], np.ndarray],
+        prefetch_errors: dict[tuple[int, str], str],
+        model_progress_cb: Any | None = None,
+    ) -> dict[tuple[int, str], TaskResult]:
         """Infer embeddings for a chunk of spatial indices across all models.
 
         Returns ``{(point_idx, model_name): TaskResult}``.
         """
-        out: Dict[Tuple[int, str], TaskResult] = {}
+        out: dict[tuple[int, str], TaskResult] = {}
         cfg = self.config
         infer_bs = cfg.effective_infer_batch_size
 
@@ -360,20 +358,14 @@ class InferenceEngine:
 
             def _get_input(i: int) -> np.ndarray:
                 if not ctx.needs_provider_input or ctx.skey is None:
-                    raise RuntimeError(
-                        f"Missing prefetched input for model={mc.name}, index={i}"
-                    )
+                    raise RuntimeError(f"Missing prefetched input for model={mc.name}, index={i}")
                 hit = prefetch_cache.get((i, ctx.skey))
                 if hit is not None:
                     return hit
                 err = prefetch_errors.get((i, ctx.skey))
                 if err:
-                    raise RuntimeError(
-                        f"Prefetch failed for model={mc.name}, index={i}: {err}"
-                    )
-                raise RuntimeError(
-                    f"Missing prefetched input for model={mc.name}, index={i}"
-                )
+                    raise RuntimeError(f"Prefetch failed for model={mc.name}, index={i}: {err}")
+                raise RuntimeError(f"Missing prefetched input for model={mc.name}, index={i}")
 
             def _single(i: int) -> Embedding:
                 inp = _get_input(i) if ctx.needs_provider_input else None
@@ -392,7 +384,7 @@ class InferenceEngine:
                     return
                 try:
                     model_progress_cb(mc.name)
-                except Exception:
+                except Exception as _e:
                     pass
 
             can_batch_prefetched, can_batch_no_input = self._evaluate_batch_capability(
@@ -458,7 +450,7 @@ class InferenceEngine:
     # ── embedder helpers ───────────────────────────────────────────
 
     @staticmethod
-    def resolve_embedder(model_config: ModelConfig, device: str) -> Tuple[Any, Any]:
+    def resolve_embedder(model_config: ModelConfig, device: str) -> tuple[Any, Any]:
         """Return ``(embedder, lock)`` for the given model config."""
         from ..tools.normalization import normalize_model_name
 
@@ -477,15 +469,15 @@ class InferenceEngine:
         *,
         model_name: str,
         model_backend: str,
-        sensor: Optional[SensorSpec],
+        sensor: SensorSpec | None,
         is_precomputed: bool,
         provider_enabled: bool,
-        spatials: List[SpatialSpec],
-        temporal: Optional[TemporalSpec],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
         inference_strategy: str,
         get_input_fn: Callable[[int, str, SensorSpec], np.ndarray],
-        progress_cb: Optional[Callable[[int], None]] = None,
-    ) -> Dict[int, TaskResult]:
+        progress_cb: Callable[[int], None] | None = None,
+    ) -> dict[int, TaskResult]:
         """Infer embeddings for ALL spatial indices for a single model.
 
         Used by combined export.  Returns ``{spatial_idx: TaskResult}``.
@@ -501,7 +493,7 @@ class InferenceEngine:
         cfg = self.config
         n = len(spatials)
         infer_bs = cfg.effective_infer_batch_size
-        out: Dict[int, TaskResult] = {}
+        out: dict[int, TaskResult] = {}
         done: set[int] = set()
 
         ctx = self._resolve_model_context(
@@ -611,9 +603,7 @@ class InferenceEngine:
 
         return out
 
-
 # ── module-level helpers ───────────────────────────────────────────
-
 
 def _device_has_gpu(device: str) -> bool:
     dev = str(device or "").strip().lower()
@@ -629,6 +619,6 @@ def _device_has_gpu(device: str) -> bool:
         mps = getattr(torch.backends, "mps", None)
         if mps is not None and bool(getattr(mps, "is_available", lambda: False)()):
             return True
-    except Exception:
+    except Exception as _e:
         return False
     return False

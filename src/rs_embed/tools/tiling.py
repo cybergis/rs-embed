@@ -9,7 +9,7 @@ from __future__ import annotations
 
 import math
 from dataclasses import dataclass
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -21,32 +21,34 @@ from ..core.specs import (
     OutputSpec,
     SensorSpec,
     SpatialSpec,
+    TemporalSpec,
 )
-from .serialization import embedding_to_numpy as _embedding_to_numpy
 from .output import normalize_embedding_output as _normalize_embedding_output
 from .runtime import (
     call_embedder_get_embedding as _call_embedder_get_embedding,
+)
+from .runtime import (
     embedder_accepts_input_chw as _embedder_accepts_input_chw,
+)
+from .runtime import (
     supports_prefetched_batch_api as _supports_prefetched_batch_api,
 )
-
+from .serialization import embedding_to_numpy as _embedding_to_numpy
 
 # ---------------------------------------------------------------------------
 # Resolved input-prep spec
 # ---------------------------------------------------------------------------
 
-
 @dataclass(frozen=True)
 class _ResolvedInputPrepSpec:
     mode: str
-    tile_size: Optional[int]
-    tile_stride: Optional[int]
+    tile_size: int | None
+    tile_stride: int | None
     max_tiles: int
     pad_edges: bool
 
-
 def _resolve_input_prep_spec(
-    input_prep: Optional[InputPrepSpec | str],
+    input_prep: InputPrepSpec | str | None,
 ) -> _ResolvedInputPrepSpec:
     if input_prep is None:
         spec: InputPrepSpec = InputPrepSpec.resize()
@@ -66,9 +68,7 @@ def _resolve_input_prep_spec(
         spec = input_prep
     mode = str(getattr(spec, "mode", "auto")).strip().lower()
     if mode not in {"auto", "resize", "tile"}:
-        raise ModelError(
-            f"input_prep.mode must be one of auto/resize/tile, got {mode!r}"
-        )
+        raise ModelError(f"input_prep.mode must be one of auto/resize/tile, got {mode!r}")
     tile_size = getattr(spec, "tile_size", None)
     tile_stride = getattr(spec, "tile_stride", None)
     max_tiles = int(getattr(spec, "max_tiles", 9))
@@ -89,16 +89,14 @@ def _resolve_input_prep_spec(
         pad_edges=pad_edges,
     )
 
-
 # ---------------------------------------------------------------------------
 # Tile geometry helpers
 # ---------------------------------------------------------------------------
 
-
-def _embedder_default_image_size(embedder: Any) -> Optional[int]:
+def _embedder_default_image_size(embedder: Any) -> int | None:
     try:
         desc = embedder.describe()
-    except Exception:
+    except Exception as _e:
         return None
     if not isinstance(desc, dict):
         return None
@@ -109,39 +107,26 @@ def _embedder_default_image_size(embedder: Any) -> Optional[int]:
     try:
         n = int(v)
         return n if n > 0 else None
-    except Exception:
+    except Exception as _e:
         return None
 
-
 def _estimate_tile_count(*, h: int, w: int, tile_size: int, stride: int) -> int:
-    ny = (
-        1
-        if h <= tile_size
-        else int(math.ceil((float(h) - float(tile_size)) / float(stride))) + 1
-    )
-    nx = (
-        1
-        if w <= tile_size
-        else int(math.ceil((float(w) - float(tile_size)) / float(stride))) + 1
-    )
+    ny = 1 if h <= tile_size else int(math.ceil((float(h) - float(tile_size)) / float(stride))) + 1
+    nx = 1 if w <= tile_size else int(math.ceil((float(w) - float(tile_size)) / float(stride))) + 1
     return max(1, ny) * max(1, nx)
 
-
-def _input_hw(x: np.ndarray) -> Tuple[int, int]:
+def _input_hw(x: np.ndarray) -> tuple[int, int]:
     if x.ndim not in (3, 4):
         raise ModelError(
             f"Tiling currently supports CHW or TCHW inputs only, got shape={getattr(x, 'shape', None)}"
         )
     return int(x.shape[-2]), int(x.shape[-1])
 
-
-def _tile_yx_starts(
-    *, h: int, w: int, tile_size: int, stride: int
-) -> Tuple[List[int], List[int]]:
-    def _starts_1d(dim: int) -> List[int]:
+def _tile_yx_starts(*, h: int, w: int, tile_size: int, stride: int) -> tuple[list[int], list[int]]:
+    def _starts_1d(dim: int) -> list[int]:
         if dim <= tile_size:
             return [0]
-        starts: List[int] = [0]
+        starts: list[int] = [0]
         pos = 0
         while True:
             nxt = int(pos + stride)
@@ -155,7 +140,6 @@ def _tile_yx_starts(
         return starts
 
     return _starts_1d(int(h)), _starts_1d(int(w))
-
 
 def _tile_subspatial(
     spatial: SpatialSpec,
@@ -180,16 +164,12 @@ def _tile_subspatial(
         lat_bot = float(spatial.maxlat) - (float(y1) / float(full_h)) * (
             float(spatial.maxlat) - float(spatial.minlat)
         )
-        return BBox(
-            minlon=lon0, minlat=lat_bot, maxlon=lon1, maxlat=lat_top, crs=spatial.crs
-        )
+        return BBox(minlon=lon0, minlat=lat_bot, maxlon=lon1, maxlat=lat_top, crs=spatial.crs)
     return spatial
-
 
 # ---------------------------------------------------------------------------
 # Tile slicing / padding
 # ---------------------------------------------------------------------------
-
 
 def _slice_and_pad_tile(
     x: np.ndarray,
@@ -199,7 +179,7 @@ def _slice_and_pad_tile(
     tile_size: int,
     pad_edges: bool,
     fill_value: float,
-) -> Tuple[np.ndarray, Dict[str, int]]:
+) -> tuple[np.ndarray, dict[str, int]]:
     h, w = _input_hw(x)
     y1 = min(h, y0 + tile_size)
     x1 = min(w, x0 + tile_size)
@@ -210,9 +190,7 @@ def _slice_and_pad_tile(
         pad_spec = [(0, 0)] * tile.ndim
         pad_spec[-2] = (0, max(0, tile_size - valid_h))
         pad_spec[-1] = (0, max(0, tile_size - valid_w))
-        tile = np.pad(
-            tile, pad_spec, mode="constant", constant_values=float(fill_value)
-        )
+        tile = np.pad(tile, pad_spec, mode="constant", constant_values=float(fill_value))
     return tile, {
         "y0": int(y0),
         "y1": int(y1),
@@ -222,11 +200,9 @@ def _slice_and_pad_tile(
         "valid_w": valid_w,
     }
 
-
 # ---------------------------------------------------------------------------
 # Tile aggregation (stitching)
 # ---------------------------------------------------------------------------
-
 
 def _crop_len_for_valid(valid: int, *, nominal: int, out_len: int) -> int:
     if nominal <= 0:
@@ -235,10 +211,9 @@ def _crop_len_for_valid(valid: int, *, nominal: int, out_len: int) -> int:
     n = int(round(ratio * float(out_len)))
     return max(1, min(int(out_len), n))
 
-
 def _midpoint_owned_ranges(
-    items: List[Tuple[int, int, int]],
-) -> Dict[int, Tuple[int, int]]:
+    items: list[tuple[int, int, int]],
+) -> dict[int, tuple[int, int]]:
     """Compute non-overlapping ownership intervals via midpoint cuts.
 
     items: [(id, start, end)] in input-pixel coordinates. Intervals must be ordered
@@ -247,8 +222,8 @@ def _midpoint_owned_ranges(
     if not items:
         return {}
     items_s = sorted(items, key=lambda t: (int(t[1]), int(t[2]), int(t[0])))
-    owned: Dict[int, Tuple[int, int]] = {}
-    prev_cut: Optional[int] = None
+    owned: dict[int, tuple[int, int]] = {}
+    prev_cut: int | None = None
     for i, (idx, start, end) in enumerate(items_s):
         s = int(start)
         e = int(end)
@@ -259,9 +234,7 @@ def _midpoint_owned_ranges(
         else:
             _, _pstart, pend = items_s[i - 1]
             if s > int(pend):
-                raise ModelError(
-                    "Tiled stitch found a gap between tiles; unsupported tile layout."
-                )
+                raise ModelError("Tiled stitch found a gap between tiles; unsupported tile layout.")
             own_s = int((int(pend) + s) // 2)
             if prev_cut is not None:
                 own_s = max(own_s, int(prev_cut))
@@ -270,9 +243,7 @@ def _midpoint_owned_ranges(
         else:
             _, nstart, _ = items_s[i + 1]
             if int(nstart) > e:
-                raise ModelError(
-                    "Tiled stitch found a gap between tiles; unsupported tile layout."
-                )
+                raise ModelError("Tiled stitch found a gap between tiles; unsupported tile layout.")
             own_e = int((e + int(nstart)) // 2)
         own_s = max(s, min(own_s, e))
         own_e = max(own_s, min(own_e, e))
@@ -282,14 +253,13 @@ def _midpoint_owned_ranges(
         prev_cut = own_e
     return owned
 
-
 def _map_input_subrange_to_feature(
     *,
     rel_start: int,
     rel_end: int,
     valid_len: int,
     out_len: int,
-) -> Tuple[int, int]:
+) -> tuple[int, int]:
     if valid_len <= 0 or out_len <= 0:
         return (0, 0)
     rs = max(0, min(int(valid_len), int(rel_start)))
@@ -302,15 +272,14 @@ def _map_input_subrange_to_feature(
     fe = max(fs + 1, min(int(out_len), fe))
     return (fs, fe)
 
-
 def _aggregate_tiled_embeddings(
     *,
-    embs: List[Embedding],
-    tile_meta: List[Dict[str, int]],
+    embs: list[Embedding],
+    tile_meta: list[dict[str, int]],
     output: OutputSpec,
     tile_size: int,
     stride: int,
-    prep_meta: Dict[str, Any],
+    prep_meta: dict[str, Any],
 ) -> Embedding:
     if not embs:
         raise ModelError("No tile embeddings produced.")
@@ -318,10 +287,7 @@ def _aggregate_tiled_embeddings(
     base_meta["input_prep"] = dict(prep_meta)
 
     if output.mode == "pooled":
-        vecs = [
-            np.asarray(_embedding_to_numpy(e), dtype=np.float32).reshape(-1)
-            for e in embs
-        ]
+        vecs = [np.asarray(_embedding_to_numpy(e), dtype=np.float32).reshape(-1) for e in embs]
         dims = {tuple(v.shape) for v in vecs}
         if len(dims) != 1:
             raise ModelError(
@@ -332,10 +298,7 @@ def _aggregate_tiled_embeddings(
             out_vec = np.max(mat, axis=0).astype(np.float32, copy=False)
         else:
             ws = np.asarray(
-                [
-                    max(1, int(m["valid_h"])) * max(1, int(m["valid_w"]))
-                    for m in tile_meta
-                ],
+                [max(1, int(m["valid_h"])) * max(1, int(m["valid_w"])) for m in tile_meta],
                 dtype=np.float32,
             )
             out_vec = (mat * ws[:, None]).sum(axis=0) / max(1.0, float(ws.sum()))
@@ -346,9 +309,7 @@ def _aggregate_tiled_embeddings(
     arrays = [np.asarray(_embedding_to_numpy(e), dtype=np.float32) for e in embs]
     for a in arrays:
         if a.ndim < 2:
-            raise ModelError(
-                f"Tiled grid merge expects arrays with ndim>=2, got shape={a.shape}"
-            )
+            raise ModelError(f"Tiled grid merge expects arrays with ndim>=2, got shape={a.shape}")
     gh = int(arrays[0].shape[-2])
     gw = int(arrays[0].shape[-1])
     lead_shape = tuple(int(v) for v in arrays[0].shape[:-2])
@@ -358,17 +319,15 @@ def _aggregate_tiled_embeddings(
             or int(a.shape[-2]) != gh
             or int(a.shape[-1]) != gw
         ):
-            raise ModelError(
-                "Tiled grid merge requires consistent per-tile output shapes."
-            )
+            raise ModelError("Tiled grid merge requires consistent per-tile output shapes.")
 
     nrows = max(int(m["row"]) for m in tile_meta) + 1
     ncols = max(int(m["col"]) for m in tile_meta) + 1
 
-    row_items: List[Tuple[int, int, int]] = []
-    col_items: List[Tuple[int, int, int]] = []
-    row_ref: Dict[int, Dict[str, int]] = {}
-    col_ref: Dict[int, Dict[str, int]] = {}
+    row_items: list[tuple[int, int, int]] = []
+    col_items: list[tuple[int, int, int]] = []
+    row_ref: dict[int, dict[str, int]] = {}
+    col_ref: dict[int, dict[str, int]] = {}
     for m in tile_meta:
         r = int(m["row"])
         c = int(m["col"])
@@ -394,8 +353,8 @@ def _aggregate_tiled_embeddings(
 
     row_heights = [0] * nrows
     col_widths = [0] * ncols
-    row_crop: Dict[int, Tuple[int, int]] = {}
-    col_crop: Dict[int, Tuple[int, int]] = {}
+    row_crop: dict[int, tuple[int, int]] = {}
+    col_crop: dict[int, tuple[int, int]] = {}
     for r in range(nrows):
         rr = row_ref.get(r)
         if rr is None:
@@ -437,7 +396,7 @@ def _aggregate_tiled_embeddings(
     for c in range(1, ncols):
         col_offsets[c] = col_offsets[c - 1] + col_widths[c - 1]
 
-    for arr, m in zip(arrays, tile_meta):
+    for arr, m in zip(arrays, tile_meta, strict=False):
         r = int(m["row"])
         c = int(m["col"])
         fy0, fy1 = row_crop[r]
@@ -456,18 +415,16 @@ def _aggregate_tiled_embeddings(
         base_meta["grid_hw"] = (int(out_h), int(out_w))
     return Embedding(data=out_arr, meta=base_meta)
 
-
 # ---------------------------------------------------------------------------
 # Tile-aware embedding dispatch
 # ---------------------------------------------------------------------------
-
 
 def _call_embedder_get_embedding_tiled(
     *,
     embedder: Any,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
-    sensor: Optional[SensorSpec],
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec | None,
     output: OutputSpec,
     backend: str,
     device: str,
@@ -518,9 +475,9 @@ def _call_embedder_get_embedding_tiled(
 
     ys, xs = _tile_yx_starts(h=h, w=w, tile_size=tile_size, stride=stride)
     fill_value = float(sensor.fill_value) if sensor is not None else 0.0
-    tiles: List[np.ndarray] = []
-    tile_meta: List[Dict[str, int]] = []
-    tile_spatials: List[SpatialSpec] = []
+    tiles: list[np.ndarray] = []
+    tile_meta: list[dict[str, int]] = []
+    tile_spatials: list[SpatialSpec] = []
     for r, y0 in enumerate(ys):
         for c, x0 in enumerate(xs):
             tile, meta = _slice_and_pad_tile(
@@ -574,10 +531,8 @@ def _call_embedder_get_embedding_tiled(
                 raise ModelError(
                     f"Tiled batch inference returned {len(tile_embs)} outputs for {len(tiles)} tiles."
                 )
-            tile_embs = [
-                _normalize_embedding_output(emb=e, output=output) for e in tile_embs
-            ]
-        except Exception:
+            tile_embs = [_normalize_embedding_output(emb=e, output=output) for e in tile_embs]
+        except Exception as _e:
             tile_embs = [
                 _call_embedder_get_embedding(
                     embedder=embedder,
@@ -606,7 +561,7 @@ def _call_embedder_get_embedding_tiled(
             for i in range(len(tiles))
         ]
 
-    prep_meta: Dict[str, Any] = {
+    prep_meta: dict[str, Any] = {
         "requested_mode": input_prep.mode,
         "resolved_mode": "tile",
         "tile_layout": "cover_shift",
@@ -626,18 +581,17 @@ def _call_embedder_get_embedding_tiled(
         prep_meta=prep_meta,
     )
 
-
 def _call_embedder_get_embedding_with_input_prep(
     *,
     embedder: Any,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
-    sensor: Optional[SensorSpec],
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec | None,
     output: OutputSpec,
     backend: str,
     device: str,
-    input_chw: Optional[np.ndarray],
-    input_prep: Optional[InputPrepSpec | str],
+    input_chw: np.ndarray | None,
+    input_prep: InputPrepSpec | str | None,
 ) -> Embedding:
     """Dispatch to resize (pass-through) or tiled embedding based on input_prep.
 

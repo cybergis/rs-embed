@@ -3,43 +3,39 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
-from ..providers.base import ProviderBase
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ._vit_mae_utils import (
+    base_meta,
+    ensure_torch,
+    fetch_s2_rgb_u8_from_provider,
+    pool_from_tokens,
+    resize_rgb_u8,
+    temporal_to_range,
+    tokens_to_grid_dhw,
+)
 from .base import EmbedderBase
 from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
 )
-
-from ._vit_mae_utils import (
-    fetch_s2_rgb_u8_from_provider,
-    resize_rgb_u8,
-    pool_from_tokens,
-    tokens_to_grid_dhw,
-    base_meta,
-    temporal_to_range,
-    ensure_torch,
-)
-
 
 _SATMAEPP_RGB_MEAN = (0.4182007312774658, 0.4214799106121063, 0.3991275727748871)
 _SATMAEPP_RGB_STD = (0.28774282336235046, 0.27541765570640564, 0.2764017581939697)
 
-
 def _truthy(v: str) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
-
 def _falsy(v: str) -> bool:
     return str(v).strip().lower() in {"0", "false", "no", "n", "off"}
-
 
 def _resolve_satmaepp_channel_order(model_id: str) -> str:
     """
@@ -66,13 +62,11 @@ def _resolve_satmaepp_channel_order(model_id: str) -> str:
         return "bgr"
     return "rgb"
 
-
 def _satmaepp_resize_short_side(image_size: int) -> int:
     crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
     return int(float(image_size) / crop_pct)
 
-
-def _satmaepp_preprocess_info(model_id: str, image_size: int) -> Dict[str, Any]:
+def _satmaepp_preprocess_info(model_id: str, image_size: int) -> dict[str, Any]:
     channel_order = _resolve_satmaepp_channel_order(model_id)
     resize_short = _satmaepp_resize_short_side(image_size)
     return {
@@ -84,9 +78,8 @@ def _satmaepp_preprocess_info(model_id: str, image_size: int) -> Dict[str, Any]:
         "center_crop": int(image_size),
     }
 
-
 def _satmaepp_preprocess_tensor_batch(
-    rgb_u8_batch: List[np.ndarray],
+    rgb_u8_batch: list[np.ndarray],
     *,
     image_size: int,
     channel_order: str,
@@ -110,20 +103,14 @@ def _satmaepp_preprocess_tensor_batch(
         [
             transforms.ToTensor(),
             transforms.Normalize(mean=_SATMAEPP_RGB_MEAN, std=_SATMAEPP_RGB_STD),
-            transforms.Resize(
-                resize_short, interpolation=transforms.InterpolationMode.BICUBIC
-            ),
+            transforms.Resize(resize_short, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.CenterCrop(image_size),
         ]
     )
 
     xs = []
     for i, rgb_u8 in enumerate(rgb_u8_batch):
-        if (
-            not isinstance(rgb_u8, np.ndarray)
-            or rgb_u8.ndim != 3
-            or int(rgb_u8.shape[2]) != 3
-        ):
+        if not isinstance(rgb_u8, np.ndarray) or rgb_u8.ndim != 3 or int(rgb_u8.shape[2]) != 3:
             raise ModelError(
                 f"SatMAE++ preprocessing expects uint8 HWC RGB arrays; got shape={getattr(rgb_u8, 'shape', None)} at index={i}."
             )
@@ -140,7 +127,6 @@ def _satmaepp_preprocess_tensor_batch(
         xs.append(x)
 
     return torch.stack(xs, dim=0)
-
 
 @lru_cache(maxsize=8)
 def _load_satmaepp_cached(model_id: str, dev: str):
@@ -160,19 +146,15 @@ def _load_satmaepp_cached(model_id: str, dev: str):
         )
     try:
         model = model.to(dev).eval()
-    except Exception:
+    except Exception as _e:
         pass
 
     meta = {"model_id": model_id, "device": dev, "in_chans": in_chans}
     return model, meta
 
-
 def _load_satmaepp(model_id: str, device: str = "auto"):
-    loaded, _dev = _load_cached_with_device(
-        _load_satmaepp_cached, device=device, model_id=model_id
-    )
+    loaded, _dev = _load_cached_with_device(_load_satmaepp_cached, device=device, model_id=model_id)
     return loaded
-
 
 def _satmaepp_forward_tokens(
     model,
@@ -193,15 +175,14 @@ def _satmaepp_forward_tokens(
         model_id=model_id,
     )[0]
 
-
 def _satmaepp_forward_tokens_batch(
     model,
-    rgb_u8_batch: List[np.ndarray],
+    rgb_u8_batch: list[np.ndarray],
     *,
     image_size: int,
     device: str,
     model_id: str,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     """
     Batch version of forward_encoder.
     Returns one [N,D] float32 token array per input image.
@@ -221,9 +202,7 @@ def _satmaepp_forward_tokens_batch(
 
     fe = getattr(model, "forward_encoder", None)
     if not callable(fe):
-        raise ModelError(
-            "SatMAE++ wrapper does not expose forward_encoder(). Update rshf."
-        )
+        raise ModelError("SatMAE++ wrapper does not expose forward_encoder(). Update rshf.")
 
     with torch.no_grad():
         out = fe(xb, mask_ratio=0.0)
@@ -235,7 +214,6 @@ def _satmaepp_forward_tokens_batch(
             )
         out_np = toks.detach().float().cpu().numpy().astype(np.float32)
         return [out_np[i] for i in range(out_np.shape[0])]
-
 
 @register("satmaepp")
 class SatMAEPPEmbedder(EmbedderBase):
@@ -253,7 +231,7 @@ class SatMAEPPEmbedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 32
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",
             "backend": ["provider"],
@@ -286,18 +264,12 @@ class SatMAEPPEmbedder(EmbedderBase):
         )
 
     def _resolve_fetch_workers(self, n_items: int) -> int:
-        v = int(
-            os.environ.get(
-                "RS_EMBED_SATMAEPP_FETCH_WORKERS", str(self.DEFAULT_FETCH_WORKERS)
-            )
-        )
+        v = int(os.environ.get("RS_EMBED_SATMAEPP_FETCH_WORKERS", str(self.DEFAULT_FETCH_WORKERS)))
         return max(1, min(int(n_items), v))
 
     def _resolve_infer_batch(self, dev: str) -> int:
         default_bs = (
-            self.DEFAULT_BATCH_CUDA
-            if str(dev).startswith("cuda")
-            else self.DEFAULT_BATCH_CPU
+            self.DEFAULT_BATCH_CUDA if str(dev).startswith("cuda") else self.DEFAULT_BATCH_CPU
         )
         v = int(os.environ.get("RS_EMBED_SATMAEPP_BATCH_SIZE", str(default_bs)))
         return max(1, v)
@@ -306,12 +278,12 @@ class SatMAEPPEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmaepp_rgb expects a provider backend (or 'auto').")
@@ -320,9 +292,7 @@ class SatMAEPPEmbedder(EmbedderBase):
             sensor = self._default_sensor()
 
         model_id = os.environ.get("RS_EMBED_SATMAEPP_ID", self.DEFAULT_MODEL_ID)
-        image_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_IMG", str(self.DEFAULT_IMAGE_SIZE))
-        )
+        image_size = int(os.environ.get("RS_EMBED_SATMAEPP_IMG", str(self.DEFAULT_IMAGE_SIZE)))
 
         t = temporal_to_range(temporal)
         # Fetch RGB patch (optionally reuse pre-fetched raw patch)
@@ -374,9 +344,7 @@ class SatMAEPPEmbedder(EmbedderBase):
 
         if output.mode == "pooled":
             vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-            meta.update(
-                {"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)}
-            )
+            meta.update({"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)})
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
@@ -392,9 +360,7 @@ class SatMAEPPEmbedder(EmbedderBase):
             try:
                 import xarray as xr
             except Exception as e:
-                raise ModelError(
-                    "grid output requires xarray. Install: pip install xarray"
-                ) from e
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
             da = xr.DataArray(
                 grid,
@@ -415,8 +381,8 @@ class SatMAEPPEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -430,16 +396,14 @@ class SatMAEPPEmbedder(EmbedderBase):
             sensor = self._default_sensor()
 
         model_id = os.environ.get("RS_EMBED_SATMAEPP_ID", self.DEFAULT_MODEL_ID)
-        image_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_IMG", str(self.DEFAULT_IMAGE_SIZE))
-        )
+        image_size = int(os.environ.get("RS_EMBED_SATMAEPP_IMG", str(self.DEFAULT_IMAGE_SIZE)))
         t = temporal_to_range(temporal)
 
         provider = self._get_provider(backend)
         n = len(spatials)
-        rgb_u8_all: List[Optional[np.ndarray]] = [None] * n
+        rgb_u8_all: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             rgb = fetch_s2_rgb_u8_from_provider(
                 spatial=sp,
                 temporal=t,
@@ -463,16 +427,14 @@ class SatMAEPPEmbedder(EmbedderBase):
 
         for i, x in enumerate(rgb_u8_all):
             if x is None:
-                raise ModelError(
-                    f"Missing fetched patch at index={i}; batch fetch failed."
-                )
+                raise ModelError(f"Missing fetched patch at index={i}; batch fetch failed.")
 
         model, wmeta = _load_satmaepp(model_id=model_id, device=device)
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
         pp_info = _satmaepp_preprocess_info(model_id=model_id, image_size=image_size)
 
-        out: List[Optional[Embedding]] = [None] * n
+        out: list[Embedding | None] = [None] * n
         want_grid = output.mode == "grid"
         xr_mod = None
         if want_grid:
@@ -481,9 +443,7 @@ class SatMAEPPEmbedder(EmbedderBase):
 
                 xr_mod = xr
             except Exception as e:
-                raise ModelError(
-                    "grid output requires xarray. Install: pip install xarray"
-                ) from e
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)
@@ -546,9 +506,7 @@ class SatMAEPPEmbedder(EmbedderBase):
                     raise ModelError(f"Unknown output mode: {output.mode}")
 
         if any(e is None for e in out):
-            raise ModelError(
-                "satmaepp_rgb batch inference produced incomplete outputs."
-            )
+            raise ModelError("satmaepp_rgb batch inference produced incomplete outputs.")
         return [e for e in out if e is not None]
 
     def get_embeddings_batch_from_inputs(
@@ -556,8 +514,8 @@ class SatMAEPPEmbedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -575,12 +533,10 @@ class SatMAEPPEmbedder(EmbedderBase):
             sensor = self._default_sensor()
 
         model_id = os.environ.get("RS_EMBED_SATMAEPP_ID", self.DEFAULT_MODEL_ID)
-        image_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_IMG", str(self.DEFAULT_IMAGE_SIZE))
-        )
+        image_size = int(os.environ.get("RS_EMBED_SATMAEPP_IMG", str(self.DEFAULT_IMAGE_SIZE)))
         t = temporal_to_range(temporal)
 
-        rgb_u8_all: List[np.ndarray] = []
+        rgb_u8_all: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or input_chw.shape[0] != 3:
                 raise ModelError(
@@ -596,7 +552,7 @@ class SatMAEPPEmbedder(EmbedderBase):
         infer_bs = self._resolve_infer_batch(str(dev))
         pp_info = _satmaepp_preprocess_info(model_id=model_id, image_size=image_size)
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         want_grid = output.mode == "grid"
         xr_mod = None
         if want_grid:
@@ -605,9 +561,7 @@ class SatMAEPPEmbedder(EmbedderBase):
 
                 xr_mod = xr
             except Exception as e:
-                raise ModelError(
-                    "grid output requires xarray. Install: pip install xarray"
-                ) from e
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
@@ -672,7 +626,5 @@ class SatMAEPPEmbedder(EmbedderBase):
                     raise ModelError(f"Unknown output mode: {output.mode}")
 
         if any(e is None for e in out):
-            raise ModelError(
-                "satmaepp_rgb batch inference produced incomplete outputs."
-            )
+            raise ModelError("satmaepp_rgb batch inference produced incomplete outputs.")
         return [e for e in out if e is not None]

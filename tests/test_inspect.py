@@ -11,9 +11,7 @@ def test_inspect_gee_patch_uses_shared_fetch_helper(monkeypatch):
         def ensure_ready(self):
             return None
 
-        def fetch_sensor_patch_chw(
-            self, **kwargs
-        ):  # pragma: no cover - should not be called
+        def fetch_sensor_patch_chw(self, **kwargs):  # pragma: no cover - should not be called
             calls["direct"] += 1
             raise AssertionError(
                 "inspect_provider_patch should use fetch_provider_patch_raw helper"

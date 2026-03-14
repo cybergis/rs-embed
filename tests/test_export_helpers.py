@@ -292,9 +292,7 @@ def test_resolve_sensor_for_model_merges_modality():
             }
 
     sensor = SensorSpec(collection="COPERNICUS/S1_GRD", bands=("VV", "VH"))
-    out = _resolve_sensor_for_model(
-        "multi_modal_resolve", sensor=sensor, modality="s1"
-    )
+    out = _resolve_sensor_for_model("multi_modal_resolve", sensor=sensor, modality="s1")
     assert out is not None
     assert out.modality == "s1"
     assert out.collection == "COPERNICUS/S1_GRD"

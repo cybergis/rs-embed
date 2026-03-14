@@ -1,14 +1,12 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
+from ..providers import has_provider
 from .errors import ModelError
 from .specs import OutputSpec, SpatialSpec, TemporalSpec
-from ..providers import has_provider
 
 
 def validate_specs(
-    *, spatial: SpatialSpec, temporal: Optional[TemporalSpec], output: OutputSpec
+    *, spatial: SpatialSpec, temporal: TemporalSpec | None, output: OutputSpec
 ) -> None:
     """Validate spatial/temporal/output specs before inference.
 
@@ -49,22 +47,20 @@ def validate_specs(
             f"Unknown grid orientation policy: {getattr(output, 'grid_orientation', None)}"
         )
 
-
 def validate_spatial_list(
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
 ) -> None:
     """Validate a non-empty list of spatial specs against shared settings."""
     if not isinstance(spatials, list) or len(spatials) == 0:
-        raise ModelError("spatials must be a non-empty List[SpatialSpec].")
+        raise ModelError("spatials must be a non-empty list[SpatialSpec].")
     for spatial in spatials:
         validate_specs(spatial=spatial, temporal=temporal, output=output)
 
-
 def assert_supported(
-    embedder, *, backend: str, output: OutputSpec, temporal: Optional[TemporalSpec]
+    embedder, *, backend: str, output: OutputSpec, temporal: TemporalSpec | None
 ) -> None:
     """Check whether an embedder supports the requested execution settings.
 
@@ -97,17 +93,9 @@ def assert_supported(
     backends = desc.get("backend")
     if isinstance(backends, list):
         allowed = [str(b).lower() for b in backends]
-        auto_provider_compatible = backend == "auto" and (
-            "provider" in allowed or "gee" in allowed
-        )
-        provider_compatible = has_provider(backend) and (
-            "provider" in allowed or "gee" in allowed
-        )
-        if (
-            backend not in allowed
-            and not provider_compatible
-            and not auto_provider_compatible
-        ):
+        auto_provider_compatible = backend == "auto" and ("provider" in allowed or "gee" in allowed)
+        provider_compatible = has_provider(backend) and ("provider" in allowed or "gee" in allowed)
+        if backend not in allowed and not provider_compatible and not auto_provider_compatible:
             raise ModelError(
                 f"Model '{embedder.model_name}' does not support backend='{backend}'. Supported: {backends}"
             )

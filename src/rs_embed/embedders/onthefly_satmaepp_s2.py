@@ -4,7 +4,7 @@ import importlib
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -17,7 +17,11 @@ from ._vit_mae_utils import base_meta, ensure_torch, temporal_to_range
 from .base import EmbedderBase
 from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
 )
 
@@ -69,12 +73,11 @@ _SENTINEL_STD_10 = np.array(
 )
 
 # Source default grouped bands for dropped-band Sentinel setting.
-_S2_10_CHANNEL_GROUPS: Tuple[Tuple[int, ...], ...] = (
+_S2_10_CHANNEL_GROUPS: tuple[tuple[int, ...], ...] = (
     (0, 1, 2, 6),
     (3, 4, 5, 7),
     (8, 9),
 )
-
 
 def _env_bool(name: str, default: bool) -> bool:
     raw = str(os.environ.get(name, "")).strip().lower()
@@ -85,7 +88,6 @@ def _env_bool(name: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "n", "off"}:
         return False
     raise ModelError(f"{name} must be a boolean string (1/0, true/false), got {raw!r}.")
-
 
 def _torch_load_checkpoint_compat(path: str):
     """
@@ -113,8 +115,7 @@ def _torch_load_checkpoint_compat(path: str):
             ) from e
         raise
 
-
-def _resolve_hf_cache_dir() -> Optional[str]:
+def _resolve_hf_cache_dir() -> str | None:
     d = (
         os.environ.get("HUGGINGFACE_HUB_CACHE")
         or os.environ.get("HF_HOME")
@@ -122,12 +123,11 @@ def _resolve_hf_cache_dir() -> Optional[str]:
     )
     return str(d) if d else None
 
-
 def _ensure_satmaepp_s2_assets(
     *,
     ckpt_repo: str,
     ckpt_file: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
 ) -> str:
     try:
         from huggingface_hub import hf_hub_download
@@ -136,14 +136,11 @@ def _ensure_satmaepp_s2_assets(
             "SatMAE++ Sentinel checkpoint download requires huggingface_hub. Install: pip install huggingface_hub"
         ) from e
 
-    ckpt_path = hf_hub_download(
-        repo_id=ckpt_repo, filename=ckpt_file, cache_dir=cache_dir
-    )
+    ckpt_path = hf_hub_download(repo_id=ckpt_repo, filename=ckpt_file, cache_dir=cache_dir)
     if not os.path.exists(ckpt_path):
         raise ModelError(f"Failed to download checkpoint {ckpt_repo}/{ckpt_file}")
 
     return ckpt_path
-
 
 @lru_cache(maxsize=1)
 def _load_satmaepp_s2_module():
@@ -153,19 +150,16 @@ def _load_satmaepp_s2_module():
         )
     except Exception as e:
         raise ModelError(
-            "Failed to import vendored SatMAE++ Sentinel runtime: "
-            f"{type(e).__name__}: {e}"
+            f"Failed to import vendored SatMAE++ Sentinel runtime: {type(e).__name__}: {e}"
         ) from e
 
-
-def _strip_module_prefix(sd: Dict[str, Any]) -> Dict[str, Any]:
+def _strip_module_prefix(sd: dict[str, Any]) -> dict[str, Any]:
     if not sd:
         return sd
     keys = list(sd.keys())
     if all(k.startswith("module.") for k in keys):
         return {k.replace("module.", "", 1): v for k, v in sd.items()}
     return sd
-
 
 @lru_cache(maxsize=4)
 def _load_satmaepp_s2_cached(
@@ -176,7 +170,7 @@ def _load_satmaepp_s2_cached(
     image_size: int,
     patch_size: int,
     dev: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
 ):
     ensure_torch()
     import torch
@@ -190,9 +184,7 @@ def _load_satmaepp_s2_cached(
 
     factory = getattr(mod, model_fn, None)
     if not callable(factory):
-        raise ModelError(
-            f"SatMAE++ source module has no callable model factory '{model_fn}'."
-        )
+        raise ModelError(f"SatMAE++ source module has no callable model factory '{model_fn}'.")
 
     try:
         model = factory(
@@ -226,7 +218,7 @@ def _load_satmaepp_s2_cached(
 
     try:
         model = model.to(dev).eval()
-    except Exception:
+    except Exception as _e:
         pass
 
     p0 = None
@@ -235,13 +227,9 @@ def _load_satmaepp_s2_cached(
             p0 = p.detach()
             break
     if p0 is None:
-        raise ModelError(
-            "SatMAE++ Sentinel model has no parameters; checkpoint load failed."
-        )
+        raise ModelError("SatMAE++ Sentinel model has no parameters; checkpoint load failed.")
     if not torch.isfinite(p0).all():
-        raise ModelError(
-            "SatMAE++ Sentinel parameters contain NaN/Inf; checkpoint likely invalid."
-        )
+        raise ModelError("SatMAE++ Sentinel parameters contain NaN/Inf; checkpoint likely invalid.")
 
     meta = {
         "device": str(dev),
@@ -252,18 +240,13 @@ def _load_satmaepp_s2_cached(
         "image_size": int(image_size),
         "patch_size": int(patch_size),
         "in_chans": len(_S2_SR_10_BANDS),
-        "channel_groups": tuple(
-            tuple(int(i) for i in g) for g in _S2_10_CHANNEL_GROUPS
-        ),
+        "channel_groups": tuple(tuple(int(i) for i in g) for g in _S2_10_CHANNEL_GROUPS),
         "param_mean": float(p0.float().mean().cpu()),
         "param_std": float(p0.float().std().cpu()),
         "param_absmax": float(p0.float().abs().max().cpu()),
-        "torch_weights_only": bool(
-            _env_bool("RS_EMBED_SATMAEPP_S2_WEIGHTS_ONLY", False)
-        ),
+        "torch_weights_only": bool(_env_bool("RS_EMBED_SATMAEPP_S2_WEIGHTS_ONLY", False)),
     }
     return model, meta
-
 
 def _load_satmaepp_s2(
     *,
@@ -272,7 +255,7 @@ def _load_satmaepp_s2(
     model_fn: str,
     image_size: int,
     patch_size: int,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
     device: str,
 ):
     loaded, _dev = _load_cached_with_device(
@@ -287,11 +270,9 @@ def _load_satmaepp_s2(
     )
     return loaded
 
-
 def _satmaepp_s2_resize_short_side(image_size: int) -> int:
     crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
     return int(float(image_size) / crop_pct)
-
 
 def _sentinel_to_uint8_hwc(raw_chw_10: np.ndarray) -> np.ndarray:
     if raw_chw_10.ndim != 3 or int(raw_chw_10.shape[0]) != len(_S2_SR_10_BANDS):
@@ -305,10 +286,7 @@ def _sentinel_to_uint8_hwc(raw_chw_10: np.ndarray) -> np.ndarray:
     y = np.clip(y * 255.0, 0.0, 255.0).astype(np.uint8)
     return y
 
-
-def _satmaepp_s2_preprocess_tensor_batch(
-    raw_chw_batch: List[np.ndarray], *, image_size: int
-):
+def _satmaepp_s2_preprocess_tensor_batch(raw_chw_batch: list[np.ndarray], *, image_size: int):
     ensure_torch()
     import torch
     from torchvision import transforms
@@ -317,9 +295,7 @@ def _satmaepp_s2_preprocess_tensor_batch(
     preprocess = transforms.Compose(
         [
             transforms.ToTensor(),
-            transforms.Resize(
-                resize_short, interpolation=transforms.InterpolationMode.BICUBIC
-            ),
+            transforms.Resize(resize_short, interpolation=transforms.InterpolationMode.BICUBIC),
             transforms.CenterCrop(image_size),
         ]
     )
@@ -336,23 +312,20 @@ def _satmaepp_s2_preprocess_tensor_batch(
         xs.append(x)
     return torch.stack(xs, dim=0)
 
-
 def _satmaepp_s2_forward_tokens_batch(
     model,
-    raw_chw_batch: List[np.ndarray],
+    raw_chw_batch: list[np.ndarray],
     *,
     image_size: int,
     device: str,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     if not raw_chw_batch:
         return []
 
     ensure_torch()
     import torch
 
-    xb = _satmaepp_s2_preprocess_tensor_batch(raw_chw_batch, image_size=image_size).to(
-        device
-    )
+    xb = _satmaepp_s2_preprocess_tensor_batch(raw_chw_batch, image_size=image_size).to(device)
 
     fe = getattr(model, "forward_encoder", None)
     if not callable(fe):
@@ -369,12 +342,9 @@ def _satmaepp_s2_forward_tokens_batch(
         arr = toks.detach().float().cpu().numpy().astype(np.float32)
     return [arr[i] for i in range(arr.shape[0])]
 
-
-def _satmaepp_s2_split_tokens(tokens_nd: np.ndarray) -> Tuple[np.ndarray, bool, int]:
+def _satmaepp_s2_split_tokens(tokens_nd: np.ndarray) -> tuple[np.ndarray, bool, int]:
     if tokens_nd.ndim != 2:
-        raise ModelError(
-            f"Expected tokens [N,D], got {getattr(tokens_nd, 'shape', None)}"
-        )
+        raise ModelError(f"Expected tokens [N,D], got {getattr(tokens_nd, 'shape', None)}")
 
     g = len(_S2_10_CHANNEL_GROUPS)
     n = int(tokens_nd.shape[0])
@@ -393,8 +363,7 @@ def _satmaepp_s2_split_tokens(tokens_nd: np.ndarray) -> Tuple[np.ndarray, bool, 
     l = int(patch.shape[0]) // g
     return patch, has_cls, l
 
-
-def _satmaepp_s2_pool(tokens_nd: np.ndarray, pooling: str) -> Tuple[np.ndarray, bool]:
+def _satmaepp_s2_pool(tokens_nd: np.ndarray, pooling: str) -> tuple[np.ndarray, bool]:
     patch, has_cls, _ = _satmaepp_s2_split_tokens(tokens_nd)
     if int(patch.shape[0]) == 0:
         raise ModelError("SatMAE++ Sentinel has no patch tokens to pool.")
@@ -405,12 +374,11 @@ def _satmaepp_s2_pool(tokens_nd: np.ndarray, pooling: str) -> Tuple[np.ndarray, 
         return patch.max(axis=0).astype(np.float32), has_cls
     raise ModelError(f"Unknown pooling='{pooling}' (expected 'mean' or 'max').")
 
-
 def _satmaepp_s2_grid(
     tokens_nd: np.ndarray,
     *,
     group_reduce: str = "mean",
-) -> Tuple[np.ndarray, Tuple[int, int], bool, Dict[str, Any]]:
+) -> tuple[np.ndarray, tuple[int, int], bool, dict[str, Any]]:
     patch, has_cls, l = _satmaepp_s2_split_tokens(tokens_nd)
     g = len(_S2_10_CHANNEL_GROUPS)
     d = int(patch.shape[1])
@@ -434,12 +402,9 @@ def _satmaepp_s2_grid(
         "group_count": int(g),
         "group_reduce": reduce_l,
         "tokens_per_group": int(l),
-        "channel_groups": tuple(
-            tuple(int(i) for i in grp) for grp in _S2_10_CHANNEL_GROUPS
-        ),
+        "channel_groups": tuple(tuple(int(i) for i in grp) for grp in _S2_10_CHANNEL_GROUPS),
     }
     return grid, (h, w), has_cls, emeta
-
 
 def _fetch_s2_sr_10_raw_chw(
     provider: ProviderBase,
@@ -471,7 +436,6 @@ def _fetch_s2_sr_10_raw_chw(
     arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(arr, 0.0, 10000.0).astype(np.float32)
 
-
 @register("satmaepp_s2_10b")
 class SatMAEPPSentinel10Embedder(EmbedderBase):
     """
@@ -494,7 +458,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 32
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",
             "backend": ["provider"],
@@ -555,27 +519,21 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
     @staticmethod
     def _resolve_group_reduce() -> str:
-        v = (
-            str(os.environ.get("RS_EMBED_SATMAEPP_S2_GRID_REDUCE", "mean"))
-            .strip()
-            .lower()
-        )
+        v = str(os.environ.get("RS_EMBED_SATMAEPP_S2_GRID_REDUCE", "mean")).strip().lower()
         if v not in {"mean", "max"}:
-            raise ModelError(
-                "RS_EMBED_SATMAEPP_S2_GRID_REDUCE must be 'mean' or 'max'."
-            )
+            raise ModelError("RS_EMBED_SATMAEPP_S2_GRID_REDUCE must be 'mean' or 'max'.")
         return v
 
     def get_embedding(
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmaepp_s2_10b expects a provider backend (or 'auto').")
@@ -589,21 +547,11 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                 f"{_S2_SR_10_BANDS}; got {tuple(sensor.bands)}"
             )
 
-        ckpt_repo = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_CKPT_REPO", self.DEFAULT_CKPT_REPO
-        ).strip()
-        ckpt_file = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_CKPT_FILE", self.DEFAULT_CKPT_FILE
-        ).strip()
-        model_fn = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_MODEL_FN", self.DEFAULT_MODEL_FN
-        ).strip()
-        image_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_S2_IMG", str(self.DEFAULT_IMAGE_SIZE))
-        )
-        patch_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_S2_PATCH", str(self.DEFAULT_PATCH_SIZE))
-        )
+        ckpt_repo = os.environ.get("RS_EMBED_SATMAEPP_S2_CKPT_REPO", self.DEFAULT_CKPT_REPO).strip()
+        ckpt_file = os.environ.get("RS_EMBED_SATMAEPP_S2_CKPT_FILE", self.DEFAULT_CKPT_FILE).strip()
+        model_fn = os.environ.get("RS_EMBED_SATMAEPP_S2_MODEL_FN", self.DEFAULT_MODEL_FN).strip()
+        image_size = int(os.environ.get("RS_EMBED_SATMAEPP_S2_IMG", str(self.DEFAULT_IMAGE_SIZE)))
+        patch_size = int(os.environ.get("RS_EMBED_SATMAEPP_S2_PATCH", str(self.DEFAULT_PATCH_SIZE)))
         cache_dir = _resolve_hf_cache_dir()
 
         t = temporal_to_range(temporal)
@@ -624,9 +572,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                     f"got {getattr(input_chw, 'shape', None)}"
                 )
             raw_chw = np.asarray(input_chw, dtype=np.float32)
-            raw_chw = np.clip(
-                np.nan_to_num(raw_chw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0
-            )
+            raw_chw = np.clip(np.nan_to_num(raw_chw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0)
 
         model, wmeta = _load_satmaepp_s2(
             ckpt_repo=ckpt_repo,
@@ -683,9 +629,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         if output.mode == "grid":
             group_reduce = self._resolve_group_reduce()
-            grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(
-                tokens, group_reduce=group_reduce
-            )
+            grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(tokens, group_reduce=group_reduce)
             meta.update(
                 {
                     "grid_hw": (h, w),
@@ -698,9 +642,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
             try:
                 import xarray as xr
             except Exception as e:
-                raise ModelError(
-                    "grid output requires xarray. Install: pip install xarray"
-                ) from e
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
             da = xr.DataArray(
                 grid,
@@ -721,8 +663,8 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -740,29 +682,19 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                 f"{_S2_SR_10_BANDS}; got {tuple(sensor.bands)}"
             )
 
-        ckpt_repo = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_CKPT_REPO", self.DEFAULT_CKPT_REPO
-        ).strip()
-        ckpt_file = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_CKPT_FILE", self.DEFAULT_CKPT_FILE
-        ).strip()
-        model_fn = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_MODEL_FN", self.DEFAULT_MODEL_FN
-        ).strip()
-        image_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_S2_IMG", str(self.DEFAULT_IMAGE_SIZE))
-        )
-        patch_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_S2_PATCH", str(self.DEFAULT_PATCH_SIZE))
-        )
+        ckpt_repo = os.environ.get("RS_EMBED_SATMAEPP_S2_CKPT_REPO", self.DEFAULT_CKPT_REPO).strip()
+        ckpt_file = os.environ.get("RS_EMBED_SATMAEPP_S2_CKPT_FILE", self.DEFAULT_CKPT_FILE).strip()
+        model_fn = os.environ.get("RS_EMBED_SATMAEPP_S2_MODEL_FN", self.DEFAULT_MODEL_FN).strip()
+        image_size = int(os.environ.get("RS_EMBED_SATMAEPP_S2_IMG", str(self.DEFAULT_IMAGE_SIZE)))
+        patch_size = int(os.environ.get("RS_EMBED_SATMAEPP_S2_PATCH", str(self.DEFAULT_PATCH_SIZE)))
         cache_dir = _resolve_hf_cache_dir()
         t = temporal_to_range(temporal)
 
         provider = self._get_provider(backend)
         n = len(spatials)
-        raws: List[Optional[np.ndarray]] = [None] * n
+        raws: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             raw = _fetch_s2_sr_10_raw_chw(
                 provider=provider,
                 spatial=sp,
@@ -788,9 +720,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         for i, x in enumerate(raws):
             if x is None:
-                raise ModelError(
-                    f"Missing fetched patch at index={i}; batch fetch failed."
-                )
+                raise ModelError(f"Missing fetched patch at index={i}; batch fetch failed.")
 
         model, wmeta = _load_satmaepp_s2(
             ckpt_repo=ckpt_repo,
@@ -804,7 +734,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
-        out: List[Optional[Embedding]] = [None] * n
+        out: list[Embedding | None] = [None] * n
         want_grid = output.mode == "grid"
         xr_mod = None
         group_reduce = self._resolve_group_reduce() if want_grid else "mean"
@@ -814,9 +744,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
                 xr_mod = xr
             except Exception as e:
-                raise ModelError(
-                    "grid output requires xarray. Install: pip install xarray"
-                ) from e
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)
@@ -891,9 +819,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                     raise ModelError(f"Unknown output mode: {output.mode}")
 
         if any(e is None for e in out):
-            raise ModelError(
-                "satmaepp_s2_10b batch inference produced incomplete outputs."
-            )
+            raise ModelError("satmaepp_s2_10b batch inference produced incomplete outputs.")
         return [e for e in out if e is not None]
 
     def get_embeddings_batch_from_inputs(
@@ -901,8 +827,8 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -924,25 +850,15 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                 f"{_S2_SR_10_BANDS}; got {tuple(sensor.bands)}"
             )
 
-        ckpt_repo = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_CKPT_REPO", self.DEFAULT_CKPT_REPO
-        ).strip()
-        ckpt_file = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_CKPT_FILE", self.DEFAULT_CKPT_FILE
-        ).strip()
-        model_fn = os.environ.get(
-            "RS_EMBED_SATMAEPP_S2_MODEL_FN", self.DEFAULT_MODEL_FN
-        ).strip()
-        image_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_S2_IMG", str(self.DEFAULT_IMAGE_SIZE))
-        )
-        patch_size = int(
-            os.environ.get("RS_EMBED_SATMAEPP_S2_PATCH", str(self.DEFAULT_PATCH_SIZE))
-        )
+        ckpt_repo = os.environ.get("RS_EMBED_SATMAEPP_S2_CKPT_REPO", self.DEFAULT_CKPT_REPO).strip()
+        ckpt_file = os.environ.get("RS_EMBED_SATMAEPP_S2_CKPT_FILE", self.DEFAULT_CKPT_FILE).strip()
+        model_fn = os.environ.get("RS_EMBED_SATMAEPP_S2_MODEL_FN", self.DEFAULT_MODEL_FN).strip()
+        image_size = int(os.environ.get("RS_EMBED_SATMAEPP_S2_IMG", str(self.DEFAULT_IMAGE_SIZE)))
+        patch_size = int(os.environ.get("RS_EMBED_SATMAEPP_S2_PATCH", str(self.DEFAULT_PATCH_SIZE)))
         cache_dir = _resolve_hf_cache_dir()
         t = temporal_to_range(temporal)
 
-        raws: List[np.ndarray] = []
+        raws: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or int(input_chw.shape[0]) != len(_S2_SR_10_BANDS):
                 raise ModelError(
@@ -950,9 +866,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                     f"got {getattr(input_chw, 'shape', None)} at index={i}"
                 )
             raw = np.asarray(input_chw, dtype=np.float32)
-            raw = np.clip(
-                np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0
-            )
+            raw = np.clip(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0)
             raws.append(raw)
 
         model, wmeta = _load_satmaepp_s2(
@@ -967,7 +881,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         want_grid = output.mode == "grid"
         xr_mod = None
         group_reduce = self._resolve_group_reduce() if want_grid else "mean"
@@ -977,9 +891,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
                 xr_mod = xr
             except Exception as e:
-                raise ModelError(
-                    "grid output requires xarray. Install: pip install xarray"
-                ) from e
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
@@ -1056,7 +968,5 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                     raise ModelError(f"Unknown output mode: {output.mode}")
 
         if any(e is None for e in out):
-            raise ModelError(
-                "satmaepp_s2_10b batch inference produced incomplete outputs."
-            )
+            raise ModelError("satmaepp_s2_10b batch inference produced incomplete outputs.")
         return [e for e in out if e is not None]

@@ -227,9 +227,7 @@ def plot_embedding_pseudocolor(
     return pcas[0] if len(pcas) == 1 else pcas
 
 
-def percentile_stretch(
-    rgb_hwc: np.ndarray, p_low=1.0, p_high=99.0, gamma=1.0
-) -> np.ndarray:
+def percentile_stretch(rgb_hwc: np.ndarray, p_low=1.0, p_high=99.0, gamma=1.0) -> np.ndarray:
     """Per-channel percentile stretch to [0,1]."""
     rgb = rgb_hwc.astype(np.float32)
     rgb = np.nan_to_num(rgb, nan=0.0, posinf=0.0, neginf=0.0)
@@ -248,9 +246,7 @@ def percentile_stretch(
     return out
 
 
-def show_input_chw(
-    x_chw: np.ndarray, title: str, rgb_idx=(0, 1, 2), p_low=1, p_high=99
-):
+def show_input_chw(x_chw: np.ndarray, title: str, rgb_idx=(0, 1, 2), p_low=1, p_high=99):
     """Visualize CHW input. If C>=3 show RGB via indices; else show grayscale."""
     if x_chw.ndim != 3:
         print(f"Skip {title}: expected CHW, got shape={x_chw.shape}")
@@ -294,9 +290,7 @@ def show_s1_vvvh_chw(
     if x.ndim != 3:
         raise ValueError(f"Expected CHW array, got shape={getattr(x, 'shape', None)}")
     if int(x.shape[0]) < 2:
-        raise ValueError(
-            f"Expected at least 2 channels for VV/VH, got C={int(x.shape[0])}"
-        )
+        raise ValueError(f"Expected at least 2 channels for VV/VH, got C={int(x.shape[0])}")
 
     fig, axes = plt.subplots(1, 2, figsize=figsize)
     for ax, band_img, band_name in zip(axes, x[:2], tuple(band_names)[:2]):
@@ -439,9 +433,7 @@ def infer_rgb_idx_from_sensor(sensor_meta, channels: int):
     return (0, 1, 2)
 
 
-def visualize_manifest_inputs(
-    manifest: dict, npz_obj, p_low: float = 1, p_high: float = 99
-):
+def visualize_manifest_inputs(manifest: dict, npz_obj, p_low: float = 1, p_high: float = 99):
     """Visualize exact model inputs using manifest.models[*].input.npz_key."""
     models = (manifest or {}).get("models") or []
     by_key = defaultdict(list)
@@ -482,9 +474,7 @@ def visualize_manifest_inputs(
 def load_export_npz(npz_path, json_path=None):
     """Load exported NPZ + sidecar manifest JSON."""
     npz_path = Path(npz_path)
-    json_path = (
-        Path(json_path) if json_path is not None else npz_path.with_suffix(".json")
-    )
+    json_path = Path(json_path) if json_path is not None else npz_path.with_suffix(".json")
 
     if not npz_path.exists():
         raise FileNotFoundError(f"Missing: {npz_path}")

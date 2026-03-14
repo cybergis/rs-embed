@@ -7,13 +7,15 @@ See :mod:`rs_embed.api` for the function-based API and :class:`rs_embed.Model`
 for the class-based (stateful) interface.
 """
 
+from ._version import __version__
+from .api import export_batch, get_embedding, get_embeddings_batch, list_models
 from .core.specs import (
     BBox,
-    PointBuffer,
-    TemporalSpec,
-    SensorSpec,
-    OutputSpec,
     InputPrepSpec,
+    OutputSpec,
+    PointBuffer,
+    SensorSpec,
+    TemporalSpec,
 )
 from .core.types import (
     ExportConfig,
@@ -22,12 +24,10 @@ from .core.types import (
     ExportTarget,
     ModelConfig,
 )
-from .api import export_batch, get_embedding, get_embeddings_batch, list_models
-from ._version import __version__
+from .export import export_npz
+from .inspect import inspect_gee_patch, inspect_provider_patch
 from .model import Model
 from .pipelines.exporter import BatchExporter
-from .inspect import inspect_gee_patch, inspect_provider_patch
-from .export import export_npz
 
 __all__ = [
     # Specs

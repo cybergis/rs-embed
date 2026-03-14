@@ -1,5 +1,7 @@
 from __future__ import annotations
-from typing import Any, Optional, Sequence, Tuple
+
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 
@@ -48,8 +50,8 @@ class ProviderBase:
         self,
         *,
         sensor: SensorSpec,
-        temporal: Optional[TemporalSpec],
-        region: Optional[Any] = None,
+        temporal: TemporalSpec | None,
+        region: Any | None = None,
     ) -> Any:
         """Build a provider-native image object for a sensor/time request.
 
@@ -79,11 +81,11 @@ class ProviderBase:
         self,
         *,
         image: Any,
-        bands: Tuple[str, ...],
+        bands: tuple[str, ...],
         region: Any,
         scale_m: int,
         fill_value: float,
-        collection: Optional[str] = None,
+        collection: str | None = None,
     ) -> np.ndarray:
         """Fetch raster pixels as a ``[C,H,W]`` float array.
 
@@ -119,8 +121,8 @@ class ProviderBase:
         self,
         *,
         collection: str,
-        bands: Tuple[str, ...],
-    ) -> Tuple[str, ...]:
+        bands: tuple[str, ...],
+    ) -> tuple[str, ...]:
         """Normalize band aliases to provider-preferred names.
 
         Parameters
@@ -143,7 +145,7 @@ class ProviderBase:
         spatial: SpatialSpec,
         temporal: TemporalSpec,
         scale_m: int = 10,
-        orbit: Optional[str] = None,
+        orbit: str | None = None,
         use_float_linear: bool = True,
         composite: str = "median",
         fill_value: float = 0.0,
@@ -190,7 +192,7 @@ class ProviderBase:
         bands: Sequence[str],
         n_frames: int = 8,
         scale_m: int = 10,
-        cloudy_pct: Optional[int] = 30,
+        cloudy_pct: int | None = 30,
         composite: str = "median",
         fill_value: float = 0.0,
     ) -> np.ndarray:
@@ -235,12 +237,12 @@ class ProviderBase:
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
+        temporal: TemporalSpec | None,
         collection: str,
         scale_m: int = 10,
         fill_value: float = 0.0,
         composite: str = "median",
-    ) -> Tuple[np.ndarray, Tuple[str, ...]]:
+    ) -> tuple[np.ndarray, tuple[str, ...]]:
         """Fetch a collection patch containing all available bands.
 
         Parameters
@@ -276,7 +278,7 @@ class ProviderBase:
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
+        temporal: TemporalSpec | None,
         sensor: SensorSpec,
         to_float_image: bool = False,
     ) -> np.ndarray:

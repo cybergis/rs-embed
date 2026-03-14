@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List, Optional, TypeVar
+from typing import Any, TypeVar
 
 from ..tools.runtime import run_with_retry
 
 _T = TypeVar("_T")
-
 
 class ParallelRunner:
     """Thread pool with retry logic and optional progress tracking.
@@ -28,7 +28,7 @@ class ParallelRunner:
         self.num_workers = max(1, int(num_workers))
         self.max_retries = max(0, int(max_retries))
         self.retry_backoff_s = max(0.0, float(retry_backoff_s))
-        self._executor: Optional[ThreadPoolExecutor] = None
+        self._executor: ThreadPoolExecutor | None = None
 
     # -- context manager -------------------------------------------------
 
@@ -58,16 +58,14 @@ class ParallelRunner:
     def map_unordered(
         self,
         fn: Callable[..., _T],
-        items: List[Any],
+        items: list[Any],
         *,
         progress: Any = None,
-    ) -> Dict[int, _T]:
+    ) -> dict[int, _T]:
         """Run *fn(item)* for each item, returning ``{index: result}``."""
         wrapped = self._retry_wrap(fn)
-        fut_to_idx = {
-            self.executor.submit(wrapped, item): idx for idx, item in enumerate(items)
-        }
-        results: Dict[int, _T] = {}
+        fut_to_idx = {self.executor.submit(wrapped, item): idx for idx, item in enumerate(items)}
+        results: dict[int, _T] = {}
         for fut in as_completed(fut_to_idx):
             idx = fut_to_idx[fut]
             results[idx] = fut.result()

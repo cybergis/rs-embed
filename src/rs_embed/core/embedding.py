@@ -1,12 +1,12 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import TYPE_CHECKING, Any, Dict, Union
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 if TYPE_CHECKING:
     import xarray as xr
-
 
 @dataclass
 class Embedding:
@@ -21,5 +21,5 @@ class Embedding:
         optional diagnostics.
     """
 
-    data: Union[np.ndarray, "xr.DataArray"]
-    meta: Dict[str, Any]
+    data: np.ndarray | xr.DataArray
+    meta: dict[str, Any]

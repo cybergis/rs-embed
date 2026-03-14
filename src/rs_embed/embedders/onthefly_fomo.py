@@ -6,7 +6,7 @@ import os
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -15,17 +15,19 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..providers import ProviderBase
 from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
-from .runtime_utils import (
-    is_provider_backend,
-    load_cached_with_device as _load_cached_with_device,
-    resolve_device_auto_torch as _resolve_device,
-)
 from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .onthefly_terramind import _fetch_s2_sr_12_raw_chw
-
+from .runtime_utils import (
+    is_provider_backend,
+)
+from .runtime_utils import (
+    load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
+    resolve_device_auto_torch as _resolve_device,
+)
 
 _S2_SR_12_BANDS = [
     "B1",
@@ -42,7 +44,7 @@ _S2_SR_12_BANDS = [
     "B12",
 ]
 
-_DEFAULT_MODALITY_CHANNELS: Dict[int, str] = {
+_DEFAULT_MODALITY_CHANNELS: dict[int, str] = {
     0: "planet-r",
     1: "planet-g",
     2: "planet-b",
@@ -82,7 +84,7 @@ _DEFAULT_MODALITY_CHANNELS: Dict[int, str] = {
     36: "gaofen2-nir",
 }
 
-_DEFAULT_S2_MODALITY_KEYS: Tuple[int, ...] = (
+_DEFAULT_S2_MODALITY_KEYS: tuple[int, ...] = (
     6,
     7,
     8,
@@ -103,13 +105,11 @@ _DEFAULT_CKPT_URL = (
 )
 _DEFAULT_CKPT_CACHE_DIR = "~/.cache/rs_embed/fomo"
 
-
 def _env_flag(name: str, default: bool) -> bool:
     v = os.environ.get(name)
     if v is None:
         return bool(default)
     return str(v).strip().lower() not in {"0", "false", "no", "off", ""}
-
 
 def _download_url_to_path(url: str, dst_path: str) -> str:
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -126,10 +126,9 @@ def _download_url_to_path(url: str, dst_path: str) -> str:
         try:
             if os.path.exists(tmp_path):
                 os.remove(tmp_path)
-        except Exception:
+        except Exception as _e:
             pass
     return dst_path
-
 
 @lru_cache(maxsize=4)
 def _download_fomo_ckpt(
@@ -154,7 +153,6 @@ def _download_fomo_ckpt(
         )
     return dst
 
-
 def _resolve_fomo_ckpt_path() -> str:
     local = str(os.environ.get("RS_EMBED_FOMO_CKPT") or "").strip()
     if local:
@@ -174,38 +172,29 @@ def _resolve_fomo_ckpt_path() -> str:
         os.environ.get("RS_EMBED_FOMO_CKPT_FILE", _DEFAULT_CKPT_FILENAME).strip()
         or _DEFAULT_CKPT_FILENAME
     )
-    url = (
-        os.environ.get("RS_EMBED_FOMO_CKPT_URL", _DEFAULT_CKPT_URL).strip()
-        or _DEFAULT_CKPT_URL
-    )
-    min_bytes = int(
-        os.environ.get("RS_EMBED_FOMO_CKPT_MIN_BYTES", str(50 * 1024 * 1024))
-    )
-    return _download_fomo_ckpt(
-        url=url, cache_dir=cache_dir, filename=filename, min_bytes=min_bytes
-    )
+    url = os.environ.get("RS_EMBED_FOMO_CKPT_URL", _DEFAULT_CKPT_URL).strip() or _DEFAULT_CKPT_URL
+    min_bytes = int(os.environ.get("RS_EMBED_FOMO_CKPT_MIN_BYTES", str(50 * 1024 * 1024)))
+    return _download_fomo_ckpt(url=url, cache_dir=cache_dir, filename=filename, min_bytes=min_bytes)
 
 @lru_cache(maxsize=8)
 def _load_fomo_module():
     try:
         mod = importlib.import_module("rs_embed.embedders._vendor.fomo_multimodal_mae")
-        getattr(mod, "MultiSpectralViT")
+        _ = mod.MultiSpectralViT
     except Exception as e:
         raise ModelError(
-            "Failed to import vendored FoMo runtime. "
-            "Install missing dependencies: torch, einops."
+            "Failed to import vendored FoMo runtime. Install missing dependencies: torch, einops."
         ) from e
     return mod
 
-
-def _extract_state_dict(obj: Any) -> Dict[str, Any]:
+def _extract_state_dict(obj: Any) -> dict[str, Any]:
     if not isinstance(obj, dict):
         raise ModelError(f"Unexpected FoMo checkpoint type: {type(obj)}")
     if isinstance(obj.get("state_dict"), dict):
         obj = obj["state_dict"]
     if not isinstance(obj, dict):
         raise ModelError("FoMo checkpoint has invalid state_dict format.")
-    cleaned: Dict[str, Any] = {}
+    cleaned: dict[str, Any] = {}
     for k, v in obj.items():
         nk = str(k)
         if nk.startswith("module."):
@@ -214,7 +203,6 @@ def _extract_state_dict(obj: Any) -> Dict[str, Any]:
             nk = nk[len("model.") :]
         cleaned[nk] = v
     return cleaned
-
 
 def _build_fomo_model_config(
     *,
@@ -225,7 +213,7 @@ def _build_fomo_model_config(
     heads: int,
     mlp_dim: int,
     num_classes: int,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return {
         "image_size": int(image_size),
         "patch_size": int(patch_size),
@@ -237,7 +225,6 @@ def _build_fomo_model_config(
         "single_embedding_layer": True,
         "modality_channels": dict(_DEFAULT_MODALITY_CHANNELS),
     }
-
 
 @lru_cache(maxsize=8)
 def _load_fomo_cached(
@@ -251,7 +238,7 @@ def _load_fomo_cached(
     mlp_dim: int,
     num_classes: int,
     dev: str,
-) -> Tuple[Any, Dict[str, Any]]:
+) -> tuple[Any, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -289,7 +276,7 @@ def _load_fomo_cached(
 
     try:
         model = model.to(dev).eval()
-    except Exception:
+    except Exception as _e:
         pass
 
     p0 = None
@@ -298,13 +285,9 @@ def _load_fomo_cached(
             p0 = p.detach()
             break
     if p0 is None:
-        raise ModelError(
-            "FoMo model has no parameters; cannot verify loaded checkpoint."
-        )
+        raise ModelError("FoMo model has no parameters; cannot verify loaded checkpoint.")
     if not torch.isfinite(p0).all():
-        raise ModelError(
-            "FoMo model parameters contain NaN/Inf; checkpoint load likely failed."
-        )
+        raise ModelError("FoMo model parameters contain NaN/Inf; checkpoint load likely failed.")
     p0f = p0.float()
 
     meta = {
@@ -327,7 +310,6 @@ def _load_fomo_cached(
     }
     return model, meta
 
-
 def _load_fomo(
     *,
     ckpt_path: str,
@@ -339,7 +321,7 @@ def _load_fomo(
     mlp_dim: int,
     num_classes: int,
     device: str,
-) -> Tuple[Any, Dict[str, Any], str]:
+) -> tuple[Any, dict[str, Any], str]:
     (loaded, dev) = _load_cached_with_device(
         _load_fomo_cached,
         device=device,
@@ -355,7 +337,6 @@ def _load_fomo(
     model, meta = loaded
     return model, meta, dev
 
-
 def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -364,11 +345,8 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     if x_chw.ndim != 3:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
-    y = F.interpolate(
-        x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False
-    )
+    y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y[0].detach().cpu().numpy().astype(np.float32)
-
 
 def _normalize_s2(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
     x = np.asarray(raw_chw, dtype=np.float32)
@@ -393,8 +371,7 @@ def _normalize_s2(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
         )
     return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-
-def _resolve_s2_modality_keys() -> Tuple[int, ...]:
+def _resolve_s2_modality_keys() -> tuple[int, ...]:
     raw = str(os.environ.get("RS_EMBED_FOMO_S2_KEYS") or "").strip()
     if not raw:
         return _DEFAULT_S2_MODALITY_KEYS
@@ -406,14 +383,13 @@ def _resolve_s2_modality_keys() -> Tuple[int, ...]:
         )
     return keys
 
-
 def _fomo_forward_tokens(
     model: Any,
     x_bchw: np.ndarray,
     *,
-    spectral_keys: Tuple[int, ...],
+    spectral_keys: tuple[int, ...],
     device: str,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -423,16 +399,14 @@ def _fomo_forward_tokens(
 
     try:
         model = model.to(dev).eval()
-    except Exception:
+    except Exception as _e:
         pass
 
     with torch.no_grad():
         out = model((x, keys), pool=False)
 
     if not hasattr(out, "ndim") or int(out.ndim) != 3:
-        raise ModelError(
-            f"FoMo forward(pool=False) expected [B,N,D] tensor, got type={type(out)}"
-        )
+        raise ModelError(f"FoMo forward(pool=False) expected [B,N,D] tensor, got type={type(out)}")
     if int(out.shape[0]) != 1:
         raise ModelError(f"FoMo embedder expects B=1 per call, got {tuple(out.shape)}")
 
@@ -443,10 +417,9 @@ def _fomo_forward_tokens(
     }
     return tokens, meta
 
-
 def _tokens_to_grid(
     tokens_nd: np.ndarray, *, n_modalities: int, patch_size: int, image_size: int
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     n_tokens, dim = int(tokens_nd.shape[0]), int(tokens_nd.shape[1])
     expected_gs = int(image_size) // int(patch_size) if int(patch_size) > 0 else 0
     expected_per_mod = expected_gs * expected_gs if expected_gs > 0 else 0
@@ -482,7 +455,6 @@ def _tokens_to_grid(
         "grid_expected_tokens": int(expected_tokens),
     }
 
-
 @register("fomo")
 class FoMoEmbedder(EmbedderBase):
     DEFAULT_IMAGE_SIZE = 64
@@ -494,7 +466,7 @@ class FoMoEmbedder(EmbedderBase):
     DEFAULT_NUM_CLASSES = 1000
     DEFAULT_FETCH_WORKERS = 8
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
             "backend": ["provider"],
@@ -539,9 +511,7 @@ class FoMoEmbedder(EmbedderBase):
     @staticmethod
     def _resolve_fetch_workers(n_items: int) -> int:
         v = int(
-            os.environ.get(
-                "RS_EMBED_FOMO_FETCH_WORKERS", str(FoMoEmbedder.DEFAULT_FETCH_WORKERS)
-            )
+            os.environ.get("RS_EMBED_FOMO_FETCH_WORKERS", str(FoMoEmbedder.DEFAULT_FETCH_WORKERS))
         )
         return max(1, min(int(n_items), v))
 
@@ -549,12 +519,12 @@ class FoMoEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
         if not is_provider_backend(backend_l, allow_auto=True):
@@ -563,16 +533,12 @@ class FoMoEmbedder(EmbedderBase):
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
 
-        image_size = int(
-            os.environ.get("RS_EMBED_FOMO_IMG", str(self.DEFAULT_IMAGE_SIZE))
-        )
+        image_size = int(os.environ.get("RS_EMBED_FOMO_IMG", str(self.DEFAULT_IMAGE_SIZE)))
         patch_size = int(os.environ.get("RS_EMBED_FOMO_PATCH", str(self.DEFAULT_PATCH)))
         dim = int(os.environ.get("RS_EMBED_FOMO_DIM", str(self.DEFAULT_DIM)))
         depth = int(os.environ.get("RS_EMBED_FOMO_DEPTH", str(self.DEFAULT_DEPTH)))
         heads = int(os.environ.get("RS_EMBED_FOMO_HEADS", str(self.DEFAULT_HEADS)))
-        mlp_dim = int(
-            os.environ.get("RS_EMBED_FOMO_MLP_DIM", str(self.DEFAULT_MLP_DIM))
-        )
+        mlp_dim = int(os.environ.get("RS_EMBED_FOMO_MLP_DIM", str(self.DEFAULT_MLP_DIM)))
         num_classes = int(
             os.environ.get("RS_EMBED_FOMO_NUM_CLASSES", str(self.DEFAULT_NUM_CLASSES))
         )
@@ -594,12 +560,10 @@ class FoMoEmbedder(EmbedderBase):
         else:
             raw = np.asarray(input_chw, dtype=np.float32)
             if raw.ndim != 3 or int(raw.shape[0]) != len(_S2_SR_12_BANDS):
-                raise ModelError(
-                    f"input_chw must be CHW with 12 bands for fomo, got {raw.shape}"
-                )
-            raw = np.clip(
-                np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0
-            ).astype(np.float32)
+                raise ModelError(f"input_chw must be CHW with 12 bands for fomo, got {raw.shape}")
+            raw = np.clip(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0).astype(
+                np.float32
+            )
 
         x = _normalize_s2(raw, mode=norm_mode)
         if int(x.shape[-2]) != image_size or int(x.shape[-1]) != image_size:
@@ -702,8 +666,8 @@ class FoMoEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -720,9 +684,9 @@ class FoMoEmbedder(EmbedderBase):
         provider = self._get_provider(backend_l)
 
         n = len(spatials)
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             raw = _fetch_s2_sr_12_raw_chw(
                 provider,
                 sp,
@@ -746,7 +710,7 @@ class FoMoEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        out: List[Embedding] = []
+        out: list[Embedding] = []
         for i, sp in enumerate(spatials):
             raw = prefetched_raw[i]
             if raw is None:

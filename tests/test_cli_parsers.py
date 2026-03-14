@@ -138,9 +138,7 @@ def test_bbox_and_pointbuffer_mutually_exclusive():
 
 def test_spatial_required():
     with pytest.raises(SystemExit):
-        cli.build_parser().parse_args(
-            ["inspect-gee", "--collection", "c", "--bands", "B1"]
-        )
+        cli.build_parser().parse_args(["inspect-gee", "--collection", "c", "--bands", "B1"])
 
 
 # ══════════════════════════════════════════════════════════════════════
