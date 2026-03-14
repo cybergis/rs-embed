@@ -18,16 +18,17 @@ from .core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from .core.validation import assert_supported, validate_specs
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
+from .tools.model_defaults import (
+    default_sensor_for_model,
+    resolve_sensor_for_model,
+)
 from .tools.normalization import (
     _resolve_embedding_api_backend,
     normalize_backend_name,
     normalize_device_name,
     normalize_model_name,
-)
-from .tools.model_defaults import (
-    default_sensor_for_model,
-    resolve_sensor_for_model,
 )
 from .tools.runtime import (
     _EmbeddingRequestContext,
@@ -38,7 +39,7 @@ from .tools.runtime import (
 from .tools.tiling import (
     _resolve_input_prep_spec,
 )
-from .core.validation import assert_supported, validate_specs
+
 
 class Model:
     """A ready-to-use embedding model.

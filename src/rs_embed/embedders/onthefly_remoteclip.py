@@ -10,23 +10,26 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
+from ..core.registry import register
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
-from .base import EmbedderBase
-from .meta_utils import build_meta, temporal_to_range, temporal_midpoint_str
-from .runtime_utils import (
-    fetch_s2_rgb_chw as _fetch_s2_rgb_chw_shared,
-    is_provider_backend,
-    resolve_device_auto_torch,
-)
 
 # -----------------------------
 # Provider: Fetch S2 RGB
 # -----------------------------
 from ._vit_mae_utils import _s2_rgb_u8_from_chw
+from .base import EmbedderBase
+from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
+from .runtime_utils import (
+    fetch_s2_rgb_chw as _fetch_s2_rgb_chw_shared,
+)
+from .runtime_utils import (
+    is_provider_backend,
+    resolve_device_auto_torch,
+)
+
 
 def _fetch_s2_rgb_chw(
     provider: ProviderBase,
@@ -272,8 +275,8 @@ def _remoteclip_encode_tokens(
       - pooled: [D]    (tokens_kind='pooled')
     """
     import torch
-    from torchvision import transforms
     from PIL import Image
+    from torchvision import transforms
 
     dev = (
         "cuda"
@@ -284,7 +287,7 @@ def _remoteclip_encode_tokens(
     core = getattr(model, "model", model)
 
     # --- preprocess to tensor ---
-    if hasattr(model, "transform") and callable(getattr(model, "transform")):
+    if hasattr(model, "transform") and callable(model.transform):
         x = model.transform(rgb_u8.astype(np.float32), image_size).unsqueeze(0)
     else:
         preprocess = transforms.Compose(
@@ -431,8 +434,8 @@ def _remoteclip_encode_pooled_batch(
         return np.zeros((0, 0), dtype=np.float32)
 
     import torch
-    from torchvision import transforms
     from PIL import Image
+    from torchvision import transforms
 
     dev = (
         "cuda"
@@ -443,7 +446,7 @@ def _remoteclip_encode_pooled_batch(
     core = getattr(model, "model", model)
 
     xs = []
-    if hasattr(model, "transform") and callable(getattr(model, "transform")):
+    if hasattr(model, "transform") and callable(model.transform):
         for rgb_u8 in rgb_u8_batch:
             x = model.transform(rgb_u8.astype(np.float32), image_size)
             if not torch.is_tensor(x):
@@ -630,9 +633,9 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
 
         # Optional: inspect on-the-fly provider input
         from ..tools.inspection import (
-            maybe_inspect_chw,
             checks_save_dir,
             checks_should_raise,
+            maybe_inspect_chw,
             save_quicklook_rgb,
         )
 

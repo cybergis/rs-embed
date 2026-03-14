@@ -9,6 +9,7 @@ from ..core.registry import get_embedder_cls
 from ..embedders.catalog import canonical_model_id
 from ..providers import has_provider
 
+
 def normalize_model_name(model: str) -> str:
     return canonical_model_id(model)
 

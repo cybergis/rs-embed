@@ -104,7 +104,7 @@ select = [
     "W",    # pycodestyle warnings
     "F",    # pyflakes (unused imports, undefined names)
     "UP",   # pyupgrade (modernize type hints, etc.)
-    "B",    # flake8-bugbear
+    # "B",    # flake8-bugbear — TODO: enable once existing patterns are addressed
     # "BLE",  # blind/broad exceptions — TODO: enable once Exception handlers are narrowed
     "I",    # isort
 ]

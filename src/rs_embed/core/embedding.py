@@ -1,6 +1,7 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import Any, TYPE_CHECKING
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -20,5 +21,5 @@ class Embedding:
         optional diagnostics.
     """
 
-    data: np.ndarray | "xr.DataArray"
+    data: np.ndarray | xr.DataArray
     meta: dict[str, Any]

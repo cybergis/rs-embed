@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from .specs import InputPrepSpec, OutputSpec, SensorSpec
+from .specs import InputPrepSpec, SensorSpec
 
 # ── Enums ──────────────────────────────────────────────────────────
 
@@ -176,12 +176,12 @@ class ExportTarget:
     names: list[str] | None = None
 
     @classmethod
-    def combined(cls, out_file: str) -> "ExportTarget":
+    def combined(cls, out_file: str) -> ExportTarget:
         """Build a combined-file export target."""
         return cls(layout=ExportLayout.COMBINED, out_file=out_file)
 
     @classmethod
-    def per_item(cls, out_dir: str, *, names: list[str] | None = None) -> "ExportTarget":
+    def per_item(cls, out_dir: str, *, names: list[str] | None = None) -> ExportTarget:
         """Build a per-item export target."""
         return cls(layout=ExportLayout.PER_ITEM, out_dir=out_dir, names=names)
 

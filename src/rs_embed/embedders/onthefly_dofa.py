@@ -4,22 +4,28 @@ from __future__ import annotations
 import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
 import xarray as xr
 
-from functools import lru_cache
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
+from ..core.registry import register
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
 from .base import EmbedderBase
 from .runtime_utils import (
     coerce_single_input_chw,
+)
+from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device_auto,
 )
 
@@ -516,7 +522,7 @@ class DOFAEmbedder(EmbedderBase):
                 }
 
             # Optional: inspect on-the-fly provider input
-            from ..tools.inspection import maybe_inspect_chw, checks_should_raise
+            from ..tools.inspection import checks_should_raise, maybe_inspect_chw
 
             check_meta.clear()
             report = maybe_inspect_chw(

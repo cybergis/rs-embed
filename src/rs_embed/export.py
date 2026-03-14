@@ -1,14 +1,15 @@
-from __future__ import annotations
-
 """High-level export entrypoints.
 
 `export_npz` is a convenience wrapper around `rs_embed.api.export_batch`.
 """
 
+from __future__ import annotations
+
 import os
 from typing import Any
 
 from .core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+
 
 def export_npz(
     *,

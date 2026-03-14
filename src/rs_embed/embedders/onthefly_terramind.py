@@ -13,15 +13,21 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
+from ._vit_mae_utils import ensure_torch, pool_from_tokens, tokens_to_grid_dhw
 from .base import EmbedderBase
+from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .runtime_utils import (
     coerce_single_input_chw,
+)
+from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device,
 )
-from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
-from ._vit_mae_utils import ensure_torch, pool_from_tokens, tokens_to_grid_dhw
 
 _S2_SR_12_BANDS = [
     "B1",
@@ -558,7 +564,7 @@ class TerraMindEmbedder(EmbedderBase):
                     10000.0,
                 ).astype(np.float32)
 
-            from ..tools.inspection import maybe_inspect_chw, checks_should_raise
+            from ..tools.inspection import checks_should_raise, maybe_inspect_chw
 
             check_meta.clear()
             report = maybe_inspect_chw(

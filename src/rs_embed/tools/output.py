@@ -7,6 +7,7 @@ import numpy as np
 from ..core.embedding import Embedding
 from ..core.specs import OutputSpec
 
+
 def _infer_native_y_axis_direction(meta: dict[str, Any]) -> tuple[str, str]:
     """Infer native y-axis direction from metadata.
 

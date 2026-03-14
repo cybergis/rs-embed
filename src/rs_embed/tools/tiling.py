@@ -21,14 +21,19 @@ from ..core.specs import (
     OutputSpec,
     SensorSpec,
     SpatialSpec,
+    TemporalSpec,
 )
-from .serialization import embedding_to_numpy as _embedding_to_numpy
 from .output import normalize_embedding_output as _normalize_embedding_output
 from .runtime import (
     call_embedder_get_embedding as _call_embedder_get_embedding,
+)
+from .runtime import (
     embedder_accepts_input_chw as _embedder_accepts_input_chw,
+)
+from .runtime import (
     supports_prefetched_batch_api as _supports_prefetched_batch_api,
 )
+from .serialization import embedding_to_numpy as _embedding_to_numpy
 
 # ---------------------------------------------------------------------------
 # Resolved input-prep spec
@@ -391,7 +396,7 @@ def _aggregate_tiled_embeddings(
     for c in range(1, ncols):
         col_offsets[c] = col_offsets[c - 1] + col_widths[c - 1]
 
-    for arr, m in zip(arrays, tile_meta):
+    for arr, m in zip(arrays, tile_meta, strict=False):
         r = int(m["row"])
         c = int(m["col"])
         fy0, fy1 = row_crop[r]

@@ -32,7 +32,7 @@ def _register_builtin_providers() -> None:
 
     try:
         mod = importlib.import_module(f"{__name__}.gee")
-        cls = getattr(mod, "GEEProvider")
+        cls = mod.GEEProvider
         _PROVIDER_REGISTRY.setdefault("gee", cls)
     except Exception as _e:
         # Keep registry usable even when optional backend deps are unavailable.

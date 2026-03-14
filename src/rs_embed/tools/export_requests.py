@@ -4,6 +4,7 @@ import os
 from dataclasses import replace
 
 from ..core.errors import ModelError
+from ..core.registry import get_embedder_cls
 from ..core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import (
     ExportConfig,
@@ -13,11 +14,11 @@ from ..core.types import (
     ModelConfig,
 )
 from ..core.validation import assert_supported
-from ..core.registry import get_embedder_cls
 from .checkpoint_utils import is_incomplete_combined_manifest
 from .manifest import combined_resume_manifest, load_json_dict
 from .model_defaults import resolve_sensor_for_model
-from .normalization import normalize_model_name, _resolve_embedding_api_backend
+from .normalization import _resolve_embedding_api_backend, normalize_model_name
+
 
 def normalize_export_layout(layout: str) -> ExportLayout:
     layout_n = str(layout).strip().lower().replace("-", "_")

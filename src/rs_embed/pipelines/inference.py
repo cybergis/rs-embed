@@ -12,7 +12,6 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from ..core.embedding import Embedding
-from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ModelConfig, TaskResult
 from ..tools.output import normalize_embedding_output
@@ -23,11 +22,13 @@ from ..tools.runtime import (
     supports_batch_api,
     supports_prefetched_batch_api,
 )
+from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..tools.tiling import (
     _call_embedder_get_embedding_with_input_prep,
     _resolve_input_prep_spec,
 )
 from .runner import run_with_retry
+
 
 class _ModelContext(NamedTuple):
     """Resolved embedder/runtime context for a single model inference pass."""

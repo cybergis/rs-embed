@@ -6,10 +6,10 @@ from typing import Any
 import numpy as np
 
 from ..core.errors import ModelError
-from ..tools.serialization import jsonable as _jsonable
 from ..core.specs import BBox, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers.base import ProviderBase
 from ..tools.normalization import normalize_input_chw
+from ..tools.serialization import jsonable as _jsonable
 
 _WEB_MERCATOR_R = 6378137.0
 _WEB_MERCATOR_MAX_LAT = 85.05112878
@@ -64,10 +64,10 @@ def _coerce_bbox_like(spatial: SpatialSpec) -> BBox:
     if not _looks_like_bbox_spatial(spatial):
         raise ModelError(f"Expected BBox-like spatial for GEE fallback, got {type(spatial)}")
     return BBox(
-        minlon=float(getattr(spatial, "minlon")),
-        minlat=float(getattr(spatial, "minlat")),
-        maxlon=float(getattr(spatial, "maxlon")),
-        maxlat=float(getattr(spatial, "maxlat")),
+        minlon=float(spatial.minlon),
+        minlat=float(spatial.minlat),
+        maxlon=float(spatial.maxlon),
+        maxlat=float(spatial.maxlat),
         crs=str(getattr(spatial, "crs", "EPSG:4326")),
     )
 

@@ -1,5 +1,6 @@
 # src/rs_embed/core/registry.py
 from __future__ import annotations
+
 import importlib
 from typing import Any
 
@@ -27,7 +28,7 @@ def register(name: str):
     def deco(cls: type[Any]):
         model_id = canonical_model_id(name)
         _REGISTRY[model_id] = cls
-        setattr(cls, "model_name", model_id)
+        cls.model_name = model_id
         return cls
 
     return deco
@@ -57,7 +58,7 @@ def _try_lazy_load_model(name: str) -> None:
     # If decorators did not run in this process state (e.g. registry was cleared),
     # repopulate from the imported module class symbol.
     _REGISTRY[model_id] = cls
-    setattr(cls, "model_name", model_id)
+    cls.model_name = model_id
     _REGISTRY_IMPORT_ERRORS.pop(model_id, None)
 
 def get_embedder_cls(name: str) -> type[Any]:

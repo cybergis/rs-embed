@@ -14,7 +14,7 @@ from ..core.specs import SensorSpec
 
 
 def utc_ts() -> str:
-    return _dt.datetime.now(_dt.timezone.utc).replace(microsecond=0).isoformat() + "Z"
+    return _dt.datetime.now(_dt.UTC).replace(microsecond=0).isoformat() + "Z"
 
 
 def sanitize_key(s: str) -> str:

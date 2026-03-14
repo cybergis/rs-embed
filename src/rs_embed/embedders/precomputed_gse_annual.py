@@ -1,4 +1,5 @@
 from __future__ import annotations
+
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -6,17 +7,19 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
-from ..providers import ProviderBase
+from ..core.registry import register
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from .base import EmbedderBase
 from .meta_utils import build_meta, temporal_midpoint_str
 from .runtime_utils import (
     fetch_collection_patch_all_bands_chw as _fetch_collection_patch_all_bands_chw,
+)
+from .runtime_utils import (
     is_provider_backend,
 )
+
 
 @register("gse")
 class GSEAnnualEmbedder(EmbedderBase):

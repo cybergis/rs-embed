@@ -5,6 +5,7 @@ from datetime import date, datetime, timedelta
 from ..core.errors import SpecError
 from ..core.specs import TemporalSpec
 
+
 def temporal_to_start_end(temporal: TemporalSpec) -> tuple[str, str]:
     temporal.validate()
     if temporal.mode == "range":

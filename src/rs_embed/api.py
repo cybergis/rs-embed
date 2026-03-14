@@ -28,36 +28,6 @@ from __future__ import annotations
 
 from typing import Any
 
-from .tools.normalization import (
-    _resolve_embedding_api_backend,  # noqa: F401
-    normalize_backend_name as _normalize_backend_name,
-    normalize_device_name as _normalize_device_name,
-    normalize_model_name as _normalize_model_name,
-    # Re-exported so `from rs_embed.api import ...` in tests/downstream still works.
-    _default_provider_backend_for_api,  # noqa: F401
-    _probe_model_describe,  # noqa: F401
-)
-from .tools.runtime import (
-    _prepare_embedding_request_context,
-    provider_factory_for_backend,
-    run_embedding_request as _run_embedding_request_shared,
-)
-from .core.validation import (
-    assert_supported as _assert_supported,
-    validate_specs as _validate_specs,
-    validate_spatial_list as _validate_spatial_list,
-)
-from .tools.model_defaults import (
-    resolve_sensor_for_model as _resolve_sensor_for_model,
-)
-from .tools.progress import create_progress as _create_progress
-from .tools.export_requests import (
-    maybe_return_completed_combined_resume as _maybe_return_completed_combined_resume,
-    normalize_export_config as _normalize_export_config,
-    normalize_export_format as _normalize_export_format,
-    normalize_export_target as _normalize_export_target,
-    resolve_export_model_configs as _resolve_export_model_configs,
-)
 from .core.embedding import Embedding
 from .core.errors import ModelError
 from .core.specs import (
@@ -72,7 +42,57 @@ from .core.types import (
     ExportModelRequest,
     ExportTarget,
 )
+from .core.validation import (
+    assert_supported as _assert_supported,
+)
+from .core.validation import (
+    validate_spatial_list as _validate_spatial_list,
+)
+from .core.validation import (
+    validate_specs as _validate_specs,
+)
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
+from .tools.export_requests import (
+    maybe_return_completed_combined_resume as _maybe_return_completed_combined_resume,
+)
+from .tools.export_requests import (
+    normalize_export_config as _normalize_export_config,
+)
+from .tools.export_requests import (
+    normalize_export_format as _normalize_export_format,
+)
+from .tools.export_requests import (
+    normalize_export_target as _normalize_export_target,
+)
+from .tools.export_requests import (
+    resolve_export_model_configs as _resolve_export_model_configs,
+)
+from .tools.model_defaults import (
+    resolve_sensor_for_model as _resolve_sensor_for_model,
+)
+from .tools.normalization import (
+    # Re-exported so `from rs_embed.api import ...` in tests/downstream still works.
+    _default_provider_backend_for_api,  # noqa: F401
+    _probe_model_describe,  # noqa: F401
+    _resolve_embedding_api_backend,  # noqa: F401
+)
+from .tools.normalization import (
+    normalize_backend_name as _normalize_backend_name,
+)
+from .tools.normalization import (
+    normalize_device_name as _normalize_device_name,
+)
+from .tools.normalization import (
+    normalize_model_name as _normalize_model_name,
+)
+from .tools.progress import create_progress as _create_progress
+from .tools.runtime import (
+    _prepare_embedding_request_context,
+    provider_factory_for_backend,
+)
+from .tools.runtime import (
+    run_embedding_request as _run_embedding_request_shared,
+)
 
 # -----------------------------------------------------------------------------
 # Public: embeddings

@@ -1,12 +1,12 @@
 from __future__ import annotations
 
 import warnings
-
-import numpy as np
 from collections.abc import Callable
 
-from ..tools.serialization import sensor_cache_key as _sensor_cache_key
+import numpy as np
+
 from ..core.specs import SensorSpec
+from ..tools.serialization import sensor_cache_key as _sensor_cache_key
 
 _LEGACY_RESOLVE_BANDS_WARNED = False
 

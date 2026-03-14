@@ -1,9 +1,11 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
 from datetime import date
 from typing import Literal
 
 from .errors import SpecError
+
 
 @dataclass(frozen=True)
 class BBox:
@@ -100,7 +102,7 @@ class TemporalSpec:
     end: str | None = None
 
     @staticmethod
-    def year(y: int) -> "TemporalSpec":
+    def year(y: int) -> TemporalSpec:
         """Build a year-mode temporal spec.
 
         Parameters
@@ -116,7 +118,7 @@ class TemporalSpec:
         return TemporalSpec(mode="year", year=y)
 
     @staticmethod
-    def range(start: str, end: str) -> "TemporalSpec":
+    def range(start: str, end: str) -> TemporalSpec:
         """Build a range-mode temporal spec.
 
         Parameters
@@ -243,7 +245,7 @@ class OutputSpec:
         scale_m: int = 10,
         *,
         grid_orientation: Literal["north_up", "native"] = "north_up",
-    ) -> "OutputSpec":
+    ) -> OutputSpec:
         """Build a grid-output specification.
 
         Parameters
@@ -261,7 +263,7 @@ class OutputSpec:
         return OutputSpec(mode="grid", scale_m=scale_m, grid_orientation=grid_orientation)
 
     @staticmethod
-    def pooled(pooling: Literal["mean", "max"] = "mean") -> "OutputSpec":
+    def pooled(pooling: Literal["mean", "max"] = "mean") -> OutputSpec:
         """Build a pooled-output specification.
 
         Parameters
@@ -307,7 +309,7 @@ class InputPrepSpec:
         tile_stride: int | None = None,
         max_tiles: int = 9,
         pad_edges: bool = True,
-    ) -> "InputPrepSpec":
+    ) -> InputPrepSpec:
         """Build an adaptive preprocessing policy.
 
         Parameters
@@ -335,7 +337,7 @@ class InputPrepSpec:
         )
 
     @staticmethod
-    def resize() -> "InputPrepSpec":
+    def resize() -> InputPrepSpec:
         """Build a resize-only preprocessing policy.
 
         Returns
@@ -352,7 +354,7 @@ class InputPrepSpec:
         tile_stride: int | None = None,
         max_tiles: int = 9,
         pad_edges: bool = True,
-    ) -> "InputPrepSpec":
+    ) -> InputPrepSpec:
         """Build a tile-based preprocessing policy.
 
         Parameters

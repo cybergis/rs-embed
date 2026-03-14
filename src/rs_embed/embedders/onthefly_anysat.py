@@ -14,17 +14,23 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..tools.temporal import temporal_frame_midpoints
 from ..providers import ProviderBase
+from ..tools.temporal import temporal_frame_midpoints
+from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
+from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .runtime_utils import (
     coerce_input_to_tchw as _coerce_input_to_tchw,
+)
+from .runtime_utils import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
 )
-from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
-from ._vit_mae_utils import ensure_torch
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
@@ -100,7 +106,7 @@ def _fetch_s2_10_raw_tchw(
 def _load_anysat_hub_module():
     try:
         mod = importlib.import_module("rs_embed.embedders._vendor.anysat.hubconf")
-        getattr(mod, "AnySat")
+        _ = mod.AnySat
     except Exception as e:
         raise ModelError(
             "Failed to import vendored AnySat runtime. Install missing dependencies: torch, einops."

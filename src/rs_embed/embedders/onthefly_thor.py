@@ -15,13 +15,19 @@ from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
 from ._vit_mae_utils import ensure_torch, pool_from_tokens, tokens_to_grid_dhw
 from .base import EmbedderBase
+from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device,
 )
-from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 
 _S2_SR_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 _THOR_MODEL_BANDS = [

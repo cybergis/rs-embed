@@ -1,8 +1,9 @@
 from __future__ import annotations
 
+from ..providers import has_provider
 from .errors import ModelError
 from .specs import OutputSpec, SpatialSpec, TemporalSpec
-from ..providers import has_provider
+
 
 def validate_specs(
     *, spatial: SpatialSpec, temporal: TemporalSpec | None, output: OutputSpec

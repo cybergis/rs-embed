@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 """Lightweight, on-the-fly input image inspection.
 
 This module is intentionally dependency-light (numpy only by default).
@@ -20,10 +18,13 @@ When enabled, we return a report dict that can be attached into embedding meta.
 If `check_raise` is enabled and issues are detected, embedders may raise.
 """
 
+from __future__ import annotations
+
 import os
 from typing import Any
 
 import numpy as np
+
 
 def _env_flag(name: str, default: str = "0") -> bool:
     v = os.environ.get(name, default)
@@ -294,8 +295,9 @@ def save_quicklook_rgb(
     vmax: float | None = None,
 ) -> None:
     import os
-    import numpy as np
+
     import matplotlib.pyplot as plt
+    import numpy as np
 
     if x_chw.ndim != 3:
         raise ValueError(f"Expected CHW, got {x_chw.shape}")

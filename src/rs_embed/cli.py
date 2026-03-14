@@ -15,9 +15,10 @@ import argparse
 import json
 import sys
 
-from .core.specs import BBox, PointBuffer, SensorSpec, TemporalSpec, OutputSpec
-from .inspect import inspect_gee_patch
+from .core.specs import BBox, OutputSpec, PointBuffer, SensorSpec, TemporalSpec
 from .export import export_npz
+from .inspect import inspect_gee_patch
+
 
 def _parse_bands(s: str) -> tuple[str, ...]:
     parts = [p.strip() for p in s.split(",") if p.strip()]

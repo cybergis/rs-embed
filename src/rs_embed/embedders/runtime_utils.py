@@ -12,10 +12,10 @@ from ..core.errors import ModelError
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import get_provider, has_provider, list_providers
 from ..providers.base import ProviderBase
+from ..tools.normalization import normalize_backend_name
 
 _T = TypeVar("_T")
 
-from ..tools.normalization import normalize_backend_name
 
 def default_provider_backend_name() -> str | None:
     configured = normalize_backend_name(os.environ.get("RS_EMBED_DEFAULT_PROVIDER", ""))

@@ -15,16 +15,19 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..providers import ProviderBase
 from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
-from .runtime_utils import (
-    is_provider_backend,
-    load_cached_with_device as _load_cached_with_device,
-    resolve_device_auto_torch as _resolve_device,
-)
 from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .onthefly_terramind import _fetch_s2_sr_12_raw_chw
+from .runtime_utils import (
+    is_provider_backend,
+)
+from .runtime_utils import (
+    load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
+    resolve_device_auto_torch as _resolve_device,
+)
 
 _S2_SR_12_BANDS = [
     "B1",
@@ -177,7 +180,7 @@ def _resolve_fomo_ckpt_path() -> str:
 def _load_fomo_module():
     try:
         mod = importlib.import_module("rs_embed.embedders._vendor.fomo_multimodal_mae")
-        getattr(mod, "MultiSpectralViT")
+        _ = mod.MultiSpectralViT
     except Exception as e:
         raise ModelError(
             "Failed to import vendored FoMo runtime. Install missing dependencies: torch, einops."

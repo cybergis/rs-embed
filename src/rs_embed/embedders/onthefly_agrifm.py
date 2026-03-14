@@ -21,12 +21,16 @@ from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
 from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
+from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .runtime_utils import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
 )
-from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
@@ -226,7 +230,7 @@ def _install_agrifm_lightweight_shims() -> None:
         sys.modules["mmseg.models.builder"] = mod_builder
         sys.modules["mmseg.models.decode_heads"] = mod_decode_heads
     else:
-        reg_backbones = getattr(sys.modules["mmseg.models.builder"], "BACKBONES")
+        reg_backbones = sys.modules["mmseg.models.builder"].BACKBONES
 
     if "mmseg.registry.registry" not in sys.modules:
         reg_models = _MiniRegistry("MODELS")
@@ -243,7 +247,7 @@ def _install_agrifm_lightweight_shims() -> None:
         sys.modules["mmseg.registry"] = mod_registry_pkg
         sys.modules["mmseg.registry.registry"] = mod_registry
     else:
-        reg_models = getattr(sys.modules["mmseg.registry.registry"], "MODELS")
+        reg_models = sys.modules["mmseg.registry.registry"].MODELS
 
     # Keep registries shared so MODELS.build can resolve BACKBONES-registered classes.
     if hasattr(reg_models, "_items") and hasattr(reg_backbones, "_items"):
@@ -660,7 +664,7 @@ class AgriFMEmbedder(EmbedderBase):
             raw_tchw = np.clip(raw_tchw, 0.0, 10000.0).astype(np.float32)
 
         # Optional: inspect first frame on normalized [0,1] scale.
-        from ..tools.inspection import maybe_inspect_chw, checks_should_raise
+        from ..tools.inspection import checks_should_raise, maybe_inspect_chw
 
         check_meta: dict[str, Any] = {"input_frames": int(raw_tchw.shape[0])}
         report = maybe_inspect_chw(

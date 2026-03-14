@@ -1,11 +1,13 @@
 from __future__ import annotations
+
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from collections.abc import Sequence
 
 from ..core.errors import ProviderError
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
+
 
 class ProviderBase:
     """Base interface for provider-specific data access implementations."""

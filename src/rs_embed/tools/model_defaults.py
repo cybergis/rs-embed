@@ -1,11 +1,12 @@
 from __future__ import annotations
 
-from dataclasses import replace
 from collections.abc import Iterable
+from dataclasses import replace
 
 from ..core.errors import ModelError
 from ..core.registry import get_embedder_cls
 from ..core.specs import SensorSpec
+
 
 def _probe_model_desc(model_id: str) -> dict:
     cls = get_embedder_cls(model_id)

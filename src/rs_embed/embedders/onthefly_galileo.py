@@ -15,18 +15,26 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..tools.temporal import temporal_frame_midpoints
 from ..providers import ProviderBase
+from ..tools.temporal import temporal_frame_midpoints
 from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
+from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .runtime_utils import (
     coerce_input_to_tchw as _coerce_input_to_tchw,
+)
+from .runtime_utils import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device,
 )
-from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
@@ -129,7 +137,7 @@ def _resolve_model_folder(
 def _load_galileo_module():
     try:
         mod = importlib.import_module("rs_embed.embedders._vendor.galileo_single_file")
-        getattr(mod, "Encoder")
+        _ = mod.Encoder
     except Exception as e:
         raise ModelError(
             "Failed to import vendored Galileo runtime. "
@@ -300,9 +308,9 @@ def _prepare_galileo_encoder_inputs(
     t = int(s2_hwtd.shape[2])
 
     # create Galileo space_time tensor [B,H,W,T,len(SPACE_TIME_BANDS)]
-    space_time_bands = list(getattr(mod, "SPACE_TIME_BANDS"))
-    s2_bands = list(getattr(mod, "S2_BANDS"))
-    s_t_groups = list(getattr(mod, "SPACE_TIME_BANDS_GROUPS_IDX").keys())
+    space_time_bands = list(mod.SPACE_TIME_BANDS)
+    s2_bands = list(mod.S2_BANDS)
+    s_t_groups = list(mod.SPACE_TIME_BANDS_GROUPS_IDX.keys())
 
     h, w = int(s2_hwtd.shape[0]), int(s2_hwtd.shape[1])
     s_t_x = np.zeros((1, h, w, t, len(space_time_bands)), dtype=np.float32)
@@ -335,12 +343,12 @@ def _prepare_galileo_encoder_inputs(
             if str(key) == "NDVI":
                 s_t_m[0, :, :, :, i] = 0.0
 
-    sp_len = len(getattr(mod, "SPACE_BANDS"))
-    t_len = len(getattr(mod, "TIME_BANDS"))
-    st_len = len(getattr(mod, "STATIC_BANDS"))
-    sp_group_len = len(getattr(mod, "SPACE_BAND_GROUPS_IDX"))
-    t_group_len = len(getattr(mod, "TIME_BAND_GROUPS_IDX"))
-    st_group_len = len(getattr(mod, "STATIC_BAND_GROUPS_IDX"))
+    sp_len = len(mod.SPACE_BANDS)
+    t_len = len(mod.TIME_BANDS)
+    st_len = len(mod.STATIC_BANDS)
+    sp_group_len = len(mod.SPACE_BAND_GROUPS_IDX)
+    t_group_len = len(mod.TIME_BAND_GROUPS_IDX)
+    st_group_len = len(mod.STATIC_BAND_GROUPS_IDX)
 
     sp_x = np.zeros((1, h, w, sp_len), dtype=np.float32)
     t_x = np.zeros((1, t, t_len), dtype=np.float32)
@@ -434,7 +442,7 @@ def _galileo_forward(
     vec = vec_t[0].detach().float().cpu().numpy().astype(np.float32)
 
     # grid features from S2-related space-time groups only
-    s_t_groups = list(getattr(mod, "SPACE_TIME_BANDS_GROUPS_IDX").keys())
+    s_t_groups = list(mod.SPACE_TIME_BANDS_GROUPS_IDX.keys())
     s2_group_indices = [i for i, key in enumerate(s_t_groups) if "S2" in str(key)]
     if not s2_group_indices:
         raise ModelError("Failed to locate Galileo S2 group indices in SPACE_TIME_BANDS_GROUPS_IDX")

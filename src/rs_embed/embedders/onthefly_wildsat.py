@@ -16,7 +16,6 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..providers.base import ProviderBase
 from ._vit_mae_utils import (
     ensure_torch,
     pool_from_tokens,
@@ -24,13 +23,19 @@ from ._vit_mae_utils import (
     tokens_to_grid_dhw,
 )
 from .base import EmbedderBase
+from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from .runtime_utils import (
     fetch_s2_rgb_chw as _fetch_s2_rgb_chw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device,
 )
-from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 
 _SUPPORTED_ARCHES = {"vitb16", "vitl16", "resnet50", "swint"}
 _WILDSAT_DEFAULT_GDRIVE_FILE_ID = "1IxBpf3nbEMzny4YJWS6stMBxel6gMiYE"

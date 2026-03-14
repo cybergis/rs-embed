@@ -9,33 +9,34 @@ It composes :class:`PrefetchManager`, :class:`InferenceEngine`, and
 from __future__ import annotations
 
 import os
-from dataclasses import replace
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from dataclasses import replace
 from typing import Any
 
 import numpy as np
-from collections.abc import Callable
 
-from ..tools.serialization import (
-    sanitize_key,
-    sha1,
-    utc_ts,
-)
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ExportLayout, ExportTarget, ModelConfig
-from .point_payload import build_one_point_payload, write_one_payload
+from ..providers import gee_utils as _gee_utils
 from ..tools.manifest import (
     point_failure_manifest,
     point_resume_manifest,
     summarize_status,
 )
 from ..tools.progress import create_progress as _default_create_progress
-from ..providers import gee_utils as _gee_utils
+from ..tools.serialization import (
+    sanitize_key,
+    sha1,
+    utc_ts,
+)
 from ..writers import get_extension
 from .checkpoint import CheckpointManager
 from .inference import InferenceEngine
+from .point_payload import build_one_point_payload, write_one_payload
 from .prefetch import PrefetchManager
 from .runner import run_with_retry
+
 
 class BatchExporter:
     """Orchestrates batch embedding export (per-item or combined).

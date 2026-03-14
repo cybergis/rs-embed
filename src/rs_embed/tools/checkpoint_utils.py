@@ -4,8 +4,8 @@ from typing import Any
 
 import numpy as np
 
-from .serialization import jsonable as _jsonable
 from ..core.specs import SensorSpec
+from .serialization import jsonable as _jsonable
 
 _CHECKPOINT_PREFETCH_BCHW_PREFIX = "__prefetch_bchw__"
 _CHECKPOINT_PREFETCH_CHW_PREFIX = "__prefetch_chw__"

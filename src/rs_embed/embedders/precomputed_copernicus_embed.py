@@ -6,16 +6,16 @@ from typing import Any
 
 import numpy as np
 
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
+from ..core.registry import register
 from ..core.specs import (
     BBox,
+    OutputSpec,
     PointBuffer,
+    SensorSpec,
     SpatialSpec,
     TemporalSpec,
-    SensorSpec,
-    OutputSpec,
 )
 from .base import EmbedderBase
 from .meta_utils import build_meta

@@ -9,13 +9,13 @@ from __future__ import annotations
 
 import inspect
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
 from threading import RLock
 from typing import Any, TypeVar
 
 import numpy as np
-from collections.abc import Callable
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -48,13 +48,13 @@ class _EmbeddingRequestContext:
     lock: Any
 
 @lru_cache(maxsize=32)
-def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: Tuple):
+def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple):
     """Return (embedder instance, instance lock)."""
     cls = get_embedder_cls(model)
     emb = cls()
     return emb, RLock()
 
-def sensor_key(sensor: SensorSpec | None) -> Tuple:
+def sensor_key(sensor: SensorSpec | None) -> tuple:
     if sensor is None:
         return ("__none__",)
     return (
@@ -140,7 +140,6 @@ def run_with_retry(
         try:
             return fn()
         except Exception as e:  # pragma: no cover - exercised by call-sites
-            last_err = e
             if attempt >= tries:
                 raise
             if backoff > 0:
@@ -269,7 +268,7 @@ def run_embedding_request(
     )
     if prefetched_inputs is not None:
         out: list[Embedding] = []
-        for spatial, raw in zip(spatials, prefetched_inputs):
+        for spatial, raw in zip(spatials, prefetched_inputs, strict=False):
             with ctx.lock:
                 emb = _call_embedder_get_embedding_with_input_prep(
                     embedder=ctx.embedder,

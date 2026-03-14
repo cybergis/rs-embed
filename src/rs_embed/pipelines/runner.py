@@ -2,9 +2,9 @@
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import Future, ThreadPoolExecutor, as_completed
 from typing import Any, TypeVar
-from collections.abc import Callable
 
 from ..tools.runtime import run_with_retry
 

@@ -4,15 +4,16 @@ import json
 import os
 from typing import Any
 
+from ..core.specs import OutputSpec, SpatialSpec, TemporalSpec
 from .serialization import jsonable as _jsonable
 from .serialization import utc_ts as _utc_ts
-from ..core.specs import OutputSpec, SpatialSpec, TemporalSpec
+
 
 def load_json_dict(path: str) -> dict[str, Any] | None:
     if not os.path.exists(path):
         return None
     try:
-        with open(path, "r", encoding="utf-8") as f:
+        with open(path, encoding="utf-8") as f:
             payload = json.load(f)
         if isinstance(payload, dict):
             return payload

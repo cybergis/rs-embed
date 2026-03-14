@@ -7,13 +7,16 @@ called from ``BatchExporter._run_combined``.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
-from collections.abc import Callable
 
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, Status, TaskResult
+from ..tools.checkpoint_utils import drop_model_arrays
+from ..tools.normalization import normalize_model_name
+from ..tools.progress import create_progress
 from ..tools.runtime import (
     get_embedder_bundle_cached,
     sensor_key,
@@ -23,9 +26,7 @@ from ..tools.serialization import (
     sanitize_key,
     sensor_cache_key,
 )
-from ..tools.normalization import normalize_model_name
-from ..tools.checkpoint_utils import drop_model_arrays
-from ..tools.progress import create_progress
+
 
 def run_pending_models(
     *,

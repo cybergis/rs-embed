@@ -147,7 +147,7 @@ def _resolve_conflicting_dims(
         return dims
 
     resolved = []
-    for name, size_raw in zip(dims, shape):
+    for name, size_raw in zip(dims, shape, strict=False):
         size = int(size_raw)
         existing = dim_sizes.get(name)
         resolved_name = name

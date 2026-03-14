@@ -1,15 +1,16 @@
-from __future__ import annotations
-
 """Utilities for inspecting raw patches downloaded from provider backends."""
+
+from __future__ import annotations
 
 from dataclasses import asdict
 from typing import Any
 
 from .core.errors import ProviderError
-from .tools.inspection import inspect_chw, checks_save_dir, save_quicklook_rgb
 from .core.specs import SensorSpec, SpatialSpec, TemporalSpec
-from .providers.gee_utils import fetch_provider_patch_raw
 from .providers import get_provider
+from .providers.gee_utils import fetch_provider_patch_raw
+from .tools.inspection import checks_save_dir, inspect_chw, save_quicklook_rgb
+
 
 def inspect_provider_patch(
     *,
@@ -58,8 +59,8 @@ def inspect_provider_patch(
     save_dir = checks_save_dir(sensor)
     if save_dir and x_chw.ndim == 3 and x_chw.shape[0] >= 3:
         try:
-            import os
             import datetime as _dt
+            import os
 
             ts = _dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
             path = os.path.join(save_dir, f"{name}_{ts}.png")

@@ -1,9 +1,9 @@
 from __future__ import annotations
 
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-import math
 from typing import Any
 
 import numpy as np
@@ -11,23 +11,26 @@ import numpy as np
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
-from .base import EmbedderBase
-from .runtime_utils import (
-    fetch_collection_patch_chw as _fetch_collection_patch_chw,
-    is_provider_backend,
-    load_cached_with_device as _load_cached_with_device,
-)
-
 from ._vit_mae_utils import (
+    base_meta,
     ensure_torch,
     pool_from_tokens,
-    tokens_to_grid_dhw,
-    base_meta,
     temporal_to_range,
+    tokens_to_grid_dhw,
 )
+from .base import EmbedderBase
 from .meta_utils import temporal_midpoint_str
+from .runtime_utils import (
+    fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from .runtime_utils import (
+    is_provider_backend,
+)
+from .runtime_utils import (
+    load_cached_with_device as _load_cached_with_device,
+)
 
 # -------------------------
 # Provider: Sentinel-2 -> Prithvi 6-band (CHW float32 in [0,1])
@@ -236,8 +239,8 @@ def _prithvi_forward_tokens(
     TerraTorch Prithvi commonly returns tokens as the last element in tuple/list.
     """
     ensure_torch()
-    import torch
     import pandas as pd
+    import torch
 
     if x_chw.ndim != 3 or x_chw.shape[0] != 6:
         raise ModelError(f"Prithvi expects 6-band CHW, got {x_chw.shape}")
@@ -291,8 +294,8 @@ def _prithvi_forward_tokens_batch(
 ) -> list[np.ndarray]:
     """Batch Prithvi forward for [B,6,H,W] inputs."""
     ensure_torch()
-    import torch
     import pandas as pd
+    import torch
 
     if x_bchw.ndim != 4 or x_bchw.shape[1] != 6:
         raise ModelError(f"Prithvi expects BCHW with C=6, got {x_bchw.shape}")
@@ -483,9 +486,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         # Optional: inspect on-the-fly provider input
         from ..tools.inspection import (
-            maybe_inspect_chw,
-            checks_should_raise,
             checks_save_dir,
+            checks_should_raise,
+            maybe_inspect_chw,
             save_quicklook_rgb,
         )
 

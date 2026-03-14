@@ -6,21 +6,22 @@ tracking for provider-backed input tensors used during export.
 
 from __future__ import annotations
 
+from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import numpy as np
-from collections.abc import Callable
 
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig
 from ..providers import gee_utils as _gee_utils
-from ..tools.normalization import normalize_input_chw
 from ..providers.prefetch_plan import (
     build_gee_prefetch_plan,
     select_prefetched_channels,
 )
+from ..tools.normalization import normalize_input_chw
 from .runner import run_with_retry
+
 
 class PrefetchManager:
     """Manages GEE input prefetching, caching, and error tracking.

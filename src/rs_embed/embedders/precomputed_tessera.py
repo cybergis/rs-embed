@@ -7,16 +7,16 @@ from typing import Any
 
 import numpy as np
 
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
+from ..core.registry import register
 from ..core.specs import (
     BBox,
+    OutputSpec,
     PointBuffer,
+    SensorSpec,
     SpatialSpec,
     TemporalSpec,
-    SensorSpec,
-    OutputSpec,
 )
 from .base import EmbedderBase
 
@@ -136,7 +136,7 @@ def _mosaic_and_crop_strict_roi(
     left = bottom = float("inf")
     right = top = float("-inf")
 
-    for year, tlon, tlat, emb, crs, transform in tiles_rows_factory():
+    for _year, _tlon, _tlat, emb, crs, transform in tiles_rows_factory():
         _assert_north_up(transform)
         h, w, d = _infer_hwc_shape(emb)
         t_left, t_bottom, t_right, t_top = _tile_bounds(transform, w, h)
@@ -202,7 +202,7 @@ def _mosaic_and_crop_strict_roi(
     cropped_hwc = np.zeros((crop_h, crop_w, int(d0)), dtype=np.float32)
 
     # Pass 2: paste tiles directly into crop canvas (avoid full mosaic allocation).
-    for year, tlon, tlat, emb, crs, transform in tiles_rows_factory():
+    for _year, _tlon, _tlat, emb, _crs, transform in tiles_rows_factory():
         _assert_north_up(transform)
         hwc = _to_hwc(emb)
         h, w, _ = hwc.shape

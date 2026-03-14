@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import os
+import re
 from collections.abc import Iterable, Sequence
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-import re
 from typing import Any
 
 import numpy as np
@@ -24,8 +24,14 @@ from ._vit_mae_utils import (
 from .base import EmbedderBase
 from .runtime_utils import (
     fetch_sensor_patch_chw as _fetch_sensor_patch_chw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
+)
+from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device,
 )
 

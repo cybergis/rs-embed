@@ -10,18 +10,26 @@ from typing import Any
 import numpy as np
 import xarray as xr
 
-from ..core.registry import register
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
+from ..core.registry import register
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
 from .base import EmbedderBase
 from .meta_utils import build_meta, temporal_midpoint_str
 from .runtime_utils import (
     coerce_single_input_chw,
+)
+from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from .runtime_utils import (
     fetch_s1_vvvh_raw_chw as _fetch_s1_vvvh_raw_chw_shared,
+)
+from .runtime_utils import (
     normalize_s1_vvvh_chw as _normalize_s1_vvvh_chw,
+)
+from .runtime_utils import (
     resolve_device_auto_torch as _auto_device,
 )
 
@@ -261,7 +269,7 @@ def _load_terrafm_b(
 # -----------------------------
 def _terrafm_pooled_and_grid(
     model,
-    x_bchw: "np.ndarray",
+    x_bchw: np.ndarray,
     *,
     device: str,
     want_grid: bool,
@@ -298,7 +306,7 @@ def _terrafm_pooled_and_grid(
 
 def _terrafm_pooled_and_grid_batch(
     model,
-    x_bchw: "np.ndarray",
+    x_bchw: np.ndarray,
     *,
     device: str,
     want_grid: bool,
@@ -510,7 +518,7 @@ class TerraFMBEmbedder(EmbedderBase):
                     raise ModelError("modality must be 's2' or 's1'.")
 
             # Optional: inspect on-the-fly provider input
-            from ..tools.inspection import maybe_inspect_chw, checks_should_raise
+            from ..tools.inspection import checks_should_raise, maybe_inspect_chw
 
             check_meta.clear()
             exp_c = 12 if modality == "s2" else 2

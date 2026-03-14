@@ -17,7 +17,11 @@ from ._vit_mae_utils import base_meta, ensure_torch, temporal_to_range
 from .base import EmbedderBase
 from .runtime_utils import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
 )
 

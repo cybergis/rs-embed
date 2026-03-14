@@ -1,11 +1,13 @@
 from __future__ import annotations
+
 from typing import Any
 
 import numpy as np
 
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
 from ..core.embedding import Embedding
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers.base import ProviderBase
+
 
 class EmbedderBase:
     """Base interface for all embedder implementations.
@@ -189,5 +191,5 @@ class EmbedderBase:
                 device=device,
                 input_chw=x,
             )
-            for s, x in zip(spatials, input_chws)
+            for s, x in zip(spatials, input_chws, strict=False)
         ]

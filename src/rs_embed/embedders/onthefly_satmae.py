@@ -10,25 +10,26 @@ import numpy as np
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
-from ..core.specs import SpatialSpec, TemporalSpec, SensorSpec, OutputSpec
-from ..providers.base import ProviderBase
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ._vit_mae_utils import (
+    base_meta,
+    ensure_torch,
+    fetch_s2_rgb_u8_from_provider,
+    maybe_use_model_transform,
+    pool_from_tokens,
+    resize_rgb_u8,
+    rgb_u8_to_tensor_clipnorm,
+    temporal_to_range,
+    tokens_to_grid_dhw,
+)
 from .base import EmbedderBase
 from .runtime_utils import (
     is_provider_backend,
+)
+from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
 )
 
-from ._vit_mae_utils import (
-    fetch_s2_rgb_u8_from_provider,
-    resize_rgb_u8,
-    pool_from_tokens,
-    tokens_to_grid_dhw,
-    base_meta,
-    temporal_to_range,
-    ensure_torch,
-    maybe_use_model_transform,
-    rgb_u8_to_tensor_clipnorm,
-)
 
 @lru_cache(maxsize=8)
 def _load_satmae_cached(model_id: str, dev: str):

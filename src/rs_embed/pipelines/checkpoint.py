@@ -6,18 +6,14 @@ write/load operations for per-item and combined layouts.
 
 from __future__ import annotations
 
-import json
 import os
 from typing import Any
 
 import numpy as np
-from collections.abc import Callable
 
-from ..tools.serialization import jsonable, sensor_cache_key, utc_ts
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..core.types import ExportConfig, ExportLayout, ExportTarget
+from ..core.types import ExportConfig, ExportTarget
 from ..tools.checkpoint_utils import (
-    drop_model_arrays,
     drop_prefetch_checkpoint_arrays,
     is_incomplete_combined_manifest,
     load_saved_arrays,
@@ -26,10 +22,14 @@ from ..tools.checkpoint_utils import (
 )
 from ..tools.manifest import (
     load_json_dict as _load_json_dict,
+)
+from ..tools.manifest import (
     summarize_status,
 )
-from ..writers import get_extension, write_arrays
+from ..tools.serialization import jsonable, sensor_cache_key, utc_ts
+from ..writers import write_arrays
 from .runner import run_with_retry
+
 
 class CheckpointManager:
     """Manages manifests, resume detection, and checkpoint writes.

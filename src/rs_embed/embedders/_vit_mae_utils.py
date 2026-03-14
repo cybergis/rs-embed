@@ -5,10 +5,11 @@ from typing import Any
 import numpy as np
 
 from ..core.errors import ModelError
-from ..core.specs import TemporalSpec, SensorSpec, SpatialSpec
+from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..providers import ProviderBase
-from .meta_utils import temporal_to_range, build_meta
+from .meta_utils import build_meta, temporal_to_range
 from .runtime_utils import create_provider_for_backend, fetch_collection_patch_chw
+
 
 # -------------------------
 # Image resize / provider-backed fetch
@@ -72,7 +73,7 @@ def fetch_s2_rgb_u8_from_provider(
     s2_chw = np.clip(s2_raw / 10000.0, 0.0, 1.0).astype(np.float32)
 
     # Optional: inspect on-the-fly provider input (shared by multiple embedders)
-    from ..tools.inspection import maybe_inspect_chw, checks_should_raise
+    from ..tools.inspection import checks_should_raise, maybe_inspect_chw
 
     report = maybe_inspect_chw(
         s2_chw,
@@ -167,7 +168,7 @@ def maybe_use_model_transform(model: Any, rgb_u8: np.ndarray, image_size: int):
     ensure_torch()
     import torch
 
-    if hasattr(model, "transform") and callable(getattr(model, "transform")):
+    if hasattr(model, "transform") and callable(model.transform):
         x = model.transform(rgb_u8.astype(np.float32), image_size)
         if isinstance(x, torch.Tensor) and x.ndim == 3:
             return x.unsqueeze(0)
@@ -180,8 +181,8 @@ def rgb_u8_to_tensor_clipnorm(rgb_u8: np.ndarray, image_size: int):
     Returns torch.Tensor [B,3,H,W] on CPU.
     """
     ensure_torch()
-    from torchvision import transforms
     from PIL import Image
+    from torchvision import transforms
 
     preprocess = transforms.Compose(
         [
