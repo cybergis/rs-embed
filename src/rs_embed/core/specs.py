@@ -1,10 +1,9 @@
 from __future__ import annotations
 from dataclasses import dataclass
 from datetime import date
-from typing import Literal, Optional, Tuple
+from typing import Literal
 
 from .errors import SpecError
-
 
 @dataclass(frozen=True)
 class BBox:
@@ -43,7 +42,6 @@ class BBox:
         if not (self.minlon < self.maxlon and self.minlat < self.maxlat):
             raise SpecError("Invalid bbox bounds.")
 
-
 @dataclass(frozen=True)
 class PointBuffer:
     """Point-centered spatial request with radius in meters.
@@ -78,9 +76,7 @@ class PointBuffer:
         if self.buffer_m <= 0:
             raise SpecError("buffer_m must be positive.")
 
-
 SpatialSpec = BBox | PointBuffer
-
 
 @dataclass(frozen=True)
 class TemporalSpec:
@@ -99,9 +95,9 @@ class TemporalSpec:
     """
 
     mode: Literal["year", "range"]
-    year: Optional[int] = None
-    start: Optional[str] = None
-    end: Optional[str] = None
+    year: int | None = None
+    start: str | None = None
+    end: str | None = None
 
     @staticmethod
     def year(y: int) -> "TemporalSpec":
@@ -167,7 +163,6 @@ class TemporalSpec:
         else:
             raise SpecError(f"Unknown TemporalSpec mode: {self.mode}")
 
-
 @dataclass(frozen=True)
 class SensorSpec:
     """Sensor/source definition for on-the-fly provider fetching.
@@ -203,13 +198,13 @@ class SensorSpec:
     """
 
     collection: str
-    bands: Tuple[str, ...]
+    bands: tuple[str, ...]
     scale_m: int = 10
     cloudy_pct: int = 30
     fill_value: float = 0.0
     composite: Literal["median", "mosaic"] = "median"
-    modality: Optional[str] = None
-    orbit: Optional[str] = None
+    modality: str | None = None
+    orbit: str | None = None
     use_float_linear: bool = True
 
     # Optional: on-the-fly input inspection for GEE downloads.
@@ -217,8 +212,7 @@ class SensorSpec:
     # (and optionally raise if issues are detected).
     check_input: bool = False
     check_raise: bool = True
-    check_save_dir: Optional[str] = None
-
+    check_save_dir: str | None = None
 
 @dataclass(frozen=True)
 class OutputSpec:
@@ -282,7 +276,6 @@ class OutputSpec:
         """
         return OutputSpec(mode="pooled", scale_m=10, pooling=pooling, grid_orientation="north_up")
 
-
 @dataclass(frozen=True)
 class InputPrepSpec:
     """Policy controlling API-side preprocessing for large on-the-fly inputs.
@@ -302,16 +295,16 @@ class InputPrepSpec:
     """
 
     mode: Literal["auto", "resize", "tile"] = "resize"
-    tile_size: Optional[int] = None
-    tile_stride: Optional[int] = None
+    tile_size: int | None = None
+    tile_stride: int | None = None
     max_tiles: int = 9
     pad_edges: bool = True
 
     @staticmethod
     def auto(
         *,
-        tile_size: Optional[int] = None,
-        tile_stride: Optional[int] = None,
+        tile_size: int | None = None,
+        tile_stride: int | None = None,
         max_tiles: int = 9,
         pad_edges: bool = True,
     ) -> "InputPrepSpec":
@@ -355,8 +348,8 @@ class InputPrepSpec:
     @staticmethod
     def tile(
         *,
-        tile_size: Optional[int] = None,
-        tile_stride: Optional[int] = None,
+        tile_size: int | None = None,
+        tile_stride: int | None = None,
         max_tiles: int = 9,
         pad_edges: bool = True,
     ) -> "InputPrepSpec":

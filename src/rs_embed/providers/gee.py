@@ -1,6 +1,7 @@
 from __future__ import annotations
 
-from typing import Any, Optional, Sequence, Tuple
+from collections.abc import Sequence
+from typing import Any
 
 import numpy as np
 from pyproj import Transformer
@@ -9,7 +10,6 @@ from ..core.errors import ProviderError, SpecError
 from ..core.specs import BBox, PointBuffer, SensorSpec, SpatialSpec, TemporalSpec
 from ..tools.temporal import split_date_range as _split_date_range_core
 from .base import ProviderBase
-
 
 _ALIAS_S2 = {
     "BLUE": "B2",
@@ -59,8 +59,7 @@ _ALIAS_LS457_SR = {
 
 _NO_IMAGES_FOUND_MSG = "No images found for the selected region/time window."
 
-
-def _resolve_band_aliases(collection: str, bands: Tuple[str, ...]) -> Tuple[str, ...]:
+def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str, ...]:
     """Resolve semantic band aliases to real band names based on collection id."""
     if not bands:
         return bands
@@ -88,32 +87,27 @@ def _resolve_band_aliases(collection: str, bands: Tuple[str, ...]) -> Tuple[str,
         out.append(amap.get(key, b))
     return tuple(out)
 
-
-def _split_date_range(start: str, end: str, n_parts: int) -> Tuple[Tuple[str, str], ...]:
+def _split_date_range(start: str, end: str, n_parts: int) -> tuple[tuple[str, str], ...]:
     try:
         return _split_date_range_core(start, end, n_parts)
     except SpecError as e:
         raise ProviderError(str(e)) from e
 
-
-def _no_images_found_message(*, collection: Optional[str] = None) -> str:
+def _no_images_found_message(*, collection: str | None = None) -> str:
     if collection:
         return f"{_NO_IMAGES_FOUND_MSG} collection={collection!r}"
     return _NO_IMAGES_FOUND_MSG
 
-
-def _collection_size_or_none(col: Any) -> Optional[int]:
+def _collection_size_or_none(col: Any) -> int | None:
     try:
         return int(col.size().getInfo())
     except Exception as _e:
         return None
 
-
-def _raise_if_empty_collection(col: Any, *, collection: Optional[str] = None) -> None:
+def _raise_if_empty_collection(col: Any, *, collection: str | None = None) -> None:
     n = _collection_size_or_none(col)
     if n == 0:
         raise ProviderError(_no_images_found_message(collection=collection))
-
 
 def _sample_image_bands_raw_chw(
     img: Any,
@@ -135,7 +129,6 @@ def _sample_image_bands_raw_chw(
         raise ProviderError("Failed to sample rectangle from GEE image.") from e
     raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
-
 
 class GEEProvider(ProviderBase):
     name = "gee"
@@ -191,13 +184,13 @@ class GEEProvider(ProviderBase):
         self,
         *,
         sensor: SensorSpec,
-        temporal: Optional[TemporalSpec],
-        region: Optional[Any] = None,
+        temporal: TemporalSpec | None,
+        region: Any | None = None,
     ) -> Any:
         """Build an ee.Image from SensorSpec and TemporalSpec."""
         import ee
 
-        temporal_range: Optional[Tuple[str, str]] = None
+        temporal_range: tuple[str, str] | None = None
         if temporal is not None:
             temporal.validate()
             if temporal.mode == "range":
@@ -238,7 +231,7 @@ class GEEProvider(ProviderBase):
         self,
         *,
         image: Any,
-        bands: Tuple[str, ...],
+        bands: tuple[str, ...],
         region: Any,
         scale_m: int,
         fill_value: float,
@@ -292,8 +285,8 @@ class GEEProvider(ProviderBase):
         self,
         *,
         collection: str,
-        bands: Tuple[str, ...],
-    ) -> Tuple[str, ...]:
+        bands: tuple[str, ...],
+    ) -> tuple[str, ...]:
         return _resolve_band_aliases(collection, tuple(str(b) for b in bands))
 
     def fetch_s1_vvvh_raw_chw(
@@ -302,7 +295,7 @@ class GEEProvider(ProviderBase):
         spatial: SpatialSpec,
         temporal: TemporalSpec,
         scale_m: int = 10,
-        orbit: Optional[str] = None,
+        orbit: str | None = None,
         use_float_linear: bool = True,
         composite: str = "median",
         fill_value: float = 0.0,
@@ -360,7 +353,7 @@ class GEEProvider(ProviderBase):
         bands: Sequence[str],
         n_frames: int = 8,
         scale_m: int = 10,
-        cloudy_pct: Optional[int] = 30,
+        cloudy_pct: int | None = 30,
         composite: str = "median",
         fill_value: float = 0.0,
     ) -> np.ndarray:
@@ -452,17 +445,17 @@ class GEEProvider(ProviderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
+        temporal: TemporalSpec | None,
         collection: str,
         scale_m: int = 10,
         fill_value: float = 0.0,
         composite: str = "median",
-    ) -> Tuple[np.ndarray, Tuple[str, ...]]:
+    ) -> tuple[np.ndarray, tuple[str, ...]]:
         import ee
 
         region = self.get_region(spatial)
 
-        temporal_range: Optional[Tuple[str, str]] = None
+        temporal_range: tuple[str, str] | None = None
         if temporal is not None:
             temporal.validate()
             if temporal.mode == "range":

@@ -7,7 +7,7 @@ once in ``__init__``, then lightweight calls to ``get_embedding`` /
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .core.embedding import Embedding
 from .core.errors import ModelError
@@ -40,7 +40,6 @@ from .tools.tiling import (
 )
 from .core.validation import assert_supported, validate_specs
 
-
 class Model:
     """A ready-to-use embedding model.
 
@@ -69,10 +68,10 @@ class Model:
         *,
         backend: str = "auto",
         device: str = "auto",
-        sensor: Optional[SensorSpec] = None,
-        modality: Optional[str] = None,
+        sensor: SensorSpec | None = None,
+        modality: str | None = None,
         output: OutputSpec = OutputSpec.pooled(),
-        input_prep: Optional[InputPrepSpec | str] = "resize",
+        input_prep: InputPrepSpec | str | None = "resize",
     ) -> None:
         self._model_n = normalize_model_name(name)
         self._backend_n = _resolve_embedding_api_backend(
@@ -119,7 +118,7 @@ class Model:
         self,
         spatial: SpatialSpec,
         *,
-        temporal: Optional[TemporalSpec] = None,
+        temporal: TemporalSpec | None = None,
     ) -> Embedding:
         """Compute one embedding with this model instance.
 
@@ -146,10 +145,10 @@ class Model:
 
     def get_embeddings_batch(
         self,
-        spatials: List[SpatialSpec],
+        spatials: list[SpatialSpec],
         *,
-        temporal: Optional[TemporalSpec] = None,
-    ) -> List[Embedding]:
+        temporal: TemporalSpec | None = None,
+    ) -> list[Embedding]:
         """Compute embeddings for multiple spatial locations.
 
         Parameters
@@ -170,7 +169,7 @@ class Model:
             If ``spatials`` is empty or not a list.
         """
         if not isinstance(spatials, list) or len(spatials) == 0:
-            raise ModelError("spatials must be a non-empty List[SpatialSpec].")
+            raise ModelError("spatials must be a non-empty list[SpatialSpec].")
         for sp in spatials:
             validate_specs(spatial=sp, temporal=temporal, output=self._output)
         return run_embedding_request(
@@ -181,7 +180,7 @@ class Model:
             ctx=self._ctx,
         )
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         """Return model capabilities from the underlying embedder.
 
         Returns
@@ -198,7 +197,7 @@ class Model:
     # ── static catalog ─────────────────────────────────────────────
 
     @staticmethod
-    def list_models(*, include_aliases: bool = False) -> List[str]:
+    def list_models(*, include_aliases: bool = False) -> list[str]:
         """Return the stable model catalog.
 
         Parameters

@@ -1,15 +1,14 @@
 # src/rs_embed/core/registry.py
 from __future__ import annotations
 import importlib
-from typing import Dict, Type, Any
+from typing import Any
 
 from rs_embed.embedders.catalog import MODEL_SPECS, canonical_model_id
 
 from .errors import ModelError
 
-_REGISTRY: Dict[str, Type[Any]] = {}
-_REGISTRY_IMPORT_ERRORS: Dict[str, BaseException] = {}
-
+_REGISTRY: dict[str, type[Any]] = {}
+_REGISTRY_IMPORT_ERRORS: dict[str, BaseException] = {}
 
 def register(name: str):
     """Create a decorator that registers an embedder class under ``name``.
@@ -21,18 +20,17 @@ def register(name: str):
 
     Returns
     -------
-    Callable[[Type[Any]], Type[Any]]
+    Callable[[type[Any]], type[Any]]
         Decorator that stores the class in the runtime model registry.
     """
 
-    def deco(cls: Type[Any]):
+    def deco(cls: type[Any]):
         model_id = canonical_model_id(name)
         _REGISTRY[model_id] = cls
         setattr(cls, "model_name", model_id)
         return cls
 
     return deco
-
 
 def _try_lazy_load_model(name: str) -> None:
     """Load only the module that owns `name`, then backfill registration if needed."""
@@ -62,8 +60,7 @@ def _try_lazy_load_model(name: str) -> None:
     setattr(cls, "model_name", model_id)
     _REGISTRY_IMPORT_ERRORS.pop(model_id, None)
 
-
-def get_embedder_cls(name: str) -> Type[Any]:
+def get_embedder_cls(name: str) -> type[Any]:
     """Resolve and return the embedder class for ``name``.
 
     Parameters
@@ -73,7 +70,7 @@ def get_embedder_cls(name: str) -> Type[Any]:
 
     Returns
     -------
-    Type[Any]
+    type[Any]
         Embedder class registered for the canonical model id.
 
     Raises
@@ -101,7 +98,6 @@ def get_embedder_cls(name: str) -> Type[Any]:
             msg += f" Embedder import errors: {'; '.join(parts)}"
         raise ModelError(msg)
     return _REGISTRY[k]
-
 
 def list_models():
     """Return sorted list of currently-loaded model IDs from the runtime registry.

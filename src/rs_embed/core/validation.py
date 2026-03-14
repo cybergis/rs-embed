@@ -1,14 +1,11 @@
 from __future__ import annotations
 
-from typing import List, Optional
-
 from .errors import ModelError
 from .specs import OutputSpec, SpatialSpec, TemporalSpec
 from ..providers import has_provider
 
-
 def validate_specs(
-    *, spatial: SpatialSpec, temporal: Optional[TemporalSpec], output: OutputSpec
+    *, spatial: SpatialSpec, temporal: TemporalSpec | None, output: OutputSpec
 ) -> None:
     """Validate spatial/temporal/output specs before inference.
 
@@ -49,22 +46,20 @@ def validate_specs(
             f"Unknown grid orientation policy: {getattr(output, 'grid_orientation', None)}"
         )
 
-
 def validate_spatial_list(
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
 ) -> None:
     """Validate a non-empty list of spatial specs against shared settings."""
     if not isinstance(spatials, list) or len(spatials) == 0:
-        raise ModelError("spatials must be a non-empty List[SpatialSpec].")
+        raise ModelError("spatials must be a non-empty list[SpatialSpec].")
     for spatial in spatials:
         validate_specs(spatial=spatial, temporal=temporal, output=output)
 
-
 def assert_supported(
-    embedder, *, backend: str, output: OutputSpec, temporal: Optional[TemporalSpec]
+    embedder, *, backend: str, output: OutputSpec, temporal: TemporalSpec | None
 ) -> None:
     """Check whether an embedder supports the requested execution settings.
 

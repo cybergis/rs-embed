@@ -3,7 +3,8 @@
 from __future__ import annotations
 
 import os
-from typing import Any, Callable, Dict, Optional, Sequence, Tuple, TypeVar
+from collections.abc import Callable, Sequence
+from typing import Any, TypeVar
 
 import numpy as np
 
@@ -14,11 +15,9 @@ from ..providers.base import ProviderBase
 
 _T = TypeVar("_T")
 
-
 from ..tools.normalization import normalize_backend_name
 
-
-def default_provider_backend_name() -> Optional[str]:
+def default_provider_backend_name() -> str | None:
     configured = normalize_backend_name(os.environ.get("RS_EMBED_DEFAULT_PROVIDER", ""))
     if configured:
         return configured if has_provider(configured) else None
@@ -29,13 +28,12 @@ def default_provider_backend_name() -> Optional[str]:
         return "gee"
     return str(providers[0]).strip().lower()
 
-
 def resolve_provider_backend_name(
     backend: str,
     *,
     allow_auto: bool = True,
-    auto_backend: Optional[str] = None,
-) -> Optional[str]:
+    auto_backend: str | None = None,
+) -> str | None:
     b = normalize_backend_name(backend)
     if allow_auto and b == "auto":
         resolved_auto = (
@@ -50,12 +48,11 @@ def resolve_provider_backend_name(
         return b
     return None
 
-
 def is_provider_backend(
     backend: str,
     *,
     allow_auto: bool = True,
-    auto_backend: Optional[str] = None,
+    auto_backend: str | None = None,
 ) -> bool:
     return (
         resolve_provider_backend_name(
@@ -66,13 +63,12 @@ def is_provider_backend(
         is not None
     )
 
-
 def get_cached_provider(
-    provider_cache: Dict[str, ProviderBase],
+    provider_cache: dict[str, ProviderBase],
     *,
     backend: str,
     allow_auto: bool = True,
-    auto_backend: Optional[str] = None,
+    auto_backend: str | None = None,
 ) -> ProviderBase:
     b = resolve_provider_backend_name(
         backend,
@@ -89,20 +85,18 @@ def get_cached_provider(
     p.ensure_ready()
     return p
 
-
-def provider_init_kwargs(backend: str) -> Dict[str, Any]:
+def provider_init_kwargs(backend: str) -> dict[str, Any]:
     """Provider-specific constructor kwargs, centralized outside embedders."""
     b = normalize_backend_name(backend)
     if b == "gee":
         return {"auto_auth": True}
     return {}
 
-
 def create_provider_for_backend(
     backend: str,
     *,
     allow_auto: bool = True,
-    auto_backend: Optional[str] = None,
+    auto_backend: str | None = None,
 ) -> ProviderBase:
     b = resolve_provider_backend_name(
         backend,
@@ -115,7 +109,6 @@ def create_provider_for_backend(
     p.ensure_ready()
     return p
 
-
 def resolve_device_auto_torch(device: str) -> str:
     if device != "auto":
         return device
@@ -126,28 +119,26 @@ def resolve_device_auto_torch(device: str) -> str:
     except Exception as _e:
         return "cpu"
 
-
 def load_cached_with_device(
     cached_loader: Callable[..., _T],
     *,
     device: str,
     **kwargs: Any,
-) -> Tuple[_T, str]:
+) -> tuple[_T, str]:
     """Resolve device once and call a cached loader that accepts `dev=...`."""
     dev = resolve_device_auto_torch(device)
     loaded = cached_loader(dev=dev, **kwargs)
     return loaded, dev
 
-
 def fetch_collection_patch_chw(
     provider: ProviderBase,
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
+    temporal: TemporalSpec | None,
     collection: str,
-    bands: Tuple[str, ...],
+    bands: tuple[str, ...],
     scale_m: int = 10,
-    cloudy_pct: Optional[int] = 30,
+    cloudy_pct: int | None = 30,
     composite: str = "median",
     fill_value: float = 0.0,
 ) -> np.ndarray:
@@ -167,12 +158,11 @@ def fetch_collection_patch_chw(
         sensor=sensor,
     )
 
-
 def fetch_sensor_patch_chw(
     provider: ProviderBase,
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
+    temporal: TemporalSpec | None,
     sensor: SensorSpec,
     to_float_image: bool = False,
 ) -> np.ndarray:
@@ -194,7 +184,6 @@ def fetch_sensor_patch_chw(
     except ProviderError as exc:
         raise ModelError(str(exc)) from exc
 
-
 def _stitch_spatial_last2_arrays(
     *,
     a: np.ndarray,
@@ -214,7 +203,6 @@ def _stitch_spatial_last2_arrays(
         scale_m=scale_m,
         fill_value=fill_value,
     )
-
 
 def _fetch_spatial_array_with_bbox_fallback(
     provider: ProviderBase,
@@ -271,20 +259,19 @@ def _fetch_spatial_array_with_bbox_fallback(
             fill_value=float(fill_value),
         )
 
-
 def fetch_collection_patch_all_bands_chw(
     provider: ProviderBase,
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
+    temporal: TemporalSpec | None,
     collection: str,
     scale_m: int = 10,
     fill_value: float = 0.0,
     composite: str = "median",
-) -> Tuple[np.ndarray, Tuple[str, ...]]:
+) -> tuple[np.ndarray, tuple[str, ...]]:
     """Fetch all bands for a collection with BBox fallback stitching for large GEE samples."""
 
-    def _fetch_once(sp: SpatialSpec) -> Tuple[np.ndarray, Tuple[str, ...]]:
+    def _fetch_once(sp: SpatialSpec) -> tuple[np.ndarray, tuple[str, ...]]:
         arr, names = provider.fetch_collection_patch_all_bands_chw(
             spatial=sp,
             temporal=temporal,
@@ -306,7 +293,7 @@ def fetch_collection_patch_all_bands_chw(
         ):
             raise
 
-        def _rec(sp: SpatialSpec, depth: int = 0) -> Tuple[np.ndarray, Tuple[str, ...]]:
+        def _rec(sp: SpatialSpec, depth: int = 0) -> tuple[np.ndarray, tuple[str, ...]]:
             max_depth = int(getattr(_ah, "_MAX_GEE_BBOX_SPLIT_DEPTH", 12))
             try:
                 return _fetch_once(sp)
@@ -342,7 +329,6 @@ def fetch_collection_patch_all_bands_chw(
 
         return _rec(spatial, 0)
 
-
 def fetch_s2_rgb_chw(
     provider: ProviderBase,
     *,
@@ -366,14 +352,13 @@ def fetch_s2_rgb_chw(
     )
     return np.clip(raw / 10000.0, 0.0, 1.0).astype(np.float32)
 
-
 def fetch_s1_vvvh_raw_chw(
     provider: ProviderBase,
     *,
     spatial: SpatialSpec,
     temporal: TemporalSpec,
     scale_m: int = 10,
-    orbit: Optional[str] = None,
+    orbit: str | None = None,
     use_float_linear: bool = True,
     composite: str = "median",
     fill_value: float = 0.0,
@@ -399,7 +384,6 @@ def fetch_s1_vvvh_raw_chw(
         raise ModelError(f"Expected S1 VV/VH CHW with C=2, got shape={getattr(arr, 'shape', None)}")
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-
 def normalize_s1_vvvh_chw(raw_chw: np.ndarray) -> np.ndarray:
     """Convert raw S1 VV/VH to numerically stable [0,1] CHW."""
     arr = np.asarray(raw_chw, dtype=np.float32)
@@ -412,7 +396,6 @@ def normalize_s1_vvvh_chw(raw_chw: np.ndarray) -> np.ndarray:
     denom = float(denom) if float(denom) > 0 else 1.0
     return np.clip(x / denom, 0.0, 1.0).astype(np.float32)
 
-
 def fetch_s2_multiframe_raw_tchw(
     provider: ProviderBase,
     *,
@@ -422,7 +405,7 @@ def fetch_s2_multiframe_raw_tchw(
     n_frames: int = 8,
     collection: str = "COPERNICUS/S2_SR_HARMONIZED",
     scale_m: int = 10,
-    cloudy_pct: Optional[int] = 30,
+    cloudy_pct: int | None = 30,
     composite: str = "median",
     fill_value: float = 0.0,
 ) -> np.ndarray:
@@ -452,7 +435,6 @@ def fetch_s2_multiframe_raw_tchw(
             f"Time series channel mismatch: got C={int(arr.shape[1])}, expected C={len(tuple(bands))}"
         )
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
-
 
 def coerce_input_to_tchw(
     input_chw: np.ndarray,
@@ -495,11 +477,10 @@ def coerce_input_to_tchw(
     raw_tchw = np.nan_to_num(raw_tchw, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(raw_tchw, 0.0, 10000.0).astype(np.float32)
 
-
 def coerce_single_input_chw(
     input_chw: Any,
     *,
-    expected_channels: Optional[int],
+    expected_channels: int | None,
     model_name: str,
 ) -> np.ndarray:
     """Normalize one user-provided tensor input into float32 CHW."""

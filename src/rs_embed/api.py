@@ -26,7 +26,7 @@ Flow summary
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .tools.normalization import (
     _resolve_embedding_api_backend,  # noqa: F401
@@ -74,13 +74,11 @@ from .core.types import (
 )
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
 
-
 # -----------------------------------------------------------------------------
 # Public: embeddings
 # -----------------------------------------------------------------------------
 
-
-def list_models(*, include_aliases: bool = False) -> List[str]:
+def list_models(*, include_aliases: bool = False) -> list[str]:
     """Return the stable model catalog, independent of runtime lazy-load state.
 
     Parameters
@@ -98,18 +96,17 @@ def list_models(*, include_aliases: bool = False) -> List[str]:
         model_ids.update(MODEL_ALIASES.keys())
     return sorted(model_ids)
 
-
 def get_embedding(
     model: str,
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec] = None,
-    sensor: Optional[SensorSpec] = None,
-    modality: Optional[str] = None,
+    temporal: TemporalSpec | None = None,
+    sensor: SensorSpec | None = None,
+    modality: str | None = None,
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
-    input_prep: Optional[InputPrepSpec | str] = "resize",
+    input_prep: InputPrepSpec | str | None = "resize",
 ) -> Embedding:
     """Compute a single embedding.
 
@@ -177,19 +174,18 @@ def get_embedding(
         ctx=ctx,
     )[0]
 
-
 def get_embeddings_batch(
     model: str,
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec] = None,
-    sensor: Optional[SensorSpec] = None,
-    modality: Optional[str] = None,
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None = None,
+    sensor: SensorSpec | None = None,
+    modality: str | None = None,
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
-    input_prep: Optional[InputPrepSpec | str] = "resize",
-) -> List[Embedding]:
+    input_prep: InputPrepSpec | str | None = "resize",
+) -> list[Embedding]:
     """Compute embeddings for multiple spatials using a shared embedder instance.
 
     Parameters
@@ -251,38 +247,36 @@ def get_embeddings_batch(
         ctx=ctx,
     )
 
-
 # -----------------------------------------------------------------------------
 # Public: batch export (core)
 # -----------------------------------------------------------------------------
 
-
 def export_batch(
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
-    models: List[str | ExportModelRequest],
-    target: Optional[ExportTarget] = None,
-    config: Optional[ExportConfig] = None,
-    out: Optional[str] = None,
-    layout: Optional[str] = None,
-    out_dir: Optional[str] = None,
-    out_path: Optional[str] = None,
-    names: Optional[List[str]] = None,
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
+    models: list[str | ExportModelRequest],
+    target: ExportTarget | None = None,
+    config: ExportConfig | None = None,
+    out: str | None = None,
+    layout: str | None = None,
+    out_dir: str | None = None,
+    out_path: str | None = None,
+    names: list[str] | None = None,
     backend: str = "auto",
     device: str = "auto",
     output: OutputSpec = OutputSpec.pooled(),
-    sensor: Optional[SensorSpec] = None,
-    modality: Optional[str] = None,
-    per_model_sensors: Optional[Dict[str, SensorSpec]] = None,
-    per_model_modalities: Optional[Dict[str, str]] = None,
+    sensor: SensorSpec | None = None,
+    modality: str | None = None,
+    per_model_sensors: dict[str, SensorSpec] | None = None,
+    per_model_modalities: dict[str, str] | None = None,
     format: str = "npz",
     save_inputs: bool = True,
     save_embeddings: bool = True,
     save_manifest: bool = True,
     fail_on_bad_input: bool = False,
     chunk_size: int = 16,
-    infer_batch_size: Optional[int] = None,
+    infer_batch_size: int | None = None,
     num_workers: int = 8,
     continue_on_error: bool = False,
     max_retries: int = 0,
@@ -291,7 +285,7 @@ def export_batch(
     writer_workers: int = 2,
     resume: bool = False,
     show_progress: bool = True,
-    input_prep: Optional[InputPrepSpec | str] = "resize",
+    input_prep: InputPrepSpec | str | None = "resize",
 ) -> Any:
     """Export inputs + embeddings for many spatials and many models.
 
@@ -358,7 +352,7 @@ def export_batch(
     from .pipelines.exporter import BatchExporter
 
     if not isinstance(spatials, list) or len(spatials) == 0:
-        raise ModelError("spatials must be a non-empty List[SpatialSpec].")
+        raise ModelError("spatials must be a non-empty list[SpatialSpec].")
 
     backend_n = _normalize_backend_name(backend)
     device_n = _normalize_device_name(device)

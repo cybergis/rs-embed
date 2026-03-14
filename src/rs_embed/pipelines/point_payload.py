@@ -7,7 +7,8 @@ fallback chain and records model-level success/failure metadata.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from collections.abc import Callable
+from typing import Any
 
 import numpy as np
 
@@ -31,29 +32,28 @@ from ..tools.runtime import (
 )
 from ..providers import gee_utils as _gee_utils
 
-
 def build_one_point_payload(
     *,
     point_index: int,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
-    models: List[str],
+    temporal: TemporalSpec | None,
+    models: list[str],
     backend: str,
-    resolved_backend: Optional[Dict[str, str]] = None,
+    resolved_backend: dict[str, str] | None = None,
     device: str,
     output: OutputSpec,
-    resolved_sensor: Dict[str, Optional[SensorSpec]],
-    model_type: Dict[str, str],
-    inputs_cache: Dict[Tuple[int, str], np.ndarray],
-    input_reports: Dict[Tuple[int, str], Dict[str, Any]],
-    prefetch_errors: Dict[Tuple[int, str], str],
+    resolved_sensor: dict[str, SensorSpec | None],
+    model_type: dict[str, str],
+    inputs_cache: dict[tuple[int, str], np.ndarray],
+    input_reports: dict[tuple[int, str], dict[str, Any]],
+    prefetch_errors: dict[tuple[int, str], str],
     pass_input_into_embedder: bool,
     config: ExportConfig,
-    provider_factory: Optional[Callable[[], Any]] = None,
-    model_progress_cb: Optional[Callable[[str], None]] = None,
-    fetch_fn: Optional[Callable[..., np.ndarray]] = None,
-    inspect_fn: Optional[Callable[..., Dict[str, Any]]] = None,
-) -> Tuple[Dict[str, np.ndarray], Dict[str, Any]]:
+    provider_factory: Callable[[], Any] | None = None,
+    model_progress_cb: Callable[[str], None] | None = None,
+    fetch_fn: Callable[..., np.ndarray] | None = None,
+    inspect_fn: Callable[..., dict[str, Any]] | None = None,
+) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """Build arrays + manifest payload for one point across all models.
 
     Input resolution order for provider-backed models:
@@ -71,8 +71,8 @@ def build_one_point_payload(
     fetch = fetch_fn or _gee_utils.fetch_gee_patch_raw
     inspect = inspect_fn or _gee_utils.inspect_input_raw
 
-    arrays: Dict[str, np.ndarray] = {}
-    manifest: Dict[str, Any] = {
+    arrays: dict[str, np.ndarray] = {}
+    manifest: dict[str, Any] = {
         "created_at": utc_ts(),
         "point_index": int(point_index),
         "status": "ok",
@@ -91,13 +91,13 @@ def build_one_point_payload(
     except Exception as _e:
         manifest["package_version"] = None
 
-    local_inp: Dict[str, np.ndarray] = {}
-    local_input_meta: Dict[str, Dict[str, Any]] = {}
+    local_inp: dict[str, np.ndarray] = {}
+    local_input_meta: dict[str, dict[str, Any]] = {}
 
     _resolved_backend = resolved_backend or {}
 
     for m in models:
-        m_entry: Dict[str, Any] = {"model": m, "status": "ok"}
+        m_entry: dict[str, Any] = {"model": m, "status": "ok"}
         sspec = resolved_sensor.get(m)
         m_entry["sensor"] = jsonable(sspec)
 
@@ -113,8 +113,8 @@ def build_one_point_payload(
             except Exception as e:
                 m_entry["describe"] = {"error": repr(e)}
 
-            input_chw: Optional[np.ndarray] = None
-            report: Optional[Dict[str, Any]] = None
+            input_chw: np.ndarray | None = None
+            report: dict[str, Any] | None = None
             provider_enabled = provider_factory is not None
             needs_provider_input = (
                 provider_enabled
@@ -251,17 +251,16 @@ def build_one_point_payload(
     }
     return arrays, manifest
 
-
 def write_one_payload(
     *,
     out_path: str,
-    arrays: Dict[str, np.ndarray],
-    manifest: Dict[str, Any],
+    arrays: dict[str, np.ndarray],
+    manifest: dict[str, Any],
     save_manifest: bool,
     fmt: str,
     max_retries: int,
     retry_backoff_s: float,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Persist one payload with retry and return writer metadata."""
     from ..writers import write_arrays
 

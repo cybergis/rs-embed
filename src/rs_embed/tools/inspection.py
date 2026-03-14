@@ -21,15 +21,13 @@ If `check_raise` is enabled and issues are detected, embedders may raise.
 """
 
 import os
-from typing import Any, Dict, Optional, Tuple
+from typing import Any
 
 import numpy as np
-
 
 def _env_flag(name: str, default: str = "0") -> bool:
     v = os.environ.get(name, default)
     return str(v).strip().lower() not in ("", "0", "false", "no", "off")
-
 
 def checks_enabled(sensor: Any = None) -> bool:
     """Return True if input checks should run."""
@@ -37,23 +35,20 @@ def checks_enabled(sensor: Any = None) -> bool:
         return True
     return bool(getattr(sensor, "check_input", False))
 
-
 def checks_should_raise(sensor: Any = None) -> bool:
     """Return True if embedders should raise on detected issues."""
     if "RS_EMBED_CHECK_RAISE" in os.environ:
         return _env_flag("RS_EMBED_CHECK_RAISE", "1")
     return bool(getattr(sensor, "check_raise", True))
 
-
-def checks_save_dir(sensor: Any = None) -> Optional[str]:
+def checks_save_dir(sensor: Any = None) -> str | None:
     """Optional directory to save quicklooks/stat dumps."""
     d = os.environ.get("RS_EMBED_CHECK_SAVE_DIR")
     if d:
         return str(d)
     return getattr(sensor, "check_save_dir", None)
 
-
-def _safe_float(x: Any) -> Optional[float]:
+def _safe_float(x: Any) -> float | None:
     try:
         if x is None:
             return None
@@ -61,20 +56,19 @@ def _safe_float(x: Any) -> Optional[float]:
     except Exception as _e:
         return None
 
-
 def inspect_chw(
     x_chw: np.ndarray,
     *,
     name: str = "input",
-    expected_channels: Optional[int] = None,
-    value_range: Optional[Tuple[float, float]] = None,
-    fill_value: Optional[float] = None,
+    expected_channels: int | None = None,
+    value_range: tuple[float, float] | None = None,
+    fill_value: float | None = None,
     max_pixels_for_full_stats: int = 1_500_000,
-    quantiles: Tuple[float, ...] = (0.01, 0.5, 0.99),
+    quantiles: tuple[float, ...] = (0.01, 0.5, 0.99),
     hist_bins: int = 32,
-    hist_clip_range: Optional[Tuple[float, float]] = None,
+    hist_clip_range: tuple[float, float] | None = None,
     max_bands_for_hist: int = 16,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Inspect a CHW numpy array and return a compact report.
 
     Parameters
@@ -91,7 +85,7 @@ def inspect_chw(
         To keep inspection cheap, if C*H*W exceeds this value we downsample
         (strided sampling) for per-band stats.
     """
-    report: Dict[str, Any] = {
+    report: dict[str, Any] = {
         "name": name,
         "ok": True,
         "issues": [],
@@ -247,17 +241,16 @@ def inspect_chw(
 
     return report
 
-
 def maybe_inspect_chw(
     x_chw: np.ndarray,
     *,
     sensor: Any = None,
     name: str = "input",
-    expected_channels: Optional[int] = None,
-    value_range: Optional[Tuple[float, float]] = None,
-    fill_value: Optional[float] = None,
-    meta: Optional[Dict[str, Any]] = None,
-) -> Optional[Dict[str, Any]]:
+    expected_channels: int | None = None,
+    value_range: tuple[float, float] | None = None,
+    fill_value: float | None = None,
+    meta: dict[str, Any] | None = None,
+) -> dict[str, Any] | None:
     """Run inspect_chw if enabled; optionally attach report to meta.
 
     Returns the report dict (or None if checks disabled).
@@ -290,7 +283,6 @@ def maybe_inspect_chw(
 
     return report
 
-
 def save_quicklook_rgb(
     x_chw: np.ndarray,
     *,
@@ -298,8 +290,8 @@ def save_quicklook_rgb(
     bands=(0, 1, 2),
     pmin: float = 2.0,
     pmax: float = 98.0,
-    vmin: Optional[float] = None,
-    vmax: Optional[float] = None,
+    vmin: float | None = None,
+    vmax: float | None = None,
 ) -> None:
     import os
     import numpy as np

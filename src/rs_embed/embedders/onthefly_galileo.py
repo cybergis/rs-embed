@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -28,9 +28,7 @@ from .runtime_utils import (
 )
 from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 
-
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
-
 
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
@@ -42,7 +40,6 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y.detach().cpu().numpy().astype(np.float32)
-
 
 def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
     x = np.asarray(raw, dtype=np.float32)
@@ -73,7 +70,6 @@ def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
         )
     return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-
 def _fetch_s2_10_raw_tchw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -99,13 +95,12 @@ def _fetch_s2_10_raw_tchw(
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
 
-
 def _resolve_model_folder(
     *,
-    model_path: Optional[str],
+    model_path: str | None,
     model_size: str,
     hf_repo: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
     auto_download: bool,
 ) -> str:
     if model_path:
@@ -130,7 +125,6 @@ def _resolve_model_folder(
         )
     return p
 
-
 @lru_cache(maxsize=8)
 def _load_galileo_module():
     try:
@@ -143,13 +137,12 @@ def _load_galileo_module():
         ) from e
     return mod
 
-
 @lru_cache(maxsize=8)
 def _download_galileo_model_folder(
     *,
     model_size: str,
     hf_repo: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
 ) -> str:
     try:
         from huggingface_hub import snapshot_download
@@ -176,11 +169,9 @@ def _download_galileo_model_folder(
         )
     return model_root
 
-
 def _month_from_iso(iso_date: str) -> int:
     d = date.fromisoformat(str(iso_date))
     return max(1, min(12, int(d.month)))
-
 
 def _frame_month_sequence(temporal: TemporalSpec, *, n_frames: int) -> np.ndarray:
     mids = temporal_frame_midpoints(temporal, max(1, int(n_frames)))
@@ -188,17 +179,16 @@ def _frame_month_sequence(temporal: TemporalSpec, *, n_frames: int) -> np.ndarra
         return np.full((max(1, int(n_frames)),), 6, dtype=np.int64)
     return np.array([_month_from_iso(v) for v in mids], dtype=np.int64)
 
-
 @lru_cache(maxsize=6)
 def _load_galileo_cached(
     *,
     model_size: str,
-    model_path: Optional[str],
+    model_path: str | None,
     hf_repo: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
     auto_download: bool,
     dev: str,
-) -> Tuple[Any, Dict[str, Any], Any]:
+) -> tuple[Any, dict[str, Any], Any]:
     ensure_torch()
     import torch
 
@@ -252,16 +242,15 @@ def _load_galileo_cached(
     }
     return encoder, meta, mod
 
-
 def _load_galileo(
     *,
     model_size: str,
-    model_path: Optional[str],
+    model_path: str | None,
     hf_repo: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
     auto_download: bool,
     device: str,
-) -> Tuple[Any, Dict[str, Any], Any, str]:
+) -> tuple[Any, dict[str, Any], Any, str]:
     (loaded, dev) = _load_cached_with_device(
         _load_galileo_cached,
         device=device,
@@ -274,7 +263,6 @@ def _load_galileo(
     encoder, meta, mod = loaded
     return encoder, meta, mod, dev
 
-
 def _prepare_galileo_encoder_inputs(
     raw_tchw: np.ndarray,
     *,
@@ -285,7 +273,7 @@ def _prepare_galileo_encoder_inputs(
     include_ndvi: bool,
     mod: Any,
     device: str,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -401,16 +389,15 @@ def _prepare_galileo_encoder_inputs(
     }
     return data, meta
 
-
 def _galileo_forward(
     encoder: Any,
-    data: Dict[str, Any],
+    data: dict[str, Any],
     *,
     mod: Any,
     patch_size: int,
     add_layernorm_on_exit: bool,
     device: str,
-) -> Tuple[np.ndarray, np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -467,7 +454,6 @@ def _galileo_forward(
     }
     return vec, grid, fmeta
 
-
 @register("galileo")
 class GalileoEmbedder(EmbedderBase):
     DEFAULT_MODEL_SIZE = "nano"
@@ -477,7 +463,7 @@ class GalileoEmbedder(EmbedderBase):
     DEFAULT_FETCH_WORKERS = 8
     _allow_auto_backend = False
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
             "backend": ["provider"],
@@ -530,12 +516,12 @@ class GalileoEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=False):
             raise ModelError("galileo expects a provider backend.")
@@ -694,8 +680,8 @@ class GalileoEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -712,9 +698,9 @@ class GalileoEmbedder(EmbedderBase):
         n_frames = max(1, int(os.environ.get("RS_EMBED_GALILEO_FRAMES", str(self.DEFAULT_FRAMES))))
 
         n = len(spatials)
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             raw = _fetch_s2_10_raw_tchw(
                 provider,
                 sp,
@@ -739,7 +725,7 @@ class GalileoEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        out: List[Embedding] = []
+        out: list[Embedding] = []
         for i, sp in enumerate(spatials):
             raw = prefetched_raw[i]
             if raw is None:

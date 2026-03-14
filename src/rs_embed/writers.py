@@ -1,8 +1,8 @@
 """Format-specific writers for embedding export.
 
 Each writer persists:
-  - arrays   : Dict[str, np.ndarray]  — named arrays (inputs / embeddings)
-  - manifest : Dict[str, Any]         — JSON-serializable metadata
+  - arrays   : dict[str, np.ndarray]  — named arrays (inputs / embeddings)
+  - manifest : dict[str, Any]         — JSON-serializable metadata
 
 Supported formats
 -----------------
@@ -15,19 +15,18 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, Tuple
+from typing import Any
 
 import numpy as np
 
 # ── format → file extension mapping ────────────────────────────────
 
-_FORMAT_EXT: Dict[str, str] = {
+_FORMAT_EXT: dict[str, str] = {
     "npz": ".npz",
     "netcdf": ".nc",
 }
 
 SUPPORTED_FORMATS = tuple(_FORMAT_EXT.keys())
-
 
 def get_extension(fmt: str) -> str:
     """Return the canonical file extension (including dot) for *fmt*."""
@@ -36,18 +35,16 @@ def get_extension(fmt: str) -> str:
     except KeyError:
         raise ValueError(f"Unknown format {fmt!r}. Supported: {SUPPORTED_FORMATS}")
 
-
 # ── public dispatcher ──────────────────────────────────────────────
-
 
 def write_arrays(
     *,
     fmt: str,
     out_path: str,
-    arrays: Dict[str, np.ndarray],
-    manifest: Dict[str, Any],
+    arrays: dict[str, np.ndarray],
+    manifest: dict[str, Any],
     save_manifest: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Persist *arrays* + *manifest* in the requested format.
 
     Returns an updated copy of *manifest* with format-specific path keys.
@@ -58,16 +55,14 @@ def write_arrays(
         return _write_netcdf(out_path, arrays, manifest, save_manifest)
     raise ValueError(f"Unknown format {fmt!r}. Supported: {SUPPORTED_FORMATS}")
 
-
 # ── NPZ writer ────────────────────────────────────────────────────
-
 
 def _write_npz(
     out_path: str,
-    arrays: Dict[str, np.ndarray],
-    manifest: Dict[str, Any],
+    arrays: dict[str, np.ndarray],
+    manifest: dict[str, Any],
     save_manifest: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     if not out_path.endswith(".npz"):
         out_path += ".npz"
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
@@ -84,16 +79,14 @@ def _write_npz(
     manifest["npz_keys"] = sorted(arrays.keys())
     return manifest
 
-
 # ── NetCDF writer ──────────────────────────────────────────────────
-
 
 def _write_netcdf(
     out_path: str,
-    arrays: Dict[str, np.ndarray],
-    manifest: Dict[str, Any],
+    arrays: dict[str, np.ndarray],
+    manifest: dict[str, Any],
     save_manifest: bool,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     import xarray as xr
 
     if not out_path.endswith(".nc"):
@@ -101,8 +94,8 @@ def _write_netcdf(
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
     # Build xarray Dataset with semantically-named dimensions.
-    data_vars: Dict[str, xr.DataArray] = {}
-    dim_sizes: Dict[str, int] = {}
+    data_vars: dict[str, xr.DataArray] = {}
+    dim_sizes: dict[str, int] = {}
     for key, arr in arrays.items():
         dims = _resolve_conflicting_dims(
             key=key,
@@ -137,20 +130,18 @@ def _write_netcdf(
     manifest["nc_variables"] = sorted(arrays.keys())
     return manifest
 
-
 def _safe_dim_suffix(key: str) -> str:
     out = "".join((c if c.isalnum() else "_") for c in str(key))
     out = out.strip("_")
     return out or "var"
 
-
 def _resolve_conflicting_dims(
     *,
     key: str,
-    dims: Tuple[str, ...],
-    shape: Tuple[int, ...],
-    dim_sizes: Dict[str, int],
-) -> Tuple[str, ...]:
+    dims: tuple[str, ...],
+    shape: tuple[int, ...],
+    dim_sizes: dict[str, int],
+) -> tuple[str, ...]:
     """Rename dims only when an existing dim name has a different size."""
     if len(dims) != len(shape):
         return dims
@@ -171,11 +162,9 @@ def _resolve_conflicting_dims(
         resolved.append(resolved_name)
     return tuple(resolved)
 
-
 # ── dimension inference ────────────────────────────────────────────
 
-
-def _infer_dims(key: str, arr: np.ndarray) -> Tuple[str, ...]:
+def _infer_dims(key: str, arr: np.ndarray) -> tuple[str, ...]:
     """Map array key + shape to semantically named NetCDF dimensions.
 
     Convention used by the NPZ export:
@@ -211,9 +200,7 @@ def _infer_dims(key: str, arr: np.ndarray) -> Tuple[str, ...]:
     # Fallback: generic numbered dimensions.
     return tuple(f"d{i}" for i in range(ndim))
 
-
 # ── engine selection ───────────────────────────────────────────────
-
 
 def _pick_engine() -> str:
     """Return the best available xarray NetCDF engine."""

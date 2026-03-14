@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -29,7 +29,6 @@ from ._vit_mae_utils import (
     rgb_u8_to_tensor_clipnorm,
 )
 
-
 @lru_cache(maxsize=8)
 def _load_scalemae_cached(model_id: str, dev: str):
     ensure_torch()
@@ -50,11 +49,9 @@ def _load_scalemae_cached(model_id: str, dev: str):
     meta = {"model_id": model_id, "device": dev}
     return model, meta
 
-
 def _load_scalemae(model_id: str, device: str = "auto"):
     loaded, _dev = _load_cached_with_device(_load_scalemae_cached, device=device, model_id=model_id)
     return loaded
-
 
 def _infer_patch_size(model) -> int:
     """
@@ -77,7 +74,6 @@ def _infer_patch_size(model) -> int:
     # some timm variants: model.patch_embed.patch_size[0]
     # fallback: ViT-L/16 is common for ScaleMAE
     return 16
-
 
 def _call_with_patch_size(fn, x, *, patch_size: int, input_res):
     """
@@ -121,7 +117,6 @@ def _call_with_patch_size(fn, x, *, patch_size: int, input_res):
             except TypeError as e:
                 raise ModelError(f"ScaleMAE call failed even with patch_size/input_res: {e}") from e
 
-
 def _scalemae_forward_tokens_or_vec(
     model,
     rgb_u8: np.ndarray,
@@ -129,7 +124,7 @@ def _scalemae_forward_tokens_or_vec(
     image_size: int,
     device: str,
     input_res_m: float,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     """
     Your rshf ScaleMAE requires:
       - input_res: 1D tensor
@@ -204,15 +199,14 @@ def _scalemae_forward_tokens_or_vec(
 
         raise ModelError("ScaleMAE: cannot obtain tokens or pooled vector from this model.")
 
-
 def _scalemae_forward_tokens_or_vec_batch(
     model,
-    rgb_u8_batch: List[np.ndarray],
+    rgb_u8_batch: list[np.ndarray],
     *,
     image_size: int,
     device: str,
     input_res_m: float,
-) -> Tuple[List[np.ndarray], Dict[str, Any]]:
+) -> tuple[list[np.ndarray], dict[str, Any]]:
     """Batch variant that returns one output array per input item."""
     if not rgb_u8_batch:
         return [], {"tokens_kind": "empty_batch"}
@@ -227,7 +221,7 @@ def _scalemae_forward_tokens_or_vec_batch(
     )
     patch_size = _infer_patch_size(model)
 
-    def _to_list(arr: np.ndarray) -> List[np.ndarray]:
+    def _to_list(arr: np.ndarray) -> list[np.ndarray]:
         return [arr[i].astype(np.float32, copy=False) for i in range(arr.shape[0])]
 
     with torch.inference_mode():
@@ -291,7 +285,6 @@ def _scalemae_forward_tokens_or_vec_batch(
 
         raise ModelError("ScaleMAE: cannot obtain tokens or pooled vector from this model.")
 
-
 @register("scalemae")
 class ScaleMAERGBEmbedder(EmbedderBase):
     """
@@ -309,7 +302,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 32
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",
             "backend": ["provider"],
@@ -364,12 +357,12 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("scalemae_rgb expects a provider backend (or 'auto').")
@@ -484,8 +477,8 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -504,9 +497,9 @@ class ScaleMAERGBEmbedder(EmbedderBase):
 
         provider = self._get_provider(backend)
         n = len(spatials)
-        rgb_u8_all: List[Optional[np.ndarray]] = [None] * n
+        rgb_u8_all: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             rgb_u8 = fetch_s2_rgb_u8_from_provider(
                 spatial=sp,
                 temporal=t,
@@ -532,7 +525,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         xr_mod = None
         if output.mode == "grid":
             try:
@@ -656,8 +649,8 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -681,7 +674,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
-        rgb_u8_all: List[np.ndarray] = []
+        rgb_u8_all: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or input_chw.shape[0] != 3:
                 raise ModelError(
@@ -692,7 +685,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             rgb_u8 = (s2_chw.transpose(1, 2, 0) * 255.0).astype(np.uint8)
             rgb_u8_all.append(resize_rgb_u8(rgb_u8, image_size))
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         xr_mod = None
         if output.mode == "grid":
             try:

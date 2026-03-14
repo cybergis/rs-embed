@@ -14,21 +14,18 @@ from __future__ import annotations
 import argparse
 import json
 import sys
-from typing import List, Optional, Tuple
 
 from .core.specs import BBox, PointBuffer, SensorSpec, TemporalSpec, OutputSpec
 from .inspect import inspect_gee_patch
 from .export import export_npz
 
-
-def _parse_bands(s: str) -> Tuple[str, ...]:
+def _parse_bands(s: str) -> tuple[str, ...]:
     parts = [p.strip() for p in s.split(",") if p.strip()]
     if not parts:
         raise argparse.ArgumentTypeError("--bands must be a comma-separated list, e.g. 'B4,B3,B2'")
     return tuple(parts)
 
-
-def _parse_models(s: str) -> List[str]:
+def _parse_models(s: str) -> list[str]:
     parts = [p.strip() for p in s.split(",") if p.strip()]
     if not parts:
         raise argparse.ArgumentTypeError(
@@ -36,8 +33,7 @@ def _parse_models(s: str) -> List[str]:
         )
     return parts
 
-
-def _parse_value_range(s: Optional[str]) -> Optional[Tuple[float, float]]:
+def _parse_value_range(s: str | None) -> tuple[float, float] | None:
     if not s:
         return None
     try:
@@ -45,7 +41,6 @@ def _parse_value_range(s: Optional[str]) -> Optional[Tuple[float, float]]:
         return (float(lo), float(hi))
     except Exception as e:
         raise argparse.ArgumentTypeError("--value-range must be 'lo,hi' (floats)") from e
-
 
 def _add_spatial_args(p: argparse.ArgumentParser) -> None:
     sp = p.add_mutually_exclusive_group(required=True)
@@ -64,13 +59,11 @@ def _add_spatial_args(p: argparse.ArgumentParser) -> None:
         help="EPSG:4326 pointbuffer (meters)",
     )
 
-
 def _parse_spatial(args) -> BBox | PointBuffer:
     if args.bbox is not None:
         return BBox(*args.bbox)
     lon, lat, buf = args.pointbuffer
     return PointBuffer(lon=lon, lat=lat, buffer_m=buf)
-
 
 def _add_temporal_args(p: argparse.ArgumentParser) -> None:
     tg = p.add_mutually_exclusive_group(required=False)
@@ -82,14 +75,12 @@ def _add_temporal_args(p: argparse.ArgumentParser) -> None:
         help="Date range, e.g. 2022-06-01 2022-09-01",
     )
 
-
-def _parse_temporal(args) -> Optional[TemporalSpec]:
+def _parse_temporal(args) -> TemporalSpec | None:
     if getattr(args, "year", None) is not None:
         return TemporalSpec.year(int(args.year))
     if getattr(args, "range", None) is not None:
         return TemporalSpec.range(args.range[0], args.range[1])
     return None
-
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="rs-embed", description="rs-embed utilities")
@@ -224,8 +215,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     return p
 
-
-def main(argv: Optional[list[str]] = None) -> None:
+def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
 
     if args.cmd == "inspect-gee":
@@ -303,7 +293,6 @@ def main(argv: Optional[list[str]] = None) -> None:
         return
 
     raise SystemExit(f"Unknown command: {args.cmd}")
-
 
 if __name__ == "__main__":
     main()

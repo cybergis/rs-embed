@@ -5,7 +5,7 @@ import logging
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -23,12 +23,10 @@ from .runtime_utils import (
     resolve_device_auto_torch,
 )
 
-
 # -----------------------------
 # Provider: Fetch S2 RGB
 # -----------------------------
 from ._vit_mae_utils import _s2_rgb_u8_from_chw
-
 
 def _fetch_s2_rgb_chw(
     provider: ProviderBase,
@@ -48,11 +46,10 @@ def _fetch_s2_rgb_chw(
         composite=str(composite),
     )
 
-
 # -----------------------------
 # HF weight management (strict)
 # -----------------------------
-def _find_weight_file(path: str) -> Optional[str]:
+def _find_weight_file(path: str) -> str | None:
     for fn in (
         "model.safetensors",
         "pytorch_model.bin",
@@ -63,15 +60,14 @@ def _find_weight_file(path: str) -> Optional[str]:
             return p
     return None
 
-
 def _ensure_hf_weights(
     repo_id_or_path: str,
     *,
     auto_download: bool = True,
     require_pretrained: bool = True,
-    cache_dir: Optional[str] = None,
+    cache_dir: str | None = None,
     min_bytes: int = 50 * 1024 * 1024,  # 50MB: below this is almost surely pointer/metadata
-) -> Tuple[str, Optional[str]]:
+) -> tuple[str, str | None]:
     """
     Ensure pretrained weights are present locally.
     Returns (local_dir, weight_file_path).
@@ -127,8 +123,7 @@ def _ensure_hf_weights(
             )
     return local_dir, wf
 
-
-def _assert_weights_loaded(model) -> Dict[str, float]:
+def _assert_weights_loaded(model) -> dict[str, float]:
     """Best-effort sanity check that weights are loaded (do not trust rshf warnings)."""
     import torch
 
@@ -151,7 +146,6 @@ def _assert_weights_loaded(model) -> Dict[str, float]:
         raise ModelError("RemoteCLIP parameters look uninitialized (near-zero stats).")
     return {"param_mean": mean, "param_std": std, "param_absmax": mx}
 
-
 @contextmanager
 def _suppress_rshf_pretrained_init_warning():
     """
@@ -160,7 +154,7 @@ def _suppress_rshf_pretrained_init_warning():
     We verify actual loaded weights immediately after construction.
     """
     root_logger = logging.getLogger()
-    suppressed: Dict[str, Any] = {"count": 0, "messages": []}
+    suppressed: dict[str, Any] = {"count": 0, "messages": []}
 
     class _KnownWarningFilter(logging.Filter):
         def filter(self, record: logging.LogRecord) -> bool:
@@ -182,14 +176,13 @@ def _suppress_rshf_pretrained_init_warning():
     finally:
         root_logger.removeFilter(filt)
 
-
 def _load_rshf_remoteclip(
     ckpt: str,
     *,
     auto_download: bool = True,
     require_pretrained: bool = True,
-    cache_dir: Optional[str] = None,
-) -> Tuple[Any, Dict[str, Any]]:
+    cache_dir: str | None = None,
+) -> tuple[Any, dict[str, Any]]:
     """Load rshf RemoteCLIP with explicit weight checks. Returns (model, weight_meta)."""
     try:
         from rshf.remoteclip import RemoteCLIP
@@ -220,7 +213,6 @@ def _load_rshf_remoteclip(
     }
     return model, meta
 
-
 # -----------------------------
 # Token -> grid helpers
 # -----------------------------
@@ -228,8 +220,7 @@ def _is_perfect_square(n: int) -> bool:
     r = int(np.sqrt(n))
     return r * r == n
 
-
-def _tokens_to_grid_dhw(tokens_nd: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
+def _tokens_to_grid_dhw(tokens_nd: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
     """
     tokens_nd: [N, D] or [N+1, D] (maybe with CLS)
     Returns: grid_dhw: [D, Ht, Wt] and meta about CLS handling and grid size.
@@ -257,7 +248,6 @@ def _tokens_to_grid_dhw(tokens_nd: np.ndarray) -> Tuple[np.ndarray, Dict[str, An
     meta = {"token_count": n, "dim": d, "grid_hw": (ht, wt), "cls_removed": cls_removed}
     return grid_dhw.astype(np.float32), meta
 
-
 # -----------------------------
 # RemoteCLIP inference adapter
 # -----------------------------
@@ -267,7 +257,7 @@ def _remoteclip_encode_tokens(
     *,
     image_size: int = 224,
     device: str = "auto",
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     """
     Return tokens if possible; else return pooled vector.
 
@@ -429,10 +419,9 @@ def _remoteclip_encode_tokens(
 
         raise ModelError("RemoteCLIP exposes neither token sequence nor pooled encoding methods.")
 
-
 def _remoteclip_encode_pooled_batch(
     model,
-    rgb_u8_batch: List[np.ndarray],
+    rgb_u8_batch: list[np.ndarray],
     *,
     image_size: int = 224,
     device: str = "auto",
@@ -502,7 +491,6 @@ def _remoteclip_encode_pooled_batch(
         )
     return arr
 
-
 @register("remoteclip")
 class RemoteCLIPS2RGBEmbedder(EmbedderBase):
     """
@@ -517,7 +505,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
     DEFAULT_BATCH_CUDA = 64
     _allow_auto_backend = False
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
             "backend": ["provider"],
@@ -540,14 +528,14 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
     def __init__(self) -> None:
         super().__init__()
         # key: (ckpt, cache_dir, resolved_device) -> (model, weight_meta)
-        self._model_cache: Dict[Tuple[str, str, str], Tuple[Any, Dict[str, Any]]] = {}
+        self._model_cache: dict[tuple[str, str, str], tuple[Any, dict[str, Any]]] = {}
 
     def _resolve_device(self, device: str) -> str:
         return resolve_device_auto_torch(device)
 
     def _get_model(
-        self, *, ckpt: str, cache_dir: Optional[str], device: str
-    ) -> Tuple[Any, Dict[str, Any], str]:
+        self, *, ckpt: str, cache_dir: str | None, device: str
+    ) -> tuple[Any, dict[str, Any], str]:
         dev = self._resolve_device(device)
         cache_dir_s = cache_dir or ""
         key = (ckpt, cache_dir_s, dev)
@@ -592,12 +580,12 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=False):
             raise ModelError("remoteclip_s2rgb only supports a provider backend in v0.1.")
@@ -648,7 +636,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             save_quicklook_rgb,
         )
 
-        extra_checks: Dict[str, Any] = {}
+        extra_checks: dict[str, Any] = {}
         report = maybe_inspect_chw(
             s2_rgb_chw,
             sensor=sensor,
@@ -782,8 +770,8 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -805,9 +793,9 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         composite = sensor.composite if sensor else "median"
 
         n = len(spatials)
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             s2_rgb_chw = _fetch_s2_rgb_chw(
                 provider,
                 sp,
@@ -832,7 +820,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        raw_inputs: List[np.ndarray] = []
+        raw_inputs: list[np.ndarray] = []
         for i, raw in enumerate(prefetched_raw):
             if raw is None:
                 raise ModelError(f"Missing prefetched input at index={i} for remoteclip_s2rgb.")
@@ -852,8 +840,8 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -890,7 +878,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         model, wmeta, dev = self._get_model(ckpt=ckpt, cache_dir=cache_dir, device=device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
-        rgb_u8_all: List[np.ndarray] = []
+        rgb_u8_all: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or input_chw.shape[0] != 3:
                 raise ModelError(
@@ -907,7 +895,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             "composite": composite,
         }
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         n = len(spatials)
 
         if output.mode == "pooled":

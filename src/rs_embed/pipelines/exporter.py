@@ -11,9 +11,10 @@ from __future__ import annotations
 import os
 from dataclasses import replace
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
+from collections.abc import Callable
 
 from ..tools.serialization import (
     sanitize_key,
@@ -35,7 +36,6 @@ from .checkpoint import CheckpointManager
 from .inference import InferenceEngine
 from .prefetch import PrefetchManager
 from .runner import run_with_retry
-
 
 class BatchExporter:
     """Orchestrates batch embedding export (per-item or combined).
@@ -71,19 +71,19 @@ class BatchExporter:
     def __init__(
         self,
         *,
-        spatials: List[SpatialSpec],
-        temporal: Optional[TemporalSpec],
-        models: List[ModelConfig],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
+        models: list[ModelConfig],
         target: ExportTarget,
         output: OutputSpec,
         config: ExportConfig,
         backend: str,
-        resolved_backend: Dict[str, str],
+        resolved_backend: dict[str, str],
         device: str,
-        provider_factory: Optional[Callable[[], Any]] = None,
-        fetch_fn: Optional[Callable[..., np.ndarray]] = None,
-        inspect_fn: Optional[Callable[..., Dict[str, Any]]] = None,
-        progress_factory: Optional[Callable[..., Any]] = None,
+        provider_factory: Callable[[], Any] | None = None,
+        fetch_fn: Callable[..., np.ndarray] | None = None,
+        inspect_fn: Callable[..., dict[str, Any]] | None = None,
+        progress_factory: Callable[..., Any] | None = None,
     ) -> None:
         self.spatials = spatials
         self.temporal = temporal
@@ -101,10 +101,10 @@ class BatchExporter:
 
         # Model name lists for convenience
         self.model_names = [mc.name for mc in models]
-        self.resolved_sensor: Dict[str, Optional[SensorSpec]] = {
+        self.resolved_sensor: dict[str, SensorSpec | None] = {
             mc.name: mc.sensor for mc in models
         }
-        self.model_type: Dict[str, str] = {mc.name: mc.model_type for mc in models}
+        self.model_type: dict[str, str] = {mc.name: mc.model_type for mc in models}
 
         # Derived extension
         self.ext = get_extension(config.format)
@@ -123,7 +123,7 @@ class BatchExporter:
 
     # ── per-item export ────────────────────────────────────────────
 
-    def _run_per_item(self) -> List[Dict[str, Any]]:
+    def _run_per_item(self) -> list[dict[str, Any]]:
         """Per-item export: one file per spatial location.
 
         Chunked pipeline: ``prefetch → infer → write`` with a 1-slot
@@ -157,7 +157,7 @@ class BatchExporter:
         csize = cfg.effective_chunk_size
         chunk_groups = [pending_idxs[s : s + csize] for s in range(0, len(pending_idxs), csize)]
 
-        prefetch_pipeline_ex: Optional[ThreadPoolExecutor] = None
+        prefetch_pipeline_ex: ThreadPoolExecutor | None = None
         prefetched_chunk_fut = None
         try:
             if need_prefetch and chunk_groups:
@@ -182,7 +182,7 @@ class BatchExporter:
                     )
 
                 # Batch inference (GPU path)
-                chunk_embed_results: Dict[Tuple[int, str], Any] = {}
+                chunk_embed_results: dict[tuple[int, str], Any] = {}
                 use_batch = bool(cfg.save_embeddings and self.inference.prefer_batch)
                 if use_batch:
                     chunk_embed_results = self.inference.infer_chunk(
@@ -222,7 +222,7 @@ class BatchExporter:
 
     # ── combined export ────────────────────────────────────────────
 
-    def _run_combined(self) -> Dict[str, Any]:
+    def _run_combined(self) -> dict[str, Any]:
         """Combined export: all points in a single file.
 
         Prefetches all inputs → checkpoints → runs inference per-model →
@@ -297,7 +297,7 @@ class BatchExporter:
                 temporal=self.temporal,
             )
 
-        def _write_ckpt(*, stage: str, final: bool = False) -> Dict[str, Any]:
+        def _write_ckpt(*, stage: str, final: bool = False) -> dict[str, Any]:
             return self.checkpoint.combined_write_checkpoint(
                 manifest=manifest,
                 arrays=arrays,
@@ -369,7 +369,7 @@ class BatchExporter:
         )
         return provider
 
-    def _setup_prefetch(self) -> Tuple[PrefetchManager, bool]:
+    def _setup_prefetch(self) -> tuple[PrefetchManager, bool]:
         """Create and plan a PrefetchManager plus provider-enabled flag."""
         provider = self._init_provider()
         prefetch = PrefetchManager(
@@ -385,14 +385,14 @@ class BatchExporter:
         prefetch.plan(resolve_bands_fn=band_resolver)
         return prefetch, prefetch.enabled
 
-    def _build_pending_queue(self, *, progress: Any) -> Tuple[List[int], List[Dict[str, Any]]]:
+    def _build_pending_queue(self, *, progress: Any) -> tuple[list[int], list[dict[str, Any]]]:
         """Split per-item indices into pending work and resume manifests."""
         out_dir = self.target.out_dir
         names = self.target.names
         assert out_dir is not None and names is not None
 
-        pending_idxs: List[int] = []
-        manifests: List[Dict[str, Any]] = []
+        pending_idxs: list[int] = []
+        manifests: list[dict[str, Any]] = []
         for i in range(len(self.spatials)):
             out_file = os.path.join(out_dir, f"{names[i]}{self.ext}")
             if self.checkpoint.per_item_should_skip(out_file):
@@ -414,7 +414,7 @@ class BatchExporter:
 
     def _create_model_progress(
         self, total: int
-    ) -> Tuple[Dict[str, Any], Optional[Callable[[str], None]]]:
+    ) -> tuple[dict[str, Any], Callable[[str], None] | None]:
         """Create per-model progress bars and callback if embedding export is enabled."""
         if not self.config.save_embeddings:
             return {}, None
@@ -436,7 +436,7 @@ class BatchExporter:
 
         return model_progress, _on_model_done
 
-    def _prefetch_chunk(self, prefetch: PrefetchManager, idxs: List[int]) -> None:
+    def _prefetch_chunk(self, prefetch: PrefetchManager, idxs: list[int]) -> None:
         """Prefetch a chunk of inputs (for use in pipelined prefetch)."""
         prefetch.fetch_chunk(idxs, self.spatials, self.temporal)
 
@@ -465,14 +465,14 @@ class BatchExporter:
     def _write_per_item_chunk(
         self,
         *,
-        idxs: List[int],
+        idxs: list[int],
         prefetch: PrefetchManager,
         provider_enabled: bool,
-        chunk_embed_results: Dict[Tuple[int, str], Any],
+        chunk_embed_results: dict[tuple[int, str], Any],
         use_batch: bool,
-        manifests: List[Dict[str, Any]],
+        manifests: list[dict[str, Any]],
         progress: Any,
-        model_progress_cb: Optional[Callable[[str], None]],
+        model_progress_cb: Callable[[str], None] | None,
     ) -> None:
         """Build payloads and write each point in a chunk."""
         cfg = self.config
@@ -482,8 +482,8 @@ class BatchExporter:
 
         writer_async = bool(cfg.async_write)
         writer_mw = max(1, int(cfg.writer_workers))
-        write_futs: List[Tuple[int, Any]] = []
-        writer_ex: Optional[ThreadPoolExecutor] = None
+        write_futs: list[tuple[int, Any]] = []
+        writer_ex: ThreadPoolExecutor | None = None
         if writer_async:
             writer_ex = ThreadPoolExecutor(max_workers=writer_mw)
 
@@ -582,9 +582,9 @@ class BatchExporter:
         *,
         point_index: int,
         out_path: str,
-        arrays: Dict[str, np.ndarray],
-        manifest: Dict[str, Any],
-    ) -> Dict[str, Any]:
+        arrays: dict[str, np.ndarray],
+        manifest: dict[str, Any],
+    ) -> dict[str, Any]:
         """Write one payload synchronously, converting write errors as configured."""
         cfg = self.config
         try:
@@ -614,8 +614,8 @@ class BatchExporter:
     def _collect_async_results(
         self,
         *,
-        write_futs: List[Tuple[int, Any]],
-        manifests: List[Dict[str, Any]],
+        write_futs: list[tuple[int, Any]],
+        manifests: list[dict[str, Any]],
         progress: Any,
     ) -> None:
         """Collect async write results and translate failures into manifests."""
@@ -649,10 +649,10 @@ class BatchExporter:
     def _inject_precomputed_embeddings(
         *,
         point_index: int,
-        models: List[str],
-        arrays: Dict[str, np.ndarray],
-        manifest: Dict[str, Any],
-        embed_results: Dict[Tuple[int, str], Any],
+        models: list[str],
+        arrays: dict[str, np.ndarray],
+        manifest: dict[str, Any],
+        embed_results: dict[tuple[int, str], Any],
     ) -> None:
         """Inject pre-computed batch embeddings into a per-item payload."""
         model_entries = manifest.get("models") or []

@@ -4,7 +4,7 @@ import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 import math
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -29,13 +29,11 @@ from ._vit_mae_utils import (
 )
 from .meta_utils import temporal_midpoint_str
 
-
 # -------------------------
 # Provider: Sentinel-2 -> Prithvi 6-band (CHW float32 in [0,1])
 # -------------------------
 PRITHVI_S2_BANDS_SRC = ["B2", "B3", "B4", "B8", "B11", "B12"]
 PRITHVI_S2_BANDS_DST = ["BLUE", "GREEN", "RED", "NIR_NARROW", "SWIR_1", "SWIR_2"]
-
 
 def _fetch_s2_prithvi6_chw(
     provider: ProviderBase,
@@ -70,7 +68,6 @@ def _fetch_s2_prithvi6_chw(
     x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
     return x_chw
 
-
 def _pad_chw_to_multiple(x_chw: np.ndarray, mult: int = 16, value: float = 0.0) -> np.ndarray:
     """
     Pad CHW to make H and W divisible by mult.
@@ -87,7 +84,6 @@ def _pad_chw_to_multiple(x_chw: np.ndarray, mult: int = 16, value: float = 0.0) 
     out[:, :h, :w] = x_chw.astype(np.float32)
     return out
 
-
 def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     """Resize CHW to square (size,size) using bilinear interpolation."""
     ensure_torch()
@@ -100,12 +96,11 @@ def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     y = F.interpolate(x, size=(int(size), int(size)), mode="bilinear", align_corners=False)
     return y[0].detach().cpu().numpy().astype(np.float32)
 
-
 def _prepare_prithvi_chw(
     x_chw: np.ndarray,
     *,
     fill_value: float,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     """
     Prepare CHW input before Prithvi forward.
 
@@ -130,8 +125,7 @@ def _prepare_prithvi_chw(
         "target_image_size": int(target_size),
     }
 
-
-def _spatial_center_lon_lat(spatial: SpatialSpec) -> Tuple[float, float]:
+def _spatial_center_lon_lat(spatial: SpatialSpec) -> tuple[float, float]:
     from ..core.specs import BBox, PointBuffer  # local import to avoid cycles
 
     if isinstance(spatial, BBox):
@@ -144,19 +138,17 @@ def _spatial_center_lon_lat(spatial: SpatialSpec) -> Tuple[float, float]:
         return float(spatial.lon), float(spatial.lat)
     raise ModelError(f"Unsupported SpatialSpec: {type(spatial)}")
 
-
 # -------------------------
 # Prithvi model loading (TerraTorch)
 # -------------------------
-
 
 @lru_cache(maxsize=8)
 def _load_prithvi_cached(
     model_key: str,
     pretrained: bool,
-    bands: Tuple[str, ...],
+    bands: tuple[str, ...],
     num_frames: int,
-    coords_encoding: Tuple[str, ...],
+    coords_encoding: tuple[str, ...],
     dev: str,
 ):
     ensure_torch()
@@ -205,14 +197,13 @@ def _load_prithvi_cached(
     }
     return m, meta
 
-
 def _load_prithvi(
     model_key: str,
     *,
     pretrained: bool,
-    bands: Tuple[str, ...],
+    bands: tuple[str, ...],
     num_frames: int,
-    coords_encoding: Tuple[str, ...],
+    coords_encoding: tuple[str, ...],
     device: str = "auto",
 ):
     """Load (and cache) a Prithvi backbone via TerraTorch.
@@ -230,7 +221,6 @@ def _load_prithvi(
     )
     m, meta = loaded
     return m, meta, dev
-
 
 def _prithvi_forward_tokens(
     model,
@@ -291,15 +281,14 @@ def _prithvi_forward_tokens(
         f"Unexpected Prithvi tokens shape/type: {type(tokens)} {getattr(tokens, 'shape', None)}"
     )
 
-
 def _prithvi_forward_tokens_batch(
     model,
     x_bchw: np.ndarray,
     *,
-    lon_lat_batch: List[Tuple[float, float]],
-    date_str_batch: List[str],
+    lon_lat_batch: list[tuple[float, float]],
+    date_str_batch: list[str],
     device: str,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     """Batch Prithvi forward for [B,6,H,W] inputs."""
     ensure_torch()
     import torch
@@ -351,7 +340,6 @@ def _prithvi_forward_tokens_batch(
     toks_np = tokens.detach().float().cpu().numpy().astype(np.float32)  # [B,N,D]
     return [toks_np[i] for i in range(bsz)]
 
-
 # -------------------------
 # Embedder
 # -------------------------
@@ -379,7 +367,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 4
     DEFAULT_BATCH_CUDA = 16
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",
             "backend": ["provider"],
@@ -434,12 +422,12 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("prithvi_eo_v2_s2_6b expects a provider backend (or 'auto').")
@@ -501,7 +489,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             save_quicklook_rgb,
         )
 
-        check_meta: Dict[str, Any] = {}
+        check_meta: dict[str, Any] = {}
         report = maybe_inspect_chw(
             x_chw,
             sensor=sensor,
@@ -618,8 +606,8 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -635,9 +623,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         t = temporal_to_range(temporal)
         provider = self._get_provider(backend)
         n = len(spatials)
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             x_chw = _fetch_s2_prithvi6_chw(
                 provider,
                 spatial=sp,
@@ -663,7 +651,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        raw_inputs: List[np.ndarray] = []
+        raw_inputs: list[np.ndarray] = []
         for i, raw in enumerate(prefetched_raw):
             if raw is None:
                 raise ModelError(f"Missing prefetched input at index={i} for prithvi_eo_v2_s2_6b.")
@@ -683,8 +671,8 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -724,8 +712,8 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         )
         infer_bs = self._resolve_infer_batch(str(dev))
 
-        x_prepared: List[np.ndarray] = []
-        lon_lat: List[Tuple[float, float]] = []
+        x_prepared: list[np.ndarray] = []
+        lon_lat: list[tuple[float, float]] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or input_chw.shape[0] != 6:
                 raise ModelError(
@@ -742,11 +730,11 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             lon_lat.append(_spatial_center_lon_lat(spatials[i]))
 
         date_str = temporal_midpoint_str(t) or "2022-07-01"
-        shape_groups: Dict[Tuple[int, int, int], List[int]] = {}
+        shape_groups: dict[tuple[int, int, int], list[int]] = {}
         for i, x in enumerate(x_prepared):
             shape_groups.setdefault(tuple(x.shape), []).append(i)
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         xr_mod = None
         if output.mode == "grid":
             try:

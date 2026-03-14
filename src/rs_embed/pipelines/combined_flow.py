@@ -7,9 +7,10 @@ called from ``BatchExporter._run_combined``.
 
 from __future__ import annotations
 
-from typing import Any, Callable, Dict, List, Optional
+from typing import Any
 
 import numpy as np
+from collections.abc import Callable
 
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, Status, TaskResult
@@ -26,19 +27,18 @@ from ..tools.normalization import normalize_model_name
 from ..tools.checkpoint_utils import drop_model_arrays
 from ..tools.progress import create_progress
 
-
 def run_pending_models(
     *,
-    pending_models: List[str],
-    arrays: Dict[str, np.ndarray],
-    manifest: Dict[str, Any],
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
+    pending_models: list[str],
+    arrays: dict[str, np.ndarray],
+    manifest: dict[str, Any],
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
-    resolved_sensor: Dict[str, Optional[SensorSpec]],
-    model_type: Dict[str, str],
+    resolved_sensor: dict[str, SensorSpec | None],
+    model_type: dict[str, str],
     backend: str,
-    resolved_backend: Optional[Dict[str, str]] = None,
+    resolved_backend: dict[str, str] | None = None,
     provider_enabled: bool,
     device: str,
     save_inputs: bool,
@@ -50,13 +50,13 @@ def run_pending_models(
     max_retries: int,
     retry_backoff_s: float,
     show_progress: bool,
-    input_refs_by_sensor: Dict[str, Dict[str, Any]],
+    input_refs_by_sensor: dict[str, dict[str, Any]],
     get_or_fetch_input_fn: Callable[[int, str, SensorSpec], np.ndarray],
-    write_checkpoint_fn: Callable[..., Dict[str, Any]],
+    write_checkpoint_fn: Callable[..., dict[str, Any]],
     progress: Any,
-    inference_engine: Optional[Any] = None,
-    progress_factory: Optional[Callable[..., Any]] = None,
-) -> Dict[str, Any]:
+    inference_engine: Any | None = None,
+    progress_factory: Callable[..., Any] | None = None,
+) -> dict[str, Any]:
     """Run inference for each pending model, delegating to *inference_engine*.
 
     If *inference_engine* is ``None`` a temporary one is built (keeps older
@@ -98,7 +98,7 @@ def run_pending_models(
             unit="point",
         )
         infer_progress_done = 0
-        m_entry: Dict[str, Any] = {
+        m_entry: dict[str, Any] = {
             "model": m,
             "sensor": jsonable(resolved_sensor.get(m)),
             "status": "ok",
@@ -189,22 +189,20 @@ def run_pending_models(
 
     return manifest
 
-
 # ── Private helpers ────────────────────────────────────────────────
-
 
 def _gather_inputs(
     *,
-    m_entry: Dict[str, Any],
+    m_entry: dict[str, Any],
     m: str,
-    sspec: Optional[SensorSpec],
-    skey: Optional[str],
-    spatials: List[SpatialSpec],
-    arrays: Dict[str, np.ndarray],
+    sspec: SensorSpec | None,
+    skey: str | None,
+    spatials: list[SpatialSpec],
+    arrays: dict[str, np.ndarray],
     save_inputs: bool,
     needs_provider_input: bool,
     continue_on_error: bool,
-    input_refs_by_sensor: Dict[str, Dict[str, Any]],
+    input_refs_by_sensor: dict[str, dict[str, Any]],
     get_or_fetch_input_fn: Callable[[int, str, SensorSpec], np.ndarray],
 ) -> None:
     """Collect and store provider inputs for *m*, updating *m_entry* in place."""
@@ -216,9 +214,9 @@ def _gather_inputs(
         m_entry["inputs"] = {**input_refs_by_sensor[skey], "dedup_reused": True}
         return
 
-    xs: List[np.ndarray] = []
-    xs_indices: List[int] = []
-    missing: List[tuple] = []
+    xs: list[np.ndarray] = []
+    xs_indices: list[int] = []
+    missing: list[tuple] = []
     for i in range(len(spatials)):
         try:
             x = get_or_fetch_input_fn(i, skey, sspec)
@@ -239,7 +237,7 @@ def _gather_inputs(
         arr = np.stack(xs, axis=0)
         in_key = f"inputs_bchw__{sanitize_key(m)}"
         arrays[in_key] = arr
-        ref: Dict[str, Any] = {
+        ref: dict[str, Any] = {
             "npz_key": in_key,
             "shape": list(arr.shape),
             "dtype": str(arr.dtype),
@@ -262,14 +260,13 @@ def _gather_inputs(
         input_refs_by_sensor[skey] = dict(ref)
         m_entry["inputs"] = ref
 
-
 def _pack_embedding_results(
     *,
-    results: Dict[int, TaskResult],
-    m_entry: Dict[str, Any],
+    results: dict[int, TaskResult],
+    m_entry: dict[str, Any],
     m: str,
     n: int,
-    arrays: Dict[str, np.ndarray],
+    arrays: dict[str, np.ndarray],
 ) -> None:
     """Convert ``{idx: TaskResult}`` into stacked arrays and manifest entries."""
     ok_indices = [i for i in range(n) if i in results and results[i].status == Status.OK]

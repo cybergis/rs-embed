@@ -17,13 +17,11 @@ Built-in providers are lazy-loaded so optional dependencies stay optional.
 from __future__ import annotations
 
 import importlib
-from typing import Dict, Tuple, Type
 
 from .base import ProviderBase
 
-_PROVIDER_REGISTRY: Dict[str, Type[ProviderBase]] = {}
+_PROVIDER_REGISTRY: dict[str, type[ProviderBase]] = {}
 _BUILTINS_LOADED = False
-
 
 def _register_builtin_providers() -> None:
     """Lazy-load built-in providers so optional deps stay optional."""
@@ -40,14 +38,12 @@ def _register_builtin_providers() -> None:
         # Keep registry usable even when optional backend deps are unavailable.
         pass
 
-
-def register_provider(name: str, provider_cls: Type[ProviderBase]) -> None:
+def register_provider(name: str, provider_cls: type[ProviderBase]) -> None:
     _register_builtin_providers()
     key = str(name).strip().lower()
     if not key:
         raise ValueError("Provider name must be a non-empty string.")
     _PROVIDER_REGISTRY[key] = provider_cls
-
 
 def get_provider(name: str, **kwargs) -> ProviderBase:
     _register_builtin_providers()
@@ -60,11 +56,9 @@ def get_provider(name: str, **kwargs) -> ProviderBase:
         raise ValueError(f"Unknown provider '{name}'. Available providers: {available}")
     return provider_cls(**kwargs)
 
-
-def list_providers() -> Tuple[str, ...]:
+def list_providers() -> tuple[str, ...]:
     _register_builtin_providers()
     return tuple(sorted(_PROVIDER_REGISTRY.keys()))
-
 
 def has_provider(name: str) -> bool:
     _register_builtin_providers()
@@ -72,7 +66,6 @@ def has_provider(name: str) -> bool:
     if not key:
         return False
     return key in _PROVIDER_REGISTRY
-
 
 def __getattr__(name: str):
     if name == "GEEProvider":
@@ -82,7 +75,6 @@ def __getattr__(name: str):
             raise AttributeError("GEEProvider is unavailable in this environment.")
         return cls
     raise AttributeError(name)
-
 
 __all__ = [
     "ProviderBase",

@@ -7,9 +7,10 @@ tracking for provider-backed input tensors used during export.
 from __future__ import annotations
 
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from typing import Any, Callable, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
+from collections.abc import Callable
 
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig
@@ -20,7 +21,6 @@ from ..providers.prefetch_plan import (
     select_prefetched_channels,
 )
 from .runner import run_with_retry
-
 
 class PrefetchManager:
     """Manages GEE input prefetching, caching, and error tracking.
@@ -47,13 +47,13 @@ class PrefetchManager:
     def __init__(
         self,
         *,
-        provider: Optional[Any],
-        models: List[str],
-        resolved_sensor: Dict[str, Optional[SensorSpec]],
-        model_type: Dict[str, str],
+        provider: Any | None,
+        models: list[str],
+        resolved_sensor: dict[str, SensorSpec | None],
+        model_type: dict[str, str],
         config: ExportConfig,
-        fetch_fn: Optional[Callable[..., np.ndarray]] = None,
-        inspect_fn: Optional[Callable[..., Dict[str, Any]]] = None,
+        fetch_fn: Callable[..., np.ndarray] | None = None,
+        inspect_fn: Callable[..., dict[str, Any]] | None = None,
     ) -> None:
         self.provider = provider
         self.models = models
@@ -64,16 +64,16 @@ class PrefetchManager:
         self.inspect_fn = inspect_fn or _gee_utils.inspect_input_raw
 
         # Caches populated by fetch_chunk / restored from checkpoint
-        self.cache: Dict[Tuple[int, str], np.ndarray] = {}
-        self.errors: Dict[Tuple[int, str], str] = {}
-        self.input_reports: Dict[Tuple[int, str], Dict[str, Any]] = {}
+        self.cache: dict[tuple[int, str], np.ndarray] = {}
+        self.errors: dict[tuple[int, str], str] = {}
+        self.input_reports: dict[tuple[int, str], dict[str, Any]] = {}
 
         # Populated by plan()
-        self.sensor_by_key: Dict[str, SensorSpec] = {}
-        self.fetch_sensor_by_key: Dict[str, SensorSpec] = {}
-        self.sensor_to_fetch: Dict[str, Tuple[str, Tuple[int, ...]]] = {}
-        self.sensor_models: Dict[str, List[str]] = {}
-        self.fetch_members: Dict[str, List[str]] = {}
+        self.sensor_by_key: dict[str, SensorSpec] = {}
+        self.fetch_sensor_by_key: dict[str, SensorSpec] = {}
+        self.sensor_to_fetch: dict[str, tuple[str, tuple[int, ...]]] = {}
+        self.sensor_models: dict[str, list[str]] = {}
+        self.fetch_members: dict[str, list[str]] = {}
 
     @property
     def enabled(self) -> bool:
@@ -81,7 +81,7 @@ class PrefetchManager:
 
     # ── plan ───────────────────────────────────────────────────────
 
-    def plan(self, resolve_bands_fn: Optional[Callable[..., Any]] = None) -> None:
+    def plan(self, resolve_bands_fn: Callable[..., Any] | None = None) -> None:
         """Build the prefetch plan (sensor dedup + band unions)."""
         (
             self.sensor_by_key,
@@ -99,10 +99,10 @@ class PrefetchManager:
     # ── fetch ──────────────────────────────────────────────────────
 
     def build_tasks(
-        self, idxs: List[int], spatials: List[SpatialSpec]
-    ) -> List[Tuple[int, str, SensorSpec]]:
+        self, idxs: list[int], spatials: list[SpatialSpec]
+    ) -> list[tuple[int, str, SensorSpec]]:
         """Return list of ``(spatial_idx, fetch_key, fetch_sensor)`` needing fetch."""
-        tasks: List[Tuple[int, str, SensorSpec]] = []
+        tasks: list[tuple[int, str, SensorSpec]] = []
         if not self.enabled:
             return tasks
         for i in idxs:
@@ -115,9 +115,9 @@ class PrefetchManager:
 
     def fetch_chunk(
         self,
-        idxs: List[int],
-        spatials: List[SpatialSpec],
-        temporal: Optional[TemporalSpec],
+        idxs: list[int],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
         *,
         progress: Any = None,
     ) -> None:
@@ -132,7 +132,7 @@ class PrefetchManager:
         cfg = self.config
         provider = self.provider
 
-        def _fetch_one(i: int, skey: str, sspec: SensorSpec) -> Tuple[int, str, np.ndarray]:
+        def _fetch_one(i: int, skey: str, sspec: SensorSpec) -> tuple[int, str, np.ndarray]:
             x = run_with_retry(
                 lambda: self.fetch_fn(
                     provider, spatial=spatials[i], temporal=temporal, sensor=sspec
@@ -207,7 +207,7 @@ class PrefetchManager:
         skey: str,
         sspec: SensorSpec,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
+        temporal: TemporalSpec | None,
     ) -> np.ndarray:
         """Return cached input, or fetch on demand if not cached."""
         hit = self.cache.get((idx, skey))
@@ -232,7 +232,7 @@ class PrefetchManager:
         self.input_reports[(idx, skey)] = rep
         return x
 
-    def has_error(self, idx: int, sensor_key: str) -> Optional[str]:
+    def has_error(self, idx: int, sensor_key: str) -> str | None:
         return self.errors.get((idx, sensor_key))
 
     def clear_chunk(self) -> None:

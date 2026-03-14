@@ -1,12 +1,11 @@
 from __future__ import annotations
 
 from dataclasses import replace
-from typing import Dict, Iterable, Optional
+from collections.abc import Iterable
 
 from ..core.errors import ModelError
 from ..core.registry import get_embedder_cls
 from ..core.specs import SensorSpec
-
 
 def _probe_model_desc(model_id: str) -> dict:
     cls = get_embedder_cls(model_id)
@@ -16,8 +15,7 @@ def _probe_model_desc(model_id: str) -> dict:
         desc = {}
     return desc if isinstance(desc, dict) else {}
 
-
-def _normalize_modality_name(modality: Optional[str]) -> Optional[str]:
+def _normalize_modality_name(modality: str | None) -> str | None:
     if modality is None:
         return None
     key = str(modality).strip().lower().replace("-", "_")
@@ -31,13 +29,12 @@ def _normalize_modality_name(modality: Optional[str]) -> Optional[str]:
     }
     return aliases.get(key, key)
 
-
 def _mk_sensor(
     *,
     collection: str,
     bands: Iterable[str],
     defaults: dict,
-    modality: Optional[str] = None,
+    modality: str | None = None,
 ) -> SensorSpec:
     return SensorSpec(
         collection=str(collection),
@@ -51,8 +48,7 @@ def _mk_sensor(
         use_float_linear=bool(defaults.get("use_float_linear", True)),
     )
 
-
-def modality_profiles_for_model(model_id: str) -> Dict[str, SensorSpec]:
+def modality_profiles_for_model(model_id: str) -> dict[str, SensorSpec]:
     desc = _probe_model_desc(model_id)
 
     typ = str(desc.get("type", "")).lower()
@@ -61,7 +57,7 @@ def modality_profiles_for_model(model_id: str) -> Dict[str, SensorSpec]:
 
     inputs = desc.get("inputs")
     defaults = desc.get("defaults", {}) or {}
-    profiles: Dict[str, SensorSpec] = {}
+    profiles: dict[str, SensorSpec] = {}
 
     explicit = desc.get("modalities")
     if isinstance(explicit, dict):
@@ -114,7 +110,6 @@ def modality_profiles_for_model(model_id: str) -> Dict[str, SensorSpec]:
             )
     return profiles
 
-
 def supports_modality_for_model(model_id: str, modality: str) -> bool:
     modality_n = _normalize_modality_name(modality)
     if modality_n is None:
@@ -126,8 +121,7 @@ def supports_modality_for_model(model_id: str, modality: str) -> bool:
     default_modality = _normalize_modality_name((desc.get("defaults") or {}).get("modality"))
     return modality_n == default_modality
 
-
-def default_sensor_for_model(model_id: str, modality: Optional[str] = None) -> Optional[SensorSpec]:
+def default_sensor_for_model(model_id: str, modality: str | None = None) -> SensorSpec | None:
     desc = _probe_model_desc(model_id)
 
     typ = str(desc.get("type", "")).lower()
@@ -190,14 +184,13 @@ def default_sensor_for_model(model_id: str, modality: Optional[str] = None) -> O
 
     return None
 
-
 def resolve_sensor_for_model(
     model_id: str,
     *,
-    sensor: Optional[SensorSpec],
-    modality: Optional[str] = None,
+    sensor: SensorSpec | None,
+    modality: str | None = None,
     default_when_missing: bool = False,
-) -> Optional[SensorSpec]:
+) -> SensorSpec | None:
     sensor_modality = _normalize_modality_name(getattr(sensor, "modality", None))
     requested_modality = _normalize_modality_name(modality) or sensor_modality
 

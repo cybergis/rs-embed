@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -30,7 +30,6 @@ from ._vit_mae_utils import (
     rgb_u8_to_tensor_clipnorm,
 )
 
-
 @lru_cache(maxsize=8)
 def _load_satmae_cached(model_id: str, dev: str):
     ensure_torch()
@@ -49,11 +48,9 @@ def _load_satmae_cached(model_id: str, dev: str):
     meta = {"model_id": model_id, "device": dev}
     return model, meta
 
-
 def _load_satmae(model_id: str, device: str = "auto"):
     loaded, _dev = _load_cached_with_device(_load_satmae_cached, device=device, model_id=model_id)
     return loaded
-
 
 def _satmae_forward_tokens(
     model, rgb_u8: np.ndarray, *, image_size: int, device: str
@@ -68,14 +65,13 @@ def _satmae_forward_tokens(
         device=device,
     )[0]
 
-
 def _satmae_forward_tokens_batch(
     model,
-    rgb_u8_batch: List[np.ndarray],
+    rgb_u8_batch: list[np.ndarray],
     *,
     image_size: int,
     device: str,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     """
     Batch version of forward_encoder.
     Returns one [N,D] float32 token array per input image.
@@ -116,7 +112,6 @@ def _satmae_forward_tokens_batch(
         out_np = toks.detach().float().cpu().numpy().astype(np.float32)
         return [out_np[i] for i in range(out_np.shape[0])]
 
-
 @register("satmae")
 class SatMAERGBEmbedder(EmbedderBase):
     """
@@ -133,7 +128,7 @@ class SatMAERGBEmbedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 32
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",
             "backend": ["provider"],
@@ -179,12 +174,12 @@ class SatMAERGBEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmae_rgb expects a provider backend (or 'auto').")
@@ -274,8 +269,8 @@ class SatMAERGBEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -294,9 +289,9 @@ class SatMAERGBEmbedder(EmbedderBase):
 
         provider = self._get_provider(backend)
         n = len(spatials)
-        rgb_u8_all: List[Optional[np.ndarray]] = [None] * n
+        rgb_u8_all: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             rgb = fetch_s2_rgb_u8_from_provider(
                 spatial=sp,
                 temporal=t,
@@ -326,7 +321,7 @@ class SatMAERGBEmbedder(EmbedderBase):
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
-        out: List[Optional[Embedding]] = [None] * n
+        out: list[Embedding | None] = [None] * n
         want_grid = output.mode == "grid"
         xr_mod = None
         if want_grid:
@@ -404,8 +399,8 @@ class SatMAERGBEmbedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -426,7 +421,7 @@ class SatMAERGBEmbedder(EmbedderBase):
         image_size = int(os.environ.get("RS_EMBED_SATMAE_IMG", str(self.DEFAULT_IMAGE_SIZE)))
         t = temporal_to_range(temporal)
 
-        rgb_u8_all: List[np.ndarray] = []
+        rgb_u8_all: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or input_chw.shape[0] != 3:
                 raise ModelError(
@@ -441,7 +436,7 @@ class SatMAERGBEmbedder(EmbedderBase):
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         want_grid = output.mode == "grid"
         xr_mod = None
         if want_grid:

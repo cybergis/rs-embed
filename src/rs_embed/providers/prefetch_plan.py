@@ -1,17 +1,16 @@
 from __future__ import annotations
 
-from typing import Callable, Dict, List, Optional, Tuple
 import warnings
 
 import numpy as np
+from collections.abc import Callable
 
 from ..tools.serialization import sensor_cache_key as _sensor_cache_key
 from ..core.specs import SensorSpec
 
 _LEGACY_RESOLVE_BANDS_WARNED = False
 
-
-def sensor_fetch_group_key(sensor: SensorSpec) -> Tuple[str, int, int, float, str]:
+def sensor_fetch_group_key(sensor: SensorSpec) -> tuple[str, int, int, float, str]:
     """Fetch identity excluding bands; used to build reusable band supersets."""
     cloudy = -1 if getattr(sensor, "cloudy_pct", None) is None else int(sensor.cloudy_pct)
     return (
@@ -22,28 +21,26 @@ def sensor_fetch_group_key(sensor: SensorSpec) -> Tuple[str, int, int, float, st
         str(sensor.composite),
     )
 
-
-def select_prefetched_channels(x_chw: np.ndarray, idx: Tuple[int, ...]) -> np.ndarray:
+def select_prefetched_channels(x_chw: np.ndarray, idx: tuple[int, ...]) -> np.ndarray:
     if len(idx) == x_chw.shape[0] and all(i == j for j, i in enumerate(idx)):
         return x_chw
     return x_chw[list(idx), :, :]
 
-
 def build_prefetch_plan(
     *,
-    models: List[str],
-    resolved_sensor: Dict[str, Optional[SensorSpec]],
-    model_type: Dict[str, str],
-    resolve_bands_fn: Optional[Callable[..., Tuple[str, ...]]] = None,
-) -> Tuple[
-    Dict[str, SensorSpec],  # sensor_by_key
-    Dict[str, SensorSpec],  # fetch_sensor_by_key
-    Dict[str, Tuple[str, Tuple[int, ...]]],  # sensor_key -> (fetch_key, channel_idx)
-    Dict[str, List[str]],  # sensor_models
-    Dict[str, List[str]],  # fetch_members
+    models: list[str],
+    resolved_sensor: dict[str, SensorSpec | None],
+    model_type: dict[str, str],
+    resolve_bands_fn: Callable[..., tuple[str, ...]] | None = None,
+) -> tuple[
+    dict[str, SensorSpec],  # sensor_by_key
+    dict[str, SensorSpec],  # fetch_sensor_by_key
+    dict[str, tuple[str, tuple[int, ...]]],  # sensor_key -> (fetch_key, channel_idx)
+    dict[str, list[str]],  # sensor_models
+    dict[str, list[str]],  # fetch_members
 ]:
-    sensor_by_key: Dict[str, SensorSpec] = {}
-    sensor_models: Dict[str, List[str]] = {}
+    sensor_by_key: dict[str, SensorSpec] = {}
+    sensor_models: dict[str, list[str]] = {}
     for m in models:
         sspec = resolved_sensor.get(m)
         if sspec is None or "precomputed" in (model_type.get(m) or ""):
@@ -52,8 +49,8 @@ def build_prefetch_plan(
         sensor_by_key.setdefault(skey, sspec)
         sensor_models.setdefault(skey, []).append(m)
 
-    groups: Dict[
-        Tuple[str, int, int, float, str], List[Tuple[str, SensorSpec, Tuple[str, ...]]]
+    groups: dict[
+        tuple[str, int, int, float, str], list[tuple[str, SensorSpec, tuple[str, ...]]]
     ] = {}
     for skey, sspec in sensor_by_key.items():
         gkey = sensor_fetch_group_key(sspec)
@@ -82,12 +79,12 @@ def build_prefetch_plan(
                 rbands = resolve_bands_fn(str(sspec.collection), tuple(sspec.bands))
         groups.setdefault(gkey, []).append((skey, sspec, rbands))
 
-    fetch_sensor_by_key: Dict[str, SensorSpec] = {}
-    sensor_to_fetch: Dict[str, Tuple[str, Tuple[int, ...]]] = {}
-    fetch_members: Dict[str, List[str]] = {}
+    fetch_sensor_by_key: dict[str, SensorSpec] = {}
+    sensor_to_fetch: dict[str, tuple[str, tuple[int, ...]]] = {}
+    fetch_members: dict[str, list[str]] = {}
 
     for members in groups.values():
-        union_bands: List[str] = []
+        union_bands: list[str] = []
         seen: set[str] = set()
         for _, _, rbands in members:
             for b in rbands:
@@ -131,7 +128,6 @@ def build_prefetch_plan(
         sensor_models,
         fetch_members,
     )
-
 
 # Backwards-compatible alias kept for existing imports/tests.
 build_gee_prefetch_plan = build_prefetch_plan

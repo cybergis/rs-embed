@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -22,7 +22,6 @@ from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device,
 )
 from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
-
 
 _S2_SR_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 _THOR_MODEL_BANDS = [
@@ -69,7 +68,6 @@ _THOR_S2_STD = np.array(
     dtype=np.float32,
 )
 
-
 def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -80,7 +78,6 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y[0].detach().cpu().numpy().astype(np.float32)
-
 
 def _normalize_s2_for_thor(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
     if raw_chw.ndim != 3 or int(raw_chw.shape[0]) != len(_S2_SR_10_BANDS):
@@ -107,7 +104,6 @@ def _normalize_s2_for_thor(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
         f"Unknown THOR normalization mode '{mode}'. Use one of: thor_stats, unit_scale, none."
     )
 
-
 def _fetch_s2_sr_10_raw_chw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -131,10 +127,9 @@ def _fetch_s2_sr_10_raw_chw(
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
 
-
 def _extract_feature_and_channel_params(
     out: Any,
-) -> Tuple[Any, Optional[Dict[str, Any]]]:
+) -> tuple[Any, dict[str, Any] | None]:
     channel_params = None
     features = out
     if isinstance(out, tuple) and len(out) >= 2:
@@ -146,14 +141,13 @@ def _extract_feature_and_channel_params(
     feat_t = features[-1]
     return feat_t, channel_params
 
-
 def _group_patch_sizes(
     *,
-    channel_params: Dict[str, Any],
-    groups: Dict[str, List[str]],
-) -> Tuple[List[int], List[str]]:
-    patch_sizes: List[int] = []
-    used_groups: List[str] = []
+    channel_params: dict[str, Any],
+    groups: dict[str, list[str]],
+) -> tuple[list[int], list[str]]:
+    patch_sizes: list[int] = []
+    used_groups: list[str] = []
     for gname, members in groups.items():
         member = next(
             (
@@ -174,12 +168,11 @@ def _group_patch_sizes(
         used_groups.append(str(gname))
     return patch_sizes, used_groups
 
-
 def _thor_group_grid_from_tokens(
     tokens_bnd,
     *,
-    channel_params: Dict[str, Any],
-    groups: Dict[str, List[str]],
+    channel_params: dict[str, Any],
+    groups: dict[str, list[str]],
     merge: str,
 ):
     ensure_torch()
@@ -235,13 +228,12 @@ def _thor_group_grid_from_tokens(
     }
     return grid, meta
 
-
 def _pool_thor_tokens(
     tokens: np.ndarray,
     *,
     pooling: str,
-    expected_patch_tokens: Optional[int],
-) -> Tuple[np.ndarray, bool]:
+    expected_patch_tokens: int | None,
+) -> tuple[np.ndarray, bool]:
     if (
         expected_patch_tokens is not None
         and tokens.ndim == 2
@@ -256,17 +248,16 @@ def _pool_thor_tokens(
         raise ModelError(f"Unknown pooling='{pooling}' (expected 'mean' or 'max').")
     return pool_from_tokens(tokens, pooling)
 
-
 @lru_cache(maxsize=8)
 def _load_thor_cached(
     model_key: str,
-    model_bands: Tuple[str, ...],
+    model_bands: tuple[str, ...],
     pretrained: bool,
-    ckpt_path: Optional[str],
+    ckpt_path: str | None,
     ground_cover: int,
     patch_size: int,
     dev: str,
-) -> Tuple[Any, Dict[str, Any]]:
+) -> tuple[Any, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -292,7 +283,7 @@ def _load_thor_cached(
             "THOR extension not found. Install: pip install git+https://github.com/FM4CS/thor_terratorch_ext.git"
         ) from e
 
-    build_kwargs: Dict[str, Any] = {
+    build_kwargs: dict[str, Any] = {
         "pretrained": bool(pretrained),
         "model_bands": list(model_bands),
         "out_indices": [-1],
@@ -352,17 +343,16 @@ def _load_thor_cached(
     }
     return model, meta
 
-
 def _load_thor(
     *,
     model_key: str,
-    model_bands: Tuple[str, ...],
+    model_bands: tuple[str, ...],
     pretrained: bool,
-    ckpt_path: Optional[str],
+    ckpt_path: str | None,
     ground_cover: int,
     patch_size: int,
     device: str,
-) -> Tuple[Any, Dict[str, Any], str]:
+) -> tuple[Any, dict[str, Any], str]:
     (loaded, dev) = _load_cached_with_device(
         _load_thor_cached,
         device=device,
@@ -376,14 +366,13 @@ def _load_thor(
     model, meta = loaded
     return model, meta, dev
 
-
 def _thor_forward_single(
     model: Any,
     x_chw: np.ndarray,
     *,
     device: str,
     group_merge: str,
-) -> Tuple[np.ndarray, Optional[np.ndarray], Dict[str, Any]]:
+) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -408,9 +397,9 @@ def _thor_forward_single(
         )
 
     tokens = feat_t[0].detach().float().cpu().numpy().astype(np.float32)
-    grid: Optional[np.ndarray] = None
-    expected_patch_tokens: Optional[int] = None
-    grid_meta: Dict[str, Any] = {}
+    grid: np.ndarray | None = None
+    expected_patch_tokens: int | None = None
+    grid_meta: dict[str, Any] = {}
 
     groups = getattr(model, "groups", None)
     if isinstance(channel_params, dict) and isinstance(groups, dict):
@@ -454,14 +443,13 @@ def _thor_forward_single(
     }
     return tokens, grid, meta
 
-
 @register("thor")
 class THORBaseEmbedder(EmbedderBase):
     DEFAULT_MODEL_KEY = "thor_v1_base"
     DEFAULT_IMAGE_SIZE = 288
     DEFAULT_FETCH_WORKERS = 8
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
             "backend": ["provider"],
@@ -510,12 +498,12 @@ class THORBaseEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("thor_1_0_base expects a provider backend (or 'auto').")
@@ -567,7 +555,7 @@ class THORBaseEmbedder(EmbedderBase):
 
         from ..tools.inspection import checks_should_raise, maybe_inspect_chw
 
-        check_meta: Dict[str, Any] = {}
+        check_meta: dict[str, Any] = {}
         report = maybe_inspect_chw(
             raw_chw,
             sensor=ss,
@@ -673,8 +661,8 @@ class THORBaseEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -696,9 +684,9 @@ class THORBaseEmbedder(EmbedderBase):
         fill_value = float(getattr(ss, "fill_value", 0.0))
 
         n = len(spatials)
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             raw = _fetch_s2_sr_10_raw_chw(
                 provider,
                 sp,
@@ -722,7 +710,7 @@ class THORBaseEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        out: List[Embedding] = []
+        out: list[Embedding] = []
         for i, sp in enumerate(spatials):
             raw = prefetched_raw[i]
             if raw is None:

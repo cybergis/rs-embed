@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -22,7 +22,6 @@ from .runtime_utils import (
 )
 from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 from ._vit_mae_utils import ensure_torch, pool_from_tokens, tokens_to_grid_dhw
-
 
 _S2_SR_12_BANDS = [
     "B1",
@@ -126,7 +125,6 @@ _V01_STD = np.array(
     dtype=np.float32,
 )
 
-
 def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     ensure_torch()
     import torch
@@ -137,7 +135,6 @@ def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
     return y[0].detach().cpu().numpy().astype(np.float32)
-
 
 def _fetch_s2_sr_12_raw_chw(
     provider: ProviderBase,
@@ -162,7 +159,6 @@ def _fetch_s2_sr_12_raw_chw(
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
 
-
 def _terramind_zscore_s2(raw_chw: np.ndarray, *, model_key: str, mode: str) -> np.ndarray:
     if raw_chw.ndim != 3 or int(raw_chw.shape[0]) != len(_S2_SR_12_BANDS):
         raise ModelError(
@@ -183,14 +179,13 @@ def _terramind_zscore_s2(raw_chw: np.ndarray, *, model_key: str, mode: str) -> n
     x = (x - mean[:, None, None]) / std[:, None, None]
     return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
-
 @lru_cache(maxsize=8)
 def _load_terramind_cached(
     model_key: str,
     pretrained: bool,
     modality: str,
     dev: str,
-) -> Tuple[Any, Dict[str, Any]]:
+) -> tuple[Any, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -250,14 +245,13 @@ def _load_terramind_cached(
     }
     return model, meta
 
-
 def _load_terramind(
     *,
     model_key: str,
     pretrained: bool,
     modality: str,
     device: str,
-) -> Tuple[Any, Dict[str, Any], str]:
+) -> tuple[Any, dict[str, Any], str]:
     (loaded, dev) = _load_cached_with_device(
         _load_terramind_cached,
         device=device,
@@ -268,7 +262,6 @@ def _load_terramind(
     model, meta = loaded
     return model, meta, dev
 
-
 def _terramind_forward_tokens(
     model: Any,
     x_bchw: np.ndarray,
@@ -276,7 +269,7 @@ def _terramind_forward_tokens(
     modality: str,
     layer_index: int,
     device: str,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -293,7 +286,7 @@ def _terramind_forward_tokens(
             # Fallback for wrappers that accept plain tensor
             out = model(x)
 
-    def _pick_from_sequence(seq: Any, idx: int) -> Optional[torch.Tensor]:
+    def _pick_from_sequence(seq: Any, idx: int) -> torch.Tensor | None:
         if not isinstance(seq, (list, tuple)) or len(seq) == 0:
             return None
         cand = None
@@ -338,7 +331,6 @@ def _terramind_forward_tokens(
     }
     return tokens, meta
 
-
 def _terramind_forward_tokens_batch(
     model: Any,
     x_bchw: np.ndarray,
@@ -346,7 +338,7 @@ def _terramind_forward_tokens_batch(
     modality: str,
     layer_index: int,
     device: str,
-) -> Tuple[np.ndarray, Dict[str, Any]]:
+) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -361,7 +353,7 @@ def _terramind_forward_tokens_batch(
         except Exception as _e:
             out = model(x)
 
-    def _pick_from_sequence(seq: Any, idx: int) -> Optional[torch.Tensor]:
+    def _pick_from_sequence(seq: Any, idx: int) -> torch.Tensor | None:
         if not isinstance(seq, (list, tuple)) or len(seq) == 0:
             return None
         cand = None
@@ -407,7 +399,6 @@ def _terramind_forward_tokens_batch(
     }
     return tokens, meta
 
-
 def _prepare_terramind_input_chw(
     input_chw: Any,
     *,
@@ -424,7 +415,6 @@ def _prepare_terramind_input_chw(
     raw_chw = _resize_chw(raw_chw, size=image_size)
     return _terramind_zscore_s2(raw_chw, model_key=model_key, mode=normalize_mode)
 
-
 @register("terramind")
 class TerraMindEmbedder(EmbedderBase):
     DEFAULT_MODEL_KEY = "terramind_v1_small"
@@ -432,7 +422,7 @@ class TerraMindEmbedder(EmbedderBase):
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
             "backend": ["provider", "tensor"],
@@ -491,12 +481,12 @@ class TerraMindEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
 
@@ -517,10 +507,10 @@ class TerraMindEmbedder(EmbedderBase):
         }
         image_size = self.DEFAULT_IMAGE_SIZE
 
-        check_meta: Dict[str, Any] = {}
+        check_meta: dict[str, Any] = {}
         source = None
         sensor_meta = None
-        temporal_used: Optional[TemporalSpec] = None
+        temporal_used: TemporalSpec | None = None
 
         if backend_l == "tensor":
             if input_chw is None:
@@ -673,8 +663,8 @@ class TerraMindEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -698,9 +688,9 @@ class TerraMindEmbedder(EmbedderBase):
         fill_value = float(getattr(ss, "fill_value", 0.0))
 
         n = len(spatials)
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             raw = _fetch_s2_sr_12_raw_chw(
                 provider,
                 sp,
@@ -724,7 +714,7 @@ class TerraMindEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        raw_inputs: List[np.ndarray] = []
+        raw_inputs: list[np.ndarray] = []
         for i, raw in enumerate(prefetched_raw):
             if raw is None:
                 raise ModelError(f"Missing prefetched input at index={i} for terramind.")
@@ -745,8 +735,8 @@ class TerraMindEmbedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -831,7 +821,7 @@ class TerraMindEmbedder(EmbedderBase):
             device=dev,
         )
 
-        out: List[Embedding] = []
+        out: list[Embedding] = []
         for i, _spatial in enumerate(spatials):
             meta = build_meta(
                 model=self.model_name,

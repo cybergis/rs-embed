@@ -3,8 +3,7 @@ from __future__ import annotations
 """Utilities for inspecting raw patches downloaded from provider backends."""
 
 from dataclasses import asdict
-from typing import Any, Dict, Optional, Tuple
-
+from typing import Any
 
 from .core.errors import ProviderError
 from .tools.inspection import inspect_chw, checks_save_dir, save_quicklook_rgb
@@ -12,17 +11,16 @@ from .core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from .providers.gee_utils import fetch_provider_patch_raw
 from .providers import get_provider
 
-
 def inspect_provider_patch(
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec] = None,
+    temporal: TemporalSpec | None = None,
     sensor: SensorSpec,
     backend: str = "gee",
     name: str = "gee_patch",
-    value_range: Optional[Tuple[float, float]] = None,
+    value_range: tuple[float, float] | None = None,
     return_array: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Download a patch from a provider and return an input inspection report.
 
     This does **not** run any embedding model.
@@ -56,7 +54,7 @@ def inspect_provider_patch(
     )
 
     # Save quicklook if requested (best-effort)
-    artifacts: Dict[str, Any] = {}
+    artifacts: dict[str, Any] = {}
     save_dir = checks_save_dir(sensor)
     if save_dir and x_chw.ndim == 3 and x_chw.shape[0] >= 3:
         try:
@@ -70,7 +68,7 @@ def inspect_provider_patch(
         except Exception as e:
             artifacts["quicklook_rgb_error"] = repr(e)
 
-    out: Dict[str, Any] = {
+    out: dict[str, Any] = {
         "ok": bool(report.get("ok", False)),
         "report": report,
         "sensor": asdict(sensor),
@@ -82,17 +80,16 @@ def inspect_provider_patch(
         out["array_chw"] = x_chw
     return out
 
-
 def inspect_gee_patch(
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec] = None,
+    temporal: TemporalSpec | None = None,
     sensor: SensorSpec,
     backend: str = "gee",
     name: str = "gee_patch",
-    value_range: Optional[Tuple[float, float]] = None,
+    value_range: tuple[float, float] | None = None,
     return_array: bool = False,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     """Backwards-compatible wrapper around inspect_provider_patch."""
     return inspect_provider_patch(
         spatial=spatial,

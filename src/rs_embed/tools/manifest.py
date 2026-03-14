@@ -2,14 +2,13 @@ from __future__ import annotations
 
 import json
 import os
-from typing import Any, Dict, List, Optional
+from typing import Any
 
 from .serialization import jsonable as _jsonable
 from .serialization import utc_ts as _utc_ts
 from ..core.specs import OutputSpec, SpatialSpec, TemporalSpec
 
-
-def load_json_dict(path: str) -> Optional[Dict[str, Any]]:
+def load_json_dict(path: str) -> dict[str, Any] | None:
     if not os.path.exists(path):
         return None
     try:
@@ -21,16 +20,15 @@ def load_json_dict(path: str) -> Optional[Dict[str, Any]]:
         return None
     return None
 
-
 def _resume_manifest(
     *,
     out_file: str,
     backend: str,
     device: str,
-    temporal: Optional[TemporalSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
-    extra_fields: Dict[str, Any],
-) -> Dict[str, Any]:
+    extra_fields: dict[str, Any],
+) -> dict[str, Any]:
     """Build a resume-skipped manifest, loading existing JSON if available."""
     json_path = os.path.splitext(out_file)[0] + ".json"
     manifest = load_json_dict(json_path)
@@ -52,17 +50,16 @@ def _resume_manifest(
     manifest.setdefault("status", "ok")
     return manifest
 
-
 def point_resume_manifest(
     *,
     point_index: int,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
     backend: str,
     device: str,
     out_file: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     manifest = _resume_manifest(
         out_file=out_file,
         backend=backend,
@@ -77,16 +74,15 @@ def point_resume_manifest(
     manifest.setdefault("point_index", int(point_index))
     return manifest
 
-
 def combined_resume_manifest(
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
     backend: str,
     device: str,
     out_file: str,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return _resume_manifest(
         out_file=out_file,
         backend=backend,
@@ -99,18 +95,17 @@ def combined_resume_manifest(
         },
     )
 
-
 def point_failure_manifest(
     *,
     point_index: int,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec],
+    temporal: TemporalSpec | None,
     output: OutputSpec,
     backend: str,
     device: str,
     stage: str,
     error: Exception,
-) -> Dict[str, Any]:
+) -> dict[str, Any]:
     return {
         "created_at": _utc_ts(),
         "point_index": int(point_index),
@@ -125,8 +120,7 @@ def point_failure_manifest(
         "output": _jsonable(output),
     }
 
-
-def summarize_status(entries: List[Dict[str, Any]]) -> str:
+def summarize_status(entries: list[dict[str, Any]]) -> str:
     """Summarize a list of model/status entries into ok/partial/failed."""
     if not entries:
         return "ok"

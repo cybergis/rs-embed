@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 
@@ -28,18 +28,14 @@ from ._vit_mae_utils import (
     ensure_torch,
 )
 
-
 _SATMAEPP_RGB_MEAN = (0.4182007312774658, 0.4214799106121063, 0.3991275727748871)
 _SATMAEPP_RGB_STD = (0.28774282336235046, 0.27541765570640564, 0.2764017581939697)
-
 
 def _truthy(v: str) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
-
 def _falsy(v: str) -> bool:
     return str(v).strip().lower() in {"0", "false", "no", "n", "off"}
-
 
 def _resolve_satmaepp_channel_order(model_id: str) -> str:
     """
@@ -66,13 +62,11 @@ def _resolve_satmaepp_channel_order(model_id: str) -> str:
         return "bgr"
     return "rgb"
 
-
 def _satmaepp_resize_short_side(image_size: int) -> int:
     crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
     return int(float(image_size) / crop_pct)
 
-
-def _satmaepp_preprocess_info(model_id: str, image_size: int) -> Dict[str, Any]:
+def _satmaepp_preprocess_info(model_id: str, image_size: int) -> dict[str, Any]:
     channel_order = _resolve_satmaepp_channel_order(model_id)
     resize_short = _satmaepp_resize_short_side(image_size)
     return {
@@ -84,9 +78,8 @@ def _satmaepp_preprocess_info(model_id: str, image_size: int) -> Dict[str, Any]:
         "center_crop": int(image_size),
     }
 
-
 def _satmaepp_preprocess_tensor_batch(
-    rgb_u8_batch: List[np.ndarray],
+    rgb_u8_batch: list[np.ndarray],
     *,
     image_size: int,
     channel_order: str,
@@ -135,7 +128,6 @@ def _satmaepp_preprocess_tensor_batch(
 
     return torch.stack(xs, dim=0)
 
-
 @lru_cache(maxsize=8)
 def _load_satmaepp_cached(model_id: str, dev: str):
     ensure_torch()
@@ -160,11 +152,9 @@ def _load_satmaepp_cached(model_id: str, dev: str):
     meta = {"model_id": model_id, "device": dev, "in_chans": in_chans}
     return model, meta
 
-
 def _load_satmaepp(model_id: str, device: str = "auto"):
     loaded, _dev = _load_cached_with_device(_load_satmaepp_cached, device=device, model_id=model_id)
     return loaded
-
 
 def _satmaepp_forward_tokens(
     model,
@@ -185,15 +175,14 @@ def _satmaepp_forward_tokens(
         model_id=model_id,
     )[0]
 
-
 def _satmaepp_forward_tokens_batch(
     model,
-    rgb_u8_batch: List[np.ndarray],
+    rgb_u8_batch: list[np.ndarray],
     *,
     image_size: int,
     device: str,
     model_id: str,
-) -> List[np.ndarray]:
+) -> list[np.ndarray]:
     """
     Batch version of forward_encoder.
     Returns one [N,D] float32 token array per input image.
@@ -226,7 +215,6 @@ def _satmaepp_forward_tokens_batch(
         out_np = toks.detach().float().cpu().numpy().astype(np.float32)
         return [out_np[i] for i in range(out_np.shape[0])]
 
-
 @register("satmaepp")
 class SatMAEPPEmbedder(EmbedderBase):
     """
@@ -243,7 +231,7 @@ class SatMAEPPEmbedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 32
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",
             "backend": ["provider"],
@@ -290,12 +278,12 @@ class SatMAEPPEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmaepp_rgb expects a provider backend (or 'auto').")
@@ -393,8 +381,8 @@ class SatMAEPPEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -413,9 +401,9 @@ class SatMAEPPEmbedder(EmbedderBase):
 
         provider = self._get_provider(backend)
         n = len(spatials)
-        rgb_u8_all: List[Optional[np.ndarray]] = [None] * n
+        rgb_u8_all: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             rgb = fetch_s2_rgb_u8_from_provider(
                 spatial=sp,
                 temporal=t,
@@ -446,7 +434,7 @@ class SatMAEPPEmbedder(EmbedderBase):
         infer_bs = self._resolve_infer_batch(str(dev))
         pp_info = _satmaepp_preprocess_info(model_id=model_id, image_size=image_size)
 
-        out: List[Optional[Embedding]] = [None] * n
+        out: list[Embedding | None] = [None] * n
         want_grid = output.mode == "grid"
         xr_mod = None
         if want_grid:
@@ -526,8 +514,8 @@ class SatMAEPPEmbedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -548,7 +536,7 @@ class SatMAEPPEmbedder(EmbedderBase):
         image_size = int(os.environ.get("RS_EMBED_SATMAEPP_IMG", str(self.DEFAULT_IMAGE_SIZE)))
         t = temporal_to_range(temporal)
 
-        rgb_u8_all: List[np.ndarray] = []
+        rgb_u8_all: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or input_chw.shape[0] != 3:
                 raise ModelError(
@@ -564,7 +552,7 @@ class SatMAEPPEmbedder(EmbedderBase):
         infer_bs = self._resolve_infer_batch(str(dev))
         pp_info = _satmaepp_preprocess_info(model_id=model_id, image_size=image_size)
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         want_grid = output.mode == "grid"
         xr_mod = None
         if want_grid:

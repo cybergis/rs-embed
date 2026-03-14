@@ -5,7 +5,7 @@ import importlib
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, Optional, Tuple, List
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -25,10 +25,8 @@ from .runtime_utils import (
     resolve_device_auto_torch as _auto_device,
 )
 
-
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"
-
 
 # -----------------------------
 # Small utils
@@ -43,7 +41,6 @@ def _resize_chw_to_224(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     x = torch.from_numpy(x_chw).unsqueeze(0)  # [1,C,H,W]
     x = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
     return x[0].cpu().numpy().astype(np.float32)
-
 
 # -----------------------------
 # Provider: Fetch S2 (12 bands, SR)
@@ -62,7 +59,6 @@ _S2_SR_12_BANDS = [
     "B11",
     "B12",
 ]
-
 
 def _fetch_s2_sr_12_chw(
     provider: ProviderBase,
@@ -87,7 +83,6 @@ def _fetch_s2_sr_12_chw(
     )
     return np.clip(raw / 10000.0, 0.0, 1.0).astype(np.float32)
 
-
 # -----------------------------
 # Provider: Fetch S1 (VV/VH)
 # -----------------------------
@@ -97,7 +92,7 @@ def _fetch_s1_vvvh_chw(
     temporal: TemporalSpec,
     *,
     scale_m: int = 10,
-    orbit: Optional[str] = None,  # "ASCENDING" | "DESCENDING"
+    orbit: str | None = None,  # "ASCENDING" | "DESCENDING"
     use_float_linear: bool = True,
     composite: str = "median",
 ) -> np.ndarray:
@@ -114,14 +109,13 @@ def _fetch_s1_vvvh_chw(
     )
     return _normalize_s1_vvvh_chw(raw)
 
-
 def _fetch_s1_vvvh_raw_chw(
     provider: ProviderBase,
     spatial: SpatialSpec,
     temporal: TemporalSpec,
     *,
     scale_m: int = 10,
-    orbit: Optional[str] = None,
+    orbit: str | None = None,
     use_float_linear: bool = True,
     composite: str = "median",
 ) -> np.ndarray:
@@ -136,7 +130,6 @@ def _fetch_s1_vvvh_raw_chw(
         composite=str(composite),
         fill_value=0.0,
     )
-
 
 def _prepare_tensor_input_chw(
     input_chw: Any,
@@ -163,7 +156,6 @@ def _prepare_tensor_input_chw(
         raise ModelError("modality must be 's2' or 's1'.")
     return _resize_chw_to_224(x_chw, size=image_size)
 
-
 # -----------------------------
 # HF asset management (strict)
 # -----------------------------
@@ -172,7 +164,7 @@ def _ensure_hf_terrafm_weights(
     repo_id: str,
     *,
     auto_download: bool = True,
-    cache_dir: Optional[str] = None,
+    cache_dir: str | None = None,
     min_bytes: int = 50 * 1024 * 1024,
 ) -> str:
     """Returns local TerraFM weight path."""
@@ -199,7 +191,6 @@ def _ensure_hf_terrafm_weights(
 
     return wt_path
 
-
 @lru_cache(maxsize=1)
 def _load_terrafm_module():
     try:
@@ -209,8 +200,7 @@ def _load_terrafm_module():
             f"Failed to import vendored TerraFM runtime. Import error: {type(e).__name__}: {e}"
         ) from e
 
-
-def _assert_weights_loaded(model) -> Dict[str, float]:
+def _assert_weights_loaded(model) -> dict[str, float]:
     """Same philosophy as your RemoteCLIP: param stats should not be near-zero."""
     import torch
 
@@ -232,13 +222,12 @@ def _assert_weights_loaded(model) -> Dict[str, float]:
         raise ModelError("TerraFM parameters look uninitialized (near-zero stats).")
     return {"param_mean": mean, "param_std": std, "param_absmax": mx}
 
-
 @lru_cache(maxsize=4)
 def _load_terrafm_b(
     *,
     auto_download: bool = True,
-    cache_dir: Optional[str] = None,
-) -> Tuple[Any, Dict[str, Any]]:
+    cache_dir: str | None = None,
+) -> tuple[Any, dict[str, Any]]:
     """
     Returns (model, weight_meta).
     """
@@ -267,7 +256,6 @@ def _load_terrafm_b(
     }
     return model, meta
 
-
 # -----------------------------
 # TerraFM forward adapters
 # -----------------------------
@@ -277,7 +265,7 @@ def _terrafm_pooled_and_grid(
     *,
     device: str,
     want_grid: bool,
-) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray | None]:
     """
     Returns (pooled_vec[D], grid_dhw[D,Ht,Wt] or None)
     """
@@ -308,14 +296,13 @@ def _terrafm_pooled_and_grid(
         grid = fmap[0].detach().float().cpu().numpy().astype(np.float32)  # [D,Ht,Wt]
         return pooled_np, grid
 
-
 def _terrafm_pooled_and_grid_batch(
     model,
     x_bchw: "np.ndarray",
     *,
     device: str,
     want_grid: bool,
-) -> Tuple[np.ndarray, Optional[np.ndarray]]:
+) -> tuple[np.ndarray, np.ndarray | None]:
     """Batch forward for TerraFM.
 
     Returns:
@@ -345,7 +332,6 @@ def _terrafm_pooled_and_grid_batch(
         grid = fmap.detach().float().cpu().numpy().astype(np.float32)
         return pooled_np, grid
 
-
 # -----------------------------
 # Embedder
 # -----------------------------
@@ -362,7 +348,7 @@ class TerraFMBEmbedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 64
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
             "backend": ["provider", "tensor"],
@@ -428,12 +414,12 @@ class TerraFMBEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
         uses_provider = backend_l != "tensor"
@@ -456,7 +442,7 @@ class TerraFMBEmbedder(EmbedderBase):
         )
 
         # For optional on-the-fly input inspection
-        check_meta: Dict[str, Any] = {}
+        check_meta: dict[str, Any] = {}
 
         # -----------------
         # Build input tensor
@@ -650,8 +636,8 @@ class TerraFMBEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -680,9 +666,9 @@ class TerraFMBEmbedder(EmbedderBase):
         use_float_linear = bool(getattr(sensor, "use_float_linear", True)) if sensor else True
 
         n = len(spatials)
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             if modality == "s2":
                 x_chw = _fetch_s2_sr_12_chw(
                     provider,
@@ -720,7 +706,7 @@ class TerraFMBEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        raw_inputs: List[np.ndarray] = []
+        raw_inputs: list[np.ndarray] = []
         for i, raw in enumerate(prefetched_raw):
             if raw is None:
                 raise ModelError(f"Missing prefetched input at index={i} for terrafm_b.")
@@ -741,8 +727,8 @@ class TerraFMBEmbedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -778,7 +764,7 @@ class TerraFMBEmbedder(EmbedderBase):
             or os.environ.get("HUGGINGFACE_HOME")
         )
 
-        x_bchw_all: List[np.ndarray] = []
+        x_bchw_all: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
             try:
                 x_bchw_all.append(
@@ -821,7 +807,7 @@ class TerraFMBEmbedder(EmbedderBase):
             }
             source = sensor_meta["collection"]
 
-        out: List[Optional[Embedding]] = [None] * len(spatials)
+        out: list[Embedding | None] = [None] * len(spatials)
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)

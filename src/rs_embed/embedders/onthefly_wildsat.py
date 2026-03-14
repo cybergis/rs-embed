@@ -7,7 +7,7 @@ import urllib.parse
 import urllib.request
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any
 
 import numpy as np
 import xarray as xr
@@ -32,20 +32,17 @@ from .runtime_utils import (
 )
 from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range
 
-
 _SUPPORTED_ARCHES = {"vitb16", "vitl16", "resnet50", "swint"}
 _WILDSAT_DEFAULT_GDRIVE_FILE_ID = "1IxBpf3nbEMzny4YJWS6stMBxel6gMiYE"
 _WILDSAT_DEFAULT_CKPT_FILENAME = "vitb16-imagenet-bnfc.pth"
 _WILDSAT_DEFAULT_CACHE_DIR = "~/.cache/rs_embed/wildsat"
 _WILDSAT_DEFAULT_MIN_BYTES = 50 * 1024 * 1024
 
-
 def _env_flag(name: str, default: bool) -> bool:
     v = os.environ.get(name)
     if v is None:
         return bool(default)
     return str(v).strip().lower() not in {"0", "false", "no", "off", ""}
-
 
 def _download_url_to_path(url: str, dst_path: str) -> str:
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -65,7 +62,6 @@ def _download_url_to_path(url: str, dst_path: str) -> str:
         except Exception as _e:
             pass
     return dst_path
-
 
 def _google_drive_confirm_url(file_id: str) -> str:
     first = f"https://drive.google.com/uc?export=download&id={urllib.parse.quote(str(file_id))}"
@@ -92,13 +88,12 @@ def _google_drive_confirm_url(file_id: str) -> str:
     action = html.unescape(form_match.group(1))
     return action + "?" + urllib.parse.urlencode(params)
 
-
 @lru_cache(maxsize=4)
 def _download_wildsat_ckpt_from_hf(
     *,
     repo_id: str,
     filename: str,
-    cache_dir: Optional[str],
+    cache_dir: str | None,
     min_bytes: int,
 ) -> str:
     try:
@@ -119,7 +114,6 @@ def _download_wildsat_ckpt_from_hf(
             "It may be an incomplete pointer/download."
         )
     return p
-
 
 @lru_cache(maxsize=4)
 def _download_wildsat_ckpt_from_gdrive(
@@ -145,7 +139,6 @@ def _download_wildsat_ckpt_from_gdrive(
             "Set RS_EMBED_WILDSAT_CKPT to a valid local .pth checkpoint path."
         )
     return dst
-
 
 def _resolve_wildsat_ckpt_path() -> str:
     ckpt_path = str(os.environ.get("RS_EMBED_WILDSAT_CKPT") or "").strip()
@@ -193,8 +186,7 @@ def _resolve_wildsat_ckpt_path() -> str:
         min_bytes=min_bytes,
     )
 
-
-def _normalize_arch_name(name: Optional[str]) -> Optional[str]:
+def _normalize_arch_name(name: str | None) -> str | None:
     if name is None:
         return None
     x = str(name).strip().lower().replace("-", "").replace("_", "")
@@ -211,7 +203,6 @@ def _normalize_arch_name(name: Optional[str]) -> Optional[str]:
     }
     return alias.get(x, x)
 
-
 def _clean_state_key(key: str) -> str:
     k = str(key)
     prefixes = ("module.", "satellite_model.", "model.")
@@ -224,8 +215,7 @@ def _clean_state_key(key: str) -> str:
                 changed = True
     return k
 
-
-def _namespace_like_to_dict(x: Any) -> Dict[str, Any]:
+def _namespace_like_to_dict(x: Any) -> dict[str, Any]:
     if x is None:
         return {}
     if isinstance(x, dict):
@@ -235,16 +225,15 @@ def _namespace_like_to_dict(x: Any) -> Dict[str, Any]:
     except Exception as _e:
         return {}
 
-
 def _extract_satellite_state_dict(
     ckpt_obj: Any,
-) -> Tuple[Dict[str, Any], Dict[str, Any]]:
+) -> tuple[dict[str, Any], dict[str, Any]]:
     if not isinstance(ckpt_obj, dict):
         raise ModelError(f"WildSAT checkpoint must be a dict-like object, got {type(ckpt_obj)}")
 
     opt_meta = _namespace_like_to_dict(ckpt_obj.get("opt"))
 
-    sd: Optional[Dict[str, Any]] = None
+    sd: dict[str, Any] | None = None
     if isinstance(ckpt_obj.get("satellite_state_dict"), dict):
         sd = ckpt_obj["satellite_state_dict"]
     elif isinstance(ckpt_obj.get("state_dict"), dict):
@@ -260,7 +249,7 @@ def _extract_satellite_state_dict(
             "Expected key 'satellite_state_dict' (preferred), or a plain torch state_dict."
         )
 
-    cleaned: Dict[str, Any] = {}
+    cleaned: dict[str, Any] = {}
     for k, v in sd.items():
         nk = _clean_state_key(str(k))
         cleaned[nk] = v
@@ -274,8 +263,7 @@ def _extract_satellite_state_dict(
 
     return cleaned, opt_meta
 
-
-def _infer_arch_from_state_dict(state_dict: Dict[str, Any]) -> Optional[str]:
+def _infer_arch_from_state_dict(state_dict: dict[str, Any]) -> str | None:
     keys = set(state_dict.keys())
     if any(k.startswith("backbone.conv_proj.") for k in keys):
         return "vitb16"
@@ -285,12 +273,11 @@ def _infer_arch_from_state_dict(state_dict: Dict[str, Any]) -> Optional[str]:
         return "resnet50"
     return None
 
-
 def _resolve_wildsat_arch(
     *,
     arch_hint: str,
-    opt_meta: Dict[str, Any],
-    state_dict: Dict[str, Any],
+    opt_meta: dict[str, Any],
+    state_dict: dict[str, Any],
 ) -> str:
     ah = _normalize_arch_name(arch_hint)
     if ah and ah != "auto":
@@ -313,7 +300,6 @@ def _resolve_wildsat_arch(
         "Set RS_EMBED_WILDSAT_ARCH explicitly (one of: vitb16, vitl16, resnet50, swint)."
     )
 
-
 def _build_backbone(arch: str):
     ensure_torch()
     import torchvision
@@ -328,8 +314,7 @@ def _build_backbone(arch: str):
         return torchvision.models.swin_t(weights=None)
     raise ModelError(f"Unsupported WildSAT arch='{arch}'")
 
-
-def _build_branch_head_from_state_dict(state_dict: Dict[str, Any], *, prefer_branch: int = 3):
+def _build_branch_head_from_state_dict(state_dict: dict[str, Any], *, prefer_branch: int = 3):
     ensure_torch()
     import torch
     import torch.nn as nn
@@ -337,7 +322,7 @@ def _build_branch_head_from_state_dict(state_dict: Dict[str, Any], *, prefer_bra
     branch_pat = re.compile(r"^decoder\.backbone(\d+)\.(\d+)\.(weight|bias)$")
     single_pat = re.compile(r"^decoder\.backbone\.(\d+)\.(weight|bias)$")
 
-    branches: Dict[int, Dict[int, Dict[str, Any]]] = {}
+    branches: dict[int, dict[int, dict[str, Any]]] = {}
 
     for k, v in state_dict.items():
         m = branch_pat.match(k)
@@ -349,7 +334,7 @@ def _build_branch_head_from_state_dict(state_dict: Dict[str, Any], *, prefer_bra
 
     head_kind = "branched"
     if not branches:
-        simple: Dict[int, Dict[str, Any]] = {}
+        simple: dict[int, dict[str, Any]] = {}
         for k, v in state_dict.items():
             m = single_pat.match(k)
             if m is None:
@@ -382,7 +367,7 @@ def _build_branch_head_from_state_dict(state_dict: Dict[str, Any], *, prefer_bra
             "image_head_kind": head_kind,
         }
 
-    layers: List[Any] = []
+    layers: list[Any] = []
     with torch.no_grad():
         for i, li in enumerate(linear_ids):
             w = params_by_layer[li]["weight"].detach().float().cpu()
@@ -408,7 +393,6 @@ def _build_branch_head_from_state_dict(state_dict: Dict[str, Any], *, prefer_bra
     }
     return head, meta
 
-
 def _torchvision_vit_tokens(backbone: Any, x_bchw: Any):
     import torch
 
@@ -419,7 +403,6 @@ def _torchvision_vit_tokens(backbone: Any, x_bchw: Any):
     x = backbone.encoder(x)
     return x
 
-
 @lru_cache(maxsize=8)
 def _load_wildsat_cached(
     *,
@@ -427,7 +410,7 @@ def _load_wildsat_cached(
     arch_hint: str,
     prefer_branch: int,
     dev: str,
-) -> Tuple[Any, Optional[Any], Dict[str, Any]]:
+) -> tuple[Any, Any | None, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -502,14 +485,13 @@ def _load_wildsat_cached(
     }
     return backbone, image_head, meta
 
-
 def _load_wildsat(
     *,
     ckpt_path: str,
     arch_hint: str,
     prefer_branch: int,
     device: str,
-) -> Tuple[Any, Optional[Any], Dict[str, Any], str]:
+) -> tuple[Any, Any | None, dict[str, Any], str]:
     (loaded, dev) = _load_cached_with_device(
         _load_wildsat_cached,
         device=device,
@@ -519,7 +501,6 @@ def _load_wildsat(
     )
     backbone, image_head, meta = loaded
     return backbone, image_head, meta, dev
-
 
 def _raw_chw_to_rgb_u8(raw_chw: np.ndarray, *, image_size: int, norm_mode: str) -> np.ndarray:
     if raw_chw.ndim != 3 or int(raw_chw.shape[0]) != 3:
@@ -550,7 +531,6 @@ def _raw_chw_to_rgb_u8(raw_chw: np.ndarray, *, image_size: int, norm_mode: str) 
     rgb_u8 = np.clip(x.transpose(1, 2, 0) * 255.0, 0.0, 255.0).astype(np.uint8)
     return resize_rgb_u8(rgb_u8, int(image_size))
 
-
 def _rgb_u8_to_bchw_unit(rgb_u8: np.ndarray) -> np.ndarray:
     if rgb_u8.dtype != np.uint8 or rgb_u8.ndim != 3 or int(rgb_u8.shape[2]) != 3:
         raise ModelError(
@@ -559,10 +539,9 @@ def _rgb_u8_to_bchw_unit(rgb_u8: np.ndarray) -> np.ndarray:
     x = rgb_u8.astype(np.float32) / 255.0
     return x.transpose(2, 0, 1)[None, ...].astype(np.float32)
 
-
 def _wildsat_forward(
     backbone: Any,
-    image_head: Optional[Any],
+    image_head: Any | None,
     x_bchw: np.ndarray,
     *,
     arch: str,
@@ -572,7 +551,7 @@ def _wildsat_forward(
     make_grid: bool,
     grid_from_tokens: bool,
     device: str,
-) -> Tuple[np.ndarray, Optional[np.ndarray], Dict[str, Any]]:
+) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
     ensure_torch()
     import torch
 
@@ -590,7 +569,7 @@ def _wildsat_forward(
             pass
 
     with torch.no_grad():
-        tok_np: Optional[np.ndarray] = None
+        tok_np: np.ndarray | None = None
         if (
             (arch in {"vitb16", "vitl16"})
             and (make_grid or pooled_from_tokens)
@@ -650,8 +629,8 @@ def _wildsat_forward(
         if pooled_from_tokens and tok_np is not None:
             vec_np, pooled_cls_removed = pool_from_tokens(tok_np, pooling)
 
-        grid_np: Optional[np.ndarray] = None
-        grid_meta: Dict[str, Any] = {}
+        grid_np: np.ndarray | None = None
+        grid_meta: dict[str, Any] = {}
         if make_grid:
             if tok_np is not None:
                 grid_np, (gh, gw), cls_removed = tokens_to_grid_dhw(tok_np)
@@ -680,13 +659,12 @@ def _wildsat_forward(
     }
     return vec_np, grid_np, meta
 
-
 @register("wildsat")
 class WildSATEmbedder(EmbedderBase):
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
 
-    def describe(self) -> Dict[str, Any]:
+    def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
             "backend": ["provider"],
@@ -738,12 +716,12 @@ class WildSATEmbedder(EmbedderBase):
         self,
         *,
         spatial: SpatialSpec,
-        temporal: Optional[TemporalSpec],
-        sensor: Optional[SensorSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: Optional[np.ndarray] = None,
+        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
         if not is_provider_backend(backend_l, allow_auto=True):
@@ -877,8 +855,8 @@ class WildSATEmbedder(EmbedderBase):
         self,
         *,
         spatials: list[SpatialSpec],
-        temporal: Optional[TemporalSpec] = None,
-        sensor: Optional[SensorSpec] = None,
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -899,9 +877,9 @@ class WildSATEmbedder(EmbedderBase):
         cloudy_pct = int(ss.cloudy_pct)
         composite = str(ss.composite)
 
-        prefetched_raw: List[Optional[np.ndarray]] = [None] * n
+        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> Tuple[int, np.ndarray]:
+        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             s2_rgb_chw = _fetch_s2_rgb_chw(
                 provider,
                 spatial=sp,
@@ -925,7 +903,7 @@ class WildSATEmbedder(EmbedderBase):
                     i, raw = fut.result()
                     prefetched_raw[i] = raw
 
-        out: List[Embedding] = []
+        out: list[Embedding] = []
         for i, sp in enumerate(spatials):
             raw = prefetched_raw[i]
             if raw is None:
