@@ -109,7 +109,11 @@ select = [
     "I",    # isort
 ]
 ignore = [
-    "E501",  # line too long
+    "E501",   # line too long
+    "F811",   # redefinition of unused name (dataclass field vs staticmethod)
+    "F841",   # local variable assigned but never used
+    "E741",   # ambiguous variable name
+    "UP047",  # generic functions should use type parameters (Python 3.12 syntax)
 ]
 
 [tool.ruff.lint.per-file-ignores]
