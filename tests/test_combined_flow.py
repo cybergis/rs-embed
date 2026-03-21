@@ -125,7 +125,20 @@ def _base_kwargs(
     continue_on_error: bool = False,
     inference_strategy: str = "auto",
 ) -> dict:
+    from rs_embed.core.types import ExportConfig
+    from rs_embed.pipelines.inference import InferenceEngine
     manifest: Dict[str, Any] = {"models": []}
+    cfg = ExportConfig(
+        save_inputs=False,
+        save_embeddings=save_embeddings,
+        continue_on_error=continue_on_error,
+        show_progress=False,
+    )
+    engine = InferenceEngine(
+        device="cpu",
+        output=OutputSpec.pooled(),
+        config=cfg,
+    )
     return dict(
         pending_models=models,
         arrays={},
@@ -134,23 +147,18 @@ def _base_kwargs(
         temporal=TemporalSpec.range("2020-01-01", "2020-06-01"),
         output=OutputSpec.pooled(),
         resolved_sensor={m: None for m in models},
+        resolved_model_config={m: None for m in models},
         model_type={m: "onthefly" for m in models},
         backend="gee",
+        resolved_backend={m: "gee" for m in models},
         provider_enabled=provider_enabled,
-        device="cpu",
-        save_inputs=False,
-        save_embeddings=save_embeddings,
-        continue_on_error=continue_on_error,
-        chunk_size=2,
-        inference_strategy=inference_strategy,
-        infer_batch_size=8,
-        max_retries=0,
-        retry_backoff_s=0.0,
-        show_progress=False,
+        config=cfg,
+        inference_engine=engine,
         input_refs_by_sensor={},
         get_or_fetch_input_fn=lambda i, sk, ss: np.ones((3, 4, 4), dtype=np.float32),
         write_checkpoint_fn=lambda **kw: manifest,
         progress=_NoOpProgress(),
+        inference_strategy=inference_strategy,
     )
 
 

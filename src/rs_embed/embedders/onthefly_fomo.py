@@ -14,7 +14,14 @@ import xarray as xr
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
-from ..core.specs import ModelInputSpec, NormalizationSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.specs import (
+    ModelInputSpec,
+    NormalizationSpec,
+    OutputSpec,
+    SensorSpec,
+    SpatialSpec,
+    TemporalSpec,
+)
 from ._vit_mae_utils import ensure_torch
 from .base import EmbedderBase
 from .meta_utils import build_meta, temporal_midpoint_str, temporal_to_range

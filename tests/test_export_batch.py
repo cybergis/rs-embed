@@ -28,7 +28,7 @@ def disable_real_progress(monkeypatch):
 
     monkeypatch.setattr(
         api,
-        "_create_progress",
+        "create_progress",
         lambda *, enabled, total, desc, unit="item": _NoOpProgress(),
     )
 

@@ -68,6 +68,10 @@ from .tools.runtime import (
     run_embedding_request,
 )
 
+# Backward-compat aliases (used by tests / external code)
+_validate_specs = validate_specs
+_assert_supported = assert_supported
+
 # -----------------------------------------------------------------------------
 # Public: embeddings
 # -----------------------------------------------------------------------------

@@ -49,6 +49,7 @@ def run_pending_models(
     write_checkpoint_fn: Callable[..., dict[str, Any]],
     progress: Any,
     progress_factory: Callable[..., Any] | None = None,
+    inference_strategy: str = "auto",
 ) -> dict[str, Any]:
     """Run inference for each pending model, delegating to *inference_engine*.
 
@@ -124,7 +125,7 @@ def run_pending_models(
                     model_config=resolved_model_config.get(m),
                     spatials=spatials,
                     temporal=temporal,
-                    inference_strategy="auto",
+                    inference_strategy=inference_strategy,
                     get_input_fn=get_or_fetch_input_fn,
                     progress_cb=_progress_cb,
                 )

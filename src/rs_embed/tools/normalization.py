@@ -45,7 +45,7 @@ def _default_provider_backend_for_api() -> str:
 
 def _resolve_embedding_api_backend(model_n: str, backend_n: str) -> str:
     """Normalize backend semantics for precomputed models."""
-    desc = _probe_model_desc(model_n)
+    desc = _probe_model_describe(model_n)
     if str(desc.get("type", "")).strip().lower() != "precomputed":
         return backend_n
 
