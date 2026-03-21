@@ -1855,7 +1855,7 @@ def test_export_batch_progress_updates_point_and_model_bars(tmp_path, monkeypatc
 
     monkeypatch.setattr(
         api,
-        "_create_progress",
+        "create_progress",
         lambda *, enabled, total, desc, unit="item": _FakeProgress(total=total, desc=desc),
     )
 
@@ -1953,7 +1953,7 @@ def test_export_batch_combined_progress_updates_model_inference(tmp_path, monkey
 
     monkeypatch.setattr(
         api,
-        "_create_progress",
+        "create_progress",
         lambda *, enabled, total, desc, unit="item": _FakeProgress(total=total, desc=desc),
     )
 
@@ -2020,7 +2020,7 @@ def test_export_batch_combined_progress_fills_on_model_init_failure(tmp_path, mo
 
     monkeypatch.setattr(
         api,
-        "_create_progress",
+        "create_progress",
         lambda *, enabled, total, desc, unit="item": _FakeProgress(total=total, desc=desc),
     )
 
