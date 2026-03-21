@@ -17,7 +17,7 @@ import sys
 
 from .core.specs import BBox, OutputSpec, PointBuffer, SensorSpec, TemporalSpec
 from .export import export_npz
-from .inspect import inspect_gee_patch
+from .inspect import inspect_provider_patch
 
 
 def _parse_bands(s: str) -> tuple[str, ...]:
@@ -236,7 +236,7 @@ def main(argv: list[str] | None = None) -> None:
         temporal = _parse_temporal(args)
         value_range = _parse_value_range(args.value_range)
 
-        out = inspect_gee_patch(
+        out = inspect_provider_patch(
             spatial=spatial, temporal=temporal, sensor=sensor, value_range=value_range
         )
         json.dump(out, sys.stdout, ensure_ascii=False, indent=2)

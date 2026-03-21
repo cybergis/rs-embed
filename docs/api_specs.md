@@ -113,7 +113,7 @@ SensorSpec(
 - `modality`: optional model-facing modality selector used by models with multiple input branches
 - `orbit`: optional orbit/pass filter for sensor families that support it
 - `use_float_linear`: selects linear-scale floating-point products when a sensor family offers both linear and dB variants
-- `check_*`: optional input checks and quicklook saving (see [`inspect_gee_patch`](api_inspect.md#inspect_gee_patch))
+- `check_*`: optional input checks and quicklook saving (see [`inspect_provider_patch`](api_inspect.md#inspect_provider_patch))
 
 !!! note
     For **precomputed** models (e.g., directly reading offline embedding products), `sensor` is usually ignored or set to `None`.

@@ -42,56 +42,30 @@ from .core.types import (
     ExportModelRequest,
     ExportTarget,
 )
-from .core.validation import (
-    assert_supported as _assert_supported,
-)
-from .core.validation import (
-    validate_spatial_list as _validate_spatial_list,
-)
-from .core.validation import (
-    validate_specs as _validate_specs,
-)
+from .core.validation import assert_supported, validate_spatial_list, validate_specs
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
 from .tools.export_requests import (
-    maybe_return_completed_combined_resume as _maybe_return_completed_combined_resume,
+    maybe_return_completed_combined_resume,
+    normalize_export_config,
+    normalize_export_format,
+    normalize_export_target,
+    resolve_export_model_configs,
 )
-from .tools.export_requests import (
-    normalize_export_config as _normalize_export_config,
-)
-from .tools.export_requests import (
-    normalize_export_format as _normalize_export_format,
-)
-from .tools.export_requests import (
-    normalize_export_target as _normalize_export_target,
-)
-from .tools.export_requests import (
-    resolve_export_model_configs as _resolve_export_model_configs,
-)
-from .tools.model_defaults import (
-    resolve_sensor_for_model as _resolve_sensor_for_model,
-)
+from .tools.model_defaults import resolve_sensor_for_model
 from .tools.normalization import (
-    # Re-exported so `from rs_embed.api import ...` in tests/downstream still works.
+    # Re-exported for backward compat:
     _default_provider_backend_for_api,  # noqa: F401
     _probe_model_describe,  # noqa: F401
     _resolve_embedding_api_backend,  # noqa: F401
+    normalize_backend_name,
+    normalize_device_name,
+    normalize_model_name,
 )
-from .tools.normalization import (
-    normalize_backend_name as _normalize_backend_name,
-)
-from .tools.normalization import (
-    normalize_device_name as _normalize_device_name,
-)
-from .tools.normalization import (
-    normalize_model_name as _normalize_model_name,
-)
-from .tools.progress import create_progress as _create_progress
+from .tools.progress import create_progress
 from .tools.runtime import (
     _prepare_embedding_request_context,
     provider_factory_for_backend,
-)
-from .tools.runtime import (
-    run_embedding_request as _run_embedding_request_shared,
+    run_embedding_request,
 )
 
 # -----------------------------------------------------------------------------
@@ -173,9 +147,9 @@ def get_embedding(
     This function reuses a cached embedder instance when possible to avoid
     repeatedly loading model weights / initializing providers.
     """
-    _validate_specs(spatial=spatial, temporal=temporal, output=output)
-    sensor_eff = _resolve_sensor_for_model(
-        _normalize_model_name(model),
+    validate_specs(spatial=spatial, temporal=temporal, output=output)
+    sensor_eff = resolve_sensor_for_model(
+        normalize_model_name(model),
         sensor=sensor,
         modality=modality,
         default_when_missing=False,
@@ -190,7 +164,7 @@ def get_embedding(
         device=device,
         input_prep=input_prep,
     )
-    return _run_embedding_request_shared(
+    return run_embedding_request(
         spatials=[spatial],
         temporal=temporal,
         sensor=sensor_eff,
@@ -250,9 +224,9 @@ def get_embeddings_batch(
     SpecError
         If spatial or temporal specifications fail validation.
     """
-    _validate_spatial_list(spatials=spatials, temporal=temporal, output=output)
-    sensor_eff = _resolve_sensor_for_model(
-        _normalize_model_name(model),
+    validate_spatial_list(spatials=spatials, temporal=temporal, output=output)
+    sensor_eff = resolve_sensor_for_model(
+        normalize_model_name(model),
         sensor=sensor,
         modality=modality,
         default_when_missing=False,
@@ -267,7 +241,7 @@ def get_embeddings_batch(
         device=device,
         input_prep=input_prep,
     )
-    return _run_embedding_request_shared(
+    return run_embedding_request(
         spatials=spatials,
         temporal=temporal,
         sensor=sensor_eff,
@@ -382,10 +356,10 @@ def export_batch(
     if not isinstance(spatials, list) or len(spatials) == 0:
         raise ModelError("spatials must be a non-empty list[SpatialSpec].")
 
-    backend_n = _normalize_backend_name(backend)
-    device_n = _normalize_device_name(device)
+    backend_n = normalize_backend_name(backend)
+    device_n = normalize_device_name(device)
 
-    export_config = _normalize_export_config(
+    export_config = normalize_export_config(
         config=config,
         format=format,
         save_inputs=save_inputs,
@@ -404,9 +378,9 @@ def export_batch(
         show_progress=show_progress,
         input_prep=input_prep,
     )
-    _fmt, ext = _normalize_export_format(export_config.format)
+    _fmt, ext = normalize_export_format(export_config.format)
 
-    export_target = _normalize_export_target(
+    export_target = normalize_export_target(
         n_spatials=len(spatials),
         ext=ext,
         target=target,
@@ -417,9 +391,9 @@ def export_batch(
         names=names,
     )
 
-    _validate_spatial_list(spatials=spatials, temporal=temporal, output=output)
+    validate_spatial_list(spatials=spatials, temporal=temporal, output=output)
 
-    resume_manifest = _maybe_return_completed_combined_resume(
+    resume_manifest = maybe_return_completed_combined_resume(
         target=export_target,
         config=export_config,
         spatials=spatials,
@@ -431,7 +405,7 @@ def export_batch(
     if resume_manifest is not None:
         return resume_manifest
 
-    model_configs, resolved_backend = _resolve_export_model_configs(
+    model_configs, resolved_backend = resolve_export_model_configs(
         models=models,
         backend_n=backend_n,
         temporal=temporal,
@@ -453,6 +427,6 @@ def export_batch(
         resolved_backend=resolved_backend,
         device=device_n,
         provider_factory=provider_factory_for_backend(backend_n),
-        progress_factory=_create_progress,
+        progress_factory=create_progress,
     )
     return exporter.run()

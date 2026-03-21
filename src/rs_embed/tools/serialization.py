@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import datetime as _dt
 import hashlib
-import json
 import re
 from dataclasses import asdict, is_dataclass
 from typing import Any
@@ -84,18 +83,7 @@ def embedding_to_numpy(emb: Embedding) -> np.ndarray:
 
 
 def sensor_cache_key(sensor: SensorSpec) -> str:
-    obj = {
-        "collection": sensor.collection,
-        "bands": list(sensor.bands),
-        "scale_m": int(sensor.scale_m),
-        "cloudy_pct": int(sensor.cloudy_pct),
-        "fill_value": float(sensor.fill_value),
-        "composite": str(sensor.composite),
-        "modality": getattr(sensor, "modality", None),
-        "orbit": getattr(sensor, "orbit", None),
-        "use_float_linear": bool(getattr(sensor, "use_float_linear", True)),
-        "s1_require_iw": bool(getattr(sensor, "s1_require_iw", True)),
-        "s1_relax_iw_on_empty": bool(getattr(sensor, "s1_relax_iw_on_empty", True)),
-    }
-    data = json.dumps(obj, sort_keys=True).encode("utf-8")
+    from .runtime import sensor_key
+
+    data = str(sensor_key(sensor)).encode("utf-8")
     return sanitize_key(hashlib.sha1(data).hexdigest()[:12])

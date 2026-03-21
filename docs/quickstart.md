@@ -191,8 +191,7 @@ Typical examples include `remoteclip`, `prithvi`, `terrafm`, and `terramind`.
 
 If the model output looks wrong, inspect the fetched patch before changing model settings:
 
-- [`inspect_provider_patch(...)`](api_inspect.md#inspect_provider_patch-recommended): recommended inspection API
-- [`inspect_gee_patch(...)`](api_inspect.md#inspect_gee_patch): compatibility alias
+- [`inspect_provider_patch(...)`](api_inspect.md#inspect_provider_patch): recommended inspection API
 
 ---
 

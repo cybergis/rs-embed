@@ -19,6 +19,11 @@ import numpy as np
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ExportLayout, ExportTarget, ModelConfig
 from ..providers import gee_utils as _gee_utils
+from ..tools.checkpoint_utils import (
+    drop_prefetch_checkpoint_arrays,
+    restore_prefetch_checkpoint_cache,
+    store_prefetch_checkpoint_arrays,
+)
 from ..tools.manifest import (
     point_failure_manifest,
     point_resume_manifest,
@@ -27,6 +32,7 @@ from ..tools.manifest import (
 from ..tools.progress import create_progress as _default_create_progress
 from ..tools.serialization import (
     sanitize_key,
+    sensor_cache_key,
     sha1,
     utc_ts,
 )
@@ -180,7 +186,7 @@ class BatchExporter:
                 if prefetch_pipeline_ex is not None and (chunk_idx + 1) < len(chunk_groups):
                     # Clone a fresh prefetch manager for next chunk to avoid
                     # cache collisions — the current chunk's data is still in use.
-                    next_prefetch = self._clone_prefetch(prefetch)
+                    next_prefetch = prefetch.clone()
                     prefetched_chunk_fut = prefetch_pipeline_ex.submit(
                         self._prefetch_chunk, next_prefetch, chunk_groups[chunk_idx + 1]
                     )
@@ -250,8 +256,11 @@ class BatchExporter:
         prefetch, _provider_enabled = self._setup_prefetch()
 
         # Restore prefetch cache from checkpoint
-        restored = self.checkpoint.restore_prefetch_cache(manifest, arrays)
-        prefetch.cache.update(restored)
+        prefetch_meta = manifest.get("prefetch")
+        if isinstance(prefetch_meta, dict):
+            prefetch.cache.update(
+                restore_prefetch_checkpoint_cache(arrays=arrays, prefetch_meta=prefetch_meta)
+            )
 
         # Build prefetch tasks
         all_idxs = list(range(len(self.spatials)))
@@ -270,7 +279,7 @@ class BatchExporter:
 
         # Store prefetch checkpoint
         if prefetch.provider is not None:
-            self.checkpoint.store_prefetch_arrays(
+            store_prefetch_checkpoint_arrays(
                 arrays=arrays,
                 manifest=manifest,
                 sensor_by_key=prefetch.sensor_by_key,
@@ -287,7 +296,22 @@ class BatchExporter:
             )
 
         # Collect input refs from previously completed models
-        input_refs_by_sensor = self.checkpoint.collect_input_refs(manifest, self.resolved_sensor)
+        input_refs_by_sensor: dict[str, dict[str, Any]] = {}
+        for prev in manifest.get("models", []):
+            if not isinstance(prev, dict):
+                continue
+            pm = prev.get("model")
+            if not isinstance(pm, str):
+                continue
+            ps = self.resolved_sensor.get(pm)
+            if ps is None:
+                continue
+            pref = prev.get("inputs")
+            if isinstance(pref, dict):
+                sk = sensor_cache_key(ps)
+                clean = dict(pref)
+                clean.pop("dedup_reused", None)
+                input_refs_by_sensor.setdefault(sk, clean)
 
         # Run pending models
         from .combined_flow import run_pending_models
@@ -324,32 +348,29 @@ class BatchExporter:
             backend=self.backend,
             resolved_backend=self.resolved_backend,
             provider_enabled=prefetch.enabled,
-            device=self.device,
-            save_inputs=cfg.save_inputs,
-            save_embeddings=cfg.save_embeddings,
-            continue_on_error=cfg.continue_on_error,
-            chunk_size=cfg.effective_chunk_size,
-            inference_strategy="auto",
-            infer_batch_size=cfg.effective_infer_batch_size,
-            max_retries=cfg.max_retries,
-            retry_backoff_s=cfg.retry_backoff_s,
-            show_progress=cfg.show_progress,
+            config=cfg,
+            inference_engine=self.inference,
             input_refs_by_sensor=input_refs_by_sensor,
             get_or_fetch_input_fn=_get_or_fetch,
             write_checkpoint_fn=_write_ckpt,
             progress=progress,
-            inference_engine=self.inference,
             progress_factory=self.create_progress,
         )
 
         # Drop prefetch checkpoint arrays before final write
-        self.checkpoint.drop_prefetch_arrays(arrays)
+        drop_prefetch_checkpoint_arrays(arrays)
 
         # Summarize
         model_entries = manifest.get("models", [])
-        status_str, summary = self.checkpoint.summarize_models(model_entries)
-        manifest["status"] = status_str
-        manifest["summary"] = summary
+        n_failed = sum(1 for x in model_entries if x.get("status") == "failed")
+        n_partial = sum(1 for x in model_entries if x.get("status") == "partial")
+        manifest["status"] = summarize_status(model_entries)
+        manifest["summary"] = {
+            "total_models": len(model_entries),
+            "failed_models": n_failed,
+            "partial_models": n_partial,
+            "ok_models": len(model_entries) - n_failed - n_partial,
+        }
         manifest["completed_at"] = utc_ts()
 
         # Final write
@@ -484,30 +505,6 @@ class BatchExporter:
     def _prefetch_chunk(self, prefetch: PrefetchManager, idxs: list[int]) -> None:
         """Prefetch a chunk of inputs (for use in pipelined prefetch)."""
         prefetch.fetch_chunk(idxs, self.spatials, self.temporal)
-
-    def _clone_prefetch(self, src: PrefetchManager) -> PrefetchManager:
-        """Clone a PrefetchManager preserving the plan but with the same cache refs."""
-        clone = PrefetchManager(
-            provider=src.provider,
-            models=self.model_names,
-            resolved_sensor=self.resolved_sensor,
-            model_type=self.model_type,
-            config=self.config,
-            fetch_fn=self.fetch_fn,
-            inspect_fn=self.inspect_fn,
-            fetcher_by_key=src.fetcher_by_key,
-        )
-        clone.sensor_by_key = src.sensor_by_key
-        clone.fetch_sensor_by_key = src.fetch_sensor_by_key
-        clone.sensor_to_fetch = src.sensor_to_fetch
-        clone.sensor_models = src.sensor_models
-        clone.fetch_members = src.fetch_members
-        # Share cache references so piped prefetch populates the same dict
-        clone.cache = src.cache
-        clone.errors = src.errors
-        clone.input_reports = src.input_reports
-        clone.fetch_meta = src.fetch_meta
-        return clone
 
     def _write_per_item_chunk(
         self,
@@ -704,6 +701,8 @@ class BatchExporter:
         embed_results: dict[tuple[int, str], Any],
     ) -> None:
         """Inject pre-computed batch embeddings into a per-item payload."""
+        from ..core.types import Status, TaskResult
+
         model_entries = manifest.get("models") or []
         entry_by_model = {
             str(entry.get("model")): entry for entry in model_entries if isinstance(entry, dict)
@@ -715,46 +714,33 @@ class BatchExporter:
             rec = embed_results.get((point_index, m))
             if rec is None:
                 continue
-            # TaskResult objects
-            from ..core.types import Status, TaskResult
 
-            if isinstance(rec, TaskResult):
-                if rec.status == Status.OK and rec.embedding is not None:
-                    e_np = np.asarray(rec.embedding)
-                    emb_key = f"embedding__{sanitize_key(m)}"
-                    arrays[emb_key] = e_np
-                    entry["embedding"] = {
-                        "npz_key": emb_key,
-                        "dtype": str(e_np.dtype),
-                        "shape": list(e_np.shape),
-                        "sha1": sha1(e_np),
-                    }
-                    entry["meta"] = rec.meta
-                else:
-                    if entry.get("status") != "failed":
-                        entry["status"] = "failed"
-                        entry["error"] = rec.error
-                    entry["embedding"] = None
-                    entry["meta"] = None
-            # Legacy dict format
-            elif isinstance(rec, dict):
-                if rec.get("status") == "ok":
-                    e_np = np.asarray(rec["embedding"])
-                    emb_key = f"embedding__{sanitize_key(m)}"
-                    arrays[emb_key] = e_np
-                    entry["embedding"] = {
-                        "npz_key": emb_key,
-                        "dtype": str(e_np.dtype),
-                        "shape": list(e_np.shape),
-                        "sha1": sha1(e_np),
-                    }
-                    entry["meta"] = rec.get("meta")
-                else:
-                    if entry.get("status") != "failed":
-                        entry["status"] = "failed"
-                        entry["error"] = rec.get("error")
-                    entry["embedding"] = None
-                    entry["meta"] = None
+            # Normalize legacy dict to TaskResult
+            if isinstance(rec, dict):
+                rec = TaskResult(
+                    status=Status.OK if rec.get("status") == "ok" else Status.FAILED,
+                    embedding=rec.get("embedding"),
+                    meta=rec.get("meta"),
+                    error=rec.get("error"),
+                )
+
+            if rec.status == Status.OK and rec.embedding is not None:
+                e_np = np.asarray(rec.embedding)
+                emb_key = f"embedding__{sanitize_key(m)}"
+                arrays[emb_key] = e_np
+                entry["embedding"] = {
+                    "npz_key": emb_key,
+                    "dtype": str(e_np.dtype),
+                    "shape": list(e_np.shape),
+                    "sha1": sha1(e_np),
+                }
+                entry["meta"] = rec.meta
+            else:
+                if entry.get("status") != "failed":
+                    entry["status"] = "failed"
+                    entry["error"] = rec.error
+                entry["embedding"] = None
+                entry["meta"] = None
 
         # Recompute summary
         all_models = manifest.get("models") or []

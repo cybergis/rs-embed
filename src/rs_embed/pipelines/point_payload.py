@@ -14,7 +14,6 @@ import numpy as np
 
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig
-from ..providers import gee_utils as _gee_utils
 from ..tools.manifest import summarize_status
 from ..tools.normalization import normalize_model_name
 from ..tools.runtime import (
@@ -40,7 +39,7 @@ def build_one_point_payload(
     temporal: TemporalSpec | None,
     models: list[str],
     backend: str,
-    resolved_backend: dict[str, str] | None = None,
+    resolved_backend: dict[str, str],
     device: str,
     output: OutputSpec,
     resolved_sensor: dict[str, SensorSpec | None],
@@ -53,8 +52,8 @@ def build_one_point_payload(
     config: ExportConfig,
     provider_factory: Callable[[], Any] | None = None,
     model_progress_cb: Callable[[str], None] | None = None,
-    fetch_fn: Callable[..., np.ndarray] | None = None,
-    inspect_fn: Callable[..., dict[str, Any]] | None = None,
+    fetch_fn: Callable[..., np.ndarray],
+    inspect_fn: Callable[..., dict[str, Any]],
     fetch_meta_cache: dict[tuple[int, str], dict[str, Any]] | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """Build arrays + manifest payload for one point across all models.
@@ -71,8 +70,6 @@ def build_one_point_payload(
     continue_on_error = config.continue_on_error
     max_retries = config.max_retries
     retry_backoff_s = config.retry_backoff_s
-    fetch = fetch_fn or _gee_utils.fetch_gee_patch_raw
-    inspect = inspect_fn or _gee_utils.inspect_input_raw
 
     arrays: dict[str, np.ndarray] = {}
     manifest: dict[str, Any] = {
@@ -97,7 +94,7 @@ def build_one_point_payload(
     local_inp: dict[str, np.ndarray] = {}
     local_input_meta: dict[str, dict[str, Any]] = {}
 
-    _resolved_backend = resolved_backend or {}
+    _resolved_backend = resolved_backend
 
     for m in models:
         m_entry: dict[str, Any] = {"model": m, "status": "ok"}
@@ -156,7 +153,7 @@ def build_one_point_payload(
                             backoff_s=retry_backoff_s,
                         )
                         input_chw = run_with_retry(
-                            lambda: fetch(
+                            lambda: fetch_fn(
                                 prov,
                                 spatial=spatial,
                                 temporal=temporal,
@@ -169,7 +166,7 @@ def build_one_point_payload(
 
                 report = input_reports.get((point_index, skey))
                 if report is None and input_chw is not None:
-                    report = inspect(input_chw, sensor=sspec, name=f"gee_input_{skey}")
+                    report = inspect_fn(input_chw, sensor=sspec, name=f"gee_input_{skey}")
 
                 if fail_on_bad_input and report is not None and (not bool(report.get("ok", True))):
                     issues = (report.get("report", {}) or {}).get("issues", [])

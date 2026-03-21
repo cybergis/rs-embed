@@ -107,10 +107,6 @@ report = inspect_provider_patch(
 )
 ```
 
-### Backward-compatible alias
-
-- `inspect_gee_patch(...)` calls the same underlying inspection flow for GEE paths.
-
 ---
 
 ## Large ROI with Tiling

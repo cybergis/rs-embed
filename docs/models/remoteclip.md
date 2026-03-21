@@ -155,7 +155,7 @@ emb = get_embedding(
 
 Recommended first check:
 
-- Use `inspect_provider_patch(...)` / `inspect_gee_patch(...)` to verify raw RGB inputs and temporal composite quality.
+- Use `inspect_provider_patch(...)` to verify raw RGB inputs and temporal composite quality.
 
 ---
 

@@ -14,7 +14,6 @@ import numpy as np
 
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, FetchResult
-from ..providers import gee_utils as _gee_utils
 from ..providers.prefetch_plan import (
     build_gee_prefetch_plan,
     select_prefetched_channels,
@@ -53,8 +52,8 @@ class PrefetchManager:
         resolved_sensor: dict[str, SensorSpec | None],
         model_type: dict[str, str],
         config: ExportConfig,
-        fetch_fn: Callable[..., np.ndarray] | None = None,
-        inspect_fn: Callable[..., dict[str, Any]] | None = None,
+        fetch_fn: Callable[..., np.ndarray],
+        inspect_fn: Callable[..., dict[str, Any]],
         fetcher_by_key: dict[str, Any] | None = None,
     ) -> None:
         self.provider = provider
@@ -62,8 +61,8 @@ class PrefetchManager:
         self.resolved_sensor = resolved_sensor
         self.model_type = model_type
         self.config = config
-        self.fetch_fn = fetch_fn or _gee_utils.fetch_gee_patch_raw
-        self.inspect_fn = inspect_fn or _gee_utils.inspect_input_raw
+        self.fetch_fn = fetch_fn
+        self.inspect_fn = inspect_fn
         self.fetcher_by_key: dict[str, Any] = fetcher_by_key or {}
 
         # Caches populated by fetch_chunk / restored from checkpoint
@@ -269,6 +268,38 @@ class PrefetchManager:
 
     def has_error(self, idx: int, sensor_key: str) -> str | None:
         return self.errors.get((idx, sensor_key))
+
+    def clone(self, *, share_cache: bool = True) -> PrefetchManager:
+        """Create a copy preserving the plan and optionally sharing caches.
+
+        Parameters
+        ----------
+        share_cache : bool
+            If ``True`` (default), the clone shares the same cache/error dicts
+            so that pipelined prefetch populates a single data store.
+        """
+        c = PrefetchManager(
+            provider=self.provider,
+            models=self.models,
+            resolved_sensor=self.resolved_sensor,
+            model_type=self.model_type,
+            config=self.config,
+            fetch_fn=self.fetch_fn,
+            inspect_fn=self.inspect_fn,
+            fetcher_by_key=self.fetcher_by_key,
+        )
+        # Copy plan state
+        c.sensor_by_key = self.sensor_by_key
+        c.fetch_sensor_by_key = self.fetch_sensor_by_key
+        c.sensor_to_fetch = self.sensor_to_fetch
+        c.sensor_models = self.sensor_models
+        c.fetch_members = self.fetch_members
+        if share_cache:
+            c.cache = self.cache
+            c.errors = self.errors
+            c.input_reports = self.input_reports
+            c.fetch_meta = self.fetch_meta
+        return c
 
     def clear_chunk(self) -> None:
         """Clear caches between chunks to bound memory."""

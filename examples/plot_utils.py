@@ -323,10 +323,10 @@ def show_s1_vvvh_from_inspect(
     print_stats=True,
     flipud: bool = False,
 ):
-    """Visualize Sentinel-1 VV/VH from inspect_gee_patch(..., return_array=True) output."""
+    """Visualize Sentinel-1 VV/VH from inspect_provider_patch(..., return_array=True) output."""
     x_s1 = (inspect_out or {}).get("array_chw")
     if x_s1 is None:
-        print("array_chw not found. Call inspect_gee_patch(..., return_array=True).")
+        print("array_chw not found. Call inspect_provider_patch(..., return_array=True).")
         return
 
     if print_stats:
@@ -366,7 +366,7 @@ def print_band_quantiles_preview(report: dict, n_preview: int = 3):
 
 
 def plot_histogram_from_report(report: dict, band_index: int = 0, figsize=(6, 3)):
-    """Plot histogram for one band from inspect_gee_patch report."""
+    """Plot histogram for one band from inspect_provider_patch report."""
     hist = (report or {}).get("hist")
     if not hist or not hist.get("bins") or not hist.get("counts"):
         print("histogram not available")
@@ -389,7 +389,7 @@ def show_quicklook_artifact(
     figsize=(5, 5),
     title: str = "quicklook_rgb",
 ):
-    """Display quicklook image from inspect_gee_patch artifacts."""
+    """Display quicklook image from inspect_provider_patch artifacts."""
     quicklook_path = (artifacts or {}).get("quicklook_rgb")
     if not quicklook_path:
         print("quicklook not saved; artifacts:", artifacts)

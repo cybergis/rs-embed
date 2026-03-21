@@ -29,7 +29,6 @@ Most users only need these public functions:
 ## Useful Extras
 
 - `export_npz(...)`: compatibility wrapper around `export_batch(...)` for single-ROI `.npz`
-- `inspect_gee_patch(...)`: compatibility wrapper around `inspect_provider_patch(...)`
 - `list_models()`: stable public model catalog helper
 
 Model-specific configuration:

@@ -81,23 +81,3 @@ def inspect_provider_patch(
         out["array_chw"] = x_chw
     return out
 
-def inspect_gee_patch(
-    *,
-    spatial: SpatialSpec,
-    temporal: TemporalSpec | None = None,
-    sensor: SensorSpec,
-    backend: str = "gee",
-    name: str = "gee_patch",
-    value_range: tuple[float, float] | None = None,
-    return_array: bool = False,
-) -> dict[str, Any]:
-    """Backwards-compatible wrapper around inspect_provider_patch."""
-    return inspect_provider_patch(
-        spatial=spatial,
-        temporal=temporal,
-        sensor=sensor,
-        backend=backend,
-        name=name,
-        value_range=value_range,
-        return_array=return_array,
-    )

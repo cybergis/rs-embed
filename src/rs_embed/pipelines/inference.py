@@ -169,6 +169,67 @@ class InferenceEngine:
         )
         return can_batch_prefetched, can_batch_no_input
 
+    def _run_batch_inner(
+        self,
+        *,
+        method_name: str,
+        batches: list[tuple[list[int], dict[str, Any]]],
+        embedder: Any,
+        lock: Any,
+        use_lock: bool,
+        model_name: str,
+        model_config: dict[str, Any] | None,
+        on_done: Callable[[int], None],
+    ) -> tuple[dict[int, TaskResult], bool]:
+        """Shared batch inference loop used by tier-1 and tier-2 paths.
+
+        Parameters
+        ----------
+        batches
+            Pre-built list of ``(sub_idx, extra_kwargs)`` per sub-batch.
+        method_name
+            Embedder method to call (e.g. ``"get_embeddings_batch"``).
+        """
+        cfg = self.config
+        out: dict[int, TaskResult] = {}
+        try:
+            for sub_idx, extra_kwargs in batches:
+                if not sub_idx:
+                    continue
+
+                def _infer(_ek=extra_kwargs):
+                    if model_config is not None:
+                        require_model_config_support(
+                            embedder=embedder,
+                            model_config=model_config,
+                            method_name=method_name,
+                        )
+                    batch_kwargs: dict[str, Any] = dict(_ek)
+                    if model_config is not None and embedder_accepts_model_config(
+                        type(embedder), method_name,
+                    ):
+                        batch_kwargs["model_config"] = model_config
+                    fn = getattr(embedder, method_name)
+                    if use_lock:
+                        with lock:
+                            return fn(**batch_kwargs)
+                    return fn(**batch_kwargs)
+
+                batch_out = run_with_retry(
+                    _infer, retries=cfg.max_retries, backoff_s=cfg.retry_backoff_s,
+                )
+                if len(batch_out) != len(sub_idx):
+                    raise RuntimeError(
+                        f"Model {model_name} returned {len(batch_out)} embeddings "
+                        f"for {len(sub_idx)} inputs."
+                    )
+                for j, emb in enumerate(batch_out):
+                    out[sub_idx[j]] = self._embedding_to_result(emb)
+                    on_done(sub_idx[j])
+            return out, True
+        except Exception as _e:
+            return out, False
+
     def _run_batch_prefetched(
         self,
         *,
@@ -188,70 +249,38 @@ class InferenceEngine:
         model_config: dict[str, Any] | None = None,
     ) -> tuple[dict[int, TaskResult], bool]:
         """Run tier-1 batch inference using prefetched provider inputs."""
-        cfg = self.config
         out: dict[int, TaskResult] = {}
-        try:
-            ready: list[tuple[int, SpatialSpec, np.ndarray]] = []
-            for i in idxs:
-                try:
-                    inp = get_input_fn(i)
-                    ready.append((i, spatials[i], np.asarray(inp, dtype=np.float32)))
-                except Exception as e:
-                    if not continue_on_error:
-                        raise
-                    out[i] = TaskResult.failed(e)
-                    on_done(i)
+        ready: list[tuple[int, SpatialSpec, np.ndarray]] = []
+        for i in idxs:
+            try:
+                inp = get_input_fn(i)
+                ready.append((i, spatials[i], np.asarray(inp, dtype=np.float32)))
+            except Exception as e:
+                if not continue_on_error:
+                    raise
+                out[i] = TaskResult.failed(e)
+                on_done(i)
 
-            for start in range(0, len(ready), batch_size):
-                sub = ready[start : start + batch_size]
-                if not sub:
-                    continue
-                sub_idx = [t[0] for t in sub]
-                sub_sp = [t[1] for t in sub]
-                sub_inp = [t[2] for t in sub]
+        base_kwargs: dict[str, Any] = {
+            "temporal": temporal, "sensor": sensor,
+            "output": self.output, "backend": backend, "device": self.device,
+        }
+        batches: list[tuple[list[int], dict[str, Any]]] = []
+        for start in range(0, len(ready), batch_size):
+            sub = ready[start : start + batch_size]
+            batches.append((
+                [t[0] for t in sub],
+                {**base_kwargs, "spatials": [t[1] for t in sub], "input_chws": [t[2] for t in sub]},
+            ))
 
-                def _infer_prefetched(_sp=sub_sp, _inp=sub_inp):
-                    if model_config is not None:
-                        require_model_config_support(
-                            embedder=embedder,
-                            model_config=model_config,
-                            method_name="get_embeddings_batch_from_inputs",
-                        )
-                    batch_kwargs: dict[str, Any] = {
-                        "spatials": _sp,
-                        "input_chws": _inp,
-                        "temporal": temporal,
-                        "sensor": sensor,
-                        "output": self.output,
-                        "backend": backend,
-                        "device": self.device,
-                    }
-                    if model_config is not None and embedder_accepts_model_config(
-                        type(embedder),
-                        "get_embeddings_batch_from_inputs",
-                    ):
-                        batch_kwargs["model_config"] = model_config
-                    if use_lock:
-                        with lock:
-                            return embedder.get_embeddings_batch_from_inputs(**batch_kwargs)
-                    return embedder.get_embeddings_batch_from_inputs(**batch_kwargs)
-
-                batch_out = run_with_retry(
-                    _infer_prefetched,
-                    retries=cfg.max_retries,
-                    backoff_s=cfg.retry_backoff_s,
-                )
-                if len(batch_out) != len(sub_idx):
-                    raise RuntimeError(
-                        f"Model {model_name} returned {len(batch_out)} embeddings "
-                        f"for {len(sub_idx)} prefetched inputs."
-                    )
-                for j, emb in enumerate(batch_out):
-                    out[sub_idx[j]] = self._embedding_to_result(emb)
-                    on_done(sub_idx[j])
-            return out, True
-        except Exception as _e:
-            return out, False
+        inner_out, ok = self._run_batch_inner(
+            method_name="get_embeddings_batch_from_inputs",
+            batches=batches, embedder=embedder, lock=lock,
+            use_lock=use_lock, model_name=model_name,
+            model_config=model_config, on_done=on_done,
+        )
+        out.update(inner_out)
+        return out, ok
 
     def _run_batch_no_input(
         self,
@@ -270,54 +299,24 @@ class InferenceEngine:
         model_config: dict[str, Any] | None = None,
     ) -> tuple[dict[int, TaskResult], bool]:
         """Run tier-2 batch inference that does not require provider inputs."""
-        cfg = self.config
-        out: dict[int, TaskResult] = {}
-        try:
-            for start in range(0, len(idxs), batch_size):
-                sub_idx = idxs[start : start + batch_size]
-                sub_sp = [spatials[i] for i in sub_idx]
+        base_kwargs: dict[str, Any] = {
+            "temporal": temporal, "sensor": sensor,
+            "output": self.output, "backend": backend, "device": self.device,
+        }
+        batches: list[tuple[list[int], dict[str, Any]]] = []
+        for start in range(0, len(idxs), batch_size):
+            sub_idx = idxs[start : start + batch_size]
+            batches.append((
+                sub_idx,
+                {**base_kwargs, "spatials": [spatials[i] for i in sub_idx]},
+            ))
 
-                def _infer_batch(_sp=sub_sp):
-                    if model_config is not None:
-                        require_model_config_support(
-                            embedder=embedder,
-                            model_config=model_config,
-                            method_name="get_embeddings_batch",
-                        )
-                    batch_kwargs: dict[str, Any] = {
-                        "spatials": _sp,
-                        "temporal": temporal,
-                        "sensor": sensor,
-                        "output": self.output,
-                        "backend": backend,
-                        "device": self.device,
-                    }
-                    if model_config is not None and embedder_accepts_model_config(
-                        type(embedder),
-                        "get_embeddings_batch",
-                    ):
-                        batch_kwargs["model_config"] = model_config
-                    if use_lock:
-                        with lock:
-                            return embedder.get_embeddings_batch(**batch_kwargs)
-                    return embedder.get_embeddings_batch(**batch_kwargs)
-
-                batch_out = run_with_retry(
-                    _infer_batch,
-                    retries=cfg.max_retries,
-                    backoff_s=cfg.retry_backoff_s,
-                )
-                if len(batch_out) != len(sub_idx):
-                    raise RuntimeError(
-                        f"Model {model_name} returned {len(batch_out)} embeddings "
-                        f"for {len(sub_idx)} inputs."
-                    )
-                for j, emb in enumerate(batch_out):
-                    out[sub_idx[j]] = self._embedding_to_result(emb)
-                    on_done(sub_idx[j])
-            return out, True
-        except Exception as _e:
-            return out, False
+        return self._run_batch_inner(
+            method_name="get_embeddings_batch",
+            batches=batches, embedder=embedder, lock=lock,
+            use_lock=use_lock, model_name=model_name,
+            model_config=model_config, on_done=on_done,
+        )
 
     def _run_single_fallback(
         self,

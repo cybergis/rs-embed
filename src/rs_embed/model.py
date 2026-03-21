@@ -19,7 +19,6 @@ from .core.specs import (
     TemporalSpec,
 )
 from .core.validation import assert_supported, validate_specs
-from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
 from .tools.model_defaults import (
     default_sensor_for_model,
     resolve_sensor_for_model,
@@ -222,7 +221,6 @@ class Model:
         list[str]
             Sorted model names available in the catalog.
         """
-        model_ids = set(MODEL_SPECS.keys())
-        if include_aliases:
-            model_ids.update(MODEL_ALIASES.keys())
-        return sorted(model_ids)
+        from .api import list_models
+
+        return list_models(include_aliases=include_aliases)

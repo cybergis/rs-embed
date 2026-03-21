@@ -25,7 +25,7 @@ from .core.types import (
     ModelConfig,
 )
 from .export import export_npz
-from .inspect import inspect_gee_patch, inspect_provider_patch
+from .inspect import inspect_provider_patch
 from .model import Model
 from .pipelines.exporter import BatchExporter
 
@@ -55,7 +55,5 @@ __all__ = [
     "export_npz",
     # Inspection
     "inspect_provider_patch",
-    # Backward-compatible alias for inspect_provider_patch
-    "inspect_gee_patch",
     "__version__",
 ]

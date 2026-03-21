@@ -142,7 +142,7 @@ emb = get_embedding(
 
 Recommended first check:
 
-- Use `inspect_provider_patch(...)` / `inspect_gee_patch(...)` to inspect raw inputs before blaming the model.
+- Use `inspect_provider_patch(...)` to inspect raw inputs before blaming the model.
 
 ---
 
