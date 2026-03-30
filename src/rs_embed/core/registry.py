@@ -11,6 +11,7 @@ from .errors import ModelError
 _REGISTRY: dict[str, type[Any]] = {}
 _REGISTRY_IMPORT_ERRORS: dict[str, BaseException] = {}
 
+
 def register(name: str):
     """Create a decorator that registers an embedder class under ``name``.
 
@@ -32,6 +33,7 @@ def register(name: str):
         return cls
 
     return deco
+
 
 def _try_lazy_load_model(name: str) -> None:
     """Load only the module that owns `name`, then backfill registration if needed."""
@@ -60,6 +62,7 @@ def _try_lazy_load_model(name: str) -> None:
     _REGISTRY[model_id] = cls
     cls.model_name = model_id
     _REGISTRY_IMPORT_ERRORS.pop(model_id, None)
+
 
 def get_embedder_cls(name: str) -> type[Any]:
     """Resolve and return the embedder class for ``name``.
@@ -99,6 +102,7 @@ def get_embedder_cls(name: str) -> type[Any]:
             msg += f" Embedder import errors: {'; '.join(parts)}"
         raise ModelError(msg)
     return _REGISTRY[k]
+
 
 def list_models():
     """Return sorted list of currently-loaded model IDs from the runtime registry.

@@ -42,6 +42,7 @@ from .serialization import embedding_to_numpy as _embedding_to_numpy
 # Resolved input-prep spec
 # ---------------------------------------------------------------------------
 
+
 @dataclass(frozen=True)
 class _ResolvedInputPrepSpec:
     mode: str
@@ -49,6 +50,7 @@ class _ResolvedInputPrepSpec:
     tile_stride: int | None
     max_tiles: int
     pad_edges: bool
+
 
 def _resolve_input_prep_spec(
     input_prep: InputPrepSpec | str | None,
@@ -92,9 +94,11 @@ def _resolve_input_prep_spec(
         pad_edges=pad_edges,
     )
 
+
 # ---------------------------------------------------------------------------
 # Tile geometry helpers
 # ---------------------------------------------------------------------------
+
 
 def _embedder_default_image_size(embedder: Any) -> int | None:
     try:
@@ -113,10 +117,12 @@ def _embedder_default_image_size(embedder: Any) -> int | None:
     except Exception as _e:
         return None
 
+
 def _estimate_tile_count(*, h: int, w: int, tile_size: int, stride: int) -> int:
     ny = 1 if h <= tile_size else int(math.ceil((float(h) - float(tile_size)) / float(stride))) + 1
     nx = 1 if w <= tile_size else int(math.ceil((float(w) - float(tile_size)) / float(stride))) + 1
     return max(1, ny) * max(1, nx)
+
 
 def _input_hw(x: np.ndarray) -> tuple[int, int]:
     if x.ndim not in (3, 4):
@@ -124,6 +130,7 @@ def _input_hw(x: np.ndarray) -> tuple[int, int]:
             f"Tiling currently supports CHW or TCHW inputs only, got shape={getattr(x, 'shape', None)}"
         )
     return int(x.shape[-2]), int(x.shape[-1])
+
 
 def _tile_yx_starts(*, h: int, w: int, tile_size: int, stride: int) -> tuple[list[int], list[int]]:
     def _starts_1d(dim: int) -> list[int]:
@@ -143,6 +150,7 @@ def _tile_yx_starts(*, h: int, w: int, tile_size: int, stride: int) -> tuple[lis
         return starts
 
     return _starts_1d(int(h)), _starts_1d(int(w))
+
 
 def _tile_subspatial(
     spatial: SpatialSpec,
@@ -170,9 +178,11 @@ def _tile_subspatial(
         return BBox(minlon=lon0, minlat=lat_bot, maxlon=lon1, maxlat=lat_top, crs=spatial.crs)
     return spatial
 
+
 # ---------------------------------------------------------------------------
 # Tile slicing / padding
 # ---------------------------------------------------------------------------
+
 
 def _slice_and_pad_tile(
     x: np.ndarray,
@@ -203,9 +213,11 @@ def _slice_and_pad_tile(
         "valid_w": valid_w,
     }
 
+
 # ---------------------------------------------------------------------------
 # Tile aggregation (stitching)
 # ---------------------------------------------------------------------------
+
 
 def _crop_len_for_valid(valid: int, *, nominal: int, out_len: int) -> int:
     if nominal <= 0:
@@ -213,6 +225,7 @@ def _crop_len_for_valid(valid: int, *, nominal: int, out_len: int) -> int:
     ratio = float(valid) / float(nominal)
     n = int(round(ratio * float(out_len)))
     return max(1, min(int(out_len), n))
+
 
 def _midpoint_owned_ranges(
     items: list[tuple[int, int, int]],
@@ -256,6 +269,7 @@ def _midpoint_owned_ranges(
         prev_cut = own_e
     return owned
 
+
 def _map_input_subrange_to_feature(
     *,
     rel_start: int,
@@ -274,6 +288,7 @@ def _map_input_subrange_to_feature(
     fs = max(0, min(int(out_len) - 1, fs))
     fe = max(fs + 1, min(int(out_len), fe))
     return (fs, fe)
+
 
 def _aggregate_tiled_embeddings(
     *,
@@ -418,9 +433,11 @@ def _aggregate_tiled_embeddings(
         base_meta["grid_hw"] = (int(out_h), int(out_w))
     return Embedding(data=out_arr, meta=base_meta)
 
+
 # ---------------------------------------------------------------------------
 # Tile-aware embedding dispatch
 # ---------------------------------------------------------------------------
+
 
 def _call_embedder_get_embedding_tiled(
     *,
@@ -596,6 +613,7 @@ def _call_embedder_get_embedding_tiled(
         stride=stride,
         prep_meta=prep_meta,
     )
+
 
 def _call_embedder_get_embedding_with_input_prep(
     *,

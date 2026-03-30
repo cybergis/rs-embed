@@ -38,6 +38,7 @@ def _infer_native_y_axis_direction(meta: dict[str, Any]) -> tuple[str, str]:
 
     return "unknown", "no orientation metadata"
 
+
 def _flip_data_y(data: Any) -> tuple[Any, bool, str]:
     # xarray.DataArray path (no hard dependency import; duck typing only).
     if hasattr(data, "dims") and hasattr(data, "isel"):
@@ -61,6 +62,7 @@ def _flip_data_y(data: Any) -> tuple[Any, bool, str]:
 
     axis = arr.ndim - 2
     return np.flip(arr, axis=axis), True, f"numpy flip axis={axis}"
+
 
 def normalize_embedding_output(*, emb: Embedding, output: OutputSpec) -> Embedding:
     """Normalize embedding outputs according to OutputSpec-level conventions."""

@@ -104,8 +104,7 @@ def _normalize_satmaepp_s2_variant(variant: Any) -> str:
     resolved = aliases.get(raw)
     if resolved is None:
         raise ModelError(
-            f"Unknown satmaepp_s2_10b variant='{variant}' "
-            "(expected one of: base, large)."
+            f"Unknown satmaepp_s2_10b variant='{variant}' (expected one of: base, large)."
         )
     return resolved
 
@@ -158,6 +157,7 @@ def _resolve_satmaepp_s2_runtime_config(
         "patch_size": int(patch_size),
     }
 
+
 def _env_bool(name: str, default: bool) -> bool:
     raw = str(os.environ.get(name, "")).strip().lower()
     if not raw:
@@ -167,6 +167,7 @@ def _env_bool(name: str, default: bool) -> bool:
     if raw in {"0", "false", "no", "n", "off"}:
         return False
     raise ModelError(f"{name} must be a boolean string (1/0, true/false), got {raw!r}.")
+
 
 def _torch_load_checkpoint_compat(path: str):
     """
@@ -194,6 +195,7 @@ def _torch_load_checkpoint_compat(path: str):
             ) from e
         raise
 
+
 def _resolve_hf_cache_dir() -> str | None:
     d = (
         os.environ.get("HUGGINGFACE_HUB_CACHE")
@@ -201,6 +203,7 @@ def _resolve_hf_cache_dir() -> str | None:
         or os.environ.get("HUGGINGFACE_HOME")
     )
     return str(d) if d else None
+
 
 def _ensure_satmaepp_s2_assets(
     *,
@@ -221,6 +224,7 @@ def _ensure_satmaepp_s2_assets(
 
     return ckpt_path
 
+
 @lru_cache(maxsize=1)
 def _load_satmaepp_s2_module():
     try:
@@ -232,6 +236,7 @@ def _load_satmaepp_s2_module():
             f"Failed to import vendored SatMAE++ Sentinel runtime: {type(e).__name__}: {e}"
         ) from e
 
+
 def _strip_module_prefix(sd: dict[str, Any]) -> dict[str, Any]:
     if not sd:
         return sd
@@ -239,6 +244,7 @@ def _strip_module_prefix(sd: dict[str, Any]) -> dict[str, Any]:
     if all(k.startswith("module.") for k in keys):
         return {k.replace("module.", "", 1): v for k, v in sd.items()}
     return sd
+
 
 @lru_cache(maxsize=4)
 def _load_satmaepp_s2_cached(
@@ -327,6 +333,7 @@ def _load_satmaepp_s2_cached(
     }
     return model, meta
 
+
 def _load_satmaepp_s2(
     *,
     ckpt_repo: str,
@@ -349,9 +356,11 @@ def _load_satmaepp_s2(
     )
     return loaded
 
+
 def _satmaepp_s2_resize_short_side(image_size: int) -> int:
     crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
     return int(float(image_size) / crop_pct)
+
 
 def _sentinel_to_uint8_hwc(raw_chw_10: np.ndarray) -> np.ndarray:
     if raw_chw_10.ndim != 3 or int(raw_chw_10.shape[0]) != len(_S2_SR_10_BANDS):
@@ -364,6 +373,7 @@ def _sentinel_to_uint8_hwc(raw_chw_10: np.ndarray) -> np.ndarray:
     y = (x - min_v) / np.maximum(max_v - min_v, 1e-6)
     y = np.clip(y * 255.0, 0.0, 255.0).astype(np.uint8)
     return y
+
 
 def _satmaepp_s2_preprocess_tensor_batch(raw_chw_batch: list[np.ndarray], *, image_size: int):
     ensure_torch()
@@ -390,6 +400,7 @@ def _satmaepp_s2_preprocess_tensor_batch(raw_chw_batch: list[np.ndarray], *, ima
             )
         xs.append(x)
     return torch.stack(xs, dim=0)
+
 
 def _satmaepp_s2_forward_tokens_batch(
     model,
@@ -421,6 +432,7 @@ def _satmaepp_s2_forward_tokens_batch(
         arr = toks.detach().float().cpu().numpy().astype(np.float32)
     return [arr[i] for i in range(arr.shape[0])]
 
+
 def _satmaepp_s2_split_tokens(tokens_nd: np.ndarray) -> tuple[np.ndarray, bool, int]:
     if tokens_nd.ndim != 2:
         raise ModelError(f"Expected tokens [N,D], got {getattr(tokens_nd, 'shape', None)}")
@@ -442,6 +454,7 @@ def _satmaepp_s2_split_tokens(tokens_nd: np.ndarray) -> tuple[np.ndarray, bool, 
     l = int(patch.shape[0]) // g
     return patch, has_cls, l
 
+
 def _satmaepp_s2_pool(tokens_nd: np.ndarray, pooling: str) -> tuple[np.ndarray, bool]:
     patch, has_cls, _ = _satmaepp_s2_split_tokens(tokens_nd)
     if int(patch.shape[0]) == 0:
@@ -452,6 +465,7 @@ def _satmaepp_s2_pool(tokens_nd: np.ndarray, pooling: str) -> tuple[np.ndarray, 
     if pooling == "max":
         return patch.max(axis=0).astype(np.float32), has_cls
     raise ModelError(f"Unknown pooling='{pooling}' (expected 'mean' or 'max').")
+
 
 def _satmaepp_s2_grid(
     tokens_nd: np.ndarray,
@@ -485,6 +499,7 @@ def _satmaepp_s2_grid(
     }
     return grid, (h, w), has_cls, emeta
 
+
 def _fetch_s2_sr_10_raw_chw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -514,6 +529,7 @@ def _fetch_s2_sr_10_raw_chw(
         )
     arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(arr, 0.0, 10000.0).astype(np.float32)
+
 
 @register("satmaepp_s2_10b")
 class SatMAEPPSentinel10Embedder(EmbedderBase):

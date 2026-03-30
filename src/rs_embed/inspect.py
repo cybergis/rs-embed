@@ -81,6 +81,7 @@ def inspect_provider_patch(
         out["array_chw"] = x_chw
     return out
 
+
 def inspect_gee_patch(
     *,
     spatial: SpatialSpec,

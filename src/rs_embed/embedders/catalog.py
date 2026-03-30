@@ -40,9 +40,11 @@ MODEL_ALIASES: dict[str, str] = {
     "satvision_toa": "satvision",
 }
 
+
 def canonical_model_id(name: str) -> str:
     k = str(name).strip().lower()
     return MODEL_ALIASES.get(k, k)
+
 
 # Optional convenience map for lazy class access from rs_embed.embedders
 CLASS_TO_MODULE: dict[str, str] = {

@@ -28,12 +28,14 @@ def resize_rgb_u8(rgb_u8: np.ndarray, out_size: int) -> np.ndarray:
     im = im.resize((out_size, out_size), resample=Image.BICUBIC)
     return np.array(im, dtype=np.uint8)
 
+
 def _s2_rgb_u8_from_chw(s2_chw: np.ndarray) -> np.ndarray:
     """s2_chw: [3,H,W] float in [0,1] -> uint8 [H,W,3]."""
     if s2_chw.ndim != 3 or s2_chw.shape[0] != 3:
         raise ModelError(f"Expected S2 RGB CHW with 3 bands, got shape={s2_chw.shape}")
     x = np.clip(s2_chw, 0.0, 1.0)
     return (x.transpose(1, 2, 0) * 255.0).astype(np.uint8)
+
 
 def fetch_s2_rgb_u8_from_provider(
     *,
@@ -90,6 +92,7 @@ def fetch_s2_rgb_u8_from_provider(
     rgb_u8 = _s2_rgb_u8_from_chw(s2_chw)
     return resize_rgb_u8(rgb_u8, out_size)
 
+
 # -------------------------
 # Tokens semantics (CLS, pooling, grid)
 # -------------------------
@@ -102,6 +105,7 @@ def infer_has_cls(n_tokens: int) -> bool:
     p = n_tokens - 1
     h = int(np.sqrt(p))
     return h * h == p
+
 
 def split_cls_patch(
     tokens: np.ndarray,
@@ -117,6 +121,7 @@ def split_cls_patch(
     if has:
         return tokens[0], tokens[1:], True
     return None, tokens, False
+
 
 def tokens_to_grid_dhw(tokens: np.ndarray) -> tuple[np.ndarray, tuple[int, int], bool]:
     """
@@ -135,6 +140,7 @@ def tokens_to_grid_dhw(tokens: np.ndarray) -> tuple[np.ndarray, tuple[int, int],
     grid = patch.reshape(h, w, d).transpose(2, 0, 1).astype(np.float32)
     return grid, (h, w), has_cls
 
+
 def pool_from_tokens(tokens: np.ndarray, pooling: str) -> tuple[np.ndarray, bool]:
     """
     Unified pooling: always pool over patch tokens (exclude CLS if present).
@@ -151,6 +157,7 @@ def pool_from_tokens(tokens: np.ndarray, pooling: str) -> tuple[np.ndarray, bool
         return patch.max(axis=0).astype(np.float32), has_cls
     raise ModelError(f"Unknown pooling='{pooling}' (expected 'mean' or 'max').")
 
+
 # -------------------------
 # Torch preprocessing
 # -------------------------
@@ -159,6 +166,7 @@ def ensure_torch():
         import torch  # noqa: F401
     except Exception as e:
         raise ModelError("This embedder requires torch installed.") from e
+
 
 def maybe_use_model_transform(model: Any, rgb_u8: np.ndarray, image_size: int):
     """
@@ -173,6 +181,7 @@ def maybe_use_model_transform(model: Any, rgb_u8: np.ndarray, image_size: int):
         if isinstance(x, torch.Tensor) and x.ndim == 3:
             return x.unsqueeze(0)
     return None
+
 
 def rgb_u8_to_tensor_clipnorm(rgb_u8: np.ndarray, image_size: int):
     """
@@ -198,6 +207,7 @@ def rgb_u8_to_tensor_clipnorm(rgb_u8: np.ndarray, image_size: int):
     img = Image.fromarray(rgb_u8, mode="RGB")
     x = preprocess(img).unsqueeze(0)
     return x
+
 
 # -------------------------
 # Meta helpers

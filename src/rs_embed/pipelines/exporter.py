@@ -102,9 +102,7 @@ class BatchExporter:
 
         # Model name lists for convenience
         self.model_names = [mc.name for mc in models]
-        self.resolved_sensor: dict[str, SensorSpec | None] = {
-            mc.name: mc.sensor for mc in models
-        }
+        self.resolved_sensor: dict[str, SensorSpec | None] = {mc.name: mc.sensor for mc in models}
         self.resolved_model_config: dict[str, dict[str, Any] | None] = {
             mc.name: mc.model_config for mc in models
         }
@@ -375,7 +373,8 @@ class BatchExporter:
         return provider
 
     def _resolve_fetcher_by_key(
-        self, prefetch: PrefetchManager,
+        self,
+        prefetch: PrefetchManager,
     ) -> dict[str, Any]:
         """Build a mapping from fetch_key to embedder for models with custom fetch.
 

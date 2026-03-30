@@ -71,6 +71,7 @@ _S2_WAVELENGTHS_UM = {
     "B12": 2.190,
 }
 
+
 def _infer_wavelengths_um(bands: list[str]) -> list[float] | None:
     wv = []
     for b in bands:
@@ -78,6 +79,7 @@ def _infer_wavelengths_um(bands: list[str]) -> list[float] | None:
             return None
         wv.append(float(_S2_WAVELENGTHS_UM[b]))
     return wv
+
 
 def _resize_chw(
     x_chw: np.ndarray,
@@ -103,6 +105,7 @@ def _resize_chw(
     x = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
     y = x[0].cpu().numpy().astype(np.float32)
     return y, info
+
 
 # -----------------------------
 # Provider fetch (generic SR scaling /10000)
@@ -147,6 +150,7 @@ def _fetch_provider_multiband_sr_chw(
     }
     return x, meta
 
+
 def _fetch_gee_multiband_sr_chw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -171,6 +175,7 @@ def _fetch_gee_multiband_sr_chw(
         composite=composite,
         default_value=default_value,
     )
+
 
 # -----------------------------
 # DOFA model + forward adapters
@@ -279,19 +284,15 @@ def _prepare_dofa_state_dict_for_model(
     model_state = model.state_dict()
     prepared = dict(state_dict)
 
-    fc_norm_weight_missing = (
-        "fc_norm.weight" not in prepared
-        or getattr(prepared.get("fc_norm.weight"), "shape", None)
-        != getattr(model_state.get("fc_norm.weight"), "shape", None)
-    )
+    fc_norm_weight_missing = "fc_norm.weight" not in prepared or getattr(
+        prepared.get("fc_norm.weight"), "shape", None
+    ) != getattr(model_state.get("fc_norm.weight"), "shape", None)
     if "fc_norm.weight" in model_state and fc_norm_weight_missing and "norm.weight" in prepared:
         prepared["fc_norm.weight"] = prepared["norm.weight"].detach().clone()
 
-    fc_norm_bias_missing = (
-        "fc_norm.bias" not in prepared
-        or getattr(prepared.get("fc_norm.bias"), "shape", None)
-        != getattr(model_state.get("fc_norm.bias"), "shape", None)
-    )
+    fc_norm_bias_missing = "fc_norm.bias" not in prepared or getattr(
+        prepared.get("fc_norm.bias"), "shape", None
+    ) != getattr(model_state.get("fc_norm.bias"), "shape", None)
     if "fc_norm.bias" in model_state and fc_norm_bias_missing and "norm.bias" in prepared:
         prepared["fc_norm.bias"] = prepared["norm.bias"].detach().clone()
 
@@ -350,6 +351,7 @@ def _resolve_dofa_weights_path(spec: dict[str, str]) -> tuple[str, str]:
             f"{spec['env_var']} or RS_EMBED_DOFA_WEIGHTS_DIR to a local checkpoint."
         ) from e
 
+
 @lru_cache(maxsize=4)
 def _load_dofa_model_cached(variant: str, dev: str):
     import torch
@@ -396,6 +398,7 @@ def _load_dofa_model_cached(variant: str, dev: str):
     }
     return model, meta
 
+
 def _load_dofa_model(
     *,
     variant: str = "base",
@@ -408,6 +411,7 @@ def _load_dofa_model(
         variant=variant_l,
     )
     return loaded
+
 
 def _dofa_forward_tokens_and_pooled(
     model,
@@ -468,6 +472,7 @@ def _dofa_forward_tokens_and_pooled(
     }
     return patch_tokens, pooled, extra
 
+
 def _dofa_forward_tokens_and_pooled_batch(
     model,
     x_bchw: np.ndarray,
@@ -523,6 +528,7 @@ def _dofa_forward_tokens_and_pooled_batch(
         "batch_shape": tuple(patch_tokens.shape),
     }
     return patch_tokens, pooled, extra
+
 
 # -----------------------------
 # Embedder

@@ -10,6 +10,7 @@ from ..tools.runtime import run_with_retry
 
 _T = TypeVar("_T")
 
+
 class ParallelRunner:
     """Thread pool with retry logic and optional progress tracking.
 

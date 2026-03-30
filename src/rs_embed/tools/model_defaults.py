@@ -16,6 +16,7 @@ def _probe_model_desc(model_id: str) -> dict:
         desc = {}
     return desc if isinstance(desc, dict) else {}
 
+
 def _normalize_modality_name(modality: str | None) -> str | None:
     if modality is None:
         return None
@@ -29,6 +30,7 @@ def _normalize_modality_name(modality: str | None) -> str | None:
         "s2l2a": "s2_l2a",
     }
     return aliases.get(key, key)
+
 
 def _mk_sensor(
     *,
@@ -50,6 +52,7 @@ def _mk_sensor(
         s1_require_iw=bool(defaults.get("s1_require_iw", True)),
         s1_relax_iw_on_empty=bool(defaults.get("s1_relax_iw_on_empty", True)),
     )
+
 
 def modality_profiles_for_model(model_id: str) -> dict[str, SensorSpec]:
     desc = _probe_model_desc(model_id)
@@ -113,6 +116,7 @@ def modality_profiles_for_model(model_id: str) -> dict[str, SensorSpec]:
             )
     return profiles
 
+
 def supports_modality_for_model(model_id: str, modality: str) -> bool:
     modality_n = _normalize_modality_name(modality)
     if modality_n is None:
@@ -123,6 +127,7 @@ def supports_modality_for_model(model_id: str, modality: str) -> bool:
     desc = _probe_model_desc(model_id)
     default_modality = _normalize_modality_name((desc.get("defaults") or {}).get("modality"))
     return modality_n == default_modality
+
 
 def default_sensor_for_model(model_id: str, modality: str | None = None) -> SensorSpec | None:
     desc = _probe_model_desc(model_id)
@@ -186,6 +191,7 @@ def default_sensor_for_model(model_id: str, modality: str | None = None) -> Sens
         )
 
     return None
+
 
 def resolve_sensor_for_model(
     model_id: str,

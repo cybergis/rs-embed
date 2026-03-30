@@ -13,14 +13,17 @@ from ..providers import has_provider
 def normalize_model_name(model: str) -> str:
     return canonical_model_id(model)
 
+
 def normalize_backend_name(backend: str) -> str:
     return str(backend).strip().lower()
+
 
 def normalize_device_name(device: str | None) -> str:
     if device is None:
         return "auto"
     dev = str(device).strip().lower()
     return dev or "auto"
+
 
 def normalize_input_chw(
     x_chw: np.ndarray,
@@ -37,6 +40,7 @@ def normalize_input_chw(
         )
     return x
 
+
 def _probe_model_describe(model_n: str) -> dict[str, Any]:
     """Best-effort model describe() probe used for API-level routing decisions."""
     try:
@@ -47,10 +51,12 @@ def _probe_model_describe(model_n: str) -> dict[str, Any]:
     except Exception as _e:
         return {}
 
+
 def _default_provider_backend_for_api() -> str:
     from ..embedders.runtime_utils import default_provider_backend_name
 
     return default_provider_backend_name() or "gee"
+
 
 def _resolve_embedding_api_backend(model_n: str, backend_n: str) -> str:
     """Normalize backend semantics for precomputed models."""

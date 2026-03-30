@@ -21,6 +21,7 @@ def load_json_dict(path: str) -> dict[str, Any] | None:
         return None
     return None
 
+
 def _resume_manifest(
     *,
     out_file: str,
@@ -51,6 +52,7 @@ def _resume_manifest(
     manifest.setdefault("status", "ok")
     return manifest
 
+
 def point_resume_manifest(
     *,
     point_index: int,
@@ -75,6 +77,7 @@ def point_resume_manifest(
     manifest.setdefault("point_index", int(point_index))
     return manifest
 
+
 def combined_resume_manifest(
     *,
     spatials: list[SpatialSpec],
@@ -95,6 +98,7 @@ def combined_resume_manifest(
             "spatials": [_jsonable(s) for s in spatials],
         },
     )
+
 
 def point_failure_manifest(
     *,
@@ -120,6 +124,7 @@ def point_failure_manifest(
         "temporal": _jsonable(temporal),
         "output": _jsonable(output),
     }
+
 
 def summarize_status(entries: list[dict[str, Any]]) -> str:
     """Summarize a list of model/status entries into ok/partial/failed."""

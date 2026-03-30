@@ -11,6 +11,7 @@ from ..core.specs import SensorSpec, TemporalSpec
 # Temporal helpers
 # ---------------------------------------------------------------------------
 
+
 def temporal_to_range(
     temporal: TemporalSpec | None,
     default: tuple[str, str] = ("2022-06-01", "2022-09-01"),
@@ -31,6 +32,7 @@ def temporal_to_range(
         return TemporalSpec.range(f"{y}-01-01", f"{y + 1}-01-01")
     raise ModelError(f"Unknown TemporalSpec mode: {temporal.mode}")
 
+
 def temporal_to_dict(temporal: TemporalSpec | None) -> dict[str, Any]:
     """
     Convert TemporalSpec into a serializable dictionary.
@@ -49,6 +51,7 @@ def temporal_to_dict(temporal: TemporalSpec | None) -> dict[str, Any]:
         }
     return {"mode": temporal.mode}
 
+
 def temporal_midpoint_str(temporal: TemporalSpec | None) -> str | None:
     """
     Return an ISO date string representing the midpoint of the temporal window.
@@ -66,9 +69,11 @@ def temporal_midpoint_str(temporal: TemporalSpec | None) -> str | None:
         return f"{int(temporal.year)}-07-01"
     return None
 
+
 # ---------------------------------------------------------------------------
 # Meta builder
 # ---------------------------------------------------------------------------
+
 
 def _sensor_to_dict(
     sensor: SensorSpec | dict[str, Any] | None,
@@ -83,6 +88,7 @@ def _sensor_to_dict(
         return asdict(sensor)  # type: ignore[arg-type]
     except Exception as exc:
         raise ModelError(f"Unsupported sensor meta type: {type(sensor)}") from exc
+
 
 def build_meta(
     *,

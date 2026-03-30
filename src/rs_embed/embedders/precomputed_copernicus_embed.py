@@ -23,6 +23,7 @@ from .meta_utils import build_meta
 
 SUPPORTED_YEARS = {2021}
 
+
 def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
     """
     Approximate meters to degrees at given latitude.
@@ -40,6 +41,7 @@ def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
     dlon = buffer_m / m_per_deg_lon
     return dlon, dlat
 
+
 def _spatial_to_bbox_4326(spatial: SpatialSpec) -> BBox:
     if isinstance(spatial, BBox):
         spatial.validate()
@@ -56,12 +58,14 @@ def _spatial_to_bbox_4326(spatial: SpatialSpec) -> BBox:
         )
     raise ModelError(f"Unsupported SpatialSpec type: {type(spatial)}")
 
+
 def _pool_chw(chw: np.ndarray, pooling: str) -> np.ndarray:
     if pooling == "mean":
         return chw.mean(axis=(1, 2)).astype(np.float32)
     if pooling == "max":
         return chw.max(axis=(1, 2)).astype(np.float32)
     raise ModelError(f"Unknown pooling='{pooling}' (expected 'mean' or 'max').")
+
 
 @register("copernicus")
 class CopernicusEmbedder(EmbedderBase):
@@ -129,7 +133,6 @@ class CopernicusEmbedder(EmbedderBase):
         device: str = "auto",
         input_chw: np.ndarray | None = None,
     ) -> Embedding:
-
         if temporal is None:
             raise ModelError("copernicus_embed requires TemporalSpec.year(YYYY).")
         if temporal.mode != "year":

@@ -30,17 +30,20 @@ def _env_flag(name: str, default: str = "0") -> bool:
     v = os.environ.get(name, default)
     return str(v).strip().lower() not in ("", "0", "false", "no", "off")
 
+
 def checks_enabled(sensor: Any = None) -> bool:
     """Return True if input checks should run."""
     if _env_flag("RS_EMBED_CHECK_INPUT", "0"):
         return True
     return bool(getattr(sensor, "check_input", False))
 
+
 def checks_should_raise(sensor: Any = None) -> bool:
     """Return True if embedders should raise on detected issues."""
     if "RS_EMBED_CHECK_RAISE" in os.environ:
         return _env_flag("RS_EMBED_CHECK_RAISE", "1")
     return bool(getattr(sensor, "check_raise", True))
+
 
 def checks_save_dir(sensor: Any = None) -> str | None:
     """Optional directory to save quicklooks/stat dumps."""
@@ -49,6 +52,7 @@ def checks_save_dir(sensor: Any = None) -> str | None:
         return str(d)
     return getattr(sensor, "check_save_dir", None)
 
+
 def _safe_float(x: Any) -> float | None:
     try:
         if x is None:
@@ -56,6 +60,7 @@ def _safe_float(x: Any) -> float | None:
         return float(x)
     except Exception as _e:
         return None
+
 
 def inspect_chw(
     x_chw: np.ndarray,
@@ -242,6 +247,7 @@ def inspect_chw(
 
     return report
 
+
 def maybe_inspect_chw(
     x_chw: np.ndarray,
     *,
@@ -283,6 +289,7 @@ def maybe_inspect_chw(
         )
 
     return report
+
 
 def save_quicklook_rgb(
     x_chw: np.ndarray,

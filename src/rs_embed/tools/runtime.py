@@ -37,6 +37,7 @@ from .output import normalize_embedding_output
 
 _T = TypeVar("_T")
 
+
 @dataclass(frozen=True)
 class _EmbeddingRequestContext:
     model_n: str
@@ -49,12 +50,14 @@ class _EmbeddingRequestContext:
     embedder: Any
     lock: Any
 
+
 @lru_cache(maxsize=32)
 def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple):
     """Return (embedder instance, instance lock)."""
     cls = get_embedder_cls(model)
     emb = cls()
     return emb, RLock()
+
 
 def sensor_key(sensor: SensorSpec | None) -> tuple:
     if sensor is None:
@@ -76,6 +79,7 @@ def sensor_key(sensor: SensorSpec | None) -> tuple:
         getattr(sensor, "check_save_dir", None),
     )
 
+
 def _overrides_base_method(embedder: Any, method_name: str) -> bool:
     """Return True when *embedder* overrides *method_name* from EmbedderBase."""
     fn = getattr(type(embedder), method_name, None)
@@ -85,13 +89,16 @@ def _overrides_base_method(embedder: Any, method_name: str) -> bool:
 
     return fn is not getattr(EmbedderBase, method_name, None)
 
+
 def supports_batch_api(embedder: Any) -> bool:
     """Return True when embedder overrides EmbedderBase.get_embeddings_batch."""
     return _overrides_base_method(embedder, "get_embeddings_batch")
 
+
 def supports_prefetched_batch_api(embedder: Any) -> bool:
     """Return True when embedder overrides batch-from-inputs fast path."""
     return _overrides_base_method(embedder, "get_embeddings_batch_from_inputs")
+
 
 @lru_cache(maxsize=128)
 def _embedder_method_accepts_parameter(
@@ -123,8 +130,10 @@ def embedder_accepts_model_config(
 ) -> bool:
     return _embedder_method_accepts_parameter(embedder_cls, method_name, "model_config")
 
+
 def _display_model_name(embedder: Any) -> str:
     return str(getattr(embedder, "model_name", type(embedder).__name__))
+
 
 def require_model_config_support(
     *,
@@ -141,6 +150,7 @@ def require_model_config_support(
         f"Model {_display_model_name(embedder)} does not support model_config"
         f" for {method_name}(); got keys {keys}."
     )
+
 
 def call_embedder_get_embedding(
     *,
@@ -174,11 +184,14 @@ def call_embedder_get_embedding(
     if input_chw is not None and embedder_accepts_input_chw(type(embedder)):
         kwargs["input_chw"] = input_chw
     if fetch_meta is not None and _embedder_method_accepts_parameter(
-        type(embedder), "get_embedding", "fetch_meta",
+        type(embedder),
+        "get_embedding",
+        "fetch_meta",
     ):
         kwargs["fetch_meta"] = fetch_meta
     out = embedder.get_embedding(**kwargs)
     return normalize_embedding_output(emb=out, output=output)
+
 
 def run_with_retry(
     fn: Callable[[], _T],
@@ -200,8 +213,10 @@ def run_with_retry(
     # Loop always returns on success or raises on last attempt; this is unreachable.
     raise AssertionError("unreachable")
 
+
 def _create_default_gee_provider() -> ProviderBase:
     return get_provider("gee", auto_auth=True)
+
 
 def provider_factory_for_backend(
     backend: str,
@@ -214,6 +229,7 @@ def provider_factory_for_backend(
     if b == "gee":
         return _create_default_gee_provider
     return lambda: get_provider(b)
+
 
 def _prepare_embedding_request_context(
     *,
@@ -252,6 +268,7 @@ def _prepare_embedding_request_context(
         embedder=embedder,
         lock=lock,
     )
+
 
 def fetch_api_side_inputs(
     *,
@@ -303,16 +320,23 @@ def fetch_api_side_inputs(
     results: list[FetchResult] = []
     for spatial in spatials:
         fr = embedder.fetch_input(
-            provider, spatial=spatial, temporal=temporal, sensor=sensor_eff,
+            provider,
+            spatial=spatial,
+            temporal=temporal,
+            sensor=sensor_eff,
         )
         if fr is not None:
             results.append(fr)
         else:
             raw = fetch_gee_patch_raw(
-                provider, spatial=spatial, temporal=temporal, sensor=sensor_eff,
+                provider,
+                spatial=spatial,
+                temporal=temporal,
+                sensor=sensor_eff,
             )
             results.append(FetchResult(data=raw, meta={}))
     return results
+
 
 def run_embedding_request(
     *,

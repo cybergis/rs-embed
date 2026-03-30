@@ -28,6 +28,7 @@ def default_provider_backend_name() -> str | None:
         return "gee"
     return str(providers[0]).strip().lower()
 
+
 def resolve_provider_backend_name(
     backend: str,
     *,
@@ -48,6 +49,7 @@ def resolve_provider_backend_name(
         return b
     return None
 
+
 def is_provider_backend(
     backend: str,
     *,
@@ -62,6 +64,7 @@ def is_provider_backend(
         )
         is not None
     )
+
 
 def get_cached_provider(
     provider_cache: dict[str, ProviderBase],
@@ -85,12 +88,14 @@ def get_cached_provider(
     p.ensure_ready()
     return p
 
+
 def provider_init_kwargs(backend: str) -> dict[str, Any]:
     """Provider-specific constructor kwargs, centralized outside embedders."""
     b = normalize_backend_name(backend)
     if b == "gee":
         return {"auto_auth": True}
     return {}
+
 
 def create_provider_for_backend(
     backend: str,
@@ -109,6 +114,7 @@ def create_provider_for_backend(
     p.ensure_ready()
     return p
 
+
 def resolve_device_auto_torch(device: str) -> str:
     if device != "auto":
         return device
@@ -118,6 +124,7 @@ def resolve_device_auto_torch(device: str) -> str:
         return "cuda" if torch.cuda.is_available() else "cpu"
     except Exception as _e:
         return "cpu"
+
 
 def load_cached_with_device(
     cached_loader: Callable[..., _T],
@@ -129,6 +136,7 @@ def load_cached_with_device(
     dev = resolve_device_auto_torch(device)
     loaded = cached_loader(dev=dev, **kwargs)
     return loaded, dev
+
 
 def fetch_collection_patch_chw(
     provider: ProviderBase,
@@ -158,6 +166,7 @@ def fetch_collection_patch_chw(
         sensor=sensor,
     )
 
+
 def fetch_sensor_patch_chw(
     provider: ProviderBase,
     *,
@@ -184,6 +193,7 @@ def fetch_sensor_patch_chw(
     except ProviderError as exc:
         raise ModelError(str(exc)) from exc
 
+
 def _stitch_spatial_last2_arrays(
     *,
     a: np.ndarray,
@@ -203,6 +213,7 @@ def _stitch_spatial_last2_arrays(
         scale_m=scale_m,
         fill_value=fill_value,
     )
+
 
 def _fetch_spatial_array_with_bbox_fallback(
     provider: ProviderBase,
@@ -258,6 +269,7 @@ def _fetch_spatial_array_with_bbox_fallback(
             scale_m=int(scale_m),
             fill_value=float(fill_value),
         )
+
 
 def fetch_collection_patch_all_bands_chw(
     provider: ProviderBase,
@@ -316,7 +328,9 @@ def fetch_collection_patch_all_bands_chw(
                 arr_a, names_a = _rec(a_sp, depth + 1)
                 arr_b, names_b = _rec(b_sp, depth + 1)
                 if tuple(names_a) != tuple(names_b):
-                    raise ModelError("Band names mismatch while stitching all-band bbox tiles.") from None
+                    raise ModelError(
+                        "Band names mismatch while stitching all-band bbox tiles."
+                    ) from None
                 stitched = _stitch_spatial_last2_arrays(
                     a=arr_a,
                     b=arr_b,
@@ -328,6 +342,7 @@ def fetch_collection_patch_all_bands_chw(
                 return stitched, tuple(names_a)
 
         return _rec(spatial, 0)
+
 
 def fetch_s2_rgb_chw(
     provider: ProviderBase,
@@ -351,6 +366,7 @@ def fetch_s2_rgb_chw(
         fill_value=0.0,
     )
     return np.clip(raw / 10000.0, 0.0, 1.0).astype(np.float32)
+
 
 def fetch_s1_vvvh_raw_chw(
     provider: ProviderBase,
@@ -440,6 +456,7 @@ def fetch_s1_vvvh_raw_chw_with_meta(
     meta_out = dict(meta or {})
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32), meta_out
 
+
 def apply_normalization(raw: np.ndarray, norm: NormalizationSpec) -> np.ndarray:
     """Apply a declarative normalization strategy to raw provider data.
 
@@ -478,6 +495,7 @@ def normalize_s1_vvvh_chw(raw_chw: np.ndarray) -> np.ndarray:
     denom = np.percentile(x, 99) if np.isfinite(x).all() else 1.0
     denom = float(denom) if float(denom) > 0 else 1.0
     return np.clip(x / denom, 0.0, 1.0).astype(np.float32)
+
 
 def fetch_s2_multiframe_raw_tchw(
     provider: ProviderBase,
@@ -519,6 +537,7 @@ def fetch_s2_multiframe_raw_tchw(
         )
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
+
 def coerce_input_to_tchw(
     input_chw: np.ndarray,
     *,
@@ -559,6 +578,7 @@ def coerce_input_to_tchw(
 
     raw_tchw = np.nan_to_num(raw_tchw, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(raw_tchw, 0.0, 10000.0).astype(np.float32)
+
 
 def coerce_single_input_chw(
     input_chw: Any,

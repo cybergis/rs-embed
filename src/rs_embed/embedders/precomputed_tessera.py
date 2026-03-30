@@ -22,6 +22,7 @@ from .base import EmbedderBase
 
 _EMBED_DIMS = (64, 128, 256, 512, 768, 1024)
 
+
 def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
     import math
 
@@ -30,6 +31,7 @@ def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
     cos_lat = max(1e-6, math.cos(math.radians(lat)))
     dlon = buffer_m / (m_per_deg_lat * cos_lat)
     return dlon, dlat
+
 
 def _to_bbox_4326(spatial: SpatialSpec) -> BBox:
     if isinstance(spatial, BBox):
@@ -47,6 +49,7 @@ def _to_bbox_4326(spatial: SpatialSpec) -> BBox:
         )
     raise ModelError(f"Unsupported SpatialSpec: {type(spatial)}")
 
+
 def _year_from_temporal(temporal: TemporalSpec | None, default_year: int = 2021) -> int:
     if temporal is None:
         return default_year
@@ -57,12 +60,14 @@ def _year_from_temporal(temporal: TemporalSpec | None, default_year: int = 2021)
         return int(str(temporal.start)[:4])
     return default_year
 
+
 def _pool(chw: np.ndarray, pooling: str) -> np.ndarray:
     if pooling == "mean":
         return chw.mean(axis=(1, 2)).astype(np.float32)
     if pooling == "max":
         return chw.max(axis=(1, 2)).astype(np.float32)
     raise ModelError(f"Unknown pooling: {pooling}")
+
 
 def _to_hwc(arr: np.ndarray) -> np.ndarray:
     a = np.asarray(arr)
@@ -76,6 +81,7 @@ def _to_hwc(arr: np.ndarray) -> np.ndarray:
         return np.moveaxis(a, 0, -1).astype(np.float32)
     raise ModelError(f"Unexpected embedding shape: {a.shape}")
 
+
 def _infer_hwc_shape(arr: np.ndarray) -> tuple[int, int, int]:
     """Return (h, w, d) without materializing a float32 copy."""
     a = np.asarray(arr)
@@ -87,6 +93,7 @@ def _infer_hwc_shape(arr: np.ndarray) -> tuple[int, int, int]:
         return int(a.shape[1]), int(a.shape[2]), int(a.shape[0])
     raise ModelError(f"Unexpected embedding shape: {a.shape}")
 
+
 def _assert_north_up(transform):
     # 期望：无旋转 b=d=0，且 a>0, e<0
     b = float(getattr(transform, "b", 0.0))
@@ -96,6 +103,7 @@ def _assert_north_up(transform):
             "Tile transform has rotation/shear; mosaic+crop requires north-up (b=d=0)."
         )
 
+
 def _tile_bounds(transform, w: int, h: int) -> tuple[float, float, float, float]:
     # (left, bottom, right, top) in tile CRS
     x0, y0 = transform * (0, 0)  # top-left
@@ -103,6 +111,7 @@ def _tile_bounds(transform, w: int, h: int) -> tuple[float, float, float, float]
     left, right = (min(x0, x1), max(x0, x1))
     bottom, top = (min(y0, y1), max(y0, y1))
     return left, bottom, right, top
+
 
 def _reproject_bbox_4326_to(tile_crs_str: str, bbox: BBox) -> tuple[float, float, float, float]:
     # returns (xmin, ymin, xmax, ymax) in tile CRS
@@ -118,6 +127,7 @@ def _reproject_bbox_4326_to(tile_crs_str: str, bbox: BBox) -> tuple[float, float
     x0, y0 = tfm.transform(bbox.minlon, bbox.minlat)
     x1, y1 = tfm.transform(bbox.maxlon, bbox.maxlat)
     return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
+
 
 def _mosaic_and_crop_strict_roi(
     tiles_rows_factory: Callable[[], Iterable[tuple[int, float, float, np.ndarray, Any, Any]]],
@@ -238,6 +248,7 @@ def _mosaic_and_crop_strict_roi(
         "global_transform": global_transform,
     }
     return chw, meta
+
 
 @register("tessera")
 class TesseraEmbedder(EmbedderBase):

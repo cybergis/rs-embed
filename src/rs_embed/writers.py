@@ -28,6 +28,7 @@ _FORMAT_EXT: dict[str, str] = {
 
 SUPPORTED_FORMATS = tuple(_FORMAT_EXT.keys())
 
+
 def get_extension(fmt: str) -> str:
     """Return the canonical file extension (including dot) for *fmt*."""
     try:
@@ -35,7 +36,9 @@ def get_extension(fmt: str) -> str:
     except KeyError:
         raise ValueError(f"Unknown format {fmt!r}. Supported: {SUPPORTED_FORMATS}") from None
 
+
 # ── public dispatcher ──────────────────────────────────────────────
+
 
 def write_arrays(
     *,
@@ -55,7 +58,9 @@ def write_arrays(
         return _write_netcdf(out_path, arrays, manifest, save_manifest)
     raise ValueError(f"Unknown format {fmt!r}. Supported: {SUPPORTED_FORMATS}")
 
+
 # ── NPZ writer ────────────────────────────────────────────────────
+
 
 def _write_npz(
     out_path: str,
@@ -79,7 +84,9 @@ def _write_npz(
     manifest["npz_keys"] = sorted(arrays.keys())
     return manifest
 
+
 # ── NetCDF writer ──────────────────────────────────────────────────
+
 
 def _write_netcdf(
     out_path: str,
@@ -130,10 +137,12 @@ def _write_netcdf(
     manifest["nc_variables"] = sorted(arrays.keys())
     return manifest
 
+
 def _safe_dim_suffix(key: str) -> str:
     out = "".join((c if c.isalnum() else "_") for c in str(key))
     out = out.strip("_")
     return out or "var"
+
 
 def _resolve_conflicting_dims(
     *,
@@ -162,7 +171,9 @@ def _resolve_conflicting_dims(
         resolved.append(resolved_name)
     return tuple(resolved)
 
+
 # ── dimension inference ────────────────────────────────────────────
+
 
 def _infer_dims(key: str, arr: np.ndarray) -> tuple[str, ...]:
     """Map array key + shape to semantically named NetCDF dimensions.
@@ -200,7 +211,9 @@ def _infer_dims(key: str, arr: np.ndarray) -> tuple[str, ...]:
     # Fallback: generic numbered dimensions.
     return tuple(f"d{i}" for i in range(ndim))
 
+
 # ── engine selection ───────────────────────────────────────────────
+
 
 def _pick_engine() -> str:
     """Return the best available xarray NetCDF engine."""

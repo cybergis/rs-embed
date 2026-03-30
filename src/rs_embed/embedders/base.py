@@ -69,10 +69,7 @@ class EmbedderBase:
         Used by the export pipeline to decide whether to delegate fetching
         to the embedder rather than using the generic provider path.
         """
-        return (
-            self.input_spec is not None
-            or type(self).fetch_input is not EmbedderBase.fetch_input
-        )
+        return self.input_spec is not None or type(self).fetch_input is not EmbedderBase.fetch_input
 
     def fetch_input(
         self,

@@ -29,6 +29,7 @@ def normalize_export_layout(layout: str) -> ExportLayout:
         return ExportLayout.PER_ITEM
     raise ModelError(f"Unsupported export layout: {layout!r}. Supported: 'combined', 'per_item'.")
 
+
 def normalize_export_format(format_name: str) -> tuple[str, str]:
     fmt = str(format_name).strip().lower()
     from ..writers import SUPPORTED_FORMATS, get_extension
@@ -38,6 +39,7 @@ def normalize_export_format(format_name: str) -> tuple[str, str]:
             f"Unsupported export format: {format_name!r}. Supported: {SUPPORTED_FORMATS}."
         )
     return fmt, get_extension(fmt)
+
 
 def _resolve_export_batch_target(
     *,
@@ -74,6 +76,7 @@ def _resolve_export_batch_target(
     if len(point_names) != n_spatials:
         raise ModelError("names must have the same length as spatials.")
     return ExportTarget(layout=ExportLayout.PER_ITEM, out_dir=out_dir, names=point_names)
+
 
 def normalize_export_target(
     *,
@@ -120,6 +123,7 @@ def normalize_export_target(
         out_path=out_path,
         names=names,
     )
+
 
 def normalize_export_config(
     *,
@@ -190,6 +194,7 @@ def normalize_export_config(
         show_progress=show_progress,
         input_prep=input_prep,
     )
+
 
 def resolve_export_model_configs(
     *,
@@ -263,6 +268,7 @@ def resolve_export_model_configs(
         )
 
     return model_configs, resolved_backend
+
 
 def maybe_return_completed_combined_resume(
     *,

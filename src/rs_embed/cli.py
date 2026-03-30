@@ -26,6 +26,7 @@ def _parse_bands(s: str) -> tuple[str, ...]:
         raise argparse.ArgumentTypeError("--bands must be a comma-separated list, e.g. 'B4,B3,B2'")
     return tuple(parts)
 
+
 def _parse_models(s: str) -> list[str]:
     parts = [p.strip() for p in s.split(",") if p.strip()]
     if not parts:
@@ -33,6 +34,7 @@ def _parse_models(s: str) -> list[str]:
             "--models must be a comma-separated list, e.g. 'remoteclip,prithvi'"
         )
     return parts
+
 
 def _parse_value_range(s: str | None) -> tuple[float, float] | None:
     if not s:
@@ -42,6 +44,7 @@ def _parse_value_range(s: str | None) -> tuple[float, float] | None:
         return (float(lo), float(hi))
     except Exception as e:
         raise argparse.ArgumentTypeError("--value-range must be 'lo,hi' (floats)") from e
+
 
 def _add_spatial_args(p: argparse.ArgumentParser) -> None:
     sp = p.add_mutually_exclusive_group(required=True)
@@ -60,11 +63,13 @@ def _add_spatial_args(p: argparse.ArgumentParser) -> None:
         help="EPSG:4326 pointbuffer (meters)",
     )
 
+
 def _parse_spatial(args) -> BBox | PointBuffer:
     if args.bbox is not None:
         return BBox(*args.bbox)
     lon, lat, buf = args.pointbuffer
     return PointBuffer(lon=lon, lat=lat, buffer_m=buf)
+
 
 def _add_temporal_args(p: argparse.ArgumentParser) -> None:
     tg = p.add_mutually_exclusive_group(required=False)
@@ -76,12 +81,14 @@ def _add_temporal_args(p: argparse.ArgumentParser) -> None:
         help="Date range, e.g. 2022-06-01 2022-09-01",
     )
 
+
 def _parse_temporal(args) -> TemporalSpec | None:
     if getattr(args, "year", None) is not None:
         return TemporalSpec.year(int(args.year))
     if getattr(args, "range", None) is not None:
         return TemporalSpec.range(args.range[0], args.range[1])
     return None
+
 
 def build_parser() -> argparse.ArgumentParser:
     p = argparse.ArgumentParser(prog="rs-embed", description="rs-embed utilities")
@@ -216,6 +223,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     return p
 
+
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
 
@@ -294,6 +302,7 @@ def main(argv: list[str] | None = None) -> None:
         return
 
     raise SystemExit(f"Unknown command: {args.cmd}")
+
 
 if __name__ == "__main__":
     main()

@@ -42,6 +42,7 @@ from .runtime_utils import (
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
+
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -52,6 +53,7 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y.detach().cpu().numpy().astype(np.float32)
+
 
 def _normalize_series(x_tchw: np.ndarray, *, mode: str) -> np.ndarray:
     mode_l = str(mode).lower().strip()
@@ -73,6 +75,7 @@ def _normalize_series(x_tchw: np.ndarray, *, mode: str) -> np.ndarray:
         "Use one of: none, unit_scale, per_tile_zscore."
     )
 
+
 def _doy0_from_iso(iso_date: str) -> int:
     d = date.fromisoformat(str(iso_date))
     # AnySat docs: 01/01 -> 0 ; 31/12 -> 364
@@ -93,8 +96,7 @@ def _normalize_anysat_model_size(model_size: Any) -> str:
     resolved = aliases.get(raw)
     if resolved is None:
         raise ModelError(
-            f"Unknown AnySat model_size='{model_size}' "
-            "(expected one of: tiny, small, base)."
+            f"Unknown AnySat model_size='{model_size}' (expected one of: tiny, small, base)."
         )
     return resolved
 
@@ -161,11 +163,13 @@ def _resolve_anysat_runtime_config(
         "hf_min_bytes": int(hf_min_bytes),
     }
 
+
 def _frame_doy0_sequence(temporal: TemporalSpec, *, n_frames: int) -> np.ndarray:
     mids = temporal_frame_midpoints(temporal, max(1, int(n_frames)))
     if not mids:
         return np.full((max(1, int(n_frames)),), 182, dtype=np.int64)
     return np.array([_doy0_from_iso(v) for v in mids], dtype=np.int64)
+
 
 def _fetch_s2_10_raw_tchw(
     provider: ProviderBase,
@@ -192,6 +196,7 @@ def _fetch_s2_10_raw_tchw(
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
 
+
 @lru_cache(maxsize=8)
 def _load_anysat_hub_module():
     try:
@@ -202,6 +207,7 @@ def _load_anysat_hub_module():
             "Failed to import vendored AnySat runtime. Install missing dependencies: torch, einops."
         ) from e
     return mod
+
 
 @lru_cache(maxsize=4)
 def _download_anysat_ckpt(
@@ -227,6 +233,7 @@ def _download_anysat_ckpt(
         raise ModelError(f"Downloaded AnySat checkpoint looks too small ({sz} bytes): {p}")
     return p
 
+
 def _load_ckpt_state_dict(ckpt_path: str) -> dict[str, Any]:
     ensure_torch()
     import torch
@@ -237,6 +244,7 @@ def _load_ckpt_state_dict(ckpt_path: str) -> dict[str, Any]:
     if isinstance(obj, dict):
         return obj
     raise ModelError(f"Unsupported checkpoint format at {ckpt_path}")
+
 
 @lru_cache(maxsize=6)
 def _load_anysat_cached(
@@ -313,6 +321,7 @@ def _load_anysat_cached(
     }
     return model, meta
 
+
 def _load_anysat(
     *,
     model_size: str,
@@ -339,6 +348,7 @@ def _load_anysat(
     )
     model, meta = loaded
     return model, meta, dev
+
 
 def _prepare_anysat_s2_input(
     raw_tchw: np.ndarray,
@@ -374,6 +384,7 @@ def _prepare_anysat_s2_input(
         "s2_dates": torch.from_numpy(dates).to(device),  # [1,T]
     }
 
+
 def _anysat_patch_features(
     model: Any,
     s2_input: dict[str, Any],
@@ -407,6 +418,7 @@ def _anysat_patch_features(
         "patch_size_m": int(patch_size_m),
     }
     return grid, meta
+
 
 @register("anysat")
 class AnySatEmbedder(EmbedderBase):

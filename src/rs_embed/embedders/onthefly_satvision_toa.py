@@ -90,6 +90,7 @@ _DEFAULT_EMISSIVE_MAXS = (
 _FALLBACK_MOD09_COLLECTION = "MODIS/061/MOD09GA"
 _FALLBACK_MOD21_COLLECTION = "MODIS/061/MOD21A1D"
 
+
 def _parse_int_list(s: str) -> tuple[int, ...]:
     out: list[int] = []
     for x in str(s).split(","):
@@ -99,6 +100,7 @@ def _parse_int_list(s: str) -> tuple[int, ...]:
         out.append(int(t))
     return tuple(out)
 
+
 def _parse_float_list(s: str) -> tuple[float, ...]:
     out: list[float] = []
     for x in str(s).split(","):
@@ -107,6 +109,7 @@ def _parse_float_list(s: str) -> tuple[float, ...]:
             continue
         out.append(float(t))
     return tuple(out)
+
 
 def _normalize_indices(indices: Sequence[int], n_channels: int) -> tuple[int, ...]:
     out: list[int] = []
@@ -118,11 +121,13 @@ def _normalize_indices(indices: Sequence[int], n_channels: int) -> tuple[int, ..
             out.append(ii)
     return tuple(out)
 
+
 def _as_bool_env(name: str, default: bool) -> bool:
     v = os.environ.get(name)
     if v is None:
         return bool(default)
     return str(v).strip().lower() not in {"0", "false", "no", "off"}
+
 
 def _resize_chw(x_chw: np.ndarray, *, out_size: int) -> np.ndarray:
     ensure_torch()
@@ -143,6 +148,7 @@ def _resize_chw(x_chw: np.ndarray, *, out_size: int) -> np.ndarray:
         xt, size=(int(out_size), int(out_size)), mode="bilinear", align_corners=False
     )
     return yt[0].detach().cpu().numpy().astype(np.float32)
+
 
 def _normalize_satvision_toa_input(
     raw_chw: np.ndarray,
@@ -225,6 +231,7 @@ def _normalize_satvision_toa_input(
 
     return np.clip(y, 0.0, 1.0).astype(np.float32)
 
+
 def _pick_first_tensor(obj: Any):
     """Best-effort pick first tensor-like value from nested output."""
     try:
@@ -251,6 +258,7 @@ def _pick_first_tensor(obj: Any):
             if t is not None:
                 return t
     return None
+
 
 def _decode_features_to_batch_arrays(
     out: Any, batch_size: int
@@ -316,6 +324,7 @@ def _decode_features_to_batch_arrays(
         f"SatVision-TOA forward_features shape unsupported: {tuple(int(v) for v in t.shape)}"
     )
 
+
 def _extract_state_dict(obj: Any) -> dict[str, Any]:
     """Extract a tensor state_dict from common checkpoint layouts."""
     ensure_torch()
@@ -339,6 +348,7 @@ def _extract_state_dict(obj: Any) -> dict[str, Any]:
             return obj
     raise ModelError("Unsupported SatVision checkpoint format: cannot locate state_dict")
 
+
 def _strip_prefix(sd: dict[str, Any], prefix: str) -> dict[str, Any]:
     plen = len(prefix)
     out: dict[str, Any] = {}
@@ -348,6 +358,7 @@ def _strip_prefix(sd: dict[str, Any], prefix: str) -> dict[str, Any]:
         else:
             out[k] = v
     return out
+
 
 def _select_best_state_dict(sd: dict[str, Any], model_keys: Iterable[str]) -> dict[str, Any]:
     mkeys = set(model_keys)
@@ -369,6 +380,7 @@ def _select_best_state_dict(sd: dict[str, Any], model_keys: Iterable[str]) -> di
         raise ModelError("SatVision checkpoint keys do not match model architecture.")
     return _align_swinv2_downsample_layout(best, mkeys)
 
+
 def _downsample_indices(keys: Iterable[str]) -> tuple[int, ...]:
     idx: set[int] = set()
     for k in keys:
@@ -376,6 +388,7 @@ def _downsample_indices(keys: Iterable[str]) -> tuple[int, ...]:
         if m:
             idx.add(int(m.group(1)))
     return tuple(sorted(idx))
+
 
 def _shift_downsample_indices(sd: dict[str, Any], delta: int) -> dict[str, Any]:
     if delta == 0:
@@ -390,6 +403,7 @@ def _shift_downsample_indices(sd: dict[str, Any], delta: int) -> dict[str, Any]:
         else:
             out[k] = v
     return out
+
 
 def _align_swinv2_downsample_layout(
     sd: dict[str, Any], model_keys: Iterable[str]
@@ -412,6 +426,7 @@ def _align_swinv2_downsample_layout(
         if shifted == model_idx:
             return _shift_downsample_indices(sd, delta)
     return sd
+
 
 def _find_ckpt_file(path_or_dir: str) -> str:
     p = os.path.expanduser(path_or_dir)
@@ -443,6 +458,7 @@ def _find_ckpt_file(path_or_dir: str) -> str:
     # Pick the largest as a reasonable fallback.
     all_files.sort(key=lambda x: os.path.getsize(x), reverse=True)
     return all_files[0]
+
 
 def _resolve_ckpt(
     *,
@@ -489,6 +505,7 @@ def _resolve_ckpt(
 
     ckpt_file = _find_ckpt_file(snap)
     return ckpt_file, f"hf://{model_id}"
+
 
 @lru_cache(maxsize=8)
 def _load_satvision_toa_cached(
@@ -578,6 +595,7 @@ def _load_satvision_toa_cached(
     }
     return model, meta
 
+
 def _load_satvision_toa(
     *,
     model_id: str,
@@ -597,6 +615,7 @@ def _load_satvision_toa(
     )
     model, meta = loaded
     return model, {**meta, "checkpoint_source": source, "model_id": model_id}
+
 
 def _fetch_toa_raw_chw_from_gee(
     provider: ProviderBase,
@@ -708,6 +727,7 @@ def _fetch_toa_raw_chw_from_gee(
             "proxy_band_order": tuple(_DEFAULT_MODIS_BANDS),
         }
 
+
 def _coerce_fetch_result(res: Any) -> tuple[np.ndarray, dict[str, Any]]:
     if isinstance(res, tuple) and len(res) == 2 and isinstance(res[1], dict):
         arr = np.asarray(res[0], dtype=np.float32)
@@ -719,6 +739,7 @@ def _coerce_fetch_result(res: Any) -> tuple[np.ndarray, dict[str, Any]]:
         "fallback_used": False,
         "already_unit_scaled": False,
     }
+
 
 def _satvision_forward_batch(
     model: Any,
@@ -746,6 +767,7 @@ def _satvision_forward_batch(
 
     arrs, meta = _decode_features_to_batch_arrays(out, len(x_chw_batch))
     return arrs, meta
+
 
 @register("satvision")
 class SatVisionTOAEmbedder(EmbedderBase):
@@ -964,9 +986,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
             Raw CHW array and fetch-time metadata including fallback info.
         """
         t = temporal_to_range(temporal)
-        raw, meta = _coerce_fetch_result(
-            _fetch_toa_raw_chw_from_gee(provider, spatial, t, sensor)
-        )
+        raw, meta = _coerce_fetch_result(_fetch_toa_raw_chw_from_gee(provider, spatial, t, sensor))
         return FetchResult(data=raw, meta=meta)
 
     def get_embedding(

@@ -38,11 +38,14 @@ from .runtime_utils import (
 _SATMAEPP_RGB_MEAN = (0.4182007312774658, 0.4214799106121063, 0.3991275727748871)
 _SATMAEPP_RGB_STD = (0.28774282336235046, 0.27541765570640564, 0.2764017581939697)
 
+
 def _truthy(v: str) -> bool:
     return str(v).strip().lower() in {"1", "true", "yes", "y", "on"}
 
+
 def _falsy(v: str) -> bool:
     return str(v).strip().lower() in {"0", "false", "no", "n", "off"}
+
 
 def _resolve_satmaepp_channel_order(model_id: str) -> str:
     """
@@ -69,9 +72,11 @@ def _resolve_satmaepp_channel_order(model_id: str) -> str:
         return "bgr"
     return "rgb"
 
+
 def _satmaepp_resize_short_side(image_size: int) -> int:
     crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
     return int(float(image_size) / crop_pct)
+
 
 def _satmaepp_preprocess_info(model_id: str, image_size: int) -> dict[str, Any]:
     channel_order = _resolve_satmaepp_channel_order(model_id)
@@ -84,6 +89,7 @@ def _satmaepp_preprocess_info(model_id: str, image_size: int) -> dict[str, Any]:
         "resize_short_side": int(resize_short),
         "center_crop": int(image_size),
     }
+
 
 def _satmaepp_preprocess_tensor_batch(
     rgb_u8_batch: list[np.ndarray],
@@ -135,6 +141,7 @@ def _satmaepp_preprocess_tensor_batch(
 
     return torch.stack(xs, dim=0)
 
+
 @lru_cache(maxsize=8)
 def _load_satmaepp_cached(model_id: str, dev: str):
     ensure_torch()
@@ -159,9 +166,11 @@ def _load_satmaepp_cached(model_id: str, dev: str):
     meta = {"model_id": model_id, "device": dev, "in_chans": in_chans}
     return model, meta
 
+
 def _load_satmaepp(model_id: str, device: str = "auto"):
     loaded, _dev = _load_cached_with_device(_load_satmaepp_cached, device=device, model_id=model_id)
     return loaded
+
 
 def _satmaepp_forward_tokens(
     model,
@@ -181,6 +190,7 @@ def _satmaepp_forward_tokens(
         device=device,
         model_id=model_id,
     )[0]
+
 
 def _satmaepp_forward_tokens_batch(
     model,
@@ -221,6 +231,7 @@ def _satmaepp_forward_tokens_batch(
             )
         out_np = toks.detach().float().cpu().numpy().astype(np.float32)
         return [out_np[i] for i in range(out_np.shape[0])]
+
 
 @register("satmaepp")
 class SatMAEPPEmbedder(EmbedderBase):

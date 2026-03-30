@@ -59,6 +59,7 @@ _ALIAS_LS457_SR = {
 
 _NO_IMAGES_FOUND_MSG = "No images found for the selected region/time window."
 
+
 def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str, ...]:
     """Resolve semantic band aliases to real band names based on collection id."""
     if not bands:
@@ -87,22 +88,26 @@ def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str,
         out.append(amap.get(key, b))
     return tuple(out)
 
+
 def _split_date_range(start: str, end: str, n_parts: int) -> tuple[tuple[str, str], ...]:
     try:
         return _split_date_range_core(start, end, n_parts)
     except SpecError as e:
         raise ProviderError(str(e)) from e
 
+
 def _no_images_found_message(*, collection: str | None = None) -> str:
     if collection:
         return f"{_NO_IMAGES_FOUND_MSG} collection={collection!r}"
     return _NO_IMAGES_FOUND_MSG
+
 
 def _collection_size_or_none(col: Any) -> int | None:
     try:
         return int(col.size().getInfo())
     except Exception as _e:
         return None
+
 
 def _raise_if_empty_collection(col: Any, *, collection: str | None = None) -> None:
     n = _collection_size_or_none(col)
@@ -146,6 +151,7 @@ def _build_s1_dualpol_collection(base: Any, *, require_iw: bool) -> Any:
     col = col.filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VH"))
     return col
 
+
 def _sample_image_bands_raw_chw(
     img: Any,
     *,
@@ -166,6 +172,7 @@ def _sample_image_bands_raw_chw(
         raise ProviderError("Failed to sample rectangle from GEE image.") from e
     raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
+
 
 class GEEProvider(ProviderBase):
     name = "gee"
@@ -371,8 +378,10 @@ class GEEProvider(ProviderBase):
 
         region = self.get_region(spatial)
         collection_id = "COPERNICUS/S1_GRD_FLOAT" if bool(use_float_linear) else "COPERNICUS/S1_GRD"
-        base = ee.ImageCollection(collection_id).filterDate(temporal.start, temporal.end).filterBounds(
-            region
+        base = (
+            ee.ImageCollection(collection_id)
+            .filterDate(temporal.start, temporal.end)
+            .filterBounds(region)
         )
         col = _build_s1_dualpol_collection(base, require_iw=bool(require_iw))
         iw_relaxed = False

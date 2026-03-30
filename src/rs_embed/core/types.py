@@ -16,6 +16,7 @@ from .specs import InputPrepSpec, SensorSpec
 
 # ── Enums ──────────────────────────────────────────────────────────
 
+
 class Status(enum.Enum):
     """Execution status for a single task."""
 
@@ -23,11 +24,13 @@ class Status(enum.Enum):
     PARTIAL = "partial"
     FAILED = "failed"
 
+
 class ExportLayout(enum.Enum):
     """Batch export layout policy."""
 
     COMBINED = "combined"
     PER_ITEM = "per_item"
+
 
 class InferenceStrategy(enum.Enum):
     """Inference dispatch policy for single vs. batch execution."""
@@ -36,7 +39,9 @@ class InferenceStrategy(enum.Enum):
     BATCH = "batch"
     SINGLE = "single"
 
+
 # ── Fetch results ─────────────────────────────────────────────────
+
 
 @dataclass
 class FetchResult:
@@ -57,7 +62,9 @@ class FetchResult:
     data: np.ndarray
     meta: dict[str, Any]
 
+
 # ── Typed results ──────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class TaskResult:
@@ -117,7 +124,9 @@ class TaskResult:
             error=repr(error) if isinstance(error, Exception) else str(error),
         )
 
+
 # ── Model configuration ───────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class ModelConfig:
@@ -155,7 +164,9 @@ class ModelConfig:
         """
         return "precomputed" in self.model_type.lower()
 
+
 # ── Public export request objects ──────────────────────────────────
+
 
 @dataclass(frozen=True)
 class ExportModelRequest:
@@ -180,7 +191,9 @@ class ExportModelRequest:
     modality: str | None = None
     model_config: dict[str, Any] | None = None
 
+
 # ── Export target ──────────────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class ExportTarget:
@@ -213,7 +226,9 @@ class ExportTarget:
         """Build a per-item export target."""
         return cls(layout=ExportLayout.PER_ITEM, out_dir=out_dir, names=names)
 
+
 # ── Export configuration ───────────────────────────────────────────
+
 
 @dataclass(frozen=True)
 class ExportConfig:

@@ -106,8 +106,7 @@ def _normalize_thor_variant(variant: Any) -> str:
     resolved = aliases.get(raw)
     if resolved is None:
         raise ModelError(
-            f"Unknown THOR variant='{variant}' "
-            "(expected one of: tiny, small, base, large)."
+            f"Unknown THOR variant='{variant}' (expected one of: tiny, small, base, large)."
         )
     return resolved
 
@@ -162,7 +161,8 @@ def _resolve_thor_runtime_config(
         model_key = _THOR_VARIANT_TO_MODEL_KEY[_normalize_thor_variant(variant_v)]
     else:
         model_key = _normalize_thor_model_key(
-            os.environ.get("RS_EMBED_THOR_MODEL_KEY", default_model_key).strip() or default_model_key
+            os.environ.get("RS_EMBED_THOR_MODEL_KEY", default_model_key).strip()
+            or default_model_key
         )
 
     image_size = int(os.environ.get("RS_EMBED_THOR_IMG", str(default_image_size)))
@@ -194,6 +194,7 @@ def _resolve_thor_runtime_config(
         "hf_id": _thor_hf_id_from_model_key(model_key),
     }
 
+
 def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -204,6 +205,7 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y[0].detach().cpu().numpy().astype(np.float32)
+
 
 def _normalize_s2_for_thor(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
     if raw_chw.ndim != 3 or int(raw_chw.shape[0]) != len(_S2_SR_10_BANDS):
@@ -230,6 +232,7 @@ def _normalize_s2_for_thor(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
         f"Unknown THOR normalization mode '{mode}'. Use one of: thor_stats, unit_scale, none."
     )
 
+
 def _fetch_s2_sr_10_raw_chw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -253,6 +256,7 @@ def _fetch_s2_sr_10_raw_chw(
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
 
+
 def _extract_feature_and_channel_params(
     out: Any,
 ) -> tuple[Any, dict[str, Any] | None]:
@@ -266,6 +270,7 @@ def _extract_feature_and_channel_params(
         raise ModelError(f"THOR forward expected list/tuple of features, got type={type(features)}")
     feat_t = features[-1]
     return feat_t, channel_params
+
 
 def _group_patch_sizes(
     *,
@@ -293,6 +298,7 @@ def _group_patch_sizes(
         patch_sizes.append(p)
         used_groups.append(str(gname))
     return patch_sizes, used_groups
+
 
 def _thor_group_grid_from_tokens(
     tokens_bnd,
@@ -354,6 +360,7 @@ def _thor_group_grid_from_tokens(
     }
     return grid, meta
 
+
 def _pool_thor_tokens(
     tokens: np.ndarray,
     *,
@@ -380,9 +387,8 @@ def _load_thor_module():
     try:
         return importlib.import_module("rs_embed.embedders._vendor.thor_vit")
     except Exception as e:
-        raise ModelError(
-            f"Failed to import vendored THOR runtime: {type(e).__name__}: {e}"
-        ) from e
+        raise ModelError(f"Failed to import vendored THOR runtime: {type(e).__name__}: {e}") from e
+
 
 @lru_cache(maxsize=8)
 def _load_thor_cached(
@@ -464,6 +470,7 @@ def _load_thor_cached(
     }
     return model, meta
 
+
 def _load_thor(
     *,
     model_key: str,
@@ -486,6 +493,7 @@ def _load_thor(
     )
     model, meta = loaded
     return model, meta, dev
+
 
 def _thor_forward_single(
     model: Any,
@@ -563,6 +571,7 @@ def _thor_forward_single(
         **grid_meta,
     }
     return tokens, grid, meta
+
 
 @register("thor")
 class THORBaseEmbedder(EmbedderBase):

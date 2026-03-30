@@ -98,6 +98,7 @@ from .tools.runtime import (
 # Public: embeddings
 # -----------------------------------------------------------------------------
 
+
 def list_models(*, include_aliases: bool = False) -> list[str]:
     """Return the stable model catalog, independent of runtime lazy-load state.
 
@@ -115,6 +116,7 @@ def list_models(*, include_aliases: bool = False) -> list[str]:
     if include_aliases:
         model_ids.update(MODEL_ALIASES.keys())
     return sorted(model_ids)
+
 
 def get_embedding(
     model: str,
@@ -198,6 +200,7 @@ def get_embedding(
         ctx=ctx,
     )[0]
 
+
 def get_embeddings_batch(
     model: str,
     *,
@@ -275,9 +278,11 @@ def get_embeddings_batch(
         ctx=ctx,
     )
 
+
 # -----------------------------------------------------------------------------
 # Public: batch export (core)
 # -----------------------------------------------------------------------------
+
 
 def export_batch(
     *,

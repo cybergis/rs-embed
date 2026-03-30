@@ -19,6 +19,7 @@ def temporal_to_start_end(temporal: TemporalSpec) -> tuple[str, str]:
         return f"{y}-01-01", f"{y + 1}-01-01"
     raise SpecError(f"Unknown TemporalSpec mode: {temporal.mode}")
 
+
 def split_date_range(start: str, end: str, n_parts: int) -> tuple[tuple[str, str], ...]:
     """Split [start, end) into n non-empty date bins using end-exclusive semantics."""
     s = date.fromisoformat(str(start))
@@ -44,9 +45,11 @@ def split_date_range(start: str, end: str, n_parts: int) -> tuple[tuple[str, str
         out.append((str(start), str(end)))
     return tuple(out)
 
+
 def split_temporal_range(temporal: TemporalSpec, n_parts: int) -> tuple[tuple[str, str], ...]:
     start, end = temporal_to_start_end(temporal)
     return split_date_range(start, end, n_parts)
+
 
 def midpoint_date(start: str, end: str) -> str:
     start_dt = datetime.fromisoformat(str(start))
@@ -55,6 +58,7 @@ def midpoint_date(start: str, end: str) -> str:
         raise SpecError(f"Invalid date range for midpoint: start={start}, end={end}")
     mid_dt = start_dt + (end_dt - start_dt) / 2
     return mid_dt.date().isoformat()
+
 
 def temporal_frame_midpoints(temporal: TemporalSpec, n_frames: int) -> tuple[str, ...]:
     bins = split_temporal_range(temporal, n_frames)

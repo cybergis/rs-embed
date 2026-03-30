@@ -193,7 +193,9 @@ def run_pending_models(
 
     return manifest
 
+
 # ── Private helpers ────────────────────────────────────────────────
+
 
 def _gather_inputs(
     *,
@@ -263,6 +265,7 @@ def _gather_inputs(
         ref = {"npz_keys": keys}
         input_refs_by_sensor[skey] = dict(ref)
         m_entry["inputs"] = ref
+
 
 def _pack_embedding_results(
     *,

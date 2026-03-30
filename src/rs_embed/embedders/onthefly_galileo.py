@@ -45,6 +45,7 @@ from .runtime_utils import (
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
+
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -55,6 +56,7 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y.detach().cpu().numpy().astype(np.float32)
+
 
 def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
     x = np.asarray(raw, dtype=np.float32)
@@ -85,6 +87,7 @@ def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
         )
     return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
+
 def _fetch_s2_10_raw_tchw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -109,6 +112,7 @@ def _fetch_s2_10_raw_tchw(
         fill_value=fill_value,
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
+
 
 def _resolve_model_folder(
     *,
@@ -140,6 +144,7 @@ def _resolve_model_folder(
         )
     return p
 
+
 @lru_cache(maxsize=8)
 def _load_galileo_module():
     try:
@@ -151,6 +156,7 @@ def _load_galileo_module():
             "Install missing dependencies: torch, einops."
         ) from e
     return mod
+
 
 @lru_cache(maxsize=8)
 def _download_galileo_model_folder(
@@ -184,15 +190,18 @@ def _download_galileo_model_folder(
         )
     return model_root
 
+
 def _month_from_iso(iso_date: str) -> int:
     d = date.fromisoformat(str(iso_date))
     return max(1, min(12, int(d.month)))
+
 
 def _frame_month_sequence(temporal: TemporalSpec, *, n_frames: int) -> np.ndarray:
     mids = temporal_frame_midpoints(temporal, max(1, int(n_frames)))
     if not mids:
         return np.full((max(1, int(n_frames)),), 6, dtype=np.int64)
     return np.array([_month_from_iso(v) for v in mids], dtype=np.int64)
+
 
 @lru_cache(maxsize=6)
 def _load_galileo_cached(
@@ -257,6 +266,7 @@ def _load_galileo_cached(
     }
     return encoder, meta, mod
 
+
 def _load_galileo(
     *,
     model_size: str,
@@ -277,6 +287,7 @@ def _load_galileo(
     )
     encoder, meta, mod = loaded
     return encoder, meta, mod, dev
+
 
 def _prepare_galileo_encoder_inputs(
     raw_tchw: np.ndarray,
@@ -404,6 +415,7 @@ def _prepare_galileo_encoder_inputs(
     }
     return data, meta
 
+
 def _galileo_forward(
     encoder: Any,
     data: dict[str, Any],
@@ -468,6 +480,7 @@ def _galileo_forward(
         "s2_group_indices": tuple(int(i) for i in s2_group_indices),
     }
     return vec, grid, fmeta
+
 
 @register("galileo")
 class GalileoEmbedder(EmbedderBase):

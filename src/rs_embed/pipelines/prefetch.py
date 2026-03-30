@@ -137,13 +137,18 @@ class PrefetchManager:
         provider = self.provider
 
         def _fetch_one(
-            i: int, skey: str, sspec: SensorSpec,
+            i: int,
+            skey: str,
+            sspec: SensorSpec,
         ) -> tuple[int, str, np.ndarray, dict[str, Any]]:
             fetcher = self.fetcher_by_key.get(skey)
             if fetcher is not None:
                 fr: FetchResult = run_with_retry(
                     lambda: fetcher.fetch_input(
-                        provider, spatial=spatials[i], temporal=temporal, sensor=sspec,
+                        provider,
+                        spatial=spatials[i],
+                        temporal=temporal,
+                        sensor=sspec,
                     ),
                     retries=cfg.max_retries,
                     backoff_s=cfg.retry_backoff_s,
@@ -241,7 +246,10 @@ class PrefetchManager:
         if fetcher is not None:
             fr: FetchResult = run_with_retry(
                 lambda: fetcher.fetch_input(
-                    self.provider, spatial=spatial, temporal=temporal, sensor=sspec,
+                    self.provider,
+                    spatial=spatial,
+                    temporal=temporal,
+                    sensor=sspec,
                 ),
                 retries=cfg.max_retries,
                 backoff_s=cfg.retry_backoff_s,
@@ -251,7 +259,9 @@ class PrefetchManager:
                 self.fetch_meta[(idx, skey)] = fr.meta
         else:
             x = run_with_retry(
-                lambda: self.fetch_fn(self.provider, spatial=spatial, temporal=temporal, sensor=sspec),
+                lambda: self.fetch_fn(
+                    self.provider, spatial=spatial, temporal=temporal, sensor=sspec
+                ),
                 retries=cfg.max_retries,
                 backoff_s=cfg.retry_backoff_s,
             )

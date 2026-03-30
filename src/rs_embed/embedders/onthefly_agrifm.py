@@ -78,11 +78,13 @@ _AGRIFM_DEFAULT_CKPT_FILENAME = "AgriFM.pth"
 _AGRIFM_DEFAULT_CACHE_DIR = "~/.cache/rs_embed/agrifm"
 _AGRIFM_DEFAULT_MIN_BYTES = 100 * 1024 * 1024
 
+
 def _env_flag(name: str, default: bool) -> bool:
     v = os.environ.get(name)
     if v is None:
         return bool(default)
     return str(v).strip().lower() not in {"0", "false", "no", "off", ""}
+
 
 def _download_url_to_path(url: str, dst_path: str) -> str:
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -102,6 +104,7 @@ def _download_url_to_path(url: str, dst_path: str) -> str:
         except Exception as _e:
             pass
     return dst_path
+
 
 @lru_cache(maxsize=4)
 def _download_agrifm_ckpt(
@@ -133,6 +136,7 @@ def _download_agrifm_ckpt(
         )
     return dst
 
+
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -143,6 +147,7 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y.detach().cpu().numpy().astype(np.float32)
+
 
 def _normalize_s2_for_agrifm(raw_tchw: np.ndarray, *, mode: str) -> np.ndarray:
     if raw_tchw.ndim != 4 or int(raw_tchw.shape[1]) != len(_S2_10_BANDS):
@@ -164,6 +169,7 @@ def _normalize_s2_for_agrifm(raw_tchw: np.ndarray, *, mode: str) -> np.ndarray:
     raise ModelError(
         f"Unknown AgriFM normalization mode '{mode}'. Use one of: agrifm_stats, unit_scale, none."
     )
+
 
 def _install_agrifm_lightweight_shims() -> None:
     """Install tiny mmseg/mmengine shims sufficient for AgriFM backbone import.
@@ -340,6 +346,7 @@ def _install_agrifm_lightweight_shims() -> None:
         if mod_mmengine is not None and getattr(mod_mmengine, "__spec__", None) is None:
             mod_mmengine.__spec__ = importlib.util.spec_from_loader("mmengine", loader=None)
 
+
 @lru_cache(maxsize=1)
 def _import_agrifm_swin():
     try:
@@ -351,6 +358,7 @@ def _import_agrifm_swin():
             "Install missing minimal deps: timm, einops (and torch). "
             f"Import error: {type(e).__name__}: {e}"
         ) from e
+
 
 def _resolve_ckpt_path() -> str:
     p = str(os.environ.get("RS_EMBED_AGRIFM_CKPT") or "").strip()
@@ -388,6 +396,7 @@ def _resolve_ckpt_path() -> str:
         min_bytes=min_bytes,
     )
 
+
 def _assert_weights_loaded(model) -> dict[str, float]:
     ensure_torch()
     import torch
@@ -409,6 +418,7 @@ def _assert_weights_loaded(model) -> dict[str, float]:
     if std < 1e-6 and mx < 1e-5:
         raise ModelError("AgriFM parameters look uninitialized (near-zero stats).")
     return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+
 
 @lru_cache(maxsize=6)
 def _load_agrifm_cached(
@@ -473,6 +483,7 @@ def _load_agrifm_cached(
     }
     return model, meta
 
+
 def _load_agrifm(
     *,
     ckpt_path: str,
@@ -485,6 +496,7 @@ def _load_agrifm(
     )
     model, meta = loaded
     return model, meta, dev
+
 
 def _fetch_s2_10_raw_tchw(
     provider: ProviderBase,
@@ -509,6 +521,7 @@ def _fetch_s2_10_raw_tchw(
         composite=str(composite),
         fill_value=float(fill_value),
     )
+
 
 def _agrifm_forward_grid(
     model, x_tchw: np.ndarray, *, device: str
@@ -554,6 +567,7 @@ def _agrifm_forward_grid(
         "feature_list_shapes": feat_list_shapes,
     }
     return grid, meta
+
 
 @register("agrifm")
 class AgriFMEmbedder(EmbedderBase):

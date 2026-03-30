@@ -47,6 +47,7 @@ def validate_specs(
             f"Unknown grid orientation policy: {getattr(output, 'grid_orientation', None)}"
         )
 
+
 def validate_spatial_list(
     *,
     spatials: list[SpatialSpec],
@@ -58,6 +59,7 @@ def validate_spatial_list(
         raise ModelError("spatials must be a non-empty list[SpatialSpec].")
     for spatial in spatials:
         validate_specs(spatial=spatial, temporal=temporal, output=output)
+
 
 def assert_supported(
     embedder, *, backend: str, output: OutputSpec, temporal: TemporalSpec | None

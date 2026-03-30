@@ -10,8 +10,10 @@ from .serialization import jsonable as _jsonable
 _CHECKPOINT_PREFETCH_BCHW_PREFIX = "__prefetch_bchw__"
 _CHECKPOINT_PREFETCH_CHW_PREFIX = "__prefetch_chw__"
 
+
 def is_incomplete_combined_manifest(manifest: dict[str, Any] | None) -> bool:
     return bool(isinstance(manifest, dict) and manifest.get("resume_incomplete"))
+
 
 def load_saved_arrays(*, fmt: str, out_path: str) -> dict[str, np.ndarray]:
     if fmt == "npz":
@@ -27,6 +29,7 @@ def load_saved_arrays(*, fmt: str, out_path: str) -> dict[str, np.ndarray]:
             ds.close()
     raise ValueError(f"Unknown format {fmt!r}. Supported: ('npz', 'netcdf')")
 
+
 def drop_prefetch_checkpoint_arrays(arrays: dict[str, np.ndarray]) -> None:
     to_drop = [
         k
@@ -36,6 +39,7 @@ def drop_prefetch_checkpoint_arrays(arrays: dict[str, np.ndarray]) -> None:
     ]
     for k in to_drop:
         arrays.pop(k, None)
+
 
 def store_prefetch_checkpoint_arrays(
     *,
@@ -86,6 +90,7 @@ def store_prefetch_checkpoint_arrays(
         prefetch_meta[skey] = entry
     manifest["prefetch"] = prefetch_meta
 
+
 def restore_prefetch_checkpoint_cache(
     *,
     arrays: dict[str, np.ndarray],
@@ -115,6 +120,7 @@ def restore_prefetch_checkpoint_cache(
                     idx = int(j)
                 cache[(idx, str(skey))] = np.asarray(arrays[key], dtype=np.float32)
     return cache
+
 
 def drop_model_arrays(arrays: dict[str, np.ndarray], model_name: str, *, sanitize_key) -> None:
     mkey = sanitize_key(model_name)

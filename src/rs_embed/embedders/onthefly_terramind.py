@@ -145,6 +145,7 @@ _TERRAMIND_REGISTRATION_MODULES = (
     "terratorch.models.backbones.terramind.model.terramind_register",
 )
 
+
 def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     ensure_torch()
     import torch
@@ -155,6 +156,7 @@ def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
     return y[0].detach().cpu().numpy().astype(np.float32)
+
 
 def _fetch_s2_sr_12_raw_chw(
     provider: ProviderBase,
@@ -178,6 +180,7 @@ def _fetch_s2_sr_12_raw_chw(
         fill_value=fill_value,
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
+
 
 def _terramind_zscore_s2(raw_chw: np.ndarray, *, model_key: str, mode: str) -> np.ndarray:
     if raw_chw.ndim != 3 or int(raw_chw.shape[0]) != len(_S2_SR_12_BANDS):
@@ -280,6 +283,7 @@ def _ensure_terramind_backbone_registered(backbone_registry: Any, *, model_key: 
         "imports cleanly."
     )
 
+
 @lru_cache(maxsize=8)
 def _load_terramind_cached(
     model_key: str,
@@ -338,6 +342,7 @@ def _load_terramind_cached(
     }
     return model, meta
 
+
 def _load_terramind(
     *,
     model_key: str,
@@ -354,6 +359,7 @@ def _load_terramind(
     )
     model, meta = loaded
     return model, meta, dev
+
 
 def _terramind_forward_tokens(
     model: Any,
@@ -424,6 +430,7 @@ def _terramind_forward_tokens(
     }
     return tokens, meta
 
+
 def _terramind_forward_tokens_batch(
     model: Any,
     x_bchw: np.ndarray,
@@ -492,6 +499,7 @@ def _terramind_forward_tokens_batch(
     }
     return tokens, meta
 
+
 def _prepare_terramind_input_chw(
     input_chw: Any,
     *,
@@ -507,6 +515,7 @@ def _prepare_terramind_input_chw(
     raw_chw = np.clip(raw_chw, 0.0, 10000.0).astype(np.float32)
     raw_chw = _resize_chw(raw_chw, size=image_size)
     return _terramind_zscore_s2(raw_chw, model_key=model_key, mode=normalize_mode)
+
 
 @register("terramind")
 class TerraMindEmbedder(EmbedderBase):

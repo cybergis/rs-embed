@@ -56,6 +56,7 @@ def _fetch_s2_rgb_chw(
         composite=str(composite),
     )
 
+
 # -----------------------------
 # HF weight management (strict)
 # -----------------------------
@@ -69,6 +70,7 @@ def _find_weight_file(path: str) -> str | None:
         if os.path.exists(p):
             return p
     return None
+
 
 def _ensure_hf_weights(
     repo_id_or_path: str,
@@ -133,6 +135,7 @@ def _ensure_hf_weights(
             )
     return local_dir, wf
 
+
 def _assert_weights_loaded(model) -> dict[str, float]:
     """Best-effort sanity check that weights are loaded (do not trust rshf warnings)."""
     import torch
@@ -155,6 +158,7 @@ def _assert_weights_loaded(model) -> dict[str, float]:
     if std < 1e-6 and mx < 1e-5:
         raise ModelError("RemoteCLIP parameters look uninitialized (near-zero stats).")
     return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+
 
 @contextmanager
 def _suppress_rshf_pretrained_init_warning():
@@ -185,6 +189,7 @@ def _suppress_rshf_pretrained_init_warning():
         yield suppressed
     finally:
         root_logger.removeFilter(filt)
+
 
 def _load_rshf_remoteclip(
     ckpt: str,
@@ -223,12 +228,14 @@ def _load_rshf_remoteclip(
     }
     return model, meta
 
+
 # -----------------------------
 # Token -> grid helpers
 # -----------------------------
 def _is_perfect_square(n: int) -> bool:
     r = int(np.sqrt(n))
     return r * r == n
+
 
 def _tokens_to_grid_dhw(tokens_nd: np.ndarray) -> tuple[np.ndarray, dict[str, Any]]:
     """
@@ -257,6 +264,7 @@ def _tokens_to_grid_dhw(tokens_nd: np.ndarray) -> tuple[np.ndarray, dict[str, An
     grid_dhw = np.transpose(grid_hwd, (2, 0, 1))  # [D, Ht, Wt]
     meta = {"token_count": n, "dim": d, "grid_hw": (ht, wt), "cls_removed": cls_removed}
     return grid_dhw.astype(np.float32), meta
+
 
 # -----------------------------
 # RemoteCLIP inference adapter
@@ -429,6 +437,7 @@ def _remoteclip_encode_tokens(
 
         raise ModelError("RemoteCLIP exposes neither token sequence nor pooled encoding methods.")
 
+
 def _remoteclip_encode_pooled_batch(
     model,
     rgb_u8_batch: list[np.ndarray],
@@ -500,6 +509,7 @@ def _remoteclip_encode_pooled_batch(
             f"RemoteCLIP batch mismatch: got B={arr.shape[0]}, expected {len(rgb_u8_batch)}"
         )
     return arr
+
 
 @register("remoteclip")
 class RemoteCLIPS2RGBEmbedder(EmbedderBase):

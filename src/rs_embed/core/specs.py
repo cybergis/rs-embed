@@ -44,6 +44,7 @@ class BBox:
         if not (self.minlon < self.maxlon and self.minlat < self.maxlat):
             raise SpecError("Invalid bbox bounds.")
 
+
 @dataclass(frozen=True)
 class PointBuffer:
     """Point-centered spatial request with radius in meters.
@@ -78,7 +79,9 @@ class PointBuffer:
         if self.buffer_m <= 0:
             raise SpecError("buffer_m must be positive.")
 
+
 SpatialSpec = BBox | PointBuffer
+
 
 @dataclass(frozen=True)
 class TemporalSpec:
@@ -165,6 +168,7 @@ class TemporalSpec:
         else:
             raise SpecError(f"Unknown TemporalSpec mode: {self.mode}")
 
+
 @dataclass(frozen=True)
 class SensorSpec:
     """Sensor/source definition for on-the-fly provider fetching.
@@ -223,7 +227,9 @@ class SensorSpec:
     check_raise: bool = True
     check_save_dir: str | None = None
 
+
 # ── Normalization & model input contract ──────────────────────────
+
 
 @dataclass(frozen=True)
 class NormalizationSpec:
@@ -370,6 +376,7 @@ class OutputSpec:
             Output specification with ``mode="pooled"``.
         """
         return OutputSpec(mode="pooled", scale_m=10, pooling=pooling, grid_orientation="north_up")
+
 
 @dataclass(frozen=True)
 class InputPrepSpec:

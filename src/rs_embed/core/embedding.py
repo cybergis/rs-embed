@@ -8,6 +8,7 @@ import numpy as np
 if TYPE_CHECKING:
     import xarray as xr
 
+
 @dataclass
 class Embedding:
     """Container for embedding values and associated metadata.

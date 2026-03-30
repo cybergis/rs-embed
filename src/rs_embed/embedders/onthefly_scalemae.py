@@ -57,9 +57,11 @@ def _load_scalemae_cached(model_id: str, dev: str):
     meta = {"model_id": model_id, "device": dev}
     return model, meta
 
+
 def _load_scalemae(model_id: str, device: str = "auto"):
     loaded, _dev = _load_cached_with_device(_load_scalemae_cached, device=device, model_id=model_id)
     return loaded
+
 
 def _infer_patch_size(model) -> int:
     """
@@ -82,6 +84,7 @@ def _infer_patch_size(model) -> int:
     # some timm variants: model.patch_embed.patch_size[0]
     # fallback: ViT-L/16 is common for ScaleMAE
     return 16
+
 
 def _call_with_patch_size(fn, x, *, patch_size: int, input_res):
     """
@@ -124,6 +127,7 @@ def _call_with_patch_size(fn, x, *, patch_size: int, input_res):
                 return fn(x, input_res, patch_size)
             except TypeError as e:
                 raise ModelError(f"ScaleMAE call failed even with patch_size/input_res: {e}") from e
+
 
 def _scalemae_forward_tokens_or_vec(
     model,
@@ -206,6 +210,7 @@ def _scalemae_forward_tokens_or_vec(
             }
 
         raise ModelError("ScaleMAE: cannot obtain tokens or pooled vector from this model.")
+
 
 def _scalemae_forward_tokens_or_vec_batch(
     model,
@@ -292,6 +297,7 @@ def _scalemae_forward_tokens_or_vec_batch(
             }
 
         raise ModelError("ScaleMAE: cannot obtain tokens or pooled vector from this model.")
+
 
 @register("scalemae")
 class ScaleMAERGBEmbedder(EmbedderBase):
