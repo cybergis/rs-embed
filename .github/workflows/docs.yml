@@ -5,10 +5,14 @@ on:
     paths:
       - "docs/**"
       - "mkdocs.yml"
+      - "pyproject.toml"
+    tags:
+      - "v*.*.*"
   pull_request:
     paths:
       - "docs/**"
       - "mkdocs.yml"
+      - "pyproject.toml"
 
 permissions:
   contents: write
@@ -21,18 +25,43 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install mkdocs-material pymdown-extensions
+      - run: pip install mkdocs-material pymdown-extensions mike
       - name: Build docs (strict)
         run: mkdocs build --strict
 
-  deploy:
+  deploy-dev:
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     needs: validate
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
-      - run: pip install mkdocs-material pymdown-extensions
-      - run: mkdocs gh-deploy --force
+      - run: pip install mkdocs-material pymdown-extensions mike
+      - run: git config user.name "github-actions[bot]"
+      - run: git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Deploy dev docs
+        run: mike deploy --push --update-aliases dev
+
+  deploy-release:
+    if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+    needs: validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - run: pip install mkdocs-material pymdown-extensions mike
+      - run: git config user.name "github-actions[bot]"
+      - run: git config user.email "github-actions[bot]@users.noreply.github.com"
+      - name: Deploy versioned docs
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          mike deploy --push --update-aliases "$VERSION" latest
+          mike set-default --push latest

@@ -1,4 +1,6 @@
 data/
+.venv/
+/site/
 __pycache__/
 *.py[cod]
 .ruff_cache/
