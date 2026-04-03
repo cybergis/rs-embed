@@ -23,8 +23,6 @@ from ._vit_mae_utils import (
     ensure_torch,
     fetch_s2_rgb_u8_from_provider,
     pool_from_tokens,
-    resize_rgb_u8,
-    rgb_u8_to_tensor_clipnorm,
     temporal_to_range,
     tokens_to_grid_dhw,
 )
@@ -35,6 +33,91 @@ from .runtime_utils import (
 from .runtime_utils import (
     load_cached_with_device as _load_cached_with_device,
 )
+
+_SCALEMAE_IMAGENET_MEAN = (0.485, 0.456, 0.406)
+_SCALEMAE_IMAGENET_STD = (0.229, 0.224, 0.225)
+
+
+def _scalemae_resize_short_side(image_size: int) -> int:
+    crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
+    return int(float(image_size) / crop_pct)
+
+
+def _scalemae_preprocess_info(image_size: int) -> dict[str, Any]:
+    resize_short = _scalemae_resize_short_side(image_size)
+    return {
+        "preprocess_name": "imagenet_eval",
+        "norm_mean": tuple(float(x) for x in _SCALEMAE_IMAGENET_MEAN),
+        "norm_std": tuple(float(x) for x in _SCALEMAE_IMAGENET_STD),
+        "resize_short_side": int(resize_short),
+        "center_crop": int(image_size),
+    }
+
+
+def _scalemae_effective_input_res_m(
+    rgb_u8: np.ndarray,
+    *,
+    image_size: int,
+    source_res_m: float,
+) -> float:
+    if not isinstance(rgb_u8, np.ndarray) or rgb_u8.ndim != 3 or int(rgb_u8.shape[2]) != 3:
+        raise ModelError(
+            "ScaleMAE effective resolution expects uint8 HWC RGB arrays; "
+            f"got shape={getattr(rgb_u8, 'shape', None)}."
+        )
+    h, w = int(rgb_u8.shape[0]), int(rgb_u8.shape[1])
+    if h <= 0 or w <= 0:
+        raise ModelError(f"ScaleMAE effective resolution got invalid shape={rgb_u8.shape}.")
+    resize_short = _scalemae_resize_short_side(image_size)
+    short_side = min(h, w)
+    return float(source_res_m) * (float(short_side) / float(resize_short))
+
+
+def _scalemae_preprocess_tensor_batch(
+    rgb_u8_batch: list[np.ndarray],
+    *,
+    image_size: int,
+):
+    ensure_torch()
+    import torch
+    from PIL import Image
+    from torchvision import transforms
+
+    resize_short = _scalemae_resize_short_side(image_size)
+    preprocess = transforms.Compose(
+        [
+            transforms.Resize(resize_short, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=_SCALEMAE_IMAGENET_MEAN,
+                std=_SCALEMAE_IMAGENET_STD,
+            ),
+        ]
+    )
+
+    xs = []
+    for i, rgb_u8 in enumerate(rgb_u8_batch):
+        if not isinstance(rgb_u8, np.ndarray) or rgb_u8.ndim != 3 or int(rgb_u8.shape[2]) != 3:
+            raise ModelError(
+                "ScaleMAE preprocessing expects uint8 HWC RGB arrays; "
+                f"got shape={getattr(rgb_u8, 'shape', None)} at index={i}."
+            )
+        if rgb_u8.dtype != np.uint8:
+            raise ModelError(
+                "ScaleMAE preprocessing expects dtype=uint8; "
+                f"got dtype={getattr(rgb_u8, 'dtype', None)} at index={i}."
+            )
+        x = preprocess(Image.fromarray(rgb_u8, mode="RGB"))
+        if x.ndim != 3:
+            raise ModelError(
+                f"ScaleMAE preprocess returned shape={tuple(x.shape)} at index={i}; expected [C,H,W]."
+            )
+        xs.append(x.unsqueeze(0))
+
+    if not xs:
+        return torch.empty((0, 3, int(image_size), int(image_size)))
+    return torch.cat(xs, dim=0)
 
 
 @lru_cache(maxsize=8)
@@ -84,6 +167,33 @@ def _infer_patch_size(model) -> int:
     # some timm variants: model.patch_embed.patch_size[0]
     # fallback: ViT-L/16 is common for ScaleMAE
     return 16
+
+
+def _resolve_scalemae_forward_features(model) -> tuple[Any, Any, str]:
+    """
+    Resolve the real ScaleMAE backbone that exposes forward_features().
+
+    rshf's ScaleMAE wrapper is a thin nn.Module shell whose actual ViT backbone
+    lives at ``wrapper.model``. The official scale-aware path is implemented on
+    that nested module, not on the outer wrapper.
+    """
+    candidates = [
+        ("self", model),
+        ("model", getattr(model, "model", None)),
+        ("backbone", getattr(model, "backbone", None)),
+        ("encoder", getattr(model, "encoder", None)),
+    ]
+    for owner, candidate in candidates:
+        if candidate is None:
+            continue
+        ff = getattr(candidate, "forward_features", None)
+        if callable(ff):
+            return candidate, ff, owner
+    raise ModelError(
+        "ScaleMAE wrapper does not expose forward_features(), including common nested "
+        "backbone attributes such as .model. Update rshf or use a wrapper that keeps "
+        "the official ScaleMAE feature-extraction path."
+    )
 
 
 def _call_with_patch_size(fn, x, *, patch_size: int, input_res):
@@ -142,74 +252,61 @@ def _scalemae_forward_tokens_or_vec(
       - input_res: 1D tensor
       - patch_size: required positional argument in forward() (and sometimes in forward_features()).
 
-    Prefer forward_features() to get tokens [N,D]; fallback to forward().
+    Always use the official ScaleMAE feature-extraction path. For rshf wrappers,
+    this may require unwrapping the nested backbone at ``model.model``.
     """
+    core_model, ff, ff_owner = _resolve_scalemae_forward_features(model)
+
     ensure_torch()
     import torch
 
-    x = rgb_u8_to_tensor_clipnorm(rgb_u8, image_size).to(device)  # [B,3,H,W]
+    x = _scalemae_preprocess_tensor_batch([rgb_u8], image_size=image_size).to(device)  # [B,3,H,W]
     input_res = torch.tensor([float(input_res_m)], dtype=torch.float32, device=device)  # 1D
-    patch_size = _infer_patch_size(model)
+    patch_size = _infer_patch_size(core_model)
+    prep = _scalemae_preprocess_info(image_size)
 
     with torch.no_grad():
-        ff = getattr(model, "forward_features", None)
-        if callable(ff):
-            out = _call_with_patch_size(ff, x, patch_size=patch_size, input_res=input_res)
-            out0 = out[0] if isinstance(out, (tuple, list)) else out
-
-            if hasattr(out0, "ndim") and out0.ndim == 3:  # [B,N,D]
-                toks = out0
-                return toks[0].detach().float().cpu().numpy().astype(np.float32), {
-                    "tokens_kind": "tokens_forward_features",
-                    "input_res_m": float(input_res_m),
-                    "used_patch_size": int(patch_size),
-                    "tokens_shape": tuple(toks.shape),
-                }
-
-            if hasattr(out0, "ndim") and out0.ndim == 2:  # [B,D]
-                v = out0
-                return v[0].detach().float().cpu().numpy().astype(np.float32), {
-                    "tokens_kind": "pooled_forward_features",
-                    "input_res_m": float(input_res_m),
-                    "used_patch_size": int(patch_size),
-                    "vec_shape": tuple(v.shape),
-                }
-
-            if hasattr(out0, "ndim") and out0.ndim == 4:  # [B,C,H,W] -> tokens
-                b, c, h, w = out0.shape
-                toks = out0.permute(0, 2, 3, 1).reshape(b, h * w, c)
-                return toks[0].detach().float().cpu().numpy().astype(np.float32), {
-                    "tokens_kind": "tokens_from_feature_map",
-                    "input_res_m": float(input_res_m),
-                    "used_patch_size": int(patch_size),
-                    "feature_map_hw": (int(h), int(w)),
-                    "tokens_shape": tuple(toks.shape),
-                }
-
-            raise ModelError(
-                f"ScaleMAE forward_features returned unsupported: {type(out0)} {getattr(out0, 'shape', None)}"
-            )
-
-        # fallback: forward (must pass patch_size + input_res)
-        out = _call_with_patch_size(model, x, patch_size=patch_size, input_res=input_res)
+        out = _call_with_patch_size(ff, x, patch_size=patch_size, input_res=input_res)
         out0 = out[0] if isinstance(out, (tuple, list)) else out
 
-        if hasattr(out0, "ndim") and out0.ndim == 3:
-            return out0[0].detach().float().cpu().numpy().astype(np.float32), {
-                "tokens_kind": "tokens_forward",
+        if hasattr(out0, "ndim") and out0.ndim == 3:  # [B,N,D]
+            toks = out0
+            return toks[0].detach().float().cpu().numpy().astype(np.float32), {
+                "tokens_kind": "tokens_forward_features",
+                "forward_features_owner": ff_owner,
                 "input_res_m": float(input_res_m),
                 "used_patch_size": int(patch_size),
-                "tokens_shape": tuple(out0.shape),
-            }
-        if hasattr(out0, "ndim") and out0.ndim == 2:
-            return out0[0].detach().float().cpu().numpy().astype(np.float32), {
-                "tokens_kind": "pooled_forward",
-                "input_res_m": float(input_res_m),
-                "used_patch_size": int(patch_size),
-                "vec_shape": tuple(out0.shape),
+                "tokens_shape": tuple(toks.shape),
+                **prep,
             }
 
-        raise ModelError("ScaleMAE: cannot obtain tokens or pooled vector from this model.")
+        if hasattr(out0, "ndim") and out0.ndim == 2:  # [B,D]
+            v = out0
+            return v[0].detach().float().cpu().numpy().astype(np.float32), {
+                "tokens_kind": "pooled_forward_features",
+                "forward_features_owner": ff_owner,
+                "input_res_m": float(input_res_m),
+                "used_patch_size": int(patch_size),
+                "vec_shape": tuple(v.shape),
+                **prep,
+            }
+
+        if hasattr(out0, "ndim") and out0.ndim == 4:  # [B,C,H,W] -> tokens
+            b, c, h, w = out0.shape
+            toks = out0.permute(0, 2, 3, 1).reshape(b, h * w, c)
+            return toks[0].detach().float().cpu().numpy().astype(np.float32), {
+                "tokens_kind": "tokens_from_feature_map",
+                "forward_features_owner": ff_owner,
+                "input_res_m": float(input_res_m),
+                "used_patch_size": int(patch_size),
+                "feature_map_hw": (int(h), int(w)),
+                "tokens_shape": tuple(toks.shape),
+                **prep,
+            }
+
+        raise ModelError(
+            f"ScaleMAE forward_features returned unsupported: {type(out0)} {getattr(out0, 'shape', None)}"
+        )
 
 
 def _scalemae_forward_tokens_or_vec_batch(
@@ -218,85 +315,79 @@ def _scalemae_forward_tokens_or_vec_batch(
     *,
     image_size: int,
     device: str,
-    input_res_m: float,
+    input_res_m: float | list[float] | np.ndarray,
 ) -> tuple[list[np.ndarray], dict[str, Any]]:
     """Batch variant that returns one output array per input item."""
     if not rgb_u8_batch:
         return [], {"tokens_kind": "empty_batch"}
 
+    core_model, ff, ff_owner = _resolve_scalemae_forward_features(model)
+
     ensure_torch()
     import torch
 
-    xs = [rgb_u8_to_tensor_clipnorm(rgb_u8, image_size) for rgb_u8 in rgb_u8_batch]
-    xb = torch.cat(xs, dim=0).to(device)  # [B,3,H,W]
-    input_res = torch.full(
-        (len(rgb_u8_batch),), float(input_res_m), dtype=torch.float32, device=device
-    )
-    patch_size = _infer_patch_size(model)
+    xb = _scalemae_preprocess_tensor_batch(rgb_u8_batch, image_size=image_size).to(device)  # [B,3,H,W]
+    if np.isscalar(input_res_m):
+        input_res_values = [float(input_res_m)] * len(rgb_u8_batch)
+    else:
+        input_res_values = [float(x) for x in input_res_m]
+        if len(input_res_values) != len(rgb_u8_batch):
+            raise ModelError(
+                "ScaleMAE batch input_res_m length mismatch: "
+                f"{len(input_res_values)} != {len(rgb_u8_batch)}"
+            )
+    input_res = torch.tensor(input_res_values, dtype=torch.float32, device=device)
+    patch_size = _infer_patch_size(core_model)
+    prep = _scalemae_preprocess_info(image_size)
 
     def _to_list(arr: np.ndarray) -> list[np.ndarray]:
         return [arr[i].astype(np.float32, copy=False) for i in range(arr.shape[0])]
 
+    common_extra: dict[str, Any] = {
+        "forward_features_owner": ff_owner,
+        "used_patch_size": int(patch_size),
+        **prep,
+    }
+    if input_res_values:
+        if all(abs(x - input_res_values[0]) < 1e-6 for x in input_res_values[1:]):
+            common_extra["input_res_m"] = float(input_res_values[0])
+        else:
+            common_extra["input_res_m_kind"] = "per_item"
+
     with torch.inference_mode():
-        ff = getattr(model, "forward_features", None)
-        if callable(ff):
-            out = _call_with_patch_size(ff, xb, patch_size=patch_size, input_res=input_res)
-            out0 = out[0] if isinstance(out, (tuple, list)) else out
-
-            if hasattr(out0, "ndim") and out0.ndim == 3:  # [B,N,D]
-                toks = out0.detach().float().cpu().numpy().astype(np.float32)
-                return _to_list(toks), {
-                    "tokens_kind": "tokens_forward_features",
-                    "input_res_m": float(input_res_m),
-                    "used_patch_size": int(patch_size),
-                    "batch_shape": tuple(toks.shape),
-                }
-
-            if hasattr(out0, "ndim") and out0.ndim == 2:  # [B,D]
-                vec = out0.detach().float().cpu().numpy().astype(np.float32)
-                return _to_list(vec), {
-                    "tokens_kind": "pooled_forward_features",
-                    "input_res_m": float(input_res_m),
-                    "used_patch_size": int(patch_size),
-                    "batch_shape": tuple(vec.shape),
-                }
-
-            if hasattr(out0, "ndim") and out0.ndim == 4:  # [B,C,H,W] -> tokens
-                b, c, h, w = out0.shape
-                toks = out0.permute(0, 2, 3, 1).reshape(b, h * w, c)
-                toks_np = toks.detach().float().cpu().numpy().astype(np.float32)
-                return _to_list(toks_np), {
-                    "tokens_kind": "tokens_from_feature_map",
-                    "input_res_m": float(input_res_m),
-                    "used_patch_size": int(patch_size),
-                    "feature_map_hw": (int(h), int(w)),
-                    "batch_shape": tuple(toks_np.shape),
-                }
-
-            raise ModelError(
-                f"ScaleMAE forward_features returned unsupported: {type(out0)} {getattr(out0, 'shape', None)}"
-            )
-
-        out = _call_with_patch_size(model, xb, patch_size=patch_size, input_res=input_res)
+        out = _call_with_patch_size(ff, xb, patch_size=patch_size, input_res=input_res)
         out0 = out[0] if isinstance(out, (tuple, list)) else out
-        if hasattr(out0, "ndim") and out0.ndim == 3:
+
+        if hasattr(out0, "ndim") and out0.ndim == 3:  # [B,N,D]
             toks = out0.detach().float().cpu().numpy().astype(np.float32)
             return _to_list(toks), {
-                "tokens_kind": "tokens_forward",
-                "input_res_m": float(input_res_m),
-                "used_patch_size": int(patch_size),
+                "tokens_kind": "tokens_forward_features",
                 "batch_shape": tuple(toks.shape),
+                **common_extra,
             }
+
         if hasattr(out0, "ndim") and out0.ndim == 2:
             vec = out0.detach().float().cpu().numpy().astype(np.float32)
             return _to_list(vec), {
-                "tokens_kind": "pooled_forward",
-                "input_res_m": float(input_res_m),
-                "used_patch_size": int(patch_size),
+                "tokens_kind": "pooled_forward_features",
                 "batch_shape": tuple(vec.shape),
+                **common_extra,
             }
 
-        raise ModelError("ScaleMAE: cannot obtain tokens or pooled vector from this model.")
+        if hasattr(out0, "ndim") and out0.ndim == 4:  # [B,C,H,W] -> tokens
+            b, c, h, w = out0.shape
+            toks = out0.permute(0, 2, 3, 1).reshape(b, h * w, c)
+            toks_np = toks.detach().float().cpu().numpy().astype(np.float32)
+            return _to_list(toks_np), {
+                "tokens_kind": "tokens_from_feature_map",
+                "feature_map_hw": (int(h), int(w)),
+                "batch_shape": tuple(toks_np.shape),
+                **common_extra,
+            }
+
+        raise ModelError(
+            f"ScaleMAE forward_features returned unsupported: {type(out0)} {getattr(out0, 'shape', None)}"
+        )
 
 
 @register("scalemae")
@@ -307,7 +398,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
     Strategy aligned via _vit_mae_utils:
       - pooled: pool patch tokens by OutputSpec.pooling (exclude CLS if present)
       - grid: patch token grid (exclude CLS if present)
-      - scale: uses sensor.scale_m as input_res_m (required by your rshf)
+      - scale: derives effective input_res_m after preprocessing from sensor.scale_m
     """
 
     DEFAULT_MODEL_ID = "MVRL/scalemae-vitlarge-800"
@@ -321,7 +412,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         bands=("B4", "B3", "B2"),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="s2_sr_clip"),
+        normalization=NormalizationSpec(mode="s2_sr_raw"),
         image_size=224,
         expected_channels=3,
     )
@@ -335,6 +426,8 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             "inputs": {
                 "collection": self.input_spec.collection,
                 "bands": list(self.input_spec.bands),
+                "raw_normalization": self.input_spec.normalization.mode,
+                "model_preprocess": "imagenet_eval",
             },
             "temporal": {"mode": "range"},
             "output": ["pooled", "grid"],
@@ -394,7 +487,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                 spatial=spatial,
                 temporal=t,
                 sensor=sensor,
-                out_size=image_size,
+                out_size=None,
                 provider=self._get_provider(backend),
             )
         else:
@@ -407,7 +500,11 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                 )
             s2_chw = np.clip(input_chw.astype(np.float32) / 10000.0, 0.0, 1.0)
             rgb_u8 = (s2_chw.transpose(1, 2, 0) * 255.0).astype(np.uint8)
-            rgb_u8 = resize_rgb_u8(rgb_u8, image_size)
+        input_res_m = _scalemae_effective_input_res_m(
+            rgb_u8,
+            image_size=image_size,
+            source_res_m=float(sensor.scale_m),
+        )
 
         model, wmeta = _load_scalemae(model_id=model_id, device=device)
         dev = wmeta.get("device", device)
@@ -416,7 +513,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             rgb_u8,
             image_size=image_size,
             device=dev,
-            input_res_m=float(sensor.scale_m),
+            input_res_m=float(input_res_m),
         )
 
         meta = base_meta(
@@ -512,13 +609,14 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         provider = self._get_provider(backend)
         n = len(spatials)
         rgb_u8_all: list[np.ndarray | None] = [None] * n
+        input_res_all: list[float | None] = [None] * n
 
         def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
             rgb_u8 = fetch_s2_rgb_u8_from_provider(
                 spatial=sp,
                 temporal=t,
                 sensor=sensor,
-                out_size=image_size,
+                out_size=None,
                 provider=provider,
             )
             return i, rgb_u8
@@ -528,12 +626,22 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             for i, sp in enumerate(spatials):
                 ii, rgb = _fetch_one(i, sp)
                 rgb_u8_all[ii] = rgb
+                input_res_all[ii] = _scalemae_effective_input_res_m(
+                    rgb,
+                    image_size=image_size,
+                    source_res_m=float(sensor.scale_m),
+                )
         else:
             with ThreadPoolExecutor(max_workers=mw) as ex:
                 futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
                 for fut in as_completed(futs):
                     i, rgb = fut.result()
                     rgb_u8_all[i] = rgb
+                    input_res_all[i] = _scalemae_effective_input_res_m(
+                        rgb,
+                        image_size=image_size,
+                        source_res_m=float(sensor.scale_m),
+                    )
 
         model, wmeta = _load_scalemae(model_id=model_id, device=device)
         dev = wmeta.get("device", device)
@@ -554,12 +662,19 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             s1 = min(n, s0 + infer_bs)
             chunk_rgb = []
             chunk_idx = []
+            chunk_res = []
             for i in range(s0, s1):
                 rgb_u8 = rgb_u8_all[i]
                 if rgb_u8 is None:
                     raise ModelError(f"Missing prefetched patch at index={i} for scalemae_rgb.")
+                input_res_m = input_res_all[i]
+                if input_res_m is None:
+                    raise ModelError(
+                        f"Missing prefetched effective input resolution at index={i} for scalemae_rgb."
+                    )
                 chunk_idx.append(i)
                 chunk_rgb.append(rgb_u8)
+                chunk_res.append(float(input_res_m))
 
             try:
                 chunk_outs, chunk_extra = _scalemae_forward_tokens_or_vec_batch(
@@ -567,18 +682,18 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                     chunk_rgb,
                     image_size=image_size,
                     device=dev,
-                    input_res_m=float(sensor.scale_m),
+                    input_res_m=chunk_res,
                 )
             except Exception as _e:
                 chunk_outs = []
                 chunk_extra = {}
-                for rgb_u8 in chunk_rgb:
+                for rgb_u8, input_res_m in zip(chunk_rgb, chunk_res):
                     o1, e1 = _scalemae_forward_tokens_or_vec(
                         model,
                         rgb_u8,
                         image_size=image_size,
                         device=dev,
-                        input_res_m=float(sensor.scale_m),
+                        input_res_m=float(input_res_m),
                     )
                     chunk_outs.append(o1)
                     chunk_extra = e1
@@ -601,6 +716,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                     extra={
                         "used_scale_m": float(sensor.scale_m),
                         **chunk_extra,
+                        "input_res_m": float(chunk_res[j]),
                         "out_shape": tuple(o.shape),
                         "batch_infer": True,
                     },
@@ -689,6 +805,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         infer_bs = self._resolve_infer_batch(str(dev))
 
         rgb_u8_all: list[np.ndarray] = []
+        input_res_all: list[float] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or input_chw.shape[0] != 3:
                 raise ModelError(
@@ -697,7 +814,14 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                 )
             s2_chw = np.clip(input_chw.astype(np.float32) / 10000.0, 0.0, 1.0)
             rgb_u8 = (s2_chw.transpose(1, 2, 0) * 255.0).astype(np.uint8)
-            rgb_u8_all.append(resize_rgb_u8(rgb_u8, image_size))
+            rgb_u8_all.append(rgb_u8)
+            input_res_all.append(
+                _scalemae_effective_input_res_m(
+                    rgb_u8,
+                    image_size=image_size,
+                    source_res_m=float(sensor.scale_m),
+                )
+            )
 
         out: list[Embedding | None] = [None] * len(spatials)
         xr_mod = None
@@ -714,12 +838,13 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             s1 = min(n, s0 + infer_bs)
             chunk_idx = list(range(s0, s1))
             chunk_rgb = [rgb_u8_all[i] for i in chunk_idx]
+            chunk_res = [float(input_res_all[i]) for i in chunk_idx]
             chunk_outs, chunk_extra = _scalemae_forward_tokens_or_vec_batch(
                 model,
                 chunk_rgb,
                 image_size=image_size,
                 device=dev,
-                input_res_m=float(sensor.scale_m),
+                input_res_m=chunk_res,
             )
             if len(chunk_outs) != len(chunk_idx):
                 raise ModelError(
@@ -739,6 +864,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                     extra={
                         "used_scale_m": float(sensor.scale_m),
                         **chunk_extra,
+                        "input_res_m": float(chunk_res[j]),
                         "out_shape": tuple(o.shape),
                         "batch_infer": True,
                         "input_override": True,

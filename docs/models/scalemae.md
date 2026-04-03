@@ -1,22 +1,22 @@
 # ScaleMAE RGB (`scalemae`)
 
-> Sentinel-2 RGB on-the-fly adapter for ScaleMAE (`rshf.scalemae.ScaleMAE`), with explicit scale conditioning via `sensor.scale_m -> input_res_m`.
+> Sentinel-2 RGB on-the-fly adapter for ScaleMAE (`rshf.scalemae.ScaleMAE`), with explicit scale conditioning via `sensor.scale_m -> effective input_res_m`.
 
 ## Quick Facts
 
-| Field                             | Value                                                                           |
-| --------------------------------- | ------------------------------------------------------------------------------- |
-| Model ID                          | `scalemae`                                                                      |
-| Aliases                           | `scalemae_rgb`                                                                  |
-| Family / Backbone                 | ScaleMAE via `rshf.scalemae.ScaleMAE`                                           |
-| Adapter type                      | `on-the-fly`                                                                    |
-| Typical backend                   | provider backend (`gee`)                                                        |
-| Primary input                     | S2 RGB (`B4,B3,B2`) + `input_res_m`                                             |
-| Default resolution                | 10m default provider fetch / semantic scale (`sensor.scale_m`)                  |
-| Temporal mode                     | range window in practice (normalized via shared helper)                         |
-| Output modes                      | `pooled`, `grid`                                                                |
-| Extra side inputs                 | **required semantic scale** (`sensor.scale_m` passed as `input_res_m`)          |
-| Training alignment (adapter path) | Medium-High when `sensor.scale_m` matches the actual input resolution semantics |
+| Field | Value |
+|---|---|
+| Model ID | `scalemae` |
+| Aliases | `scalemae_rgb` |
+| Family / Backbone | ScaleMAE via `rshf.scalemae.ScaleMAE` |
+| Adapter type | `on-the-fly` |
+| Typical backend | provider backend (`gee`) |
+| Primary input | S2 RGB (`B4,B3,B2`) + `input_res_m` |
+| Default resolution | 10m default provider fetch / source scale (`sensor.scale_m`) |
+| Temporal mode | range window in practice (normalized via shared helper) |
+| Output modes | `pooled`, `grid` |
+| Extra side inputs | **required effective scale** (`input_res_m` derived from `sensor.scale_m` after preprocess) |
+| Training alignment (adapter path) | High when `sensor.scale_m` matches the source patch resolution semantics |
 
 ---
 
@@ -40,13 +40,15 @@ Default `SensorSpec` if omitted:
 
 The default sensor is `COPERNICUS/S2_SR_HARMONIZED` with bands `("B4", "B3", "B2")`, `scale_m=10`, `cloudy_pct=30`, and `composite="median"`.
 
+The declarative `input_spec.normalization` for this adapter is `s2_sr_raw`, which here means the provider contract remains raw Sentinel-2 SR and the adapter applies its own RGB conversion plus ImageNet eval preprocessing afterward.
+
 `input_chw` contract:
 
 `input_chw` must be `CHW` with 3 channels in `(B4,B3,B2)` order, and the adapter expects raw Sentinel-2 SR values in `0..10000`.
 
 Scale requirement:
 
-The adapter passes `float(sensor.scale_m)` to ScaleMAE as `input_res_m`. If `sensor.scale_m` does not match the actual resolution semantics of the patch, the resulting embeddings are not meaningfully comparable.
+The adapter derives `input_res_m` from `sensor.scale_m` and the actual preprocessed tensor geometry (`Resize(short side) + CenterCrop`). If `sensor.scale_m` does not match the source patch resolution semantics, the resulting embeddings are not meaningfully comparable.
 
 ---
 
@@ -55,14 +57,12 @@ The adapter passes `float(sensor.scale_m)` to ScaleMAE as `input_res_m`. If `sen
 <pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  provider fetch / input_chw
   <span class="pipeline-arrow">-&gt;</span> S2 RGB patch
      <span class="pipeline-detail">input_chw path: raw SR -&gt; [0,1] -&gt; uint8</span>
-  <span class="pipeline-arrow">-&gt;</span> resize to RS_EMBED_SCALEMAE_IMG=224
-  <span class="pipeline-arrow">-&gt;</span> CLIP-style tensor preprocess
-     <span class="pipeline-detail">rgb_u8_to_tensor_clipnorm</span>
-  <span class="pipeline-arrow">-&gt;</span> build input_res tensor from sensor.scale_m
+  <span class="pipeline-arrow">-&gt;</span> ImageNet eval preprocess
+     <span class="pipeline-detail">Resize(short side) -&gt; CenterCrop -&gt; ToTensor -&gt; Normalize(ImageNet)</span>
+  <span class="pipeline-arrow">-&gt;</span> derive effective input_res tensor from source `sensor.scale_m`
   <span class="pipeline-arrow">-&gt;</span> ScaleMAE forward
-     <span class="pipeline-branch">preferred:</span> forward_features(...)
-     <span class="pipeline-branch">fallback:</span>  forward(...)
-     <span class="pipeline-detail">adapter passes patch_size + input_res and handles rshf signature differences</span>
+     <span class="pipeline-branch">path:</span> official `forward_features(...)`
+     <span class="pipeline-detail">adapter unwraps common rshf wrappers (for example nested `.model`) and passes patch_size + input_res compatibly</span>
   <span class="pipeline-arrow">-&gt;</span> normalize output format
      <span class="pipeline-branch">tokens:</span> [N,D]
      <span class="pipeline-branch">pooled:</span> [D]
@@ -88,7 +88,7 @@ Important:
 
 Non-env but critical:
 
-Even though it is not an environment variable, `sensor.scale_m` is a critical runtime setting because it is passed directly as `input_res_m`.
+Even though it is not an environment variable, `sensor.scale_m` is a critical runtime setting because the adapter uses it to derive the effective `input_res_m` passed to ScaleMAE.
 
 ---
 
@@ -127,7 +127,7 @@ emb = get_embedding(
 # export RS_EMBED_SCALEMAE_ID=MVRL/scalemae-vitlarge-800
 # export RS_EMBED_SCALEMAE_IMG=224
 #
-# In code, keep sensor.scale_m correct (this is passed to ScaleMAE as input_res_m).
+# In code, keep sensor.scale_m correct (the adapter derives effective input_res_m from it).
 ```
 
 ---
@@ -137,13 +137,14 @@ emb = get_embedding(
 - backend mismatch (`scalemae` is provider-only)
 - wrong `input_chw` shape / band order (`CHW`, 3 channels, `(B4,B3,B2)`)
 - missing `rshf.scalemae.ScaleMAE`
-- wrapper signature mismatch in older/newer `rshf` versions (adapter has fallbacks, but still possible)
+- wrapper mismatch in older/newer `rshf` versions, especially wrappers that hide the real ScaleMAE backbone and do not expose `forward_features()` even through common nested attributes such as `.model`
 - `grid` requested when model output is pooled vector only
 - incorrect `sensor.scale_m` causing silent comparison drift
+- mismatch between expected source resolution and the post-preprocess effective `input_res_m`
 
 Recommended first checks:
 
-Start by inspecting metadata such as `tokens_kind`, `used_patch_size`, and `input_res_m` or `used_scale_m`. Then verify `sensor.scale_m` and `RS_EMBED_SCALEMAE_IMG`, and use `OutputSpec.pooled()` first if you are isolating a grid-layout issue.
+Start by inspecting metadata such as `tokens_kind`, `used_patch_size`, `input_res_m`, `resize_short_side`, and `used_scale_m`. Then verify `sensor.scale_m` and `RS_EMBED_SCALEMAE_IMG`, and use `OutputSpec.pooled()` first if you are isolating a grid-layout issue.
 
 ---
 

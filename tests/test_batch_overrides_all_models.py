@@ -66,19 +66,23 @@ def test_scalemae_batch_prefetch_and_single_model_load(monkeypatch):
     calls = {"load": 0}
 
     def _fake_fetch(*, spatial, temporal, sensor, out_size, provider):
-        return np.full((out_size, out_size, 3), int(spatial.lon) + 10, dtype=np.uint8)
+        assert out_size is None
+        return np.full((11, 13, 3), int(spatial.lon) + 10, dtype=np.uint8)
 
     def _fake_load(*, model_id, device):
         calls["load"] += 1
         return object(), {"device": "cpu"}
 
-    def _fake_forward(model, rgb_u8, *, image_size, device, input_res_m):
-        val = float(rgb_u8[0, 0, 0])
-        return np.full((4, 2), val, dtype=np.float32), {"tokens_kind": "tokens_forward"}
+    def _fake_forward_batch(model, rgb_u8_batch, *, image_size, device, input_res_m):
+        vals = [float(rgb_u8[0, 0, 0]) for rgb_u8 in rgb_u8_batch]
+        assert len(vals) == len(input_res_m)
+        return [
+            np.full((4, 2), val, dtype=np.float32) for val in vals
+        ], {"tokens_kind": "tokens_forward"}
 
     monkeypatch.setattr(sm, "fetch_s2_rgb_u8_from_provider", _fake_fetch)
     monkeypatch.setattr(sm, "_load_scalemae", _fake_load)
-    monkeypatch.setattr(sm, "_scalemae_forward_tokens_or_vec", _fake_forward)
+    monkeypatch.setattr(sm, "_scalemae_forward_tokens_or_vec_batch", _fake_forward_batch)
 
     out = emb.get_embeddings_batch(
         spatials=_spatials(4),
