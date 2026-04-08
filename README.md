@@ -12,6 +12,7 @@
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=cybergis.rs-embed)
 ![Last Commit](https://img.shields.io/github/last-commit/cybergis/rs-embed)
 ![License](https://img.shields.io/github/license/cybergis/rs-embed)
+[![PyPI Downloads](https://static.pepy.tech/personalized-badge/rs-embed?period=total&units=INTERNATIONAL_SYSTEM&left_color=GREY&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/rs-embed)
 
 [Docs](https://cybergis.github.io/rs-embed/) · [Releases](https://github.com/cybergis/rs-embed/releases) · [Changelog](https://github.com/cybergis/rs-embed/blob/main/CHANGELOG.md) · [StartNow](https://github.com/cybergis/rs-embed/blob/main/examples/playground.ipynb) · [UseCase](https://github.com/cybergis/rs-embed/blob/main/examples/demo.ipynb) · [Paper](https://arxiv.org/abs/2602.23678)
 
@@ -126,13 +127,15 @@ Resolution here means the default provider/source fetch resolution used by the a
 
 📚 [Full documentation](https://cybergis.github.io/rs-embed/)
 
-🧾 [Release policy and versioning](https://cybergis.github.io/rs-embed/releases/)
-
-📌 [Project changelog](https://github.com/cybergis/rs-embed/blob/main/CHANGELOG.md)
-
 🪄 [Get Started: Try `rs-embed` Now](https://github.com/cybergis/rs-embed/blob/main/examples/playground.ipynb)
 
 🪀 [Use case: Maize yield mapping Illinois](https://github.com/cybergis/rs-embed/blob/main/examples/demo.ipynb)
+
+📢 [Disscusion](https://github.com/cybergis/rs-embed/discussions)
+
+🧾 [Release policy and versioning](https://cybergis.github.io/rs-embed/releases/)
+
+📌 [Project changelog](https://github.com/cybergis/rs-embed/blob/main/CHANGELOG.md)
 
 ## Extending & Contributing
 
