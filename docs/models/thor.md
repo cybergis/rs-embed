@@ -27,6 +27,8 @@ THOR is a strong Sentinel-2 SR baseline when you want pretrained THOR weights, b
 
 As with the other model pages, the runtime knobs here affect representation semantics. Moving away from `thor_stats` normalization, changing `patch_size` or `image_size` without logging `ground_cover_m`, or assuming `grid` is always available can all make comparisons harder to interpret.
 
+One THOR-specific characteristic is that `RS_EMBED_THOR_PATCH_SIZE` directly changes how finely the vendored THOR backbone tokenizes each Sentinel-2 group. Smaller patch sizes keep the same geographic crop but produce denser token layouts and higher compute cost; larger patch sizes coarsen the token grid and reduce compute. In the current S2 10m/20m adapter path, `RS_EMBED_THOR_PATCH_SIZE=8` is the default because it stays divisible with `RS_EMBED_THOR_IMG=288` while giving a denser grid than the previous `16`-pixel default.
+
 ---
 
 ## Input Contract (Current Adapter Path)
@@ -79,12 +81,18 @@ The default sensor is `COPERNICUS/S2_SR_HARMONIZED` with adapter band order `B2,
 | `RS_EMBED_THOR_IMG`           | `288`          | Resize target image size                             |
 | `RS_EMBED_THOR_NORMALIZE`     | `thor_stats`   | `thor_stats`, `unit_scale`, or `none`                |
 | `RS_EMBED_THOR_GROUP_MERGE`   | `mean`         | THOR group-grid aggregation: `mean`, `sum`, `concat` |
-| `RS_EMBED_THOR_PATCH_SIZE`    | `16`           | THOR flexi patch size parameter                      |
+| `RS_EMBED_THOR_PATCH_SIZE`    | `8`            | THOR flexi patch size parameter                      |
 | `RS_EMBED_THOR_FETCH_WORKERS` | `8`            | Provider prefetch workers for batch APIs             |
 
 Notes:
 
 `RS_EMBED_THOR_PATCH_SIZE` and `RS_EMBED_THOR_IMG` jointly affect token layout and `ground_cover_m`. Changing `group_merge` also changes grid channel semantics and dimensionality, especially when `concat` is used.
+
+For the current Sentinel-2 SR 10-band path, a practical rule is to keep `RS_EMBED_THOR_IMG` divisible by `2 * RS_EMBED_THOR_PATCH_SIZE`. That keeps the default 10m and 20m THOR groups aligned to valid patch grids. With the default `RS_EMBED_THOR_IMG=288`, common valid choices include `4`, `6`, `8`, `12`, `16`, and `18`.
+
+If you want to preserve the same geographic footprint (`ground_cover_m=2880` at the default 10m fetch), keep `RS_EMBED_THOR_IMG=288` and only change `RS_EMBED_THOR_PATCH_SIZE`. If you choose a patch size that no longer divides cleanly, change `RS_EMBED_THOR_IMG` together with it.
+
+![patch size](assets/thor.png)
 
 ## Model-specific Settings
 
@@ -144,8 +152,35 @@ emb = get_embedding(
 # export RS_EMBED_THOR_NORMALIZE=thor_stats
 # export RS_EMBED_THOR_GROUP_MERGE=mean
 # export RS_EMBED_THOR_IMG=288
-# export RS_EMBED_THOR_PATCH_SIZE=16
+# export RS_EMBED_THOR_PATCH_SIZE=8
 ```
+
+### Example: keep the same coverage, use a denser token grid
+
+```bash
+export RS_EMBED_THOR_IMG=288
+export RS_EMBED_THOR_PATCH_SIZE=4
+```
+
+This keeps the same `ground_cover_m` as the default path, but increases the token density substantially. Use this when spatial detail matters more than runtime or memory.
+
+### Example: keep the same coverage, use a coarser token grid
+
+```bash
+export RS_EMBED_THOR_IMG=288
+export RS_EMBED_THOR_PATCH_SIZE=12
+```
+
+This preserves the same geographic crop while reducing token count compared with `patch_size=8`.
+
+### Example: choose a patch size that requires changing image size too
+
+```bash
+export RS_EMBED_THOR_IMG=280
+export RS_EMBED_THOR_PATCH_SIZE=10
+```
+
+With `patch_size=10`, the default `288` image size does not divide cleanly for THOR's 10m/20m S2 groups, so `RS_EMBED_THOR_IMG` needs to move to a compatible value such as `280` or `300`.
 
 ### Example with variant selection
 

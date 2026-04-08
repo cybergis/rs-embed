@@ -180,7 +180,7 @@ def _resolve_thor_runtime_config(
 
     group_merge = os.environ.get("RS_EMBED_THOR_GROUP_MERGE", "mean").strip().lower()
 
-    patch_size = int(os.environ.get("RS_EMBED_THOR_PATCH_SIZE", "16"))
+    patch_size = int(os.environ.get("RS_EMBED_THOR_PATCH_SIZE", "8"))
 
     return {
         "model_key": model_key,
@@ -602,6 +602,7 @@ class THORBaseEmbedder(EmbedderBase):
                 "model_key": self.DEFAULT_MODEL_KEY,
                 "variant": _thor_variant_from_model_key(self.DEFAULT_MODEL_KEY),
                 "image_size": self.DEFAULT_IMAGE_SIZE,
+                "patch_size": 8,
                 "normalization": "thor_stats",
                 "scale_m": self.input_spec.scale_m,
                 "cloudy_pct": self.input_spec.cloudy_pct,

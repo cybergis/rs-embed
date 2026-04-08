@@ -68,6 +68,23 @@ def test_thor_loads_vendored_runtime_without_external_thor_dependency(monkeypatc
     assert fmeta["expected_patch_tokens"] == 405
 
 
+def test_thor_runtime_config_defaults_patch_size_to_8(monkeypatch):
+    import rs_embed.embedders.onthefly_thor as thor
+
+    monkeypatch.delenv("RS_EMBED_THOR_PATCH_SIZE", raising=False)
+    monkeypatch.delenv("RS_EMBED_THOR_IMG", raising=False)
+    monkeypatch.delenv("RS_EMBED_THOR_MODEL_KEY", raising=False)
+
+    cfg = thor._resolve_thor_runtime_config(
+        model_config=None,
+        default_model_key=thor.THORBaseEmbedder.DEFAULT_MODEL_KEY,
+        default_image_size=thor.THORBaseEmbedder.DEFAULT_IMAGE_SIZE,
+    )
+
+    assert cfg["patch_size"] == 8
+    assert cfg["image_size"] == 288
+
+
 def test_enable_alibi_for_timm_patches_block_and_attention():
     from timm.models.vision_transformer import Attention, Block
 

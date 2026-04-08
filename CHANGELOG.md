@@ -11,6 +11,7 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 ### Changed
 
 - `GEEProvider` initialization now prefers an explicit Google Cloud project when one is provided via `project=...`, `EE_PROJECT`, or `GOOGLE_CLOUD_PROJECT`, but no longer hard-requires rs-embed callers to pass one explicitly. When no project is supplied, rs-embed now lets `ee.Initialize()` and `geemap.ee_initialize()` resolve Earth Engine's configured default project first, while still surfacing a clear error message when authentication is missing or no usable Cloud/quota project is configured.
+- `thor` now defaults `RS_EMBED_THOR_PATCH_SIZE` to `8` instead of `16`, increasing the default token-grid density while keeping `RS_EMBED_THOR_IMG=288`. The THOR model page now documents the patch-size/image-size coupling explicitly and includes concrete environment-variable examples for common tuning patterns.
 
 ### Fixed
 
