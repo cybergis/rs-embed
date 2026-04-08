@@ -61,6 +61,54 @@ _ALIAS_LS457_SR = {
 _NO_IMAGES_FOUND_MSG = "No images found for the selected region/time window."
 
 
+def _gee_init_kwargs(project: str | None) -> dict[str, str]:
+    return {"project": project} if project else {}
+
+
+def _gee_error_message(exc: Exception) -> str:
+    msg = str(exc).strip()
+    low = msg.lower()
+
+    if any(
+        token in low
+        for token in (
+            "quota project",
+            "cloud project",
+            "project is required",
+            "user project",
+            "quota_project_id",
+            "no project",
+        )
+    ):
+        return (
+            "Earth Engine requires a Google Cloud project. Pass "
+            "project='your-gcp-project-id', set EE_PROJECT or "
+            "GOOGLE_CLOUD_PROJECT, or configure a default project with "
+            "`earthengine set_project your-gcp-project-id` or "
+            "`gcloud auth application-default set-quota-project your-gcp-project-id`."
+        )
+
+    if any(
+        token in low
+        for token in (
+            "authenticate",
+            "authorization",
+            "credentials",
+            "credential",
+            "login required",
+            "invalid_grant",
+            "refresh token",
+            "reauth",
+        )
+    ):
+        return (
+            "Earth Engine authentication is required. Run `earthengine authenticate` and try again."
+        )
+
+    detail = msg or repr(exc)
+    return f"Failed to initialize GEE: {detail}"
+
+
 def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str, ...]:
     """Resolve semantic band aliases to real band names based on collection id."""
     if not bands:
@@ -193,28 +241,20 @@ class GEEProvider(ProviderBase):
         )
 
     def ensure_ready(self) -> None:
-        if not self.project:
-            raise ProviderError(
-                "A Google Cloud project is required for Earth Engine. "
-                "Set the EE_PROJECT environment variable or pass "
-                "project='your-gcp-project-id' to GEEProvider(). "
-                "See https://developers.google.com/earth-engine/guides/access#a-]role-in-a-cloud-project for details."
-            )
         try:
             import ee
 
-            ee.Initialize(project=self.project)
-        except Exception as _e:
+            ee.Initialize(**_gee_init_kwargs(self.project))
+            return
+        except Exception as e:
             if not self.auto_auth:
-                raise ProviderError(
-                    "Earth Engine not initialized. Run `earthengine authenticate` and try again."
-                ) from None
+                raise ProviderError(_gee_error_message(e)) from None
             try:
                 import geemap
 
-                geemap.ee_initialize(project=self.project)
-            except Exception as e:
-                raise ProviderError(f"Failed to initialize GEE: {e!r}") from e
+                geemap.ee_initialize(**_gee_init_kwargs(self.project))
+            except Exception as geemap_exc:
+                raise ProviderError(_gee_error_message(geemap_exc)) from geemap_exc
 
     def _to_ee_region_3857(self, spatial: SpatialSpec):
         import ee

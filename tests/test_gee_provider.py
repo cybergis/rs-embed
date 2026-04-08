@@ -108,6 +108,77 @@ def test_mixed_alias_and_real():
     assert result == ("B4", "B3", "B2")
 
 
+def test_ensure_ready_allows_default_project_resolution(monkeypatch):
+    calls = []
+
+    class _FakeEE:
+        @staticmethod
+        def Initialize(**kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setitem(sys.modules, "ee", _FakeEE())
+
+    provider = GEEProvider(auto_auth=False, project=None)
+    provider.ensure_ready()
+
+    assert calls == [{}]
+
+
+def test_ensure_ready_passes_explicit_project(monkeypatch):
+    calls = []
+
+    class _FakeEE:
+        @staticmethod
+        def Initialize(**kwargs):
+            calls.append(kwargs)
+
+    monkeypatch.setitem(sys.modules, "ee", _FakeEE())
+
+    provider = GEEProvider(auto_auth=False, project="demo-project")
+    provider.ensure_ready()
+
+    assert calls == [{"project": "demo-project"}]
+
+
+def test_ensure_ready_missing_project_reports_setup_guidance(monkeypatch):
+    class _FakeEE:
+        @staticmethod
+        def Initialize(**kwargs):  # noqa: ARG004
+            raise Exception("no project found. Call with a quota project.")
+
+    monkeypatch.setitem(sys.modules, "ee", _FakeEE())
+
+    provider = GEEProvider(auto_auth=False, project=None)
+
+    with pytest.raises(ProviderError, match="Earth Engine requires a Google Cloud project"):
+        provider.ensure_ready()
+
+
+def test_ensure_ready_auto_auth_fallback_omits_project_when_unset(monkeypatch):
+    ee_calls = []
+    geemap_calls = []
+
+    class _FakeEE:
+        @staticmethod
+        def Initialize(**kwargs):
+            ee_calls.append(kwargs)
+            raise Exception("credentials missing")
+
+    class _FakeGeemap:
+        @staticmethod
+        def ee_initialize(**kwargs):
+            geemap_calls.append(kwargs)
+
+    monkeypatch.setitem(sys.modules, "ee", _FakeEE())
+    monkeypatch.setitem(sys.modules, "geemap", _FakeGeemap())
+
+    provider = GEEProvider(auto_auth=True, project=None)
+    provider.ensure_ready()
+
+    assert ee_calls == [{}]
+    assert geemap_calls == [{}]
+
+
 def test_build_image_empty_collection_raises_clear_error(monkeypatch):
     class _FakeSize:
         def getInfo(self):

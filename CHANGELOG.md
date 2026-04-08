@@ -10,7 +10,7 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ### Changed
 
-- `GEEProvider` now requires an explicit Google Cloud project. Users must either set the `EE_PROJECT` (or `GOOGLE_CLOUD_PROJECT`) environment variable, or pass `project='...'` to `GEEProvider()`. Previously, `ee.Initialize()` was called without a `project` argument, causing the GEE SDK to fall back to the quota project of geemap's default OAuth Client ID — a project that external users have no permission to use, resulting in `EEException: Caller does not have required permission to use project 517222506229`.
+- `GEEProvider` initialization now prefers an explicit Google Cloud project when one is provided via `project=...`, `EE_PROJECT`, or `GOOGLE_CLOUD_PROJECT`, but no longer hard-requires rs-embed callers to pass one explicitly. When no project is supplied, rs-embed now lets `ee.Initialize()` and `geemap.ee_initialize()` resolve Earth Engine's configured default project first, while still surfacing a clear error message when authentication is missing or no usable Cloud/quota project is configured.
 
 ### Fixed
 
