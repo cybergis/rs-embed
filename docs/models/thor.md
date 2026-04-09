@@ -1,7 +1,5 @@
 # THOR (`thor`)
 
-> Vendored THOR adapter for Sentinel-2 SR 10-band inputs, with THOR-specific normalization and flexible group-grid aggregation (`mean` / `sum` / `concat`).
-
 ## Quick Facts
 
 | Field                             | Value                                                                                             |
@@ -19,15 +17,49 @@
 | Extra side inputs                 | none required in current adapter                                                                  |
 | Training alignment (adapter path) | High when `thor_stats` normalization and default S2 SR setup are preserved                        |
 
+!!! success "THOR In 30 Seconds"
+    THOR is a Sentinel-2 SR 10-band model that works well when you want either a pooled embedding or a grid-like token output while preserving THOR's channel-group structure.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - grouped token layout instead of one ready-made spatial feature map: see [Output Semantics](#output-semantics)
+    - patch-size-sensitive token density and geometry: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
+    - bounded `native_snap` preprocessing for small near-square projection mismatches: see [Preprocessing Pipeline](#preprocessing-pipeline-current-rs-embed-path)
+
 ---
 
 ## When To Use This Model
 
-THOR is a strong Sentinel-2 SR baseline when you want pretrained THOR weights, both pooled and token-grid outputs, or experiments where group-wise token aggregation through `group_merge` is part of the analysis.
+THOR is a strong Sentinel-2 SR baseline when you want pretrained THOR weights, both pooled and token-grid outputs, or experiments where group-aware spatial aggregation matters.
 
-As with the other model pages, the runtime knobs here affect representation semantics. Moving away from `thor_stats` normalization, changing `patch_size` or `image_size` without logging `ground_cover_m`, or assuming `grid` is always available can all make comparisons harder to interpret.
+The two THOR choices that most affect representation semantics are:
 
-One THOR-specific characteristic is that `RS_EMBED_THOR_PATCH_SIZE` directly changes how finely the vendored THOR backbone tokenizes each Sentinel-2 group. Smaller patch sizes keep the same geographic crop but produce denser token layouts and higher compute cost; larger patch sizes coarsen the token grid and reduce compute. In the current S2 10m/20m adapter path, `RS_EMBED_THOR_PATCH_SIZE=8` is the default because it stays divisible with `RS_EMBED_THOR_IMG=288` while giving a denser grid than the previous `16`-pixel default.
+- preprocessing and size policy: see [Preprocessing Pipeline](#preprocessing-pipeline-current-rs-embed-path) and [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
+- token-to-grid reconstruction: see [Output Semantics](#output-semantics)
+
+## Quick Decision Guide
+
+
+=== "Near-Square Input"
+
+    Use `input_prep="resize"` with the default `RS_EMBED_THOR_RESIZE_MODE=native_snap`.
+
+    This handles small projection mismatches without forcing an immediate `288x288` resize.
+
+=== "Large ROI"
+
+    Use `input_prep="tile"`.
+
+    This avoids token explosion and keeps stitched grid geometry stable.
+
+=== "Per-Group Channels"
+
+    Use `RS_EMBED_THOR_GROUP_MERGE=concat`.
+
+    This keeps aligned group maps separate in the channel dimension instead of collapsing them into one shared grid.
+
+!!! warning "What Usually Goes Wrong"
+    Most THOR confusion comes from three places: changing `patch_size` without checking that `image_size` still divides cleanly, assuming `native_snap` should also apply inside tiled inference, and interpreting `concat` grids as directly comparable to `mean` grids. Treat those as different representation settings, not just cosmetic options.
 
 ---
 
@@ -39,13 +71,9 @@ The current adapter path is provider-only, so use `backend="gee"` or another pro
 
 ### Sensor / channels
 
-Default `SensorSpec` if omitted:
+Default `SensorSpec` if omitted: The default sensor is `COPERNICUS/S2_SR_HARMONIZED` with adapter band order `B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12`, `scale_m=10`, `cloudy_pct=30`, `composite="median"`, and `fill_value=0.0`.
 
-The default sensor is `COPERNICUS/S2_SR_HARMONIZED` with adapter band order `B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12`, `scale_m=10`, `cloudy_pct=30`, `composite="median"`, and `fill_value=0.0`.
-
-`input_chw` contract:
-
-`input_chw` must be `CHW` with `C=10`, and raw Sentinel-2 SR values are expected in `0..10000`. Before normalization, the adapter clips NaN and Inf values and clamps the range to `0..10000`.
+`input_chw` contract: `input_chw` must be `CHW` with `C=10`, and raw Sentinel-2 SR values are expected in `0..10000`. Before normalization, the adapter clips NaN and Inf values and clamps the range to `0..10000`.
 
 ---
 
@@ -55,11 +83,17 @@ The default sensor is `COPERNICUS/S2_SR_HARMONIZED` with adapter band order `B2,
   <span class="pipeline-arrow">-&gt;</span> S2 SR 10-band composite patch
   <span class="pipeline-arrow">-&gt;</span> optional raw-value inspection
      <span class="pipeline-detail">expected_channels=10, value range 0..10000</span>
+  <span class="pipeline-arrow">-&gt;</span> THOR geometry policy
+     <span class="pipeline-branch">native_snap:</span> small near-square mismatch -&gt; center crop/pad to square -&gt; snap side to valid THOR grid -&gt; keep native side when limits allow
+     <span class="pipeline-branch">fixed:</span> keep raw geometry here; final tensor will be resized to RS_EMBED_THOR_IMG
+     <span class="pipeline-branch">tile mode:</span> force fixed per-tile resize to preserve stitch geometry
   <span class="pipeline-arrow">-&gt;</span> normalize with RS_EMBED_THOR_NORMALIZE
      <span class="pipeline-branch">thor_stats:</span> /10000 -&gt; THOR z-score stats
      <span class="pipeline-branch">unit_scale:</span> /10000 -&gt; clip [0,1]
      <span class="pipeline-branch">none / raw:</span> keep clipped raw values
-  <span class="pipeline-arrow">-&gt;</span> resize to RS_EMBED_THOR_IMG=288
+  <span class="pipeline-arrow">-&gt;</span> optional final resize
+     <span class="pipeline-branch">fixed / tile:</span> resize to RS_EMBED_THOR_IMG=288
+     <span class="pipeline-branch">native_snap:</span> skip final resize and use snapped native side
   <span class="pipeline-arrow">-&gt;</span> build/load THOR backbone
      <span class="pipeline-detail">ground_cover_m = sensor.scale_m * image_size</span>
      <span class="pipeline-detail">patch_size passed through THOR build params</span>
@@ -79,26 +113,51 @@ The default sensor is `COPERNICUS/S2_SR_HARMONIZED` with adapter band order `B2,
 | `RS_EMBED_THOR_CKPT`          | unset          | Local checkpoint path override                       |
 | `RS_EMBED_THOR_PRETRAINED`    | `1`            | Use pretrained weights (HF default path)             |
 | `RS_EMBED_THOR_IMG`           | `288`          | Resize target image size                             |
+| `RS_EMBED_THOR_RESIZE_MODE`   | `native_snap`  | `native_snap` keeps bounded snapped native sides; `fixed` always resizes to `RS_EMBED_THOR_IMG` |
 | `RS_EMBED_THOR_NORMALIZE`     | `thor_stats`   | `thor_stats`, `unit_scale`, or `none`                |
 | `RS_EMBED_THOR_GROUP_MERGE`   | `mean`         | THOR group-grid aggregation: `mean`, `sum`, `concat` |
 | `RS_EMBED_THOR_PATCH_SIZE`    | `8`            | THOR flexi patch size parameter                      |
+| `RS_EMBED_THOR_SHAPE_ADJUST`  | `crop`         | How `native_snap` resolves small non-square inputs: `crop` or `pad` |
+| `RS_EMBED_THOR_SHAPE_TOL_PX`  | `8`            | Maximum `abs(H-W)` tolerated before `native_snap` falls back to fixed resize |
+| `RS_EMBED_THOR_MAX_NATIVE_SIDE` | `384`        | Largest snapped native side allowed before falling back to fixed resize |
+| `RS_EMBED_THOR_MAX_NATIVE_TOKENS` | `3000`     | Largest estimated THOR patch-token count allowed for `native_snap` |
 | `RS_EMBED_THOR_FETCH_WORKERS` | `8`            | Provider prefetch workers for batch APIs             |
 
-Notes:
+=== "Patch Size"
 
-`RS_EMBED_THOR_PATCH_SIZE` and `RS_EMBED_THOR_IMG` jointly affect token layout and `ground_cover_m`. Changing `group_merge` also changes grid channel semantics and dimensionality, especially when `concat` is used.
+    `patch_size` changes token density, not embedding dimension. Smaller patch sizes mean denser token grids and more compute.
 
-For the current Sentinel-2 SR 10-band path, a practical rule is to keep `RS_EMBED_THOR_IMG` divisible by `2 * RS_EMBED_THOR_PATCH_SIZE`. That keeps the default 10m and 20m THOR groups aligned to valid patch grids. With the default `RS_EMBED_THOR_IMG=288`, common valid choices include `4`, `6`, `8`, `12`, `16`, and `18`.
+    Keep `RS_EMBED_THOR_IMG` divisible by `2 * RS_EMBED_THOR_PATCH_SIZE` for the current S2 10m/20m path. If you are unsure, keep `RS_EMBED_THOR_IMG=288` and change only `patch_size` to one of the known-compatible values such as `4`, `6`, `8`, `12`, `16`, or `18`.
 
-If you want to preserve the same geographic footprint (`ground_cover_m=2880` at the default 10m fetch), keep `RS_EMBED_THOR_IMG=288` and only change `RS_EMBED_THOR_PATCH_SIZE`. If you choose a patch size that no longer divides cleanly, change `RS_EMBED_THOR_IMG` together with it.
+=== "Resize vs Tile"
 
-![patch size](assets/thor.png)
+    `input_prep="resize"` means one whole input patch goes through THOR once; in that path the adapter may use `native_snap`.
+
+    `input_prep="tile"` means the API slices a larger input into multiple tiles first; inside that tiled path THOR intentionally uses fixed per-tile resize behavior so the stitched output still maps cleanly back to the tile layout.
+
+=== "Native-Snap Limits"
+
+    `native_snap` is intentionally bounded. It only stays on the native path when the input is close to square, the snapped side does not exceed `RS_EMBED_THOR_MAX_NATIVE_SIDE`, and the estimated THOR patch-token count does not exceed `RS_EMBED_THOR_MAX_NATIVE_TOKENS`.
+
+    For the current default S2 10m/20m path with `patch_size=8`, `side=384` corresponds to about `2880` patch tokens, which is why `384` is the default ceiling.
+
+
 
 ## Model-specific Settings
 
-| Key       | Type     | Default | Choices                          | Notes                                                                                                         |
-| --------- | -------- | ------- | -------------------------------- | ------------------------------------------------------------------------------------------------------------- |
-| `variant` | `string` | `base`  | `tiny`, `small`, `base`, `large` | Backbone size selector. For export jobs, pass it through `ExportModelRequest.configure("thor", variant=...)`. |
+`variant` selects the THOR backbone size. In `rs-embed`, pass it as `variant="tiny" | "small" | "base" | "large"`.
+
+| Variant | Vendored model key | Parameters | Output channels | Transformer blocks | Attention heads | Notes |
+| ------- | ------------------ | ---------- | --------------- | ------------------ | --------------- | ----- |
+| `tiny`  | `thor_v1_tiny`     | 7.6M   | 192  | 12 | 3  | Smallest and fastest option. |
+| `small` | `thor_v1_small`    | 25.8M  | 384  | 12 | 6  | Middle ground when `tiny` is too limited. |
+| `base`  | `thor_v1_base`     | 94.1M  | 768  | 12 | 12 | Current default. |
+| `large` | `thor_v1_large`    | 314.4M | 1024 | 24 | 16 | Highest capacity and heaviest runtime. |
+
+!!! info "How To Read Output Channels"
+    `Output channels` here means the default THOR embedding width for `pooled` output and for `grid` output when group aggregation keeps one shared channel space, such as `RS_EMBED_THOR_GROUP_MERGE=mean` or `sum`.
+
+    If you use `RS_EMBED_THOR_GROUP_MERGE=concat`, the final `grid` channel count becomes `embedding_width x number_of_THOR_groups`, so it is larger than the values listed above.
 
 Example:
 
@@ -127,79 +186,122 @@ emb = get_embedding(
 
 `OutputSpec.grid()` first tries to build a THOR group-aware grid with `grid_kind="thor_group_grid"` from the channel groups. If that fails, it falls back to a generic ViT-style patch-token reshape with `grid_kind="patch_tokens"`. Some token layouts still cannot be reshaped into a grid, in which case the adapter raises a clear error and suggests using pooled output.
 
+The group-aware path exists because native THOR emits one token sequence plus layout metadata, not one uniform spatial tensor. `rs-embed` uses that metadata to reconstruct per-group feature maps, upsamples lower-resolution groups onto the densest group grid, and then applies `group_merge`.
+
+=== "`mean`"
+
+    Use this unless you have a specific reason not to.
+
+    It averages aligned group maps into one shared grid, keeps output dimensionality stable, and is the easiest setting to compare across runs.
+
+=== "`sum`"
+
+    Use this when you want one shared grid but prefer additive responses over averaging.
+
+    It is more sensitive to feature scale than `mean`.
+
+=== "`concat`"
+
+    Use this only when downstream code expects a wider channel dimension and you explicitly want to preserve group-specific information instead of collapsing it.
+
 ---
 
 ## Examples
 
-### Minimal provider-backed example
+=== "Minimal"
 
-```python
-from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec
+    ```python
+    from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec
 
-emb = get_embedding(
-    "thor",
-    spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
-    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
-    output=OutputSpec.pooled(),
-    backend="gee",
-)
-```
+    emb = get_embedding(
+        "thor",
+        spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
+        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+        output=OutputSpec.pooled(),
+        backend="gee",
+    )
+    ```
 
-### Example THOR tuning (env-controlled)
+=== "Common Tuning"
 
-```python
-# Example (shell):
-# export RS_EMBED_THOR_NORMALIZE=thor_stats
-# export RS_EMBED_THOR_GROUP_MERGE=mean
-# export RS_EMBED_THOR_IMG=288
-# export RS_EMBED_THOR_PATCH_SIZE=8
-```
+    ```bash
+    export RS_EMBED_THOR_RESIZE_MODE=native_snap
+    export RS_EMBED_THOR_NORMALIZE=thor_stats
+    export RS_EMBED_THOR_GROUP_MERGE=mean
+    export RS_EMBED_THOR_IMG=288
+    export RS_EMBED_THOR_PATCH_SIZE=8
+    ```
 
-### Example: keep the same coverage, use a denser token grid
+=== "Native-Snap"
 
-```bash
-export RS_EMBED_THOR_IMG=288
-export RS_EMBED_THOR_PATCH_SIZE=4
-```
+    ```bash
+    export RS_EMBED_THOR_RESIZE_MODE=native_snap
+    export RS_EMBED_THOR_SHAPE_ADJUST=crop
+    export RS_EMBED_THOR_SHAPE_TOL_PX=8
+    export RS_EMBED_THOR_MAX_NATIVE_SIDE=384
+    export RS_EMBED_THOR_MAX_NATIVE_TOKENS=3000
+    ```
 
-This keeps the same `ground_cover_m` as the default path, but increases the token density substantially. Use this when spatial detail matters more than runtime or memory.
+    This lets THOR keep a snapped native side for near-square inputs such as `289x288` or `300x300`, but still falls back to fixed resize for larger or more expensive inputs.
 
-### Example: keep the same coverage, use a coarser token grid
+=== "Patch Size"
 
-```bash
-export RS_EMBED_THOR_IMG=288
-export RS_EMBED_THOR_PATCH_SIZE=12
-```
+    ```bash
+    export RS_EMBED_THOR_IMG=288
+    export RS_EMBED_THOR_PATCH_SIZE=4
+    ```
 
-This preserves the same geographic crop while reducing token count compared with `patch_size=8`.
+    Use a smaller `patch_size` when spatial detail matters more than runtime or memory.
 
-### Example: choose a patch size that requires changing image size too
+    ```bash
+    export RS_EMBED_THOR_IMG=288
+    export RS_EMBED_THOR_PATCH_SIZE=12
+    ```
 
-```bash
-export RS_EMBED_THOR_IMG=280
-export RS_EMBED_THOR_PATCH_SIZE=10
-```
+    Use a larger `patch_size` when you want a coarser token grid with lower compute cost.
 
-With `patch_size=10`, the default `288` image size does not divide cleanly for THOR's 10m/20m S2 groups, so `RS_EMBED_THOR_IMG` needs to move to a compatible value such as `280` or `300`.
+    ```bash
+    export RS_EMBED_THOR_IMG=280
+    export RS_EMBED_THOR_PATCH_SIZE=10
+    ```
 
-### Example with variant selection
+    When `patch_size` no longer divides cleanly, change `RS_EMBED_THOR_IMG` together with it.
 
-```python
-from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec
+    ![patch size](assets/thor.png)
 
-emb = get_embedding(
-    "thor",
-    spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
-    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
-    output=OutputSpec.grid(pooling="mean"),
-    backend="gee",
-    variant="small",
-)
-```
+=== "Large ROI / Tile"
 
-Use `variant` only for backbone size selection.
-Other THOR runtime knobs such as image size, normalization, patch size, and checkpoint override
-still use the existing environment-variable path.
+    ```python
+    from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec, InputPrepSpec
+
+    emb = get_embedding(
+        "thor",
+        spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=4096),
+        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+        output=OutputSpec.grid(pooling="mean"),
+        backend="gee",
+        input_prep=InputPrepSpec.tile(tile_size=288),
+    )
+    ```
+
+    In this mode the large input is split into `288x288` tiles. Each tile uses THOR's fixed per-tile resize path rather than `native_snap`, so stitched grid outputs stay aligned with the tile layout.
+
+=== "Variant"
+
+    ```python
+    from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec
+
+    emb = get_embedding(
+        "thor",
+        spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
+        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+        output=OutputSpec.grid(pooling="mean"),
+        backend="gee",
+        variant="small",
+    )
+    ```
+
+    Use `variant` only for backbone size selection. Other THOR runtime knobs such as image size, normalization, patch size, and checkpoint override still use the environment-variable path above.
 
 ---
 
@@ -213,7 +315,7 @@ still use the existing environment-variable path.
 
 Recommended first checks:
 
-Start by verifying metadata such as `model_key`, `normalization`, `group_merge`, `patch_size`, and `ground_cover_m`. `OutputSpec.pooled()` is the faster way to isolate grid-layout issues, and the default `thor_stats` plus `group_merge=mean` combination is the best baseline before benchmarking alternatives.
+Start by verifying metadata such as `model_key`, `normalization`, `group_merge`, `patch_size`, and `ground_cover_m`. `OutputSpec.pooled()` is the faster way to isolate grid-layout issues. If the issue looks geometric, jump back to [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs); if it looks like token-layout confusion, re-check [Output Semantics](#output-semantics).
 
 ---
 

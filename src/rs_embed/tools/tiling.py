@@ -132,6 +132,21 @@ def _input_hw(x: np.ndarray) -> tuple[int, int]:
     return int(x.shape[-2]), int(x.shape[-1])
 
 
+def _augment_model_config_for_tiled_dispatch(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    *,
+    tile_size: int,
+) -> dict[str, Any] | None:
+    model_name = str(getattr(embedder, "model_name", "")).strip().lower()
+    if model_name != "thor":
+        return model_config
+    cfg = dict(model_config or {})
+    cfg["_input_prep_mode"] = "tile"
+    cfg["_input_prep_tile_size"] = int(tile_size)
+    return cfg
+
+
 def _tile_yx_starts(*, h: int, w: int, tile_size: int, stride: int) -> tuple[list[int], list[int]]:
     def _starts_1d(dim: int) -> list[int]:
         if dim <= tile_size:
@@ -463,6 +478,11 @@ def _call_embedder_get_embedding_tiled(
     stride = int(input_prep.tile_stride or tile_size)
     if stride <= 0:
         raise ModelError(f"Invalid tile_stride={stride}")
+    tiled_model_config = _augment_model_config_for_tiled_dispatch(
+        embedder,
+        model_config,
+        tile_size=tile_size,
+    )
     num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
     if input_prep.mode == "auto":
         if (
@@ -532,7 +552,7 @@ def _call_embedder_get_embedding_tiled(
             spatial=spatial,
             temporal=temporal,
             sensor=sensor,
-            model_config=model_config,
+            model_config=tiled_model_config if input_prep.mode == "tile" else model_config,
             output=output,
             backend=backend,
             device=device,
@@ -550,11 +570,11 @@ def _call_embedder_get_embedding_tiled(
                 "backend": backend,
                 "device": device,
             }
-            if model_config is not None and _embedder_accepts_model_config(
+            if tiled_model_config is not None and _embedder_accepts_model_config(
                 type(embedder),
                 "get_embeddings_batch_from_inputs",
             ):
-                batch_kwargs["model_config"] = model_config
+                batch_kwargs["model_config"] = tiled_model_config
             tile_embs = embedder.get_embeddings_batch_from_inputs(
                 **batch_kwargs,
             )
@@ -570,7 +590,7 @@ def _call_embedder_get_embedding_tiled(
                     spatial=tile_spatials[i],
                     temporal=temporal,
                     sensor=sensor,
-                    model_config=model_config,
+                    model_config=tiled_model_config,
                     output=output,
                     backend=backend,
                     device=device,
@@ -585,7 +605,7 @@ def _call_embedder_get_embedding_tiled(
                 spatial=tile_spatials[i],
                 temporal=temporal,
                 sensor=sensor,
-                model_config=model_config,
+                model_config=tiled_model_config,
                 output=output,
                 backend=backend,
                 device=device,

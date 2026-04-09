@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 import os
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
@@ -181,6 +182,31 @@ def _resolve_thor_runtime_config(
     group_merge = os.environ.get("RS_EMBED_THOR_GROUP_MERGE", "mean").strip().lower()
 
     patch_size = int(os.environ.get("RS_EMBED_THOR_PATCH_SIZE", "8"))
+    resize_mode = str(os.environ.get("RS_EMBED_THOR_RESIZE_MODE", "native_snap")).strip().lower()
+    shape_adjust = str(os.environ.get("RS_EMBED_THOR_SHAPE_ADJUST", "crop")).strip().lower()
+    shape_tol_px = int(os.environ.get("RS_EMBED_THOR_SHAPE_TOL_PX", "8"))
+    max_native_side = int(os.environ.get("RS_EMBED_THOR_MAX_NATIVE_SIDE", "384"))
+    max_native_tokens = int(os.environ.get("RS_EMBED_THOR_MAX_NATIVE_TOKENS", "3000"))
+    input_prep_mode = str(model_config_value(model_config, "_input_prep_mode") or "").strip().lower()
+
+    if resize_mode not in {"fixed", "native_snap"}:
+        raise ModelError(
+            f"Unknown THOR resize mode '{resize_mode}'. Use one of: fixed, native_snap."
+        )
+    if shape_adjust not in {"crop", "pad"}:
+        raise ModelError(
+            f"Unknown THOR shape adjust mode '{shape_adjust}'. Use one of: crop, pad."
+        )
+    if shape_tol_px < 0:
+        raise ModelError(f"RS_EMBED_THOR_SHAPE_TOL_PX must be >= 0, got {shape_tol_px}.")
+    if max_native_side <= 0:
+        raise ModelError(
+            f"RS_EMBED_THOR_MAX_NATIVE_SIDE must be > 0, got {max_native_side}."
+        )
+    if max_native_tokens <= 0:
+        raise ModelError(
+            f"RS_EMBED_THOR_MAX_NATIVE_TOKENS must be > 0, got {max_native_tokens}."
+        )
 
     return {
         "model_key": model_key,
@@ -191,6 +217,12 @@ def _resolve_thor_runtime_config(
         "normalize_mode": normalize_mode,
         "group_merge": group_merge,
         "patch_size": int(patch_size),
+        "resize_mode": resize_mode,
+        "shape_adjust": shape_adjust,
+        "shape_tol_px": int(shape_tol_px),
+        "max_native_side": int(max_native_side),
+        "max_native_tokens": int(max_native_tokens),
+        "input_prep_mode": input_prep_mode,
         "hf_id": _thor_hf_id_from_model_key(model_key),
     }
 
@@ -205,6 +237,239 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
     return y[0].detach().cpu().numpy().astype(np.float32)
+
+
+def _thor_s2_valid_side_unit(*, scale_m: int, patch_size: int) -> int:
+    if scale_m <= 0:
+        raise ModelError(f"THOR scale_m must be > 0, got {scale_m}.")
+    if patch_size <= 0:
+        raise ModelError(f"THOR patch_size must be > 0, got {patch_size}.")
+
+    units = []
+    for gsd in (10, 20):
+        ground_unit = int(patch_size) * int(gsd)
+        units.append(ground_unit // math.gcd(int(scale_m), ground_unit))
+    return int(math.lcm(*units))
+
+
+def _thor_estimated_patch_tokens(
+    *,
+    side: int,
+    scale_m: int,
+    patch_size: int,
+) -> int | None:
+    if side <= 0:
+        return None
+    ground_cover = int(side) * int(scale_m)
+    total = 0
+    for gsd in (10, 20):
+        denom = int(patch_size) * int(gsd)
+        if ground_cover % denom != 0:
+            return None
+        n = ground_cover // denom
+        total += int(n * n)
+    return int(total)
+
+
+def _thor_center_crop_to_square_chw(x_chw: np.ndarray) -> np.ndarray:
+    h, w = int(x_chw.shape[-2]), int(x_chw.shape[-1])
+    side = min(h, w)
+    y0 = max(0, (h - side) // 2)
+    x0 = max(0, (w - side) // 2)
+    return np.ascontiguousarray(x_chw[:, y0 : y0 + side, x0 : x0 + side])
+
+
+def _thor_center_pad_to_square_chw(
+    x_chw: np.ndarray,
+    *,
+    fill_value: float,
+) -> np.ndarray:
+    c, h, w = int(x_chw.shape[0]), int(x_chw.shape[1]), int(x_chw.shape[2])
+    side = max(h, w)
+    out = np.full((c, side, side), float(fill_value), dtype=np.float32)
+    y0 = max(0, (side - h) // 2)
+    x0 = max(0, (side - w) // 2)
+    out[:, y0 : y0 + h, x0 : x0 + w] = x_chw
+    return out
+
+
+def _thor_center_crop_or_pad_to_side_chw(
+    x_chw: np.ndarray,
+    *,
+    side: int,
+    fill_value: float,
+) -> np.ndarray:
+    cur = int(x_chw.shape[-1])
+    if int(x_chw.shape[-2]) != cur:
+        raise ModelError(
+            "THOR crop/pad-to-side expects a square CHW tensor before snapping to target side."
+        )
+    side = int(side)
+    if side <= 0:
+        raise ModelError(f"THOR target side must be > 0, got {side}.")
+    if side == cur:
+        return np.ascontiguousarray(x_chw)
+    if side < cur:
+        off = max(0, (cur - side) // 2)
+        return np.ascontiguousarray(x_chw[:, off : off + side, off : off + side])
+
+    c = int(x_chw.shape[0])
+    out = np.full((c, side, side), float(fill_value), dtype=np.float32)
+    off = max(0, (side - cur) // 2)
+    out[:, off : off + cur, off : off + cur] = x_chw
+    return out
+
+
+def _thor_snap_side_to_valid(
+    side: int,
+    *,
+    scale_m: int,
+    patch_size: int,
+) -> int:
+    unit = _thor_s2_valid_side_unit(scale_m=scale_m, patch_size=patch_size)
+    lower = max(unit, (int(side) // unit) * unit)
+    upper = max(unit, ((int(side) + unit - 1) // unit) * unit)
+    if abs(int(side) - lower) <= abs(upper - int(side)):
+        return int(lower)
+    return int(upper)
+
+
+def _prepare_thor_raw_chw(
+    raw_chw: np.ndarray,
+    *,
+    scale_m: int,
+    patch_size: int,
+    image_size: int,
+    resize_mode: str,
+    shape_adjust: str,
+    shape_tol_px: int,
+    max_native_side: int,
+    max_native_tokens: int,
+    input_prep_mode: str,
+    fill_value: float,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    x = np.asarray(raw_chw, dtype=np.float32)
+    if x.ndim != 3:
+        raise ModelError(f"THOR expected CHW input, got {getattr(x, 'shape', None)}")
+
+    h, w = int(x.shape[-2]), int(x.shape[-1])
+    meta: dict[str, Any] = {
+        "resize_mode_requested": str(resize_mode),
+        "input_prep_mode": str(input_prep_mode or "resize"),
+        "raw_input_hw": (h, w),
+        "requested_image_size": int(image_size),
+        "shape_adjust": str(shape_adjust),
+        "shape_tol_px": int(shape_tol_px),
+        "max_native_side": int(max_native_side),
+        "max_native_tokens": int(max_native_tokens),
+        "shape_adjust_applied": "none",
+    }
+
+    if image_size <= 0:
+        raise ModelError(f"RS_EMBED_THOR_IMG must be > 0, got {image_size}.")
+
+    force_fixed = False
+    fallback_reason = None
+    input_prep_mode_l = str(input_prep_mode or "").lower().strip()
+    resize_mode_l = str(resize_mode).lower().strip()
+
+    if input_prep_mode_l == "tile":
+        force_fixed = True
+        fallback_reason = "tile_preserve_stitch_geometry"
+    elif resize_mode_l != "native_snap":
+        force_fixed = True
+        fallback_reason = "fixed_mode"
+    else:
+        diff = abs(h - w)
+        meta["raw_aspect_diff_px"] = int(diff)
+        if diff > int(shape_tol_px):
+            force_fixed = True
+            fallback_reason = "rectangular_above_tolerance"
+
+    if force_fixed:
+        meta["preprocess_strategy"] = "fixed_resize"
+        meta["preprocess_reason"] = str(fallback_reason)
+        meta["final_hw"] = (int(image_size), int(image_size))
+        meta["effective_image_size"] = int(image_size)
+        meta["ground_cover_m"] = int(scale_m) * int(image_size)
+        meta["estimated_patch_tokens"] = _thor_estimated_patch_tokens(
+            side=int(image_size),
+            scale_m=int(scale_m),
+            patch_size=int(patch_size),
+        )
+        return x, meta
+
+    if shape_adjust == "crop":
+        x_sq = _thor_center_crop_to_square_chw(x)
+        if h != w:
+            meta["shape_adjust_applied"] = "crop_to_square"
+    else:
+        x_sq = _thor_center_pad_to_square_chw(x, fill_value=float(fill_value))
+        if h != w:
+            meta["shape_adjust_applied"] = "pad_to_square"
+
+    square_side = int(x_sq.shape[-1])
+    side_unit = _thor_s2_valid_side_unit(scale_m=int(scale_m), patch_size=int(patch_size))
+    snapped_side = _thor_snap_side_to_valid(
+        square_side,
+        scale_m=int(scale_m),
+        patch_size=int(patch_size),
+    )
+    est_tokens = _thor_estimated_patch_tokens(
+        side=int(snapped_side),
+        scale_m=int(scale_m),
+        patch_size=int(patch_size),
+    )
+
+    meta["square_side"] = int(square_side)
+    meta["side_unit"] = int(side_unit)
+    meta["snapped_side"] = int(snapped_side)
+    meta["estimated_patch_tokens"] = est_tokens
+
+    if int(snapped_side) > int(max_native_side):
+        meta["preprocess_strategy"] = "fixed_resize"
+        meta["preprocess_reason"] = "native_side_limit"
+        meta["final_hw"] = (int(image_size), int(image_size))
+        meta["effective_image_size"] = int(image_size)
+        meta["ground_cover_m"] = int(scale_m) * int(image_size)
+        meta["estimated_patch_tokens"] = _thor_estimated_patch_tokens(
+            side=int(image_size),
+            scale_m=int(scale_m),
+            patch_size=int(patch_size),
+        )
+        return x, meta
+
+    if est_tokens is None or int(est_tokens) > int(max_native_tokens):
+        meta["preprocess_strategy"] = "fixed_resize"
+        meta["preprocess_reason"] = "native_token_limit"
+        meta["final_hw"] = (int(image_size), int(image_size))
+        meta["effective_image_size"] = int(image_size)
+        meta["ground_cover_m"] = int(scale_m) * int(image_size)
+        meta["estimated_patch_tokens"] = _thor_estimated_patch_tokens(
+            side=int(image_size),
+            scale_m=int(scale_m),
+            patch_size=int(patch_size),
+        )
+        return x, meta
+
+    x_native = _thor_center_crop_or_pad_to_side_chw(
+        x_sq,
+        side=int(snapped_side),
+        fill_value=float(fill_value),
+    )
+    if int(snapped_side) > int(square_side):
+        meta["snap_adjust_applied"] = "pad_to_valid_side"
+    elif int(snapped_side) < int(square_side):
+        meta["snap_adjust_applied"] = "crop_to_valid_side"
+    else:
+        meta["snap_adjust_applied"] = "none"
+
+    meta["preprocess_strategy"] = "native_snap"
+    meta["preprocess_reason"] = "native_snap_applied"
+    meta["final_hw"] = (int(snapped_side), int(snapped_side))
+    meta["effective_image_size"] = int(snapped_side)
+    meta["ground_cover_m"] = int(scale_m) * int(snapped_side)
+    return x_native, meta
 
 
 def _normalize_s2_for_thor(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -603,6 +868,11 @@ class THORBaseEmbedder(EmbedderBase):
                 "variant": _thor_variant_from_model_key(self.DEFAULT_MODEL_KEY),
                 "image_size": self.DEFAULT_IMAGE_SIZE,
                 "patch_size": 8,
+                "resize_mode": "native_snap",
+                "shape_adjust": "crop",
+                "shape_tol_px": 8,
+                "max_native_side": 384,
+                "max_native_tokens": 3000,
                 "normalization": "thor_stats",
                 "scale_m": self.input_spec.scale_m,
                 "cloudy_pct": self.input_spec.cloudy_pct,
@@ -665,7 +935,12 @@ class THORBaseEmbedder(EmbedderBase):
         normalize_mode = str(runtime_cfg["normalize_mode"])
         group_merge = str(runtime_cfg["group_merge"])
         patch_size = int(runtime_cfg["patch_size"])
-        ground_cover = int(round(float(getattr(ss, "scale_m", 10)) * float(image_size)))
+        resize_mode = str(runtime_cfg["resize_mode"])
+        shape_adjust = str(runtime_cfg["shape_adjust"])
+        shape_tol_px = int(runtime_cfg["shape_tol_px"])
+        max_native_side = int(runtime_cfg["max_native_side"])
+        max_native_tokens = int(runtime_cfg["max_native_tokens"])
+        input_prep_mode = str(runtime_cfg["input_prep_mode"])
 
         source = str(getattr(ss, "collection", "COPERNICUS/S2_SR_HARMONIZED"))
         scale_m = int(getattr(ss, "scale_m", 10))
@@ -710,8 +985,26 @@ class THORBaseEmbedder(EmbedderBase):
                 "Provider input inspection failed: " + "; ".join(report.get("issues", []))
             )
 
-        x_chw = _normalize_s2_for_thor(raw_chw, mode=normalize_mode)
-        if x_chw.shape[-1] != image_size or x_chw.shape[-2] != image_size:
+        raw_prepped, prep_meta = _prepare_thor_raw_chw(
+            raw_chw,
+            scale_m=scale_m,
+            patch_size=patch_size,
+            image_size=image_size,
+            resize_mode=resize_mode,
+            shape_adjust=shape_adjust,
+            shape_tol_px=shape_tol_px,
+            max_native_side=max_native_side,
+            max_native_tokens=max_native_tokens,
+            input_prep_mode=input_prep_mode,
+            fill_value=fill_value,
+        )
+
+        x_chw = _normalize_s2_for_thor(raw_prepped, mode=normalize_mode)
+        effective_image_size = int(prep_meta["effective_image_size"])
+        ground_cover = int(prep_meta["ground_cover_m"])
+        if prep_meta["preprocess_strategy"] == "fixed_resize" and (
+            x_chw.shape[-1] != image_size or x_chw.shape[-2] != image_size
+        ):
             x_chw = _resize_chw(x_chw, out_hw=image_size)
 
         model, wmeta, dev = _load_thor(
@@ -745,16 +1038,23 @@ class THORBaseEmbedder(EmbedderBase):
                 "fill_value": fill_value,
             },
             temporal=t,
-            image_size=image_size,
+            image_size=effective_image_size,
             extra={
                 "hf_id": runtime_cfg["hf_id"],
                 "model_source": "vendored_rs_embed_runtime",
                 "variant": str(runtime_cfg["variant"]),
                 "normalization": normalize_mode,
                 "group_merge": group_merge,
+                "requested_image_size": image_size,
+                "resize_mode": resize_mode,
+                "shape_adjust": shape_adjust,
+                "shape_tol_px": shape_tol_px,
+                "max_native_side": max_native_side,
+                "max_native_tokens": max_native_tokens,
                 "ground_cover_m": ground_cover,
                 "patch_size": patch_size,
                 **check_meta,
+                **prep_meta,
                 **wmeta,
                 **fmeta,
             },

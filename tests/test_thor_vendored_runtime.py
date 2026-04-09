@@ -74,6 +74,7 @@ def test_thor_runtime_config_defaults_patch_size_to_8(monkeypatch):
     monkeypatch.delenv("RS_EMBED_THOR_PATCH_SIZE", raising=False)
     monkeypatch.delenv("RS_EMBED_THOR_IMG", raising=False)
     monkeypatch.delenv("RS_EMBED_THOR_MODEL_KEY", raising=False)
+    monkeypatch.delenv("RS_EMBED_THOR_RESIZE_MODE", raising=False)
 
     cfg = thor._resolve_thor_runtime_config(
         model_config=None,
@@ -83,6 +84,105 @@ def test_thor_runtime_config_defaults_patch_size_to_8(monkeypatch):
 
     assert cfg["patch_size"] == 8
     assert cfg["image_size"] == 288
+    assert cfg["resize_mode"] == "native_snap"
+
+
+def test_prepare_thor_raw_chw_native_snap_crops_small_projection_mismatch():
+    import rs_embed.embedders.onthefly_thor as thor
+
+    raw = np.zeros((10, 289, 288), dtype=np.float32)
+    out, meta = thor._prepare_thor_raw_chw(
+        raw,
+        scale_m=10,
+        patch_size=8,
+        image_size=288,
+        resize_mode="native_snap",
+        shape_adjust="crop",
+        shape_tol_px=8,
+        max_native_side=384,
+        max_native_tokens=3000,
+        input_prep_mode="resize",
+        fill_value=0.0,
+    )
+
+    assert out.shape == (10, 288, 288)
+    assert meta["preprocess_strategy"] == "native_snap"
+    assert meta["shape_adjust_applied"] == "crop_to_square"
+    assert meta["effective_image_size"] == 288
+    assert meta["estimated_patch_tokens"] == 1620
+
+
+def test_prepare_thor_raw_chw_native_snap_snaps_square_side_to_valid_grid():
+    import rs_embed.embedders.onthefly_thor as thor
+
+    raw = np.zeros((10, 300, 300), dtype=np.float32)
+    out, meta = thor._prepare_thor_raw_chw(
+        raw,
+        scale_m=10,
+        patch_size=8,
+        image_size=288,
+        resize_mode="native_snap",
+        shape_adjust="crop",
+        shape_tol_px=8,
+        max_native_side=384,
+        max_native_tokens=3000,
+        input_prep_mode="resize",
+        fill_value=0.0,
+    )
+
+    assert out.shape == (10, 304, 304)
+    assert meta["preprocess_strategy"] == "native_snap"
+    assert meta["snapped_side"] == 304
+    assert meta["effective_image_size"] == 304
+    assert meta["estimated_patch_tokens"] == 1805
+
+
+def test_prepare_thor_raw_chw_tile_mode_forces_fixed_resize():
+    import rs_embed.embedders.onthefly_thor as thor
+
+    raw = np.zeros((10, 300, 300), dtype=np.float32)
+    out, meta = thor._prepare_thor_raw_chw(
+        raw,
+        scale_m=10,
+        patch_size=8,
+        image_size=288,
+        resize_mode="native_snap",
+        shape_adjust="crop",
+        shape_tol_px=8,
+        max_native_side=384,
+        max_native_tokens=3000,
+        input_prep_mode="tile",
+        fill_value=0.0,
+    )
+
+    assert out.shape == (10, 300, 300)
+    assert meta["preprocess_strategy"] == "fixed_resize"
+    assert meta["preprocess_reason"] == "tile_preserve_stitch_geometry"
+    assert meta["effective_image_size"] == 288
+
+
+def test_prepare_thor_raw_chw_large_square_falls_back_to_fixed_resize():
+    import rs_embed.embedders.onthefly_thor as thor
+
+    raw = np.zeros((10, 512, 512), dtype=np.float32)
+    out, meta = thor._prepare_thor_raw_chw(
+        raw,
+        scale_m=10,
+        patch_size=8,
+        image_size=288,
+        resize_mode="native_snap",
+        shape_adjust="crop",
+        shape_tol_px=8,
+        max_native_side=384,
+        max_native_tokens=3000,
+        input_prep_mode="resize",
+        fill_value=0.0,
+    )
+
+    assert out.shape == (10, 512, 512)
+    assert meta["preprocess_strategy"] == "fixed_resize"
+    assert meta["preprocess_reason"] == "native_side_limit"
+    assert meta["effective_image_size"] == 288
 
 
 def test_enable_alibi_for_timm_patches_block_and_attention():
