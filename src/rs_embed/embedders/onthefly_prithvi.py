@@ -79,8 +79,11 @@ def _resolve_prithvi_model_key(
         model_key = _normalize_prithvi_variant(variant_v)
         return model_key, model_key
 
-    model_key = os.environ.get("RS_EMBED_PRITHVI_KEY", default_model_key).strip() or default_model_key
+    model_key = (
+        os.environ.get("RS_EMBED_PRITHVI_KEY", default_model_key).strip() or default_model_key
+    )
     return str(model_key), str(model_key)
+
 
 def _fetch_s2_prithvi6_chw(
     provider: ProviderBase,
@@ -112,8 +115,9 @@ def _fetch_s2_prithvi6_chw(
     # S2 SR scaling: 0..10000
     x_chw = x_chw / 10000.0
     x_chw = np.clip(x_chw, 0.0, 1.0)
-    x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0)
     return x_chw
+
 
 def _pad_chw_to_multiple(x_chw: np.ndarray, mult: int = 16, value: float = 0.0) -> np.ndarray:
     """
@@ -131,6 +135,7 @@ def _pad_chw_to_multiple(x_chw: np.ndarray, mult: int = 16, value: float = 0.0) 
     out[:, :h, :w] = x_chw.astype(np.float32)
     return out
 
+
 def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     """Resize CHW to square (size,size) using bilinear interpolation."""
     ensure_torch()
@@ -141,7 +146,8 @@ def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(int(size), int(size)), mode="bilinear", align_corners=False)
-    return y[0].detach().cpu().numpy().astype(np.float32)
+    return y[0].detach().float().cpu().numpy()
+
 
 def _prepare_prithvi_chw(
     x_chw: np.ndarray,
@@ -172,6 +178,7 @@ def _prepare_prithvi_chw(
         "target_image_size": int(target_size),
     }
 
+
 def _spatial_center_lon_lat(spatial: SpatialSpec) -> tuple[float, float]:
     from ..core.specs import BBox, PointBuffer  # local import to avoid cycles
 
@@ -185,9 +192,11 @@ def _spatial_center_lon_lat(spatial: SpatialSpec) -> tuple[float, float]:
         return float(spatial.lon), float(spatial.lat)
     raise ModelError(f"Unsupported SpatialSpec: {type(spatial)}")
 
+
 # -------------------------
 # Prithvi model loading (TerraTorch)
 # -------------------------
+
 
 @lru_cache(maxsize=8)
 def _load_prithvi_cached(
@@ -244,6 +253,7 @@ def _load_prithvi_cached(
     }
     return m, meta
 
+
 def _load_prithvi(
     model_key: str,
     *,
@@ -268,6 +278,7 @@ def _load_prithvi(
     )
     m, meta = loaded
     return m, meta, dev
+
 
 def _prithvi_forward_tokens(
     model,
@@ -322,11 +333,12 @@ def _prithvi_forward_tokens(
 
     if hasattr(tokens, "ndim") and tokens.ndim == 3:
         # [B,N,D]
-        return tokens[0].detach().float().cpu().numpy().astype(np.float32)
+        return tokens[0].detach().float().cpu().numpy()
 
     raise ModelError(
         f"Unexpected Prithvi tokens shape/type: {type(tokens)} {getattr(tokens, 'shape', None)}"
     )
+
 
 def _prithvi_forward_tokens_batch(
     model,
@@ -343,7 +355,7 @@ def _prithvi_forward_tokens_batch(
 
     if x_bchw.ndim != 4 or x_bchw.shape[1] != 6:
         raise ModelError(f"Prithvi expects BCHW with C=6, got {x_bchw.shape}")
-    bsz = int(x_bchw.shape[0])
+    bsz = x_bchw.shape[0]
     if len(lon_lat_batch) != bsz or len(date_str_batch) != bsz:
         raise ModelError("lon_lat_batch/date_str_batch size mismatch with input batch.")
 
@@ -381,11 +393,12 @@ def _prithvi_forward_tokens_batch(
         raise ModelError(
             f"Unexpected Prithvi batch tokens shape/type: {type(tokens)} {getattr(tokens, 'shape', None)}"
         )
-    if int(tokens.shape[0]) != bsz:
-        raise ModelError(f"Prithvi batch mismatch: got B={int(tokens.shape[0])}, expected {bsz}")
+    if tokens.shape[0] != bsz:
+        raise ModelError(f"Prithvi batch mismatch: got B={tokens.shape[0]}, expected {bsz}")
 
-    toks_np = tokens.detach().float().cpu().numpy().astype(np.float32)  # [B,N,D]
+    toks_np = tokens.detach().float().cpu().numpy()  # [B,N,D]
     return [toks_np[i] for i in range(bsz)]
+
 
 # -------------------------
 # Embedder
@@ -544,7 +557,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 )
             x_chw = input_chw.astype(np.float32) / 10000.0
             x_chw = np.clip(x_chw, 0.0, 1.0)
-            x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+            x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0)
 
         # Optional: inspect on-the-fly provider input
         from ..tools.inspection import (
@@ -613,7 +626,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             model_name=self.model_name,
             hf_id=model_key,  # for terratorch we store model key here
             backend=str(backend).lower(),
-            image_size=int(x_chw.shape[-1]),  # not fixed 224; depends on ROI/scale
+            image_size=x_chw.shape[-1],  # not fixed 224; depends on ROI/scale
             sensor=sensor,
             temporal=t,
             source=sensor.collection,
@@ -627,7 +640,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 "pretrained": bool(pretrained),
                 "coords_encoding": coords_encoding,
                 "num_frames": num_frames,
-                "input_hw": (int(x_chw.shape[1]), int(x_chw.shape[2])),
+                "input_hw": (x_chw.shape[1], x_chw.shape[2]),
                 **prep_meta,
                 **check_meta,
             },
@@ -793,7 +806,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 )
             x_chw = input_chw.astype(np.float32) / 10000.0
             x_chw = np.clip(x_chw, 0.0, 1.0)
-            x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+            x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0)
             x_chw, _ = _prepare_prithvi_chw(
                 x_chw,
                 fill_value=float(sensor.fill_value),
@@ -840,7 +853,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         model_name=self.model_name,
                         hf_id=model_key,
                         backend=str(backend).lower(),
-                        image_size=int(x_chw.shape[-1]),
+                        image_size=x_chw.shape[-1],
                         sensor=sensor,
                         temporal=t,
                         source=sensor.collection,
@@ -854,7 +867,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                             "pretrained": bool(pretrained),
                             "coords_encoding": coords_encoding,
                             "num_frames": num_frames,
-                            "input_hw": (int(x_chw.shape[1]), int(x_chw.shape[2])),
+                            "input_hw": (x_chw.shape[1], x_chw.shape[2]),
                             "prep_mode": str(prep_mode),
                             "patch_mult": patch_mult,
                             "target_image_size": target_size,

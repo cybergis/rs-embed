@@ -78,11 +78,13 @@ _AGRIFM_DEFAULT_CKPT_FILENAME = "AgriFM.pth"
 _AGRIFM_DEFAULT_CACHE_DIR = "~/.cache/rs_embed/agrifm"
 _AGRIFM_DEFAULT_MIN_BYTES = 100 * 1024 * 1024
 
+
 def _env_flag(name: str, default: bool) -> bool:
     v = os.environ.get(name)
     if v is None:
         return bool(default)
     return str(v).strip().lower() not in {"0", "false", "no", "off", ""}
+
 
 def _download_url_to_path(url: str, dst_path: str) -> str:
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -102,6 +104,7 @@ def _download_url_to_path(url: str, dst_path: str) -> str:
         except Exception as _e:
             pass
     return dst_path
+
 
 @lru_cache(maxsize=4)
 def _download_agrifm_ckpt(
@@ -133,6 +136,7 @@ def _download_agrifm_ckpt(
         )
     return dst
 
+
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -142,10 +146,11 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
     x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y.detach().cpu().numpy().astype(np.float32)
+    return y.detach().float().cpu().numpy()
+
 
 def _normalize_s2_for_agrifm(raw_tchw: np.ndarray, *, mode: str) -> np.ndarray:
-    if raw_tchw.ndim != 4 or int(raw_tchw.shape[1]) != len(_S2_10_BANDS):
+    if raw_tchw.ndim != 4 or raw_tchw.shape[1] != len(_S2_10_BANDS):
         raise ModelError(f"AgriFM expects TCHW with C=10, got {getattr(raw_tchw, 'shape', None)}")
 
     x = np.asarray(raw_tchw, dtype=np.float32)
@@ -160,10 +165,11 @@ def _normalize_s2_for_agrifm(raw_tchw: np.ndarray, *, mode: str) -> np.ndarray:
     if m in {"agrifm_stats", "zscore", "stats"}:
         std = np.maximum(_AGRIFM_S2_STD, 1e-6)
         x = (x - _AGRIFM_S2_MEAN[None, :, None, None]) / std[None, :, None, None]
-        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     raise ModelError(
         f"Unknown AgriFM normalization mode '{mode}'. Use one of: agrifm_stats, unit_scale, none."
     )
+
 
 def _install_agrifm_lightweight_shims() -> None:
     """Install tiny mmseg/mmengine shims sufficient for AgriFM backbone import.
@@ -340,6 +346,7 @@ def _install_agrifm_lightweight_shims() -> None:
         if mod_mmengine is not None and getattr(mod_mmengine, "__spec__", None) is None:
             mod_mmengine.__spec__ = importlib.util.spec_from_loader("mmengine", loader=None)
 
+
 @lru_cache(maxsize=1)
 def _import_agrifm_swin():
     try:
@@ -351,6 +358,7 @@ def _import_agrifm_swin():
             "Install missing minimal deps: timm, einops (and torch). "
             f"Import error: {type(e).__name__}: {e}"
         ) from e
+
 
 def _resolve_ckpt_path() -> str:
     p = str(os.environ.get("RS_EMBED_AGRIFM_CKPT") or "").strip()
@@ -388,6 +396,7 @@ def _resolve_ckpt_path() -> str:
         min_bytes=min_bytes,
     )
 
+
 def _assert_weights_loaded(model) -> dict[str, float]:
     ensure_torch()
     import torch
@@ -409,6 +418,7 @@ def _assert_weights_loaded(model) -> dict[str, float]:
     if std < 1e-6 and mx < 1e-5:
         raise ModelError("AgriFM parameters look uninitialized (near-zero stats).")
     return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+
 
 @lru_cache(maxsize=6)
 def _load_agrifm_cached(
@@ -473,6 +483,7 @@ def _load_agrifm_cached(
     }
     return model, meta
 
+
 def _load_agrifm(
     *,
     ckpt_path: str,
@@ -485,6 +496,7 @@ def _load_agrifm(
     )
     model, meta = loaded
     return model, meta, dev
+
 
 def _fetch_s2_10_raw_tchw(
     provider: ProviderBase,
@@ -510,13 +522,14 @@ def _fetch_s2_10_raw_tchw(
         fill_value=float(fill_value),
     )
 
+
 def _agrifm_forward_grid(
     model, x_tchw: np.ndarray, *, device: str
 ) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
-    if x_tchw.ndim != 4 or int(x_tchw.shape[1]) != len(_S2_10_BANDS):
+    if x_tchw.ndim != 4 or x_tchw.shape[1] != len(_S2_10_BANDS):
         raise ModelError(f"AgriFM expects TCHW with C=10, got {getattr(x_tchw, 'shape', None)}")
 
     xb = (
@@ -531,7 +544,7 @@ def _agrifm_forward_grid(
         feats = out.get("encoder_features", None)
         fl = out.get("features_list", None)
         if isinstance(fl, (tuple, list)):
-            feat_list_shapes = [tuple(int(v) for v in x.shape) for x in fl if hasattr(x, "shape")]
+            feat_list_shapes = [x.shape for x in fl if hasattr(x, "shape")]
     else:
         feats = out
 
@@ -543,17 +556,18 @@ def _agrifm_forward_grid(
         feats = feats.mean(dim=2)
     if feats.ndim != 4:
         raise ModelError(f"Unexpected AgriFM feature shape: {getattr(feats, 'shape', None)}")
-    if int(feats.shape[0]) != 1:
+    if feats.shape[0] != 1:
         raise ModelError(
             f"AgriFM expects batch size 1 in single inference, got {tuple(feats.shape)}"
         )
 
-    grid = feats[0].detach().float().cpu().numpy().astype(np.float32)  # [D,H,W]
+    grid = feats[0].detach().float().cpu().numpy()  # [D,H,W]
     meta = {
-        "feature_shape": tuple(int(v) for v in feats.shape),
+        "feature_shape": feats.shape,
         "feature_list_shapes": feat_list_shapes,
     }
     return grid, meta
+
 
 @register("agrifm")
 class AgriFMEmbedder(EmbedderBase):
@@ -650,13 +664,13 @@ class AgriFMEmbedder(EmbedderBase):
         else:
             raw = np.asarray(input_chw, dtype=np.float32)
             if raw.ndim == 3:
-                if int(raw.shape[0]) != len(_S2_10_BANDS):
+                if raw.shape[0] != len(_S2_10_BANDS):
                     raise ModelError(
                         f"input_chw must be CHW with 10 bands for agrifm, got {raw.shape}"
                     )
                 raw_tchw = np.repeat(raw[None, ...], repeats=n_frames, axis=0).astype(np.float32)
             elif raw.ndim == 4:
-                if int(raw.shape[1]) != len(_S2_10_BANDS):
+                if raw.shape[1] != len(_S2_10_BANDS):
                     raise ModelError(
                         f"input_chw must be TCHW with C=10 for agrifm, got {raw.shape}"
                     )
@@ -678,7 +692,7 @@ class AgriFMEmbedder(EmbedderBase):
         # Optional: inspect first frame on normalized [0,1] scale.
         from ..tools.inspection import checks_should_raise, maybe_inspect_chw
 
-        check_meta: dict[str, Any] = {"input_frames": int(raw_tchw.shape[0])}
+        check_meta: dict[str, Any] = {"input_frames": raw_tchw.shape[0]}
         report = maybe_inspect_chw(
             np.clip(raw_tchw[0] / 10000.0, 0.0, 1.0).astype(np.float32),
             sensor=sensor,
@@ -713,10 +727,10 @@ class AgriFMEmbedder(EmbedderBase):
             input_time=temporal_midpoint_str(t),
             extra={
                 "bands": tuple(_S2_10_BANDS),
-                "n_frames": int(raw_tchw.shape[0]),
+                "n_frames": raw_tchw.shape[0],
                 "norm_mode": norm_mode,
-                "input_hw": (int(raw_tchw.shape[-2]), int(raw_tchw.shape[-1])),
-                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "input_hw": (raw_tchw.shape[-2], raw_tchw.shape[-1]),
+                "grid_hw": (grid.shape[1], grid.shape[2]),
                 **check_meta,
                 **wmeta,
                 **fmeta,

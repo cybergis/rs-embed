@@ -71,6 +71,7 @@ _S2_WAVELENGTHS_UM = {
     "B12": 2.190,
 }
 
+
 def _infer_wavelengths_um(bands: list[str]) -> list[float] | None:
     wv = []
     for b in bands:
@@ -78,6 +79,7 @@ def _infer_wavelengths_um(bands: list[str]) -> list[float] | None:
             return None
         wv.append(float(_S2_WAVELENGTHS_UM[b]))
     return wv
+
 
 def _resize_chw(
     x_chw: np.ndarray,
@@ -101,8 +103,9 @@ def _resize_chw(
 
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)  # [1,C,H,W]
     x = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
-    y = x[0].cpu().numpy().astype(np.float32)
+    y = x[0].float().cpu().numpy()
     return y, info
+
 
 # -----------------------------
 # Provider fetch (generic SR scaling /10000)
@@ -147,6 +150,7 @@ def _fetch_provider_multiband_sr_chw(
     }
     return x, meta
 
+
 def _fetch_gee_multiband_sr_chw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -171,6 +175,7 @@ def _fetch_gee_multiband_sr_chw(
         composite=composite,
         default_value=default_value,
     )
+
 
 # -----------------------------
 # DOFA model + forward adapters
@@ -279,19 +284,15 @@ def _prepare_dofa_state_dict_for_model(
     model_state = model.state_dict()
     prepared = dict(state_dict)
 
-    fc_norm_weight_missing = (
-        "fc_norm.weight" not in prepared
-        or getattr(prepared.get("fc_norm.weight"), "shape", None)
-        != getattr(model_state.get("fc_norm.weight"), "shape", None)
-    )
+    fc_norm_weight_missing = "fc_norm.weight" not in prepared or getattr(
+        prepared.get("fc_norm.weight"), "shape", None
+    ) != getattr(model_state.get("fc_norm.weight"), "shape", None)
     if "fc_norm.weight" in model_state and fc_norm_weight_missing and "norm.weight" in prepared:
         prepared["fc_norm.weight"] = prepared["norm.weight"].detach().clone()
 
-    fc_norm_bias_missing = (
-        "fc_norm.bias" not in prepared
-        or getattr(prepared.get("fc_norm.bias"), "shape", None)
-        != getattr(model_state.get("fc_norm.bias"), "shape", None)
-    )
+    fc_norm_bias_missing = "fc_norm.bias" not in prepared or getattr(
+        prepared.get("fc_norm.bias"), "shape", None
+    ) != getattr(model_state.get("fc_norm.bias"), "shape", None)
     if "fc_norm.bias" in model_state and fc_norm_bias_missing and "norm.bias" in prepared:
         prepared["fc_norm.bias"] = prepared["norm.bias"].detach().clone()
 
@@ -350,6 +351,7 @@ def _resolve_dofa_weights_path(spec: dict[str, str]) -> tuple[str, str]:
             f"{spec['env_var']} or RS_EMBED_DOFA_WEIGHTS_DIR to a local checkpoint."
         ) from e
 
+
 @lru_cache(maxsize=4)
 def _load_dofa_model_cached(variant: str, dev: str):
     import torch
@@ -396,6 +398,7 @@ def _load_dofa_model_cached(variant: str, dev: str):
     }
     return model, meta
 
+
 def _load_dofa_model(
     *,
     variant: str = "base",
@@ -408,6 +411,7 @@ def _load_dofa_model(
         variant=variant_l,
     )
     return loaded
+
 
 def _dofa_forward_tokens_and_pooled(
     model,
@@ -448,14 +452,14 @@ def _dofa_forward_tokens_and_pooled(
         if getattr(model, "global_pool", True):
             pooled_t = xseq[:, 1:, :].mean(dim=1)
             pooled_t = model.fc_norm(pooled_t)
-            pooled = pooled_t[0].detach().float().cpu().numpy().astype(np.float32)
+            pooled = pooled_t[0].detach().float().cpu().numpy()
             norm_applied = "fc_norm(global_pool_mean)"
         else:
             xseq = model.norm(xseq)
-            pooled = xseq[:, 0][0].detach().float().cpu().numpy().astype(np.float32)
+            pooled = xseq[:, 0][0].detach().float().cpu().numpy()
             norm_applied = "norm(cls)"
 
-        patch_tokens = xseq[:, 1:, :][0].detach().float().cpu().numpy().astype(np.float32)  # [N,D]
+        patch_tokens = xseq[:, 1:, :][0].detach().float().cpu().numpy()  # [N,D]
 
     n, d = patch_tokens.shape
     side = int(round(math.sqrt(n)))
@@ -467,6 +471,7 @@ def _dofa_forward_tokens_and_pooled(
         "pooled_norm": norm_applied,
     }
     return patch_tokens, pooled, extra
+
 
 def _dofa_forward_tokens_and_pooled_batch(
     model,
@@ -502,17 +507,17 @@ def _dofa_forward_tokens_and_pooled_batch(
         if getattr(model, "global_pool", True):
             pooled_t = xseq[:, 1:, :].mean(dim=1)
             pooled_t = model.fc_norm(pooled_t)
-            pooled = pooled_t.detach().float().cpu().numpy().astype(np.float32)  # [B,D]
+            pooled = pooled_t.detach().float().cpu().numpy()  # [B,D]
             norm_applied = "fc_norm(global_pool_mean)"
         else:
             xseq = model.norm(xseq)
-            pooled = xseq[:, 0].detach().float().cpu().numpy().astype(np.float32)  # [B,D]
+            pooled = xseq[:, 0].detach().float().cpu().numpy()  # [B,D]
             norm_applied = "norm(cls)"
 
-        patch_tokens = xseq[:, 1:, :].detach().float().cpu().numpy().astype(np.float32)  # [B,N,D]
+        patch_tokens = xseq[:, 1:, :].detach().float().cpu().numpy()  # [B,N,D]
 
-    n = int(patch_tokens.shape[1])
-    d = int(patch_tokens.shape[2])
+    n = patch_tokens.shape[1]
+    d = patch_tokens.shape[2]
     side = int(round(math.sqrt(n)))
     extra = {
         "token_count": int(n),
@@ -523,6 +528,7 @@ def _dofa_forward_tokens_and_pooled_batch(
         "batch_shape": tuple(patch_tokens.shape),
     }
     return patch_tokens, pooled, extra
+
 
 # -----------------------------
 # Embedder
@@ -699,7 +705,7 @@ class DOFAEmbedder(EmbedderBase):
                 )
             else:
                 # input_chw expected to be raw SR values (0..10000) in band order `bands`
-                if input_chw.ndim != 3 or int(input_chw.shape[0]) != len(bands):
+                if input_chw.ndim != 3 or input_chw.shape[0] != len(bands):
                     raise ModelError(
                         f"input_chw must be CHW with {len(bands)} bands for DOFA, got {getattr(input_chw, 'shape', None)}"
                     )
@@ -729,7 +735,7 @@ class DOFAEmbedder(EmbedderBase):
 
             x_chw, resize_meta = _resize_chw(x_chw, size=image_size)
             x_bchw = x_chw[None, ...].astype(np.float32)
-        c = int(x_bchw.shape[1])
+        c = x_bchw.shape[1]
         if len(wavelengths_um) != c:
             raise ModelError(f"wavelengths length={len(wavelengths_um)} must equal channels C={c}.")
 
@@ -755,7 +761,7 @@ class DOFAEmbedder(EmbedderBase):
             },
             "input_channels": int(c),
             "wavelengths_um": list(map(float, wavelengths_um)),
-            "input_size_hw": (int(x_bchw.shape[2]), int(x_bchw.shape[3])),
+            "input_size_hw": (x_bchw.shape[2], x_bchw.shape[3]),
             "token_meta": tmeta,
             **check_meta,
             **mmeta,
@@ -929,7 +935,7 @@ class DOFAEmbedder(EmbedderBase):
         x_bchw_all: list[np.ndarray] = []
         resize_meta_all: list[dict[str, Any]] = []
         for i, input_chw in enumerate(input_chws):
-            if input_chw.ndim != 3 or int(input_chw.shape[0]) != len(bands):
+            if input_chw.ndim != 3 or input_chw.shape[0] != len(bands):
                 raise ModelError(
                     f"input_chw must be CHW with {len(bands)} bands for DOFA, got "
                     f"{getattr(input_chw, 'shape', None)} at index={i}"
@@ -969,11 +975,11 @@ class DOFAEmbedder(EmbedderBase):
                         "strategy": "resize_to_224_bilinear",
                         "resize_meta": resize_meta_all[i],
                     },
-                    "input_channels": int(x_bchw_all[i].shape[0]),
+                    "input_channels": x_bchw_all[i].shape[0],
                     "wavelengths_um": list(map(float, wavelengths_um)),
                     "input_size_hw": (
-                        int(x_bchw_all[i].shape[1]),
-                        int(x_bchw_all[i].shape[2]),
+                        x_bchw_all[i].shape[1],
+                        x_bchw_all[i].shape[2],
                     ),
                     "token_meta": tmeta,
                     "batch_infer": True,

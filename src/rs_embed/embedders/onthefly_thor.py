@@ -106,8 +106,7 @@ def _normalize_thor_variant(variant: Any) -> str:
     resolved = aliases.get(raw)
     if resolved is None:
         raise ModelError(
-            f"Unknown THOR variant='{variant}' "
-            "(expected one of: tiny, small, base, large)."
+            f"Unknown THOR variant='{variant}' (expected one of: tiny, small, base, large)."
         )
     return resolved
 
@@ -162,7 +161,8 @@ def _resolve_thor_runtime_config(
         model_key = _THOR_VARIANT_TO_MODEL_KEY[_normalize_thor_variant(variant_v)]
     else:
         model_key = _normalize_thor_model_key(
-            os.environ.get("RS_EMBED_THOR_MODEL_KEY", default_model_key).strip() or default_model_key
+            os.environ.get("RS_EMBED_THOR_MODEL_KEY", default_model_key).strip()
+            or default_model_key
         )
 
     image_size = int(os.environ.get("RS_EMBED_THOR_IMG", str(default_image_size)))
@@ -194,6 +194,7 @@ def _resolve_thor_runtime_config(
         "hf_id": _thor_hf_id_from_model_key(model_key),
     }
 
+
 def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -203,10 +204,11 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y[0].detach().cpu().numpy().astype(np.float32)
+    return y[0].detach().float().cpu().numpy()
+
 
 def _normalize_s2_for_thor(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
-    if raw_chw.ndim != 3 or int(raw_chw.shape[0]) != len(_S2_SR_10_BANDS):
+    if raw_chw.ndim != 3 or raw_chw.shape[0] != len(_S2_SR_10_BANDS):
         raise ModelError(f"Expected CHW with 10 S2 bands, got {getattr(raw_chw, 'shape', None)}")
 
     x = np.asarray(raw_chw, dtype=np.float32)
@@ -224,11 +226,12 @@ def _normalize_s2_for_thor(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
     if m in {"thor_stats", "zscore", "thor_zscore"}:
         std = np.maximum(_THOR_S2_STD, 1e-6)
         x = (x - _THOR_S2_MEAN[:, None, None]) / std[:, None, None]
-        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
 
     raise ModelError(
         f"Unknown THOR normalization mode '{mode}'. Use one of: thor_stats, unit_scale, none."
     )
+
 
 def _fetch_s2_sr_10_raw_chw(
     provider: ProviderBase,
@@ -253,6 +256,7 @@ def _fetch_s2_sr_10_raw_chw(
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
 
+
 def _extract_feature_and_channel_params(
     out: Any,
 ) -> tuple[Any, dict[str, Any] | None]:
@@ -266,6 +270,7 @@ def _extract_feature_and_channel_params(
         raise ModelError(f"THOR forward expected list/tuple of features, got type={type(features)}")
     feat_t = features[-1]
     return feat_t, channel_params
+
 
 def _group_patch_sizes(
     *,
@@ -294,6 +299,7 @@ def _group_patch_sizes(
         used_groups.append(str(gname))
     return patch_sizes, used_groups
 
+
 def _thor_group_grid_from_tokens(
     tokens_bnd,
     *,
@@ -313,7 +319,7 @@ def _thor_group_grid_from_tokens(
         raise ModelError("THOR returned no usable group patch sizes in channel_params.")
 
     expected_patch_tokens = int(sum(p * p for p in patch_sizes))
-    n_tok = int(tokens_bnd.shape[1])
+    n_tok = tokens_bnd.shape[1]
     start = 1 if n_tok == expected_patch_tokens + 1 else 0
     cls_removed = bool(start == 1)
     if n_tok < expected_patch_tokens + start:
@@ -354,6 +360,7 @@ def _thor_group_grid_from_tokens(
     }
     return grid, meta
 
+
 def _pool_thor_tokens(
     tokens: np.ndarray,
     *,
@@ -363,9 +370,9 @@ def _pool_thor_tokens(
     if (
         expected_patch_tokens is not None
         and tokens.ndim == 2
-        and int(tokens.shape[0]) in {int(expected_patch_tokens), int(expected_patch_tokens) + 1}
+        and tokens.shape[0] in {int(expected_patch_tokens), int(expected_patch_tokens) + 1}
     ):
-        cls_removed = int(tokens.shape[0]) == int(expected_patch_tokens) + 1
+        cls_removed = tokens.shape[0] == int(expected_patch_tokens) + 1
         patch_tokens = tokens[1:] if cls_removed else tokens
         if pooling == "mean":
             return patch_tokens.mean(axis=0).astype(np.float32), bool(cls_removed)
@@ -380,9 +387,8 @@ def _load_thor_module():
     try:
         return importlib.import_module("rs_embed.embedders._vendor.thor_vit")
     except Exception as e:
-        raise ModelError(
-            f"Failed to import vendored THOR runtime: {type(e).__name__}: {e}"
-        ) from e
+        raise ModelError(f"Failed to import vendored THOR runtime: {type(e).__name__}: {e}") from e
+
 
 @lru_cache(maxsize=8)
 def _load_thor_cached(
@@ -464,6 +470,7 @@ def _load_thor_cached(
     }
     return model, meta
 
+
 def _load_thor(
     *,
     model_key: str,
@@ -486,6 +493,7 @@ def _load_thor(
     )
     model, meta = loaded
     return model, meta, dev
+
 
 def _thor_forward_single(
     model: Any,
@@ -512,12 +520,10 @@ def _thor_forward_single(
         raise ModelError(
             f"THOR feature tensor must be [B,N,D], got {getattr(feat_t, 'shape', None)}"
         )
-    if int(feat_t.shape[0]) != 1:
-        raise ModelError(
-            f"THOR embedder expects B=1 in single inference, got B={int(feat_t.shape[0])}"
-        )
+    if feat_t.shape[0] != 1:
+        raise ModelError(f"THOR embedder expects B=1 in single inference, got B={feat_t.shape[0]}")
 
-    tokens = feat_t[0].detach().float().cpu().numpy().astype(np.float32)
+    tokens = feat_t[0].detach().float().cpu().numpy()
     grid: np.ndarray | None = None
     expected_patch_tokens: int | None = None
     grid_meta: dict[str, Any] = {}
@@ -531,7 +537,7 @@ def _thor_forward_single(
                 groups=groups,
                 merge=group_merge,
             )
-            grid = grid_bdhw[0].detach().float().cpu().numpy().astype(np.float32)
+            grid = grid_bdhw[0].detach().float().cpu().numpy()
             expected_patch_tokens = int(gmeta["expected_patch_tokens"])
             grid_meta = {
                 "grid_kind": "thor_group_grid",
@@ -563,6 +569,7 @@ def _thor_forward_single(
         **grid_meta,
     }
     return tokens, grid, meta
+
 
 @register("thor")
 class THORBaseEmbedder(EmbedderBase):
@@ -674,7 +681,7 @@ class THORBaseEmbedder(EmbedderBase):
                 fill_value=fill_value,
             )
         else:
-            if input_chw.ndim != 3 or int(input_chw.shape[0]) != len(_S2_SR_10_BANDS):
+            if input_chw.ndim != 3 or input_chw.shape[0] != len(_S2_SR_10_BANDS):
                 raise ModelError(
                     f"input_chw must be CHW with 10 bands for THOR, got {getattr(input_chw, 'shape', None)}"
                 )

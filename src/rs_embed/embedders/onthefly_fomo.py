@@ -112,11 +112,13 @@ _DEFAULT_CKPT_URL = (
 )
 _DEFAULT_CKPT_CACHE_DIR = "~/.cache/rs_embed/fomo"
 
+
 def _env_flag(name: str, default: bool) -> bool:
     v = os.environ.get(name)
     if v is None:
         return bool(default)
     return str(v).strip().lower() not in {"0", "false", "no", "off", ""}
+
 
 def _download_url_to_path(url: str, dst_path: str) -> str:
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -136,6 +138,7 @@ def _download_url_to_path(url: str, dst_path: str) -> str:
         except Exception as _e:
             pass
     return dst_path
+
 
 @lru_cache(maxsize=4)
 def _download_fomo_ckpt(
@@ -160,6 +163,7 @@ def _download_fomo_ckpt(
         )
     return dst
 
+
 def _resolve_fomo_ckpt_path() -> str:
     local = str(os.environ.get("RS_EMBED_FOMO_CKPT") or "").strip()
     if local:
@@ -183,6 +187,7 @@ def _resolve_fomo_ckpt_path() -> str:
     min_bytes = int(os.environ.get("RS_EMBED_FOMO_CKPT_MIN_BYTES", str(50 * 1024 * 1024)))
     return _download_fomo_ckpt(url=url, cache_dir=cache_dir, filename=filename, min_bytes=min_bytes)
 
+
 @lru_cache(maxsize=8)
 def _load_fomo_module():
     try:
@@ -193,6 +198,7 @@ def _load_fomo_module():
             "Failed to import vendored FoMo runtime. Install missing dependencies: torch, einops."
         ) from e
     return mod
+
 
 def _extract_state_dict(obj: Any) -> dict[str, Any]:
     if not isinstance(obj, dict):
@@ -210,6 +216,7 @@ def _extract_state_dict(obj: Any) -> dict[str, Any]:
             nk = nk[len("model.") :]
         cleaned[nk] = v
     return cleaned
+
 
 def _build_fomo_model_config(
     *,
@@ -232,6 +239,7 @@ def _build_fomo_model_config(
         "single_embedding_layer": True,
         "modality_channels": dict(_DEFAULT_MODALITY_CHANNELS),
     }
+
 
 @lru_cache(maxsize=8)
 def _load_fomo_cached(
@@ -317,6 +325,7 @@ def _load_fomo_cached(
     }
     return model, meta
 
+
 def _load_fomo(
     *,
     ckpt_path: str,
@@ -344,6 +353,7 @@ def _load_fomo(
     model, meta = loaded
     return model, meta, dev
 
+
 def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -353,7 +363,8 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y[0].detach().cpu().numpy().astype(np.float32)
+    return y[0].detach().float().cpu().numpy()
+
 
 def _normalize_s2(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
     x = np.asarray(raw_chw, dtype=np.float32)
@@ -376,7 +387,8 @@ def _normalize_s2(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
             f"Unknown FoMo normalization mode '{mode}'. "
             "Use one of: unit_scale, per_tile_minmax, none."
         )
-    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+
 
 def _resolve_s2_modality_keys() -> tuple[int, ...]:
     raw = str(os.environ.get("RS_EMBED_FOMO_S2_KEYS") or "").strip()
@@ -389,6 +401,7 @@ def _resolve_s2_modality_keys() -> tuple[int, ...]:
             f"RS_EMBED_FOMO_S2_KEYS expects {len(_S2_SR_12_BANDS)} comma-separated integers, got {len(keys)}."
         )
     return keys
+
 
 def _fomo_forward_tokens(
     model: Any,
@@ -414,20 +427,21 @@ def _fomo_forward_tokens(
 
     if not hasattr(out, "ndim") or int(out.ndim) != 3:
         raise ModelError(f"FoMo forward(pool=False) expected [B,N,D] tensor, got type={type(out)}")
-    if int(out.shape[0]) != 1:
+    if out.shape[0] != 1:
         raise ModelError(f"FoMo embedder expects B=1 per call, got {tuple(out.shape)}")
 
-    tokens = out[0].detach().float().cpu().numpy().astype(np.float32)  # [N,D]
+    tokens = out[0].detach().float().cpu().numpy()  # [N,D]
     meta = {
-        "token_count": int(tokens.shape[0]),
-        "token_dim": int(tokens.shape[1]),
+        "token_count": tokens.shape[0],
+        "token_dim": tokens.shape[1],
     }
     return tokens, meta
+
 
 def _tokens_to_grid(
     tokens_nd: np.ndarray, *, n_modalities: int, patch_size: int, image_size: int
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    n_tokens, dim = int(tokens_nd.shape[0]), int(tokens_nd.shape[1])
+    n_tokens, dim = tokens_nd.shape[0], tokens_nd.shape[1]
     expected_gs = int(image_size) // int(patch_size) if int(patch_size) > 0 else 0
     expected_per_mod = expected_gs * expected_gs if expected_gs > 0 else 0
     expected_tokens = n_modalities * expected_per_mod
@@ -437,7 +451,7 @@ def _tokens_to_grid(
         return vec[:, None, None], {
             "grid_kind": "vector_as_1x1",
             "grid_hw": (1, 1),
-            "grid_shape": (int(vec.shape[0]), 1, 1),
+            "grid_shape": (vec.shape[0], 1, 1),
             "grid_expected_tokens": int(expected_tokens),
         }
 
@@ -448,7 +462,7 @@ def _tokens_to_grid(
         return vec[:, None, None], {
             "grid_kind": "vector_as_1x1",
             "grid_hw": (1, 1),
-            "grid_shape": (int(vec.shape[0]), 1, 1),
+            "grid_shape": (vec.shape[0], 1, 1),
             "grid_expected_tokens": int(expected_tokens),
         }
 
@@ -461,6 +475,7 @@ def _tokens_to_grid(
         "grid_modalities": int(n_modalities),
         "grid_expected_tokens": int(expected_tokens),
     }
+
 
 @register("fomo")
 class FoMoEmbedder(EmbedderBase):
@@ -569,20 +584,20 @@ class FoMoEmbedder(EmbedderBase):
             )
         else:
             raw = np.asarray(input_chw, dtype=np.float32)
-            if raw.ndim != 3 or int(raw.shape[0]) != len(_S2_SR_12_BANDS):
+            if raw.ndim != 3 or raw.shape[0] != len(_S2_SR_12_BANDS):
                 raise ModelError(f"input_chw must be CHW with 12 bands for fomo, got {raw.shape}")
             raw = np.clip(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0).astype(
                 np.float32
             )
 
         x = _normalize_s2(raw, mode=norm_mode)
-        if int(x.shape[-2]) != image_size or int(x.shape[-1]) != image_size:
+        if x.shape[-2] != image_size or x.shape[-1] != image_size:
             x = _resize_chw(x, out_hw=image_size)
         x_bchw = x[None, ...].astype(np.float32)
 
-        if int(x_bchw.shape[1]) != len(spectral_keys):
+        if x_bchw.shape[1] != len(spectral_keys):
             raise ModelError(
-                f"FoMo spectral key count ({len(spectral_keys)}) does not match input channels ({int(x_bchw.shape[1])})."
+                f"FoMo spectral key count ({len(spectral_keys)}) does not match input channels ({x_bchw.shape[1]})."
             )
 
         model, lmeta, dev = _load_fomo(
@@ -655,7 +670,7 @@ class FoMoEmbedder(EmbedderBase):
             gmeta_full = {
                 **meta,
                 "grid_shape": tuple(grid.shape),
-                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "grid_hw": (grid.shape[1], grid.shape[2]),
             }
             da = xr.DataArray(
                 grid.astype(np.float32),

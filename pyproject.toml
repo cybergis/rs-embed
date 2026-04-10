@@ -67,6 +67,7 @@ dev = [
   "pytest>=7.4",
   "pytest-cov>=4.1",
   "ruff>=0.5.0",
+  "pre-commit>=3.0",
 ]
 
 [project.scripts]
@@ -112,6 +113,7 @@ ignore = [
     "F811",   # redefinition of unused name (dataclass field vs staticmethod)
     "F841",   # local variable assigned but never used
     "E741",   # ambiguous variable name
+    "UP038",  # isinstance(x, (A, B)) → isinstance(x, A | B) — unsafe with metaclasses
     "UP047",  # generic functions should use type parameters (Python 3.12 syntax)
 ]
 

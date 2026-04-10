@@ -28,6 +28,7 @@ def default_provider_backend_name() -> str | None:
         return "gee"
     return str(providers[0]).strip().lower()
 
+
 def resolve_provider_backend_name(
     backend: str,
     *,
@@ -48,6 +49,7 @@ def resolve_provider_backend_name(
         return b
     return None
 
+
 def is_provider_backend(
     backend: str,
     *,
@@ -62,6 +64,7 @@ def is_provider_backend(
         )
         is not None
     )
+
 
 def get_cached_provider(
     provider_cache: dict[str, ProviderBase],
@@ -85,12 +88,14 @@ def get_cached_provider(
     p.ensure_ready()
     return p
 
+
 def provider_init_kwargs(backend: str) -> dict[str, Any]:
     """Provider-specific constructor kwargs, centralized outside embedders."""
     b = normalize_backend_name(backend)
     if b == "gee":
         return {"auto_auth": True}
     return {}
+
 
 def create_provider_for_backend(
     backend: str,
@@ -109,6 +114,7 @@ def create_provider_for_backend(
     p.ensure_ready()
     return p
 
+
 def resolve_device_auto_torch(device: str) -> str:
     if device != "auto":
         return device
@@ -116,8 +122,9 @@ def resolve_device_auto_torch(device: str) -> str:
         import torch
 
         return "cuda" if torch.cuda.is_available() else "cpu"
-    except Exception as _e:
+    except ImportError:
         return "cpu"
+
 
 def load_cached_with_device(
     cached_loader: Callable[..., _T],
@@ -129,6 +136,7 @@ def load_cached_with_device(
     dev = resolve_device_auto_torch(device)
     loaded = cached_loader(dev=dev, **kwargs)
     return loaded, dev
+
 
 def fetch_collection_patch_chw(
     provider: ProviderBase,
@@ -144,12 +152,12 @@ def fetch_collection_patch_chw(
 ) -> np.ndarray:
     """Fetch a provider patch as CHW float32 using shared SensorSpec logic."""
     sensor = SensorSpec(
-        collection=str(collection),
-        bands=tuple(str(b) for b in bands),
-        scale_m=int(scale_m),
-        cloudy_pct=(int(cloudy_pct) if cloudy_pct is not None else None),  # type: ignore[arg-type]
-        fill_value=float(fill_value),
-        composite=str(composite),
+        collection=collection,
+        bands=bands,
+        scale_m=scale_m,
+        cloudy_pct=cloudy_pct,  # type: ignore[arg-type]
+        fill_value=fill_value,
+        composite=composite,
     )
     return fetch_sensor_patch_chw(
         provider,
@@ -157,6 +165,7 @@ def fetch_collection_patch_chw(
         temporal=temporal,
         sensor=sensor,
     )
+
 
 def fetch_sensor_patch_chw(
     provider: ProviderBase,
@@ -184,6 +193,7 @@ def fetch_sensor_patch_chw(
     except ProviderError as exc:
         raise ModelError(str(exc)) from exc
 
+
 def _stitch_spatial_last2_arrays(
     *,
     a: np.ndarray,
@@ -204,6 +214,7 @@ def _stitch_spatial_last2_arrays(
         fill_value=fill_value,
     )
 
+
 def _fetch_spatial_array_with_bbox_fallback(
     provider: ProviderBase,
     *,
@@ -223,41 +234,42 @@ def _fetch_spatial_array_with_bbox_fallback(
         ):
             raise
         max_depth = int(getattr(_ah, "_MAX_GEE_BBOX_SPLIT_DEPTH", 12))
-        if int(split_depth) >= max_depth:
+        if split_depth >= max_depth:
             raise ModelError(
                 f"GEE bbox fallback exceeded max recursive splits ({max_depth})."
             ) from e
 
         spatial_bbox = _ah._coerce_bbox_like(spatial)
-        h_est, w_est = _ah._bbox_span_pixels_estimate(spatial_bbox, scale_m=int(scale_m))
-        prefer_axis = "x" if int(w_est) >= int(h_est) else "y"
+        h_est, w_est = _ah._bbox_span_pixels_estimate(spatial_bbox, scale_m=scale_m)
+        prefer_axis = "x" if w_est >= h_est else "y"
         a_sp, b_sp, axis = _ah._split_bbox_for_recursive_fetch(
             spatial_bbox, prefer_axis=prefer_axis
         )
         arr_a = _fetch_spatial_array_with_bbox_fallback(
             provider,
             spatial=a_sp,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
+            scale_m=scale_m,
+            fill_value=fill_value,
             fetch_fn=fetch_fn,
-            split_depth=int(split_depth) + 1,
+            split_depth=split_depth + 1,
         )
         arr_b = _fetch_spatial_array_with_bbox_fallback(
             provider,
             spatial=b_sp,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
+            scale_m=scale_m,
+            fill_value=fill_value,
             fetch_fn=fetch_fn,
-            split_depth=int(split_depth) + 1,
+            split_depth=split_depth + 1,
         )
         return _stitch_spatial_last2_arrays(
             a=arr_a,
             b=arr_b,
             parent_spatial=spatial_bbox,
             axis=axis,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
+            scale_m=scale_m,
+            fill_value=fill_value,
         )
+
 
 def fetch_collection_patch_all_bands_chw(
     provider: ProviderBase,
@@ -275,16 +287,15 @@ def fetch_collection_patch_all_bands_chw(
         arr, names = provider.fetch_collection_patch_all_bands_chw(
             spatial=sp,
             temporal=temporal,
-            collection=str(collection),
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
-            composite=str(composite),
+            collection=collection,
+            scale_m=scale_m,
+            fill_value=fill_value,
+            composite=composite,
         )
-        return np.asarray(arr, dtype=np.float32), tuple(str(b) for b in names)
+        return np.asarray(arr, dtype=np.float32), tuple(names)
 
     try:
-        arr, names = _fetch_once(spatial)
-        return np.asarray(arr, dtype=np.float32), tuple(names)
+        return _fetch_once(spatial)
     except Exception as e:
         from ..providers import gee_utils as _ah
 
@@ -303,31 +314,32 @@ def fetch_collection_patch_all_bands_chw(
                     and _ah._looks_like_bbox_spatial(sp)
                 ):
                     raise
-                if int(depth) >= max_depth:
+                if depth >= max_depth:
                     raise ModelError(
                         f"GEE bbox fallback exceeded max recursive splits ({max_depth})."
                     ) from ee
                 sp_bbox = _ah._coerce_bbox_like(sp)
-                h_est, w_est = _ah._bbox_span_pixels_estimate(sp_bbox, scale_m=int(scale_m))
-                prefer_axis = "x" if int(w_est) >= int(h_est) else "y"
+                h_est, w_est = _ah._bbox_span_pixels_estimate(sp_bbox, scale_m=scale_m)
+                prefer_axis = "x" if w_est >= h_est else "y"
                 a_sp, b_sp, axis = _ah._split_bbox_for_recursive_fetch(
                     sp_bbox, prefer_axis=prefer_axis
                 )
                 arr_a, names_a = _rec(a_sp, depth + 1)
                 arr_b, names_b = _rec(b_sp, depth + 1)
-                if tuple(names_a) != tuple(names_b):
+                if names_a != names_b:
                     raise ModelError("Band names mismatch while stitching all-band bbox tiles.")
                 stitched = _stitch_spatial_last2_arrays(
                     a=arr_a,
                     b=arr_b,
                     parent_spatial=sp_bbox,
                     axis=axis,
-                    scale_m=int(scale_m),
-                    fill_value=float(fill_value),
+                    scale_m=scale_m,
+                    fill_value=fill_value,
                 )
-                return stitched, tuple(names_a)
+                return stitched, names_a
 
         return _rec(spatial, 0)
+
 
 def fetch_s2_rgb_chw(
     provider: ProviderBase,
@@ -345,12 +357,21 @@ def fetch_s2_rgb_chw(
         temporal=temporal,
         collection="COPERNICUS/S2_SR_HARMONIZED",
         bands=("B4", "B3", "B2"),
-        scale_m=int(scale_m),
-        cloudy_pct=int(cloudy_pct),
-        composite=str(composite),
+        scale_m=scale_m,
+        cloudy_pct=cloudy_pct,
+        composite=composite,
         fill_value=0.0,
     )
     return np.clip(raw / 10000.0, 0.0, 1.0).astype(np.float32)
+
+
+def _validate_and_sanitize_s1_chw(arr: np.ndarray) -> np.ndarray:
+    """Validate shape and sanitize a raw S1 VV/VH CHW array to clean float32."""
+    arr = np.asarray(arr, dtype=np.float32)
+    if arr.ndim != 3 or arr.shape[0] != 2:
+        raise ModelError(f"Expected S1 VV/VH CHW with C=2, got shape={arr.shape}")
+    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0)
+
 
 def fetch_s1_vvvh_raw_chw(
     provider: ProviderBase,
@@ -369,24 +390,21 @@ def fetch_s1_vvvh_raw_chw(
     arr = _fetch_spatial_array_with_bbox_fallback(
         provider,
         spatial=spatial,
-        scale_m=int(scale_m),
-        fill_value=float(fill_value),
+        scale_m=scale_m,
+        fill_value=fill_value,
         fetch_fn=lambda sp: provider.fetch_s1_vvvh_raw_chw(
             spatial=sp,
             temporal=temporal,
-            scale_m=int(scale_m),
+            scale_m=scale_m,
             orbit=orbit,
-            use_float_linear=bool(use_float_linear),
-            composite=str(composite),
-            fill_value=float(fill_value),
-            require_iw=bool(require_iw),
-            relax_iw_on_empty=bool(relax_iw_on_empty),
+            use_float_linear=use_float_linear,
+            composite=composite,
+            fill_value=fill_value,
+            require_iw=require_iw,
+            relax_iw_on_empty=relax_iw_on_empty,
         ),
     )
-    arr = np.asarray(arr, dtype=np.float32)
-    if arr.ndim != 3 or int(arr.shape[0]) != 2:
-        raise ModelError(f"Expected S1 VV/VH CHW with C=2, got shape={getattr(arr, 'shape', None)}")
-    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    return _validate_and_sanitize_s1_chw(arr)
 
 
 def fetch_s1_vvvh_raw_chw_with_meta(
@@ -407,38 +425,36 @@ def fetch_s1_vvvh_raw_chw_with_meta(
         arr, meta = provider.fetch_s1_vvvh_raw_chw_with_meta(
             spatial=spatial,
             temporal=temporal,
-            scale_m=int(scale_m),
+            scale_m=scale_m,
             orbit=orbit,
-            use_float_linear=bool(use_float_linear),
-            composite=str(composite),
-            fill_value=float(fill_value),
-            require_iw=bool(require_iw),
-            relax_iw_on_empty=bool(relax_iw_on_empty),
+            use_float_linear=use_float_linear,
+            composite=composite,
+            fill_value=fill_value,
+            require_iw=require_iw,
+            relax_iw_on_empty=relax_iw_on_empty,
         )
     else:
         arr = fetch_s1_vvvh_raw_chw(
             provider,
             spatial=spatial,
             temporal=temporal,
-            scale_m=int(scale_m),
+            scale_m=scale_m,
             orbit=orbit,
-            use_float_linear=bool(use_float_linear),
-            composite=str(composite),
-            fill_value=float(fill_value),
-            require_iw=bool(require_iw),
-            relax_iw_on_empty=bool(relax_iw_on_empty),
+            use_float_linear=use_float_linear,
+            composite=composite,
+            fill_value=fill_value,
+            require_iw=require_iw,
+            relax_iw_on_empty=relax_iw_on_empty,
         )
         meta = {
-            "s1_iw_requested": bool(require_iw),
-            "s1_iw_applied": bool(require_iw),
+            "s1_iw_requested": require_iw,
+            "s1_iw_applied": require_iw,
             "s1_iw_relaxed_on_empty": False,
-            "s1_relax_iw_on_empty": bool(relax_iw_on_empty),
+            "s1_relax_iw_on_empty": relax_iw_on_empty,
         }
-    arr = np.asarray(arr, dtype=np.float32)
-    if arr.ndim != 3 or int(arr.shape[0]) != 2:
-        raise ModelError(f"Expected S1 VV/VH CHW with C=2, got shape={getattr(arr, 'shape', None)}")
     meta_out = dict(meta or {})
-    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32), meta_out
+    return _validate_and_sanitize_s1_chw(arr), meta_out
+
 
 def apply_normalization(raw: np.ndarray, norm: NormalizationSpec) -> np.ndarray:
     """Apply a declarative normalization strategy to raw provider data.
@@ -470,14 +486,13 @@ def apply_normalization(raw: np.ndarray, norm: NormalizationSpec) -> np.ndarray:
 def normalize_s1_vvvh_chw(raw_chw: np.ndarray) -> np.ndarray:
     """Convert raw S1 VV/VH to numerically stable [0,1] CHW."""
     arr = np.asarray(raw_chw, dtype=np.float32)
-    if arr.ndim != 3 or int(arr.shape[0]) != 2:
-        raise ModelError(
-            f"Expected raw S1 VV/VH CHW with C=2, got shape={getattr(arr, 'shape', None)}"
-        )
+    if arr.ndim != 3 or arr.shape[0] != 2:
+        raise ModelError(f"Expected raw S1 VV/VH CHW with C=2, got shape={arr.shape}")
     x = np.log1p(np.maximum(arr, 0.0))
     denom = np.percentile(x, 99) if np.isfinite(x).all() else 1.0
     denom = float(denom) if float(denom) > 0 else 1.0
     return np.clip(x / denom, 0.0, 1.0).astype(np.float32)
+
 
 def fetch_s2_multiframe_raw_tchw(
     provider: ProviderBase,
@@ -496,28 +511,30 @@ def fetch_s2_multiframe_raw_tchw(
     arr = _fetch_spatial_array_with_bbox_fallback(
         provider,
         spatial=spatial,
-        scale_m=int(scale_m),
-        fill_value=float(fill_value),
+        scale_m=scale_m,
+        fill_value=fill_value,
         fetch_fn=lambda sp: provider.fetch_multiframe_collection_raw_tchw(
             spatial=sp,
             temporal=temporal,
-            collection=str(collection),
-            bands=tuple(str(b) for b in bands),
-            n_frames=int(n_frames),
-            scale_m=int(scale_m),
-            cloudy_pct=(int(cloudy_pct) if cloudy_pct is not None else None),
-            composite=str(composite),
-            fill_value=float(fill_value),
+            collection=collection,
+            bands=tuple(bands),
+            n_frames=n_frames,
+            scale_m=scale_m,
+            cloudy_pct=cloudy_pct,
+            composite=composite,
+            fill_value=fill_value,
         ),
     )
     arr = np.asarray(arr, dtype=np.float32)
     if arr.ndim != 4:
-        raise ModelError(f"Expected TCHW array, got shape={getattr(arr, 'shape', None)}")
-    if int(arr.shape[1]) != len(tuple(bands)):
+        raise ModelError(f"Expected TCHW array, got shape={arr.shape}")
+    n_bands = len(tuple(bands))
+    if arr.shape[1] != n_bands:
         raise ModelError(
-            f"Time series channel mismatch: got C={int(arr.shape[1])}, expected C={len(tuple(bands))}"
+            f"Time series channel mismatch: got C={arr.shape[1]}, expected C={n_bands}"
         )
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
 
 def coerce_input_to_tchw(
     input_chw: np.ndarray,
@@ -528,22 +545,22 @@ def coerce_input_to_tchw(
 ) -> np.ndarray:
     """Normalize user-provided CHW/TCHW into clipped float32 [T,C,H,W]."""
     raw = np.asarray(input_chw, dtype=np.float32)
-    t = max(1, int(n_frames))
+    t = max(1, n_frames)
 
     if raw.ndim == 3:
-        if int(raw.shape[0]) != int(expected_channels):
+        if raw.shape[0] != expected_channels:
             raise ModelError(
-                f"input_chw must be CHW with C={int(expected_channels)} for {model_name}, "
-                f"got {tuple(int(v) for v in raw.shape)}"
+                f"input_chw must be CHW with C={expected_channels} for {model_name}, "
+                f"got {raw.shape}"
             )
-        raw_tchw = np.repeat(raw[None, ...], repeats=t, axis=0).astype(np.float32)
+        raw_tchw = np.repeat(raw[None, ...], repeats=t, axis=0)
     elif raw.ndim == 4:
-        if int(raw.shape[1]) != int(expected_channels):
+        if raw.shape[1] != expected_channels:
             raise ModelError(
-                f"input_chw must be TCHW with C={int(expected_channels)} for {model_name}, "
-                f"got {tuple(int(v) for v in raw.shape)}"
+                f"input_chw must be TCHW with C={expected_channels} for {model_name}, "
+                f"got {raw.shape}"
             )
-        raw_tchw = raw.astype(np.float32, copy=False)
+        raw_tchw = raw
         if raw_tchw.shape[0] < t:
             raw_tchw = np.concatenate(
                 [raw_tchw] + [raw_tchw[-1:]] * (t - raw_tchw.shape[0]),
@@ -553,12 +570,12 @@ def coerce_input_to_tchw(
             raw_tchw = raw_tchw[:t]
     else:
         raise ModelError(
-            f"input_chw must be CHW (C,H,W) or TCHW (T,C,H,W) for {model_name}, "
-            f"got {tuple(int(v) for v in raw.shape)}"
+            f"input_chw must be CHW (C,H,W) or TCHW (T,C,H,W) for {model_name}, got {raw.shape}"
         )
 
     raw_tchw = np.nan_to_num(raw_tchw, nan=0.0, posinf=0.0, neginf=0.0)
     return np.clip(raw_tchw, 0.0, 10000.0).astype(np.float32)
+
 
 def coerce_single_input_chw(
     input_chw: Any,
@@ -573,23 +590,20 @@ def coerce_single_input_chw(
 
         if torch.is_tensor(raw):
             raw = raw.detach().cpu().numpy()
-    except Exception as _e:
+    except ImportError:
         pass
 
     arr = np.asarray(raw, dtype=np.float32)
     if arr.ndim == 4:
         raise ModelError(
             f"{model_name} expects single-sample input_chw as CHW (C,H,W), "
-            f"got {tuple(int(v) for v in arr.shape)}. "
+            f"got {arr.shape}. "
             "Use get_embeddings_batch_from_inputs(...) for batches."
         )
     if arr.ndim != 3:
+        raise ModelError(f"{model_name} expects input_chw as CHW (C,H,W), got {arr.shape}")
+    if expected_channels is not None and arr.shape[0] != expected_channels:
         raise ModelError(
-            f"{model_name} expects input_chw as CHW (C,H,W), got {tuple(int(v) for v in arr.shape)}"
-        )
-    if expected_channels is not None and int(arr.shape[0]) != int(expected_channels):
-        raise ModelError(
-            f"input_chw must be CHW with C={int(expected_channels)} for {model_name}, "
-            f"got {tuple(int(v) for v in arr.shape)}"
+            f"input_chw must be CHW with C={expected_channels} for {model_name}, got {arr.shape}"
         )
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)

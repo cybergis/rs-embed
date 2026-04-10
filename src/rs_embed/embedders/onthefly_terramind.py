@@ -145,6 +145,7 @@ _TERRAMIND_REGISTRATION_MODULES = (
     "terratorch.models.backbones.terramind.model.terramind_register",
 )
 
+
 def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     ensure_torch()
     import torch
@@ -154,7 +155,8 @@ def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
     x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
     y = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
-    return y[0].detach().cpu().numpy().astype(np.float32)
+    return y[0].detach().float().cpu().numpy()
+
 
 def _fetch_s2_sr_12_raw_chw(
     provider: ProviderBase,
@@ -179,8 +181,9 @@ def _fetch_s2_sr_12_raw_chw(
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
 
+
 def _terramind_zscore_s2(raw_chw: np.ndarray, *, model_key: str, mode: str) -> np.ndarray:
-    if raw_chw.ndim != 3 or int(raw_chw.shape[0]) != len(_S2_SR_12_BANDS):
+    if raw_chw.ndim != 3 or raw_chw.shape[0] != len(_S2_SR_12_BANDS):
         raise ModelError(
             f"TerraMind expects CHW with 12 S2 bands, got {getattr(raw_chw, 'shape', None)}"
         )
@@ -188,7 +191,7 @@ def _terramind_zscore_s2(raw_chw: np.ndarray, *, model_key: str, mode: str) -> n
     mode_l = str(mode).lower().strip()
     if mode_l in ("none", "off", "raw"):
         x = raw_chw.astype(np.float32, copy=False)
-        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
 
     use_v01 = str(model_key).lower().startswith("terramind_v01")
     mean = _V01_MEAN if use_v01 else _V1_MEAN
@@ -197,7 +200,7 @@ def _terramind_zscore_s2(raw_chw: np.ndarray, *, model_key: str, mode: str) -> n
 
     x = raw_chw.astype(np.float32, copy=False)
     x = (x - mean[:, None, None]) / std[:, None, None]
-    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
 
 
 def _import_terramind_backbone_registry() -> Any:
@@ -280,6 +283,7 @@ def _ensure_terramind_backbone_registered(backbone_registry: Any, *, model_key: 
         "imports cleanly."
     )
 
+
 @lru_cache(maxsize=8)
 def _load_terramind_cached(
     model_key: str,
@@ -338,6 +342,7 @@ def _load_terramind_cached(
     }
     return model, meta
 
+
 def _load_terramind(
     *,
     model_key: str,
@@ -354,6 +359,7 @@ def _load_terramind(
     )
     model, meta = loaded
     return model, meta, dev
+
 
 def _terramind_forward_tokens(
     model: Any,
@@ -416,13 +422,14 @@ def _terramind_forward_tokens(
             f"TerraMind forward did not return token tensor [B,N,D]. Got type={type(out)}."
         )
 
-    tokens = toks_t[0].detach().float().cpu().numpy().astype(np.float32)
+    tokens = toks_t[0].detach().float().cpu().numpy()
     meta = {
         "tokens_shape": tuple(tokens.shape),
         "layer_index": int(layer_index),
         "tokens_include_cls": False,
     }
     return tokens, meta
+
 
 def _terramind_forward_tokens_batch(
     model: Any,
@@ -483,7 +490,7 @@ def _terramind_forward_tokens_batch(
             f"TerraMind forward did not return token tensor [B,N,D]. Got type={type(out)}."
         )
 
-    tokens = toks_t.detach().float().cpu().numpy().astype(np.float32)
+    tokens = toks_t.detach().float().cpu().numpy()
     meta = {
         "tokens_shape": tuple(tokens.shape[1:]),
         "batch_tokens_shape": tuple(tokens.shape),
@@ -491,6 +498,7 @@ def _terramind_forward_tokens_batch(
         "tokens_include_cls": False,
     }
     return tokens, meta
+
 
 def _prepare_terramind_input_chw(
     input_chw: Any,
@@ -507,6 +515,7 @@ def _prepare_terramind_input_chw(
     raw_chw = np.clip(raw_chw, 0.0, 10000.0).astype(np.float32)
     raw_chw = _resize_chw(raw_chw, size=image_size)
     return _terramind_zscore_s2(raw_chw, model_key=model_key, mode=normalize_mode)
+
 
 @register("terramind")
 class TerraMindEmbedder(EmbedderBase):
@@ -643,7 +652,7 @@ class TerraMindEmbedder(EmbedderBase):
                     fill_value=fill_value,
                 )
             else:
-                if input_chw.ndim != 3 or int(input_chw.shape[0]) != len(_S2_SR_12_BANDS):
+                if input_chw.ndim != 3 or input_chw.shape[0] != len(_S2_SR_12_BANDS):
                     raise ModelError(
                         f"input_chw must be CHW with 12 bands for TerraMind, got {getattr(input_chw, 'shape', None)}"
                     )

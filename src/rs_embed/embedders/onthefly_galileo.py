@@ -45,6 +45,7 @@ from .runtime_utils import (
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
+
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -54,7 +55,8 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
     x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y.detach().cpu().numpy().astype(np.float32)
+    return y.detach().float().cpu().numpy()
+
 
 def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
     x = np.asarray(raw, dtype=np.float32)
@@ -83,7 +85,8 @@ def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
             f"Unknown Galileo normalization mode '{mode}'. "
             "Use one of: unit_scale, per_tile_minmax, none."
         )
-    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
+
 
 def _fetch_s2_10_raw_tchw(
     provider: ProviderBase,
@@ -109,6 +112,7 @@ def _fetch_s2_10_raw_tchw(
         fill_value=fill_value,
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
+
 
 def _resolve_model_folder(
     *,
@@ -140,6 +144,7 @@ def _resolve_model_folder(
         )
     return p
 
+
 @lru_cache(maxsize=8)
 def _load_galileo_module():
     try:
@@ -151,6 +156,7 @@ def _load_galileo_module():
             "Install missing dependencies: torch, einops."
         ) from e
     return mod
+
 
 @lru_cache(maxsize=8)
 def _download_galileo_model_folder(
@@ -184,15 +190,18 @@ def _download_galileo_model_folder(
         )
     return model_root
 
+
 def _month_from_iso(iso_date: str) -> int:
     d = date.fromisoformat(str(iso_date))
     return max(1, min(12, int(d.month)))
+
 
 def _frame_month_sequence(temporal: TemporalSpec, *, n_frames: int) -> np.ndarray:
     mids = temporal_frame_midpoints(temporal, max(1, int(n_frames)))
     if not mids:
         return np.full((max(1, int(n_frames)),), 6, dtype=np.int64)
     return np.array([_month_from_iso(v) for v in mids], dtype=np.int64)
+
 
 @lru_cache(maxsize=6)
 def _load_galileo_cached(
@@ -257,6 +266,7 @@ def _load_galileo_cached(
     }
     return encoder, meta, mod
 
+
 def _load_galileo(
     *,
     model_size: str,
@@ -278,6 +288,7 @@ def _load_galileo(
     encoder, meta, mod = loaded
     return encoder, meta, mod, dev
 
+
 def _prepare_galileo_encoder_inputs(
     raw_tchw: np.ndarray,
     *,
@@ -292,7 +303,7 @@ def _prepare_galileo_encoder_inputs(
     ensure_torch()
     import torch
 
-    if raw_tchw.ndim != 4 or int(raw_tchw.shape[1]) != 10:
+    if raw_tchw.ndim != 4 or raw_tchw.shape[1] != 10:
         raise ModelError(
             f"Galileo expects TCHW with C=10 S2 bands, got {getattr(raw_tchw, 'shape', None)}"
         )
@@ -312,14 +323,14 @@ def _prepare_galileo_encoder_inputs(
 
     # [H,W,T,10]
     s2_hwtd = np.transpose(x_tchw, (2, 3, 0, 1)).astype(np.float32)
-    t = int(s2_hwtd.shape[2])
+    t = s2_hwtd.shape[2]
 
     # create Galileo space_time tensor [B,H,W,T,len(SPACE_TIME_BANDS)]
     space_time_bands = list(mod.SPACE_TIME_BANDS)
     s2_bands = list(mod.S2_BANDS)
     s_t_groups = list(mod.SPACE_TIME_BANDS_GROUPS_IDX.keys())
 
-    h, w = int(s2_hwtd.shape[0]), int(s2_hwtd.shape[1])
+    h, w = s2_hwtd.shape[0], s2_hwtd.shape[1]
     s_t_x = np.zeros((1, h, w, t, len(space_time_bands)), dtype=np.float32)
 
     s2_map = [space_time_bands.index(b) for b in s2_bands]
@@ -404,6 +415,7 @@ def _prepare_galileo_encoder_inputs(
     }
     return data, meta
 
+
 def _galileo_forward(
     encoder: Any,
     data: dict[str, Any],
@@ -444,9 +456,9 @@ def _galileo_forward(
 
     # pooled features from all visible tokens
     vec_t = encoder.average_tokens(s_t_x, sp_x, t_x, st_x, s_t_m, sp_m, t_m, st_m)
-    if vec_t.ndim != 2 or int(vec_t.shape[0]) != 1:
+    if vec_t.ndim != 2 or vec_t.shape[0] != 1:
         raise ModelError(f"Unexpected Galileo pooled output shape: {tuple(vec_t.shape)}")
-    vec = vec_t[0].detach().float().cpu().numpy().astype(np.float32)
+    vec = vec_t[0].detach().float().cpu().numpy()
 
     # grid features from S2-related space-time groups only
     s_t_groups = list(mod.SPACE_TIME_BANDS_GROUPS_IDX.keys())
@@ -461,13 +473,14 @@ def _galileo_forward(
     grid = grid_hwd.detach().float().cpu().numpy().transpose(2, 0, 1).astype(np.float32)  # [D,H,W]
 
     fmeta = {
-        "feature_dim": int(vec.shape[0]),
+        "feature_dim": vec.shape[0],
         "grid_shape": tuple(grid.shape),
-        "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+        "grid_hw": (grid.shape[1], grid.shape[2]),
         "grid_kind": "s2_group_patch_tokens",
         "s2_group_indices": tuple(int(i) for i in s2_group_indices),
     }
     return vec, grid, fmeta
+
 
 @register("galileo")
 class GalileoEmbedder(EmbedderBase):
@@ -600,9 +613,9 @@ class GalileoEmbedder(EmbedderBase):
 
         if month_override is not None:
             month_value = max(1, min(12, int(month_override)))
-            months_seq = np.full((int(raw_tchw.shape[0]),), month_value, dtype=np.int64)
+            months_seq = np.full((raw_tchw.shape[0],), month_value, dtype=np.int64)
         else:
-            months_seq = _frame_month_sequence(t, n_frames=int(raw_tchw.shape[0]))
+            months_seq = _frame_month_sequence(t, n_frames=raw_tchw.shape[0])
 
         encoder, lmeta, mod, dev = _load_galileo(
             model_size=model_size,
@@ -653,7 +666,7 @@ class GalileoEmbedder(EmbedderBase):
                 "start": t.start,
                 "end": t.end,
                 "patch_size": int(patch_size),
-                "n_frames": int(raw_tchw.shape[0]),
+                "n_frames": raw_tchw.shape[0],
                 "normalization": str(norm_mode),
                 "include_ndvi": bool(include_ndvi),
                 "device": dev,
@@ -679,7 +692,7 @@ class GalileoEmbedder(EmbedderBase):
                 **meta,
                 "grid_kind": "s2_group_patch_tokens",
                 "grid_shape": tuple(grid.shape),
-                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "grid_hw": (grid.shape[1], grid.shape[2]),
             }
             da = xr.DataArray(
                 grid.astype(np.float32),

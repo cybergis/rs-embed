@@ -42,6 +42,7 @@ from .runtime_utils import (
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
+
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
     ensure_torch()
     import torch
@@ -51,27 +52,29 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
     x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
     y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y.detach().cpu().numpy().astype(np.float32)
+    return y.detach().float().cpu().numpy()
+
 
 def _normalize_series(x_tchw: np.ndarray, *, mode: str) -> np.ndarray:
     mode_l = str(mode).lower().strip()
     x = x_tchw.astype(np.float32, copy=False)
     if mode_l in ("none", "off", "raw"):
-        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     if mode_l in ("unit", "unit_scale", "reflectance"):
         x = np.clip(x / 10000.0, 0.0, 1.0)
-        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     if mode_l in ("per_tile_zscore", "zscore", "tile_zscore"):
         mu = np.nanmean(x, axis=(0, 2, 3), keepdims=True)
         sigma = np.nanstd(x, axis=(0, 2, 3), keepdims=True)
         sigma = np.where(np.isfinite(sigma), sigma, 0.0)
         sigma = np.maximum(sigma, 1e-6)
         x = (x - mu) / sigma
-        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+        return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
     raise ModelError(
         f"Unknown AnySat normalization mode '{mode}'. "
         "Use one of: none, unit_scale, per_tile_zscore."
     )
+
 
 def _doy0_from_iso(iso_date: str) -> int:
     d = date.fromisoformat(str(iso_date))
@@ -93,8 +96,7 @@ def _normalize_anysat_model_size(model_size: Any) -> str:
     resolved = aliases.get(raw)
     if resolved is None:
         raise ModelError(
-            f"Unknown AnySat model_size='{model_size}' "
-            "(expected one of: tiny, small, base)."
+            f"Unknown AnySat model_size='{model_size}' (expected one of: tiny, small, base)."
         )
     return resolved
 
@@ -161,11 +163,13 @@ def _resolve_anysat_runtime_config(
         "hf_min_bytes": int(hf_min_bytes),
     }
 
+
 def _frame_doy0_sequence(temporal: TemporalSpec, *, n_frames: int) -> np.ndarray:
     mids = temporal_frame_midpoints(temporal, max(1, int(n_frames)))
     if not mids:
         return np.full((max(1, int(n_frames)),), 182, dtype=np.int64)
     return np.array([_doy0_from_iso(v) for v in mids], dtype=np.int64)
+
 
 def _fetch_s2_10_raw_tchw(
     provider: ProviderBase,
@@ -192,6 +196,7 @@ def _fetch_s2_10_raw_tchw(
     )
     return np.clip(raw, 0.0, 10000.0).astype(np.float32)
 
+
 @lru_cache(maxsize=8)
 def _load_anysat_hub_module():
     try:
@@ -202,6 +207,7 @@ def _load_anysat_hub_module():
             "Failed to import vendored AnySat runtime. Install missing dependencies: torch, einops."
         ) from e
     return mod
+
 
 @lru_cache(maxsize=4)
 def _download_anysat_ckpt(
@@ -227,6 +233,7 @@ def _download_anysat_ckpt(
         raise ModelError(f"Downloaded AnySat checkpoint looks too small ({sz} bytes): {p}")
     return p
 
+
 def _load_ckpt_state_dict(ckpt_path: str) -> dict[str, Any]:
     ensure_torch()
     import torch
@@ -237,6 +244,7 @@ def _load_ckpt_state_dict(ckpt_path: str) -> dict[str, Any]:
     if isinstance(obj, dict):
         return obj
     raise ModelError(f"Unsupported checkpoint format at {ckpt_path}")
+
 
 @lru_cache(maxsize=6)
 def _load_anysat_cached(
@@ -313,6 +321,7 @@ def _load_anysat_cached(
     }
     return model, meta
 
+
 def _load_anysat(
     *,
     model_size: str,
@@ -340,6 +349,7 @@ def _load_anysat(
     model, meta = loaded
     return model, meta, dev
 
+
 def _prepare_anysat_s2_input(
     raw_tchw: np.ndarray,
     *,
@@ -351,7 +361,7 @@ def _prepare_anysat_s2_input(
     ensure_torch()
     import torch
 
-    if raw_tchw.ndim != 4 or int(raw_tchw.shape[1]) != 10:
+    if raw_tchw.ndim != 4 or raw_tchw.shape[1] != 10:
         raise ModelError(f"AnySat s2 expects [T,10,H,W], got shape={raw_tchw.shape}")
     x_tchw = raw_tchw.astype(np.float32, copy=False)
 
@@ -359,7 +369,7 @@ def _prepare_anysat_s2_input(
         x_tchw = _resize_tchw(x_tchw, out_hw=image_size)
 
     x_tchw = _normalize_series(x_tchw, mode=norm_mode)
-    t = int(x_tchw.shape[0])
+    t = x_tchw.shape[0]
     doy = np.asarray(doy0_values, dtype=np.int64).reshape(-1)
     if doy.size == 0:
         doy = np.full((t,), 182, dtype=np.int64)
@@ -373,6 +383,7 @@ def _prepare_anysat_s2_input(
         "s2": torch.from_numpy(x_tchw[None, ...]).to(device),  # [1,T,10,H,W]
         "s2_dates": torch.from_numpy(dates).to(device),  # [1,T]
     }
+
 
 def _anysat_patch_features(
     model: Any,
@@ -397,16 +408,17 @@ def _anysat_patch_features(
         )
 
     # AnySat patch output: [B,H,W,D]
-    if int(out.shape[0]) != 1:
+    if out.shape[0] != 1:
         raise ModelError(f"AnySat embedder expects B=1 per call, got {tuple(out.shape)}")
-    arr = out[0].detach().float().cpu().numpy().astype(np.float32)  # [H,W,D]
+    arr = out[0].detach().float().cpu().numpy()  # [H,W,D]
     grid = np.transpose(arr, (2, 0, 1)).astype(np.float32)  # [D,H,W]
     meta = {
-        "patch_output_hw": (int(arr.shape[0]), int(arr.shape[1])),
-        "feature_dim": int(arr.shape[2]),
+        "patch_output_hw": (arr.shape[0], arr.shape[1]),
+        "feature_dim": arr.shape[2],
         "patch_size_m": int(patch_size_m),
     }
     return grid, meta
+
 
 @register("anysat")
 class AnySatEmbedder(EmbedderBase):
@@ -524,7 +536,7 @@ class AnySatEmbedder(EmbedderBase):
                 model_name="anysat",
             )
 
-        doy0_values = _frame_doy0_sequence(t, n_frames=int(raw_tchw.shape[0]))
+        doy0_values = _frame_doy0_sequence(t, n_frames=raw_tchw.shape[0])
 
         model, lmeta, dev = _load_anysat(
             model_size=model_size,
@@ -573,7 +585,7 @@ class AnySatEmbedder(EmbedderBase):
                 "normalization": norm_mode,
                 "start": t.start,
                 "end": t.end,
-                "n_frames": int(raw_tchw.shape[0]),
+                "n_frames": raw_tchw.shape[0],
                 "doy0_values": tuple(int(v) for v in doy0_values.tolist()),
                 "device": dev,
                 "hf_repo": str(runtime_cfg["hf_repo"]),
@@ -599,7 +611,7 @@ class AnySatEmbedder(EmbedderBase):
             gmeta = {
                 **meta,
                 "grid_kind": "patch_tokens",
-                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "grid_hw": (grid.shape[1], grid.shape[2]),
                 "grid_shape": tuple(grid.shape),
             }
             da = xr.DataArray(

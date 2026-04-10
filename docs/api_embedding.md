@@ -21,7 +21,7 @@ from rs_embed.core.embedding import Embedding
 
 Embedding(
     data: np.ndarray | xarray.DataArray,
-    meta: Dict[str, Any],
+    meta: dict[str, Any],
 )
 ```
 
@@ -39,14 +39,14 @@ get_embedding(
     model: str,
     *,
     spatial: SpatialSpec,
-    temporal: Optional[TemporalSpec] = None,
-    sensor: Optional[SensorSpec] = None,
-    model_config: Optional[dict[str, Any]] = None,
-    modality: Optional[str] = None,
+    temporal: TemporalSpec | None = None,
+    sensor: SensorSpec | None = None,
+    model_config: dict[str, Any] | None = None,
+    modality: str | None = None,
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
-    input_prep: InputPrepSpec | str = "resize",
+    input_prep: InputPrepSpec | str | None = "resize",
 ) -> Embedding
 ```
 
@@ -127,28 +127,28 @@ emb = get_embedding(
 get_embeddings_batch(
     model: str,
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec] = None,
-    sensor: Optional[SensorSpec] = None,
-    model_config: Optional[dict[str, Any]] = None,
-    modality: Optional[str] = None,
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None = None,
+    sensor: SensorSpec | None = None,
+    model_config: dict[str, Any] | None = None,
+    modality: str | None = None,
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
-    input_prep: InputPrepSpec | str = "resize",
-) -> List[Embedding]
+    input_prep: InputPrepSpec | str | None = "resize",
+) -> list[Embedding]
 ```
 
 Batch-computes embeddings for multiple ROIs using the same embedder instance (often more efficient than looping over `get_embedding`).
 
 **Parameters**
 
-- `spatials`: a non-empty `List[SpatialSpec]`
+- `spatials`: a non-empty `list[SpatialSpec]`
 - Others are the same as `get_embedding`
 
 **Returns**
 
-- `List[Embedding]` (same length as `spatials`)
+- `list[Embedding]` (same length as `spatials`)
 
 **Example**
 

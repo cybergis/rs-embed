@@ -10,7 +10,6 @@ from __future__ import annotations
 from typing import Any
 
 from .core.embedding import Embedding
-from .core.errors import ModelError
 from .core.specs import (
     InputPrepSpec,
     OutputSpec,
@@ -18,7 +17,7 @@ from .core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-from .core.validation import assert_supported, validate_specs
+from .core.validation import assert_supported, validate_spatial_list, validate_specs
 from .tools.model_defaults import (
     default_sensor_for_model,
     resolve_sensor_for_model,
@@ -179,10 +178,7 @@ class Model:
         ModelError
             If ``spatials`` is empty or not a list.
         """
-        if not isinstance(spatials, list) or len(spatials) == 0:
-            raise ModelError("spatials must be a non-empty list[SpatialSpec].")
-        for sp in spatials:
-            validate_specs(spatial=sp, temporal=temporal, output=self._output)
+        validate_spatial_list(spatials=spatials, temporal=temporal, output=self._output)
         return run_embedding_request(
             spatials=spatials,
             temporal=temporal,

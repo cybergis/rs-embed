@@ -6,112 +6,20 @@ the registry so no GEE, torch, or real model weights are required.
 
 import numpy as np
 import pytest
+from conftest import MockEmbedder, MockMultimodalEmbedder, MockPrecomputedLocalEmbedder
 
 from rs_embed.core import registry
 from rs_embed.core.embedding import Embedding
 from rs_embed.core.errors import ModelError
 from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
-from rs_embed.embedders.base import EmbedderBase
 from rs_embed.model import Model
 from rs_embed.tools.runtime import get_embedder_bundle_cached
-
-
-# ── mock embedder ──────────────────────────────────────────────────
-
-
-class _MockEmbedder(EmbedderBase):
-    """Deterministic embedder with no I/O."""
-
-    def describe(self):
-        return {"type": "mock", "dim": 8}
-
-    def get_embedding(
-        self,
-        *,
-        spatial,
-        temporal,
-        sensor,
-        output,
-        backend,
-        device="auto",
-        input_chw=None,
-    ):
-        vec = np.arange(8, dtype=np.float32)
-        return Embedding(
-            data=vec,
-            meta={
-                "model": self.model_name,
-                "output": output.mode,
-                "sensor": sensor,
-            },
-        )
-
-
-class _MockPrecomputedLocalEmbedder(EmbedderBase):
-    def describe(self):
-        return {
-            "type": "precomputed",
-            "backend": ["local", "auto"],
-            "output": ["pooled"],
-        }
-
-    def get_embedding(
-        self,
-        *,
-        spatial,
-        temporal,
-        sensor,
-        output,
-        backend,
-        device="auto",
-        input_chw=None,
-    ):
-        return Embedding(
-            data=np.ones(4, dtype=np.float32),
-            meta={"backend_used": backend},
-        )
-
-
-class _MockMultimodalEmbedder(EmbedderBase):
-    def describe(self):
-        return {
-            "type": "on_the_fly",
-            "backend": ["provider"],
-            "output": ["pooled"],
-            "modalities": {
-                "s2": {
-                    "collection": "COPERNICUS/S2_SR_HARMONIZED",
-                    "bands": ["B4", "B3", "B2"],
-                },
-                "s1": {
-                    "collection": "COPERNICUS/S1_GRD_FLOAT",
-                    "bands": ["VV", "VH"],
-                },
-            },
-            "defaults": {"modality": "s2"},
-        }
-
-    def get_embedding(
-        self,
-        *,
-        spatial,
-        temporal,
-        sensor,
-        output,
-        backend,
-        device="auto",
-        input_chw=None,
-    ):
-        return Embedding(
-            data=np.arange(3, dtype=np.float32),
-            meta={"sensor": sensor, "backend_used": backend},
-        )
 
 
 @pytest.fixture(autouse=True)
 def _setup():
     registry._REGISTRY.clear()
-    registry.register("mock_model")(_MockEmbedder)
+    registry.register("mock_model")(MockEmbedder)
     get_embedder_bundle_cached.cache_clear()
     yield
     registry._REGISTRY.clear()
@@ -140,7 +48,7 @@ def test_model_init_unknown_model_raises():
 
 
 def test_model_init_with_modality_resolves_sensor():
-    registry.register("mock_multi")(_MockMultimodalEmbedder)
+    registry.register("mock_multi")(MockMultimodalEmbedder)
     m = Model("mock_multi", modality="s1", backend="gee")
     assert m._sensor is not None
     assert m._sensor.modality == "s1"
@@ -326,7 +234,7 @@ def test_model_no_sensor_passes_none():
 
 def test_model_precomputed_auto_resolves_to_auto():
     """Precomputed model with backend='auto' should route to 'auto' (local access)."""
-    registry.register("mock_precomputed")(_MockPrecomputedLocalEmbedder)
+    registry.register("mock_precomputed")(MockPrecomputedLocalEmbedder)
     m = Model("mock_precomputed", backend="auto")
     emb = m.get_embedding(_SPATIAL)
     assert emb.meta["backend_used"] == "auto"

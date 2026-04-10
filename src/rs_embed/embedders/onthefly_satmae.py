@@ -56,9 +56,11 @@ def _load_satmae_cached(model_id: str, dev: str):
     meta = {"model_id": model_id, "device": dev}
     return model, meta
 
+
 def _load_satmae(model_id: str, device: str = "auto"):
     loaded, _dev = _load_cached_with_device(_load_satmae_cached, device=device, model_id=model_id)
     return loaded
+
 
 def _satmae_forward_tokens(
     model, rgb_u8: np.ndarray, *, image_size: int, device: str
@@ -72,6 +74,7 @@ def _satmae_forward_tokens(
         image_size=image_size,
         device=device,
     )[0]
+
 
 def _satmae_forward_tokens_batch(
     model,
@@ -112,13 +115,14 @@ def _satmae_forward_tokens_batch(
     with torch.no_grad():
         out = fe(xb, mask_ratio=0.0)
         toks = out[0] if isinstance(out, (tuple, list)) else out  # [B,N,D]
-        if toks.ndim != 3 or int(toks.shape[0]) != len(rgb_u8_batch):
+        if toks.ndim != 3 or toks.shape[0] != len(rgb_u8_batch):
             raise ModelError(
                 f"SatMAE forward_encoder returned {tuple(toks.shape)}; "
                 f"expected [B,N,D] with B={len(rgb_u8_batch)}."
             )
-        out_np = toks.detach().float().cpu().numpy().astype(np.float32)
+        out_np = toks.detach().float().cpu().numpy()
         return [out_np[i] for i in range(out_np.shape[0])]
+
 
 @register("satmae")
 class SatMAERGBEmbedder(EmbedderBase):

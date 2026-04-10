@@ -57,9 +57,11 @@ def _load_scalemae_cached(model_id: str, dev: str):
     meta = {"model_id": model_id, "device": dev}
     return model, meta
 
+
 def _load_scalemae(model_id: str, device: str = "auto"):
     loaded, _dev = _load_cached_with_device(_load_scalemae_cached, device=device, model_id=model_id)
     return loaded
+
 
 def _infer_patch_size(model) -> int:
     """
@@ -82,6 +84,7 @@ def _infer_patch_size(model) -> int:
     # some timm variants: model.patch_embed.patch_size[0]
     # fallback: ViT-L/16 is common for ScaleMAE
     return 16
+
 
 def _call_with_patch_size(fn, x, *, patch_size: int, input_res):
     """
@@ -125,6 +128,7 @@ def _call_with_patch_size(fn, x, *, patch_size: int, input_res):
             except TypeError as e:
                 raise ModelError(f"ScaleMAE call failed even with patch_size/input_res: {e}") from e
 
+
 def _scalemae_forward_tokens_or_vec(
     model,
     rgb_u8: np.ndarray,
@@ -155,7 +159,7 @@ def _scalemae_forward_tokens_or_vec(
 
             if hasattr(out0, "ndim") and out0.ndim == 3:  # [B,N,D]
                 toks = out0
-                return toks[0].detach().float().cpu().numpy().astype(np.float32), {
+                return toks[0].detach().float().cpu().numpy(), {
                     "tokens_kind": "tokens_forward_features",
                     "input_res_m": float(input_res_m),
                     "used_patch_size": int(patch_size),
@@ -164,7 +168,7 @@ def _scalemae_forward_tokens_or_vec(
 
             if hasattr(out0, "ndim") and out0.ndim == 2:  # [B,D]
                 v = out0
-                return v[0].detach().float().cpu().numpy().astype(np.float32), {
+                return v[0].detach().float().cpu().numpy(), {
                     "tokens_kind": "pooled_forward_features",
                     "input_res_m": float(input_res_m),
                     "used_patch_size": int(patch_size),
@@ -174,7 +178,7 @@ def _scalemae_forward_tokens_or_vec(
             if hasattr(out0, "ndim") and out0.ndim == 4:  # [B,C,H,W] -> tokens
                 b, c, h, w = out0.shape
                 toks = out0.permute(0, 2, 3, 1).reshape(b, h * w, c)
-                return toks[0].detach().float().cpu().numpy().astype(np.float32), {
+                return toks[0].detach().float().cpu().numpy(), {
                     "tokens_kind": "tokens_from_feature_map",
                     "input_res_m": float(input_res_m),
                     "used_patch_size": int(patch_size),
@@ -191,14 +195,14 @@ def _scalemae_forward_tokens_or_vec(
         out0 = out[0] if isinstance(out, (tuple, list)) else out
 
         if hasattr(out0, "ndim") and out0.ndim == 3:
-            return out0[0].detach().float().cpu().numpy().astype(np.float32), {
+            return out0[0].detach().float().cpu().numpy(), {
                 "tokens_kind": "tokens_forward",
                 "input_res_m": float(input_res_m),
                 "used_patch_size": int(patch_size),
                 "tokens_shape": tuple(out0.shape),
             }
         if hasattr(out0, "ndim") and out0.ndim == 2:
-            return out0[0].detach().float().cpu().numpy().astype(np.float32), {
+            return out0[0].detach().float().cpu().numpy(), {
                 "tokens_kind": "pooled_forward",
                 "input_res_m": float(input_res_m),
                 "used_patch_size": int(patch_size),
@@ -206,6 +210,7 @@ def _scalemae_forward_tokens_or_vec(
             }
 
         raise ModelError("ScaleMAE: cannot obtain tokens or pooled vector from this model.")
+
 
 def _scalemae_forward_tokens_or_vec_batch(
     model,
@@ -239,7 +244,7 @@ def _scalemae_forward_tokens_or_vec_batch(
             out0 = out[0] if isinstance(out, (tuple, list)) else out
 
             if hasattr(out0, "ndim") and out0.ndim == 3:  # [B,N,D]
-                toks = out0.detach().float().cpu().numpy().astype(np.float32)
+                toks = out0.detach().float().cpu().numpy()
                 return _to_list(toks), {
                     "tokens_kind": "tokens_forward_features",
                     "input_res_m": float(input_res_m),
@@ -248,7 +253,7 @@ def _scalemae_forward_tokens_or_vec_batch(
                 }
 
             if hasattr(out0, "ndim") and out0.ndim == 2:  # [B,D]
-                vec = out0.detach().float().cpu().numpy().astype(np.float32)
+                vec = out0.detach().float().cpu().numpy()
                 return _to_list(vec), {
                     "tokens_kind": "pooled_forward_features",
                     "input_res_m": float(input_res_m),
@@ -259,7 +264,7 @@ def _scalemae_forward_tokens_or_vec_batch(
             if hasattr(out0, "ndim") and out0.ndim == 4:  # [B,C,H,W] -> tokens
                 b, c, h, w = out0.shape
                 toks = out0.permute(0, 2, 3, 1).reshape(b, h * w, c)
-                toks_np = toks.detach().float().cpu().numpy().astype(np.float32)
+                toks_np = toks.detach().float().cpu().numpy()
                 return _to_list(toks_np), {
                     "tokens_kind": "tokens_from_feature_map",
                     "input_res_m": float(input_res_m),
@@ -275,7 +280,7 @@ def _scalemae_forward_tokens_or_vec_batch(
         out = _call_with_patch_size(model, xb, patch_size=patch_size, input_res=input_res)
         out0 = out[0] if isinstance(out, (tuple, list)) else out
         if hasattr(out0, "ndim") and out0.ndim == 3:
-            toks = out0.detach().float().cpu().numpy().astype(np.float32)
+            toks = out0.detach().float().cpu().numpy()
             return _to_list(toks), {
                 "tokens_kind": "tokens_forward",
                 "input_res_m": float(input_res_m),
@@ -283,7 +288,7 @@ def _scalemae_forward_tokens_or_vec_batch(
                 "batch_shape": tuple(toks.shape),
             }
         if hasattr(out0, "ndim") and out0.ndim == 2:
-            vec = out0.detach().float().cpu().numpy().astype(np.float32)
+            vec = out0.detach().float().cpu().numpy()
             return _to_list(vec), {
                 "tokens_kind": "pooled_forward",
                 "input_res_m": float(input_res_m),
@@ -292,6 +297,7 @@ def _scalemae_forward_tokens_or_vec_batch(
             }
 
         raise ModelError("ScaleMAE: cannot obtain tokens or pooled vector from this model.")
+
 
 @register("scalemae")
 class ScaleMAERGBEmbedder(EmbedderBase):

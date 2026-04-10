@@ -50,11 +50,13 @@ _WILDSAT_DEFAULT_CKPT_FILENAME = "vitb16-imagenet-bnfc.pth"
 _WILDSAT_DEFAULT_CACHE_DIR = "~/.cache/rs_embed/wildsat"
 _WILDSAT_DEFAULT_MIN_BYTES = 50 * 1024 * 1024
 
+
 def _env_flag(name: str, default: bool) -> bool:
     v = os.environ.get(name)
     if v is None:
         return bool(default)
     return str(v).strip().lower() not in {"0", "false", "no", "off", ""}
+
 
 def _download_url_to_path(url: str, dst_path: str) -> str:
     os.makedirs(os.path.dirname(dst_path), exist_ok=True)
@@ -74,6 +76,7 @@ def _download_url_to_path(url: str, dst_path: str) -> str:
         except Exception as _e:
             pass
     return dst_path
+
 
 def _google_drive_confirm_url(file_id: str) -> str:
     first = f"https://drive.google.com/uc?export=download&id={urllib.parse.quote(str(file_id))}"
@@ -99,6 +102,7 @@ def _google_drive_confirm_url(file_id: str) -> str:
 
     action = html.unescape(form_match.group(1))
     return action + "?" + urllib.parse.urlencode(params)
+
 
 @lru_cache(maxsize=4)
 def _download_wildsat_ckpt_from_hf(
@@ -127,6 +131,7 @@ def _download_wildsat_ckpt_from_hf(
         )
     return p
 
+
 @lru_cache(maxsize=4)
 def _download_wildsat_ckpt_from_gdrive(
     *,
@@ -151,6 +156,7 @@ def _download_wildsat_ckpt_from_gdrive(
             "Set RS_EMBED_WILDSAT_CKPT to a valid local .pth checkpoint path."
         )
     return dst
+
 
 def _resolve_wildsat_ckpt_path() -> str:
     ckpt_path = str(os.environ.get("RS_EMBED_WILDSAT_CKPT") or "").strip()
@@ -198,6 +204,7 @@ def _resolve_wildsat_ckpt_path() -> str:
         min_bytes=min_bytes,
     )
 
+
 def _normalize_arch_name(name: str | None) -> str | None:
     if name is None:
         return None
@@ -215,6 +222,7 @@ def _normalize_arch_name(name: str | None) -> str | None:
     }
     return alias.get(x, x)
 
+
 def _clean_state_key(key: str) -> str:
     k = str(key)
     prefixes = ("module.", "satellite_model.", "model.")
@@ -227,6 +235,7 @@ def _clean_state_key(key: str) -> str:
                 changed = True
     return k
 
+
 def _namespace_like_to_dict(x: Any) -> dict[str, Any]:
     if x is None:
         return {}
@@ -236,6 +245,7 @@ def _namespace_like_to_dict(x: Any) -> dict[str, Any]:
         return dict(vars(x))
     except Exception as _e:
         return {}
+
 
 def _extract_satellite_state_dict(
     ckpt_obj: Any,
@@ -275,6 +285,7 @@ def _extract_satellite_state_dict(
 
     return cleaned, opt_meta
 
+
 def _infer_arch_from_state_dict(state_dict: dict[str, Any]) -> str | None:
     keys = set(state_dict.keys())
     if any(k.startswith("backbone.conv_proj.") for k in keys):
@@ -284,6 +295,7 @@ def _infer_arch_from_state_dict(state_dict: dict[str, Any]) -> str | None:
     if any(k.startswith("backbone.layer1.") for k in keys):
         return "resnet50"
     return None
+
 
 def _resolve_wildsat_arch(
     *,
@@ -312,6 +324,7 @@ def _resolve_wildsat_arch(
         "Set RS_EMBED_WILDSAT_ARCH explicitly (one of: vitb16, vitl16, resnet50, swint)."
     )
 
+
 def _build_backbone(arch: str):
     ensure_torch()
     import torchvision
@@ -325,6 +338,7 @@ def _build_backbone(arch: str):
     if arch == "swint":
         return torchvision.models.swin_t(weights=None)
     raise ModelError(f"Unsupported WildSAT arch='{arch}'")
+
 
 def _build_branch_head_from_state_dict(state_dict: dict[str, Any], *, prefer_branch: int = 3):
     ensure_torch()
@@ -386,7 +400,7 @@ def _build_branch_head_from_state_dict(state_dict: dict[str, Any], *, prefer_bra
             b = params_by_layer[li].get("bias")
             b_t = b.detach().float().cpu() if b is not None else None
 
-            lin = nn.Linear(int(w.shape[1]), int(w.shape[0]), bias=(b_t is not None))
+            lin = nn.Linear(w.shape[1], w.shape[0], bias=(b_t is not None))
             lin.weight.copy_(w)
             if b_t is not None:
                 lin.bias.copy_(b_t)
@@ -401,9 +415,10 @@ def _build_branch_head_from_state_dict(state_dict: dict[str, Any], *, prefer_bra
         "image_head_kind": head_kind,
         "image_head_branch": int(branch),
         "image_head_linear_layers": int(len(linear_ids)),
-        "image_head_out_dim": int(params_by_layer[linear_ids[-1]]["weight"].shape[0]),
+        "image_head_out_dim": params_by_layer[linear_ids[-1]]["weight"].shape[0],
     }
     return head, meta
+
 
 def _torchvision_vit_tokens(backbone: Any, x_bchw: Any):
     import torch
@@ -414,6 +429,7 @@ def _torchvision_vit_tokens(backbone: Any, x_bchw: Any):
     x = torch.cat((cls, x), dim=1)
     x = backbone.encoder(x)
     return x
+
 
 @lru_cache(maxsize=8)
 def _load_wildsat_cached(
@@ -497,6 +513,7 @@ def _load_wildsat_cached(
     }
     return backbone, image_head, meta
 
+
 def _load_wildsat(
     *,
     ckpt_path: str,
@@ -514,8 +531,9 @@ def _load_wildsat(
     backbone, image_head, meta = loaded
     return backbone, image_head, meta, dev
 
+
 def _raw_chw_to_rgb_u8(raw_chw: np.ndarray, *, image_size: int, norm_mode: str) -> np.ndarray:
-    if raw_chw.ndim != 3 or int(raw_chw.shape[0]) != 3:
+    if raw_chw.ndim != 3 or raw_chw.shape[0] != 3:
         raise ModelError(
             f"WildSAT expects input_chw as CHW with C=3, got {getattr(raw_chw, 'shape', None)}"
         )
@@ -543,13 +561,15 @@ def _raw_chw_to_rgb_u8(raw_chw: np.ndarray, *, image_size: int, norm_mode: str) 
     rgb_u8 = np.clip(x.transpose(1, 2, 0) * 255.0, 0.0, 255.0).astype(np.uint8)
     return resize_rgb_u8(rgb_u8, int(image_size))
 
+
 def _rgb_u8_to_bchw_unit(rgb_u8: np.ndarray) -> np.ndarray:
-    if rgb_u8.dtype != np.uint8 or rgb_u8.ndim != 3 or int(rgb_u8.shape[2]) != 3:
+    if rgb_u8.dtype != np.uint8 or rgb_u8.ndim != 3 or rgb_u8.shape[2] != 3:
         raise ModelError(
             f"Expected uint8 HWC RGB image, got dtype={rgb_u8.dtype}, shape={rgb_u8.shape}"
         )
     x = rgb_u8.astype(np.float32) / 255.0
     return x.transpose(2, 0, 1)[None, ...].astype(np.float32)
+
 
 def _wildsat_forward(
     backbone: Any,
@@ -589,7 +609,7 @@ def _wildsat_forward(
         ):
             try:
                 toks = _torchvision_vit_tokens(backbone, x)
-                tok_np = toks[0].detach().float().cpu().numpy().astype(np.float32)
+                tok_np = toks[0].detach().float().cpu().numpy()
             except Exception as _e:
                 tok_np = None
 
@@ -635,7 +655,7 @@ def _wildsat_forward(
         else:
             raise ModelError("RS_EMBED_WILDSAT_FEATURE must be one of: auto, image_head, backbone")
 
-        vec_np = final_vec_t[0].detach().float().cpu().numpy().astype(np.float32)
+        vec_np = final_vec_t[0].detach().float().cpu().numpy()
 
         pooled_cls_removed = False
         if pooled_from_tokens and tok_np is not None:
@@ -663,13 +683,14 @@ def _wildsat_forward(
 
     meta = {
         "feature_source": used_source,
-        "feature_dim": int(vec_np.shape[0]),
+        "feature_dim": vec_np.shape[0],
         "pooled_from_tokens": bool(pooled_from_tokens and (tok_np is not None)),
         "pooled_cls_removed": bool(pooled_cls_removed),
         "tokens_available": bool(tok_np is not None),
         **grid_meta,
     }
     return vec_np, grid_np, meta
+
 
 @register("wildsat")
 class WildSATEmbedder(EmbedderBase):
@@ -776,7 +797,7 @@ class WildSATEmbedder(EmbedderBase):
             raw = np.clip(s2_rgb_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
         else:
             raw = np.asarray(input_chw, dtype=np.float32)
-            if raw.ndim != 3 or int(raw.shape[0]) != 3:
+            if raw.ndim != 3 or raw.shape[0] != 3:
                 raise ModelError(
                     f"input_chw must be CHW with 3 bands for wildsat, got {getattr(raw, 'shape', None)}"
                 )
@@ -850,7 +871,7 @@ class WildSATEmbedder(EmbedderBase):
             gmeta = {
                 **meta,
                 "grid_shape": tuple(grid.shape),
-                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "grid_hw": (grid.shape[1], grid.shape[2]),
             }
             da = xr.DataArray(
                 grid.astype(np.float32),

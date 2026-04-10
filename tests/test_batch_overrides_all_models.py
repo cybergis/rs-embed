@@ -1,24 +1,33 @@
 import numpy as np
+import pytest
 
 from rs_embed.core.embedding import Embedding
 from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
+from rs_embed.embedders.onthefly_agrifm import AgriFMEmbedder
 from rs_embed.embedders.onthefly_anysat import AnySatEmbedder
+from rs_embed.embedders.onthefly_dofa import DOFAEmbedder
+from rs_embed.embedders.onthefly_fomo import FoMoEmbedder
+from rs_embed.embedders.onthefly_galileo import GalileoEmbedder
 from rs_embed.embedders.onthefly_prithvi import PrithviEOV2S2_6B_Embedder
 from rs_embed.embedders.onthefly_remoteclip import RemoteCLIPS2RGBEmbedder
+from rs_embed.embedders.onthefly_satvision_toa import SatVisionTOAEmbedder
 from rs_embed.embedders.onthefly_scalemae import ScaleMAERGBEmbedder
-from rs_embed.embedders.onthefly_galileo import GalileoEmbedder
-from rs_embed.embedders.onthefly_wildsat import WildSATEmbedder
-from rs_embed.embedders.onthefly_dofa import DOFAEmbedder
 from rs_embed.embedders.onthefly_terrafm import TerraFMBEmbedder
 from rs_embed.embedders.onthefly_terramind import TerraMindEmbedder
-from rs_embed.embedders.onthefly_fomo import FoMoEmbedder
 from rs_embed.embedders.onthefly_thor import THORBaseEmbedder
-from rs_embed.embedders.onthefly_agrifm import AgriFMEmbedder
-from rs_embed.embedders.onthefly_satvision_toa import SatVisionTOAEmbedder
-
+from rs_embed.embedders.onthefly_wildsat import WildSATEmbedder
 from rs_embed.embedders.precomputed_copernicus_embed import CopernicusEmbedder
 from rs_embed.embedders.precomputed_gse_annual import GSEAnnualEmbedder
 from rs_embed.embedders.precomputed_tessera import TesseraEmbedder
+
+
+def _has_terratorch() -> bool:
+    try:
+        import terratorch  # noqa: F401
+
+        return True
+    except ModuleNotFoundError:
+        return False
 
 
 def _spatials(n: int) -> list[PointBuffer]:
@@ -93,6 +102,10 @@ def test_scalemae_batch_prefetch_and_single_model_load(monkeypatch):
     assert [float(e.data[0]) for e in out] == [10.0, 11.0, 12.0, 13.0]
 
 
+@pytest.mark.skipif(
+    not _has_terratorch(),
+    reason="terratorch not installed",
+)
 def test_prithvi_batch_prefetch_passes_raw_input(monkeypatch):
     import rs_embed.embedders.onthefly_prithvi as pr
 

@@ -47,6 +47,7 @@ from .runtime_utils import (
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"
 
+
 # -----------------------------
 # Small utils
 # -----------------------------
@@ -59,7 +60,8 @@ def _resize_chw_to_224(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
     x = torch.from_numpy(x_chw).unsqueeze(0)  # [1,C,H,W]
     x = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
-    return x[0].cpu().numpy().astype(np.float32)
+    return x[0].float().cpu().numpy()
+
 
 # -----------------------------
 # Provider: Fetch S2 (12 bands, SR)
@@ -78,6 +80,7 @@ _S2_SR_12_BANDS = [
     "B11",
     "B12",
 ]
+
 
 def _fetch_s2_sr_12_chw(
     provider: ProviderBase,
@@ -101,6 +104,7 @@ def _fetch_s2_sr_12_chw(
         fill_value=0.0,
     )
     return np.clip(raw / 10000.0, 0.0, 1.0).astype(np.float32)
+
 
 # -----------------------------
 # Provider: Fetch S1 (VV/VH)
@@ -129,6 +133,7 @@ def _fetch_s1_vvvh_chw(
         relax_iw_on_empty=bool(relax_iw_on_empty),
     )
     return _normalize_s1_vvvh_chw(raw)
+
 
 def _fetch_s1_vvvh_raw_chw(
     provider: ProviderBase,
@@ -178,6 +183,7 @@ def _fetch_s1_vvvh_raw_chw_with_meta(
         relax_iw_on_empty=bool(relax_iw_on_empty),
     )
 
+
 def _prepare_tensor_input_chw(
     input_chw: Any,
     *,
@@ -202,6 +208,7 @@ def _prepare_tensor_input_chw(
     else:
         raise ModelError("modality must be 's2' or 's1'.")
     return _resize_chw_to_224(x_chw, size=image_size)
+
 
 # -----------------------------
 # HF asset management (strict)
@@ -238,6 +245,7 @@ def _ensure_hf_terrafm_weights(
 
     return wt_path
 
+
 @lru_cache(maxsize=1)
 def _load_terrafm_module():
     try:
@@ -246,6 +254,7 @@ def _load_terrafm_module():
         raise ModelError(
             f"Failed to import vendored TerraFM runtime. Import error: {type(e).__name__}: {e}"
         ) from e
+
 
 def _assert_weights_loaded(model) -> dict[str, float]:
     """Same philosophy as your RemoteCLIP: param stats should not be near-zero."""
@@ -268,6 +277,7 @@ def _assert_weights_loaded(model) -> dict[str, float]:
     if std < 1e-6 and mx < 1e-5:
         raise ModelError("TerraFM parameters look uninitialized (near-zero stats).")
     return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+
 
 @lru_cache(maxsize=4)
 def _load_terrafm_b(
@@ -303,6 +313,7 @@ def _load_terrafm_b(
     }
     return model, meta
 
+
 # -----------------------------
 # TerraFM forward adapters
 # -----------------------------
@@ -324,7 +335,7 @@ def _terrafm_pooled_and_grid(
     x = torch.from_numpy(x_bchw).to(dev)  # [B,C,H,W]
     with torch.no_grad():
         pooled = model(x)  # TerraFM forward returns CLS embedding (B,D)
-        pooled_np = pooled[0].detach().float().cpu().numpy().astype(np.float32)
+        pooled_np = pooled[0].detach().float().cpu().numpy()
 
         if not want_grid:
             return pooled_np, None
@@ -340,8 +351,9 @@ def _terrafm_pooled_and_grid(
         feats = model.extract_feature(x, return_h_w=True, out_indices=[last_idx])
         # feats[-1] is (B, C, H, W) for the requested index
         fmap = feats[-1]
-        grid = fmap[0].detach().float().cpu().numpy().astype(np.float32)  # [D,Ht,Wt]
+        grid = fmap[0].detach().float().cpu().numpy()  # [D,Ht,Wt]
         return pooled_np, grid
+
 
 def _terrafm_pooled_and_grid_batch(
     model,
@@ -363,7 +375,7 @@ def _terrafm_pooled_and_grid_batch(
 
     with torch.inference_mode():
         pooled = model(x)  # [B,D]
-        pooled_np = pooled.detach().float().cpu().numpy().astype(np.float32)
+        pooled_np = pooled.detach().float().cpu().numpy()
 
         if not want_grid:
             return pooled_np, None
@@ -376,8 +388,9 @@ def _terrafm_pooled_and_grid_batch(
         last_idx = depth - 1
         feats = model.extract_feature(x, return_h_w=True, out_indices=[last_idx])
         fmap = feats[-1]  # [B,D,H,W]
-        grid = fmap.detach().float().cpu().numpy().astype(np.float32)
+        grid = fmap.detach().float().cpu().numpy()
         return pooled_np, grid
+
 
 # -----------------------------
 # Embedder
@@ -559,7 +572,9 @@ class TerraFMBEmbedder(EmbedderBase):
         composite = str(getattr(sensor, "composite", "median")) if sensor else "median"
         use_float_linear = bool(getattr(sensor, "use_float_linear", True)) if sensor else True
         s1_require_iw = bool(getattr(sensor, "s1_require_iw", True)) if sensor else True
-        s1_relax_iw_on_empty = bool(getattr(sensor, "s1_relax_iw_on_empty", True)) if sensor else True
+        s1_relax_iw_on_empty = (
+            bool(getattr(sensor, "s1_relax_iw_on_empty", True)) if sensor else True
+        )
 
         image_size = 224
         cache_dir = (
@@ -591,8 +606,14 @@ class TerraFMBEmbedder(EmbedderBase):
             provider = self._get_provider(backend)
             if input_chw is None:
                 result = self.fetch_input(
-                    provider, spatial=spatial, temporal=temporal, sensor=sensor or SensorSpec(
-                        collection="", bands=(), modality=modality,
+                    provider,
+                    spatial=spatial,
+                    temporal=temporal,
+                    sensor=sensor
+                    or SensorSpec(
+                        collection="",
+                        bands=(),
+                        modality=modality,
                     ),
                 )
                 assert result is not None
@@ -601,13 +622,13 @@ class TerraFMBEmbedder(EmbedderBase):
 
             # input_chw is raw provider values in the order implied by `sensor.bands`
             if modality == "s2":
-                if input_chw.ndim != 3 or int(input_chw.shape[0]) != 12:
+                if input_chw.ndim != 3 or input_chw.shape[0] != 12:
                     raise ModelError(
                         f"input_chw must be CHW with 12 bands for TerraFM S2, got {getattr(input_chw, 'shape', None)}"
                     )
                 x_chw = np.clip(input_chw.astype(np.float32) / 10000.0, 0.0, 1.0)
             elif modality == "s1":
-                if input_chw.ndim != 3 or int(input_chw.shape[0]) != 2:
+                if input_chw.ndim != 3 or input_chw.shape[0] != 2:
                     raise ModelError(
                         f"input_chw must be CHW with 2 bands (VV,VH) for TerraFM S1, got {getattr(input_chw, 'shape', None)}"
                     )
@@ -638,7 +659,7 @@ class TerraFMBEmbedder(EmbedderBase):
             x_chw = _resize_chw_to_224(x_chw, size=image_size)
             x_bchw = x_chw[None, ...].astype(np.float32)
         # channel sanity: TerraFM HF terrafm.py routes by C==2 (S1) else (S2). Keep it strict.
-        c = int(x_bchw.shape[1])
+        c = x_bchw.shape[1]
         if c not in (2, 12):
             raise ModelError(f"TerraFM expects C=2 (S1 VV/VH) or C=12 (S2 SR bands). Got C={c}")
 

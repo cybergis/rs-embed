@@ -17,16 +17,16 @@ Related pages:
 ```python
 export_batch(
     *,
-    spatials: List[SpatialSpec],
-    temporal: Optional[TemporalSpec],
-    models: List[str | ExportModelRequest],
-    target: ExportTarget,
-    config: ExportConfig,
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None,
+    models: list[str | ExportModelRequest],
+    target: ExportTarget | None = None,
+    config: ExportConfig | None = None,
     backend: str = "auto",
     device: str = "auto",
     output: OutputSpec = OutputSpec.pooled(),
-    sensor: Optional[SensorSpec] = None,
-    modality: Optional[str] = None,
+    sensor: SensorSpec | None = None,
+    modality: str | None = None,
 ) -> Any
 ```
 
@@ -224,7 +224,7 @@ Modality rules:
 
 ## What Gets Returned
 
-- `ExportTarget.per_item(...)`: returns `List[dict]`
+- `ExportTarget.per_item(...)`: returns `list[dict]`
 - `ExportTarget.combined(...)`: returns `dict`
 
 In both cases, the return value is manifest-style metadata describing what was exported.
