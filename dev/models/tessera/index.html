@@ -387,6 +387,8 @@
       
         
       
+        
+      
     
     
     
@@ -458,6 +460,34 @@
     
   
     Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../choosing_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Before You Start
   
 
     
@@ -2256,8 +2286,8 @@
 <p>The adapter accepts <code>BBox</code> directly and <code>PointBuffer</code>, which it converts to <code>BBox</code> in EPSG:4326 using an approximate meter-to-degree conversion. Unsupported spatial types raise <code>ModelError</code>.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
-</div>
 <p>Tessera still reads and returns embeddings in the product-native tile CRS after crop. That CRS may differ from the more common provider-backed EPSG:3857 sampling default used elsewhere in <code>rs-embed</code>, even though the public spatial input is still <code>EPSG:4326</code>.</p>
+</div>
 <h3 id="temporal">Temporal<a class="headerlink" href="#temporal" title="Permanent link">&para;</a></h3>
 <p><code>temporal=None</code> defaults to year <code>2021</code>. <code>TemporalSpec.year(...)</code> uses <code>temporal.year</code>, and <code>TemporalSpec.range(start, end)</code> uses the year parsed from <code>start</code>. This is a year selector for tile-product lookup, not scene-level temporal filtering.</p>
 <h3 id="backend-cache">Backend / cache<a class="headerlink" href="#backend-cache" title="Permanent link">&para;</a></h3>

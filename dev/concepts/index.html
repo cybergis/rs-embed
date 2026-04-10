@@ -381,6 +381,8 @@
       
         
       
+        
+      
     
     
     
@@ -452,6 +454,34 @@
     
   
     Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../choosing_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Before You Start
   
 
     
@@ -1984,24 +2014,24 @@ It is a supplement to <a href="../quickstart/">Quickstart</a> and <a href="../ap
 <p>It usually does <strong>not</strong> mean "pick a single image acquired exactly on this date."</p>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-</div>
 <p>If you want a near single-day query, use a one-day window such as
 <code>TemporalSpec.range("2022-06-01", "2022-06-02")</code>.</p>
+</div>
 <p>See detailed model-specific temporal behavior in <a href="../models/">Supported Models</a>.</p>
 <hr />
 <h2 id="output-specs-pooled-vs-grid">Output Specs: <code>pooled</code> vs <code>grid</code><a class="headerlink" href="#output-specs-pooled-vs-grid" title="Permanent link">&para;</a></h2>
 <h3 id="outputspecpooled"><code>OutputSpec.pooled()</code><a class="headerlink" href="#outputspecpooled" title="Permanent link">&para;</a></h3>
 <p>Returns one vector <code>(D,)</code> for the whole ROI.</p>
 <p>Use <code>pooled</code> for classification, retrieval, clustering, and most cross-model benchmarking work.</p>
-<p>Conceptually, this is one ROI in and one embedding vector out. It is also the easiest format to compare across different model families.</p>
+<p>Conceptually, this is one ROI in and one embedding vector out. It is also the easiest format to compare across different model families. The main advantage is semantic simplicity and small output size, not a guarantee of much lower inference cost.</p>
 <h3 id="outputspecgrid"><code>OutputSpec.grid()</code><a class="headerlink" href="#outputspecgrid" title="Permanent link">&para;</a></h3>
 <p>Returns a spatial feature grid <code>(D, H, W)</code>.</p>
 <p>Use <code>grid</code> for visualization, patch-wise analysis, and spatial structure inspection.</p>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-</div>
 <p>For ViT-like models, <code>grid</code> is often a token/patch grid, not guaranteed georeferenced raster pixels.</p>
-<p>Conceptually, this is one ROI in and one spatial embedding field out. It is useful when spatial layout matters more than a single pooled descriptor.</p>
+</div>
+<p>Conceptually, this is one ROI in and one spatial embedding field out. It is useful when spatial layout matters more than a single pooled descriptor. For many ViT-like models, <code>grid</code> is not much more expensive at forward time than <code>pooled</code>; the extra cost mostly comes from reconstruction, larger outputs, and downstream processing.</p>
 <hr />
 <h2 id="backends-and-providers">Backends and Providers<a class="headerlink" href="#backends-and-providers" title="Permanent link">&para;</a></h2>
 <p>Think of backend as the input retrieval and runtime path. <code>backend="auto"</code> is the recommended default and lets rs-embed choose the model-compatible path. <code>backend="gee"</code> explicitly fetches imagery from Google Earth Engine and is common for on-the-fly models.</p>

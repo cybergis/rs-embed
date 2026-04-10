@@ -387,6 +387,8 @@
       
         
       
+        
+      
     
     
     
@@ -458,6 +460,34 @@
     
   
     Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../choosing_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Before You Start
   
 
     
@@ -2418,7 +2448,7 @@
 <p>Use <code>TemporalSpec.year(...)</code> for precomputed/year-indexed products and <code>TemporalSpec.range(...)</code> for provider/on-the-fly fetch windows.</p>
 </div>
 <div class="tabbed-block">
-<p>Use <code>OutputSpec.pooled()</code> first unless you specifically need spatial structure (<code>grid</code>).</p>
+<p>Use <code>OutputSpec.pooled()</code> first unless you specifically need spatial structure (<code>grid</code>) or a model-specific spatial field.</p>
 </div>
 </div>
 </div>
@@ -2445,8 +2475,8 @@
 </code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Temporal range is a window</p>
-</div>
 <p><code>TemporalSpec.range(start, end)</code> is treated as a half-open interval <code>[start, end)</code>, so <code>end</code> is excluded.</p>
+</div>
 <p>Temporal semantics in provider and on-the-fly paths: <code>TemporalSpec.range(start, end)</code> is interpreted as a half-open window <code>[start, end)</code>, so <code>end</code> is excluded. In GEE-backed fetch paths, that window is used to filter an image collection and then apply a compositing reducer such as <code>median</code> or <code>mosaic</code>. The fetched input is therefore usually a composite over the whole window rather than an automatically selected single-day scene. If you want to approximate a single-day query, use a one-day window such as <code>TemporalSpec.range("2022-06-01", "2022-06-02")</code>.</p>
 <hr />
 <h3 id="sensorspec">SensorSpec<a class="headerlink" href="#sensorspec" title="Permanent link">&para;</a></h3>
@@ -2528,13 +2558,13 @@
 </table>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-</div>
 <p>For <strong>precomputed</strong> models (e.g., directly reading offline embedding products), <code>sensor</code> is usually ignored or set to <code>None</code>.</p>
+</div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-</div>
 <p>Public embedding/export APIs also accept a top-level <code>modality=...</code> convenience argument.
 When provided, rs-embed resolves it into the model's sensor/input contract and validates that the model explicitly supports that modality.</p>
+</div>
 <h3 id="fetchspec">FetchSpec<a class="headerlink" href="#fetchspec" title="Permanent link">&para;</a></h3>
 <p><code>FetchSpec</code> is the lightweight public override for <strong>sampling / fetch policy</strong>.
 Use it when you want to change common knobs such as resolution or compositing, but do <strong>not</strong> want to define a full <code>SensorSpec</code>.</p>
@@ -2613,7 +2643,7 @@ Use <code>fetch=FetchSpec(scale_m=...)</code> for resolution overrides.</p>
 <p>ROI-level Vector Embedding</p>
 </blockquote>
 <p><code>pooled</code> represents one whole ROI (Region of Interest) using a single vector <code>(D,)</code>.</p>
-<p>Best suited for classification, retrieval, clustering, and most cross-model comparison work. The out put shape is:</p>
+<p>Best suited for classification, retrieval, clustering, and most cross-model comparison work. It is usually recommended because it is easier to compare across models and much smaller to store and pass downstream, not because it is always dramatically faster than <code>grid</code>. The out put shape is:</p>
 <div class="highlight"><pre><span></span><code><span class="n">Embedding</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="n">D</span><span class="p">,)</span>
 </code></pre></div>
 <p>How <code>pooled</code> is produced:</p>
@@ -2637,13 +2667,13 @@ v_d = \frac{1}{HW} \sum_{y,x} g_{d,y,x}
 <p>ROI-level Spatial Embedding Field</p>
 </blockquote>
 <p><code>grid</code> returns a spatial embedding field <code>(D, H, W)</code>, where each spatial location maps to a vector.</p>
-<p>Best suited for spatial visualization, pixel-wise or patch-wise tasks, and intra-ROI structure analysis. The output shape is:</p>
+<p>Best suited for spatial visualization, pixel-wise or patch-wise tasks, and intra-ROI structure analysis. For many token-based models, the backbone forward cost is similar to <code>pooled</code>, and the main difference is output reconstruction, memory footprint, and downstream handling. The output shape is:</p>
 <div class="highlight"><pre><span></span><code><span class="n">Embedding</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span> <span class="o">==</span> <span class="p">(</span><span class="n">D</span><span class="p">,</span> <span class="n">H</span><span class="p">,</span> <span class="n">W</span><span class="p">)</span>
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-</div>
 <p><code>data</code> can be returned as <code>xarray.DataArray</code>, with metadata in <code>meta</code> or <code>attrs</code>. For precomputed geospatial products, that metadata may include CRS and crop context. For ViT token grids, it usually describes patch-grid structure rather than georeferenced pixel coordinates.</p>
+</div>
 <p>How <code>grid</code> is produced:</p>
 <ul>
 <li>

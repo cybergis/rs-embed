@@ -387,6 +387,8 @@
       
         
       
+        
+      
     
     
     
@@ -458,6 +460,34 @@
     
   
     Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../choosing_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Before You Start
   
 
     
@@ -2244,9 +2274,9 @@
 </ul>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-</div>
 <p>Put your embedder in <code>rs_embed/embedders/</code> and add it to <code>src/rs_embed/embedders/catalog.py</code>.
 If it's not in <code>MODEL_SPECS</code>, string-based lookup (<code>get_embedding("...")</code>) will not find it.</p>
+</div>
 <hr />
 <h2 id="embedder-interface">Embedder Interface<a class="headerlink" href="#embedder-interface" title="Permanent link">&para;</a></h2>
 <p>All models implement <code>EmbedderBase</code>:</p>
@@ -2310,8 +2340,8 @@ If it's not in <code>MODEL_SPECS</code>, string-based lookup (<code>get_embeddin
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Note</p>
-</div>
 <p><code>describe()</code> must stay fast. It should not trigger checkpoint downloads, provider setup, or heavy model loading.</p>
+</div>
 <p>Important fields currently consumed by rs-embed:</p>
 <ul>
 <li><code>backend</code>, <code>output</code>, and <code>temporal</code> for capability checks</li>
@@ -2407,8 +2437,8 @@ If it's not in <code>MODEL_SPECS</code>, string-based lookup (<code>get_embeddin
 </ul>
 <div class="admonition tip">
 <p class="admonition-title">Tip</p>
-</div>
 <p>Keep provider IO separate from model inference whenever possible. That makes batching, caching, and export reuse simpler.</p>
+</div>
 <hr />
 <h2 id="vendored-runtime-code">Vendored Runtime Code<a class="headerlink" href="#vendored-runtime-code" title="Permanent link">&para;</a></h2>
 <p>If a model depends on upstream runtime code that is easier to vendor than to wrap as an external package dependency, place that code under <code>src/rs_embed/embedders/_vendor/</code>.</p>
@@ -2449,8 +2479,8 @@ If it's not in <code>MODEL_SPECS</code>, string-based lookup (<code>get_embeddin
 </code></pre></div>
 <div class="admonition important">
 <p class="admonition-title">Important</p>
-</div>
 <p>This is the key to avoiding “download twice” when <code>save_inputs=True</code> and <code>save_embeddings=True</code>.</p>
+</div>
 <hr />
 <h2 id="batch-methods">Batch Methods<a class="headerlink" href="#batch-methods" title="Permanent link">&para;</a></h2>
 <p><code>EmbedderBase.get_embeddings_batch</code> defaults to a Python loop calling <code>get_embedding</code>.<br />

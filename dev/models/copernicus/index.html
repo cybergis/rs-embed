@@ -387,6 +387,8 @@
       
         
       
+        
+      
     
     
     
@@ -458,6 +460,34 @@
     
   
     Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../choosing_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Before You Start
   
 
     
@@ -2260,8 +2290,8 @@
 <p>The adapter accepts <code>BBox</code> directly and <code>PointBuffer</code>, which it converts to an EPSG:4326 bbox. Internally it slices the local GeoTIFF with bbox indexing via <code>ds[minlon:maxlon, minlat:maxlat]</code>.</p>
 <div class="admonition warning">
 <p class="admonition-title">Warning</p>
-</div>
 <p>Copernicus keeps the product's fixed <code>EPSG:4326</code> grid with 0.25 degree pixels. That differs from the more common provider-backed EPSG:3857 sampling default used elsewhere in <code>rs-embed</code>, even though the public spatial input is still <code>EPSG:4326</code>.</p>
+</div>
 <h3 id="temporal">Temporal<a class="headerlink" href="#temporal" title="Permanent link">&para;</a></h3>
 <p>Copernicus Embed requires <code>TemporalSpec.year(...)</code>, currently supports only <code>2021</code>, and validates the year before dataset access.</p>
 <h3 id="backend-data-directory">Backend / data directory<a class="headerlink" href="#backend-data-directory" title="Permanent link">&para;</a></h3>

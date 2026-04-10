@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../quickstart/">
+        <link rel="prev" href="../choosing_settings/">
       
       
         <link rel="next" href="../models_reference/">
@@ -387,6 +387,8 @@
       
         
       
+        
+      
     
     
     
@@ -458,6 +460,34 @@
     
   
     Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../choosing_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Before You Start
   
 
     
@@ -2003,7 +2033,8 @@
 <h1 id="supported-models-overview">Supported Models (Overview)<a class="headerlink" href="#supported-models-overview" title="Permanent link">&para;</a></h1>
 <p>This page is the model selection entry point.
 Use it to answer one question quickly: which model IDs should I shortlist for this task?</p>
-<p>Once you have a shortlist, use <a href="../models_reference/">Advanced Model Reference</a> for side-by-side preprocessing and temporal details, then open the linked detail page for the exact contract, caveats, and examples.</p>
+<p>Once you have a shortlist, use <a href="../models_reference/">Advanced Model Reference</a> for side-by-side preprocessing and temporal details, then open the linked detail page for the exact contract, caveats, and examples.
+If you are about to change <code>input_prep</code>, <code>variant</code>, fetch resolution, patch size, or image size, read <a href="../choosing_settings/">Before You Start</a> first, because those knobs affect both runtime cost and embedding semantics.</p>
 <hr />
 <h2 id="how-to-read-this-page">How To Read This Page<a class="headerlink" href="#how-to-read-this-page" title="Permanent link">&para;</a></h2>
 <p>Start with the quick chooser, then scan the catalog table for input and temporal fit, and open the detail page before benchmarking or production use.</p>
@@ -2042,7 +2073,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 </tr>
 <tr>
 <td>Mixed-modality experiments (S1/S2)</td>
-<td><code>terrafm</code></td>
+<td><code>terrafm</code>, <code>thor</code></td>
 <td>Supports S2 or S1 path (per call)</td>
 </tr>
 </tbody>
@@ -2210,11 +2241,11 @@ Some detail-page filenames still use older names for compatibility, but the cano
 </tr>
 <tr>
 <td><code>thor</code></td>
-<td>S2 SR 10-band</td>
+<td>S2 SR 10-band or S1 VV/VH</td>
 <td>10m</td>
 <td>single composite window</td>
 <td><code>pooled</code>, <code>grid</code></td>
-<td>strict stats-based normalization</td>
+<td>choose modality per call; THOR stats on S2, shared log-style normalization on S1; bounded native-snap for near-square inputs</td>
 <td><a href="thor/">detail</a></td>
 </tr>
 <tr>
@@ -2263,7 +2294,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <p>Read the details in <a href="../models_reference/">Supported Models (Advanced Reference)</a>.</p>
 <hr />
 <h2 id="more-detail">More Detail<a class="headerlink" href="#more-detail" title="Permanent link">&para;</a></h2>
-<p>For cross-model preprocessing, temporal packaging, and environment knobs, continue to <a href="../models_reference/">Advanced Model Reference</a>. If you are adding a new adapter, use <a href="../extending/">Extending</a> to keep the implementation and documentation consistent.</p>
+<p>For cross-model preprocessing, temporal packaging, and environment knobs, continue to <a href="../models_reference/">Advanced Model Reference</a>. For user-facing guidance on how to trade compute for quality, spatial detail, or temporal fidelity, read <a href="../choosing_settings/">Before You Start</a>. If you are adding a new adapter, use <a href="../extending/">Extending</a> to keep the implementation and documentation consistent.</p>
 
 
 

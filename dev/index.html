@@ -387,6 +387,8 @@
       
         
       
+        
+      
     
     
     
@@ -459,6 +461,34 @@
     
   
     Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="choosing_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Before You Start
   
 
     
@@ -1868,8 +1898,8 @@ Yet, using them in practice remains surprisingly painful. Model interfaces vary 
 <p>RS-Embed aims to fix this.</p>
 <div class="admonition success">
 <p class="admonition-title">Goal</p>
-</div>
 <p>Provide a <strong>minimal</strong>, <strong>unified</strong>, and <strong>stable API</strong> that turns diverse RS foundation models into a simple <code>ROI → embedding service</code> — so researchers can focus on <strong>downstream tasks</strong>, <strong>benchmarking</strong>, and <strong>analysis</strong>, not glue code.</p>
+</div>
 <hr />
 <h2 id="start-here">Start Here<a class="headerlink" href="#start-here" title="Permanent link">&para;</a></h2>
 <p>Use the documentation the same way you would approach a mature library: start with one successful run, choose a model only after you understand the core API shape, and drop into the reference when you need exact contracts.</p>
@@ -1884,6 +1914,10 @@ Yet, using them in practice remains surprisingly painful. Model interfaces vary 
 <tr>
 <td>get something running quickly</td>
 <td><a href="quickstart/">Quickstart</a>: install the package, run a first example, and learn the three core APIs</td>
+</tr>
+<tr>
+<td>understand settings first</td>
+<td><a href="choosing_settings/">Before You Start</a>: learn which settings change embedding quality, semantics, and runtime before you tune anything</td>
 </tr>
 <tr>
 <td>choose a model</td>
@@ -1943,7 +1977,7 @@ Yet, using them in practice remains surprisingly painful. Model interfaces vary 
 </table>
 <hr />
 <h2 id="advanced-reading">Advanced Reading<a class="headerlink" href="#advanced-reading" title="Permanent link">&para;</a></h2>
-<p>Once the basic flow is familiar, read <a href="concepts/">Concepts</a> for the semantics behind <code>TemporalSpec</code>, <code>OutputSpec</code>, and backends, then use <a href="workflows/">Workflows</a> for task-oriented recipes. <a href="models_reference/">Advanced Model Reference</a> goes deeper on preprocessing and temporal assumptions, while <a href="limitations/">Limitations</a> collects current constraints and edge cases.</p>
+<p>Once the basic flow is familiar, read <a href="choosing_settings/">Before You Start</a> before changing model defaults for speed or quality. Then use <a href="concepts/">Concepts</a> for the semantics behind <code>TemporalSpec</code>, <code>OutputSpec</code>, and backends, <a href="workflows/">Workflows</a> for task-oriented recipes, and <a href="models_reference/">Advanced Model Reference</a> for deeper preprocessing and temporal comparison details. <a href="limitations/">Limitations</a> collects current constraints and edge cases.</p>
 <h2 id="citation">Citation<a class="headerlink" href="#citation" title="Permanent link">&para;</a></h2>
 <div class="highlight"><pre><span></span><code>@article{ye2026modelplacetimeremote,
       title={Any Model, Any Place, Any Time: Get Remote Sensing Foundation Model Embeddings On Demand},

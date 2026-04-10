@@ -387,6 +387,8 @@
       
         
       
+        
+      
     
     
     
@@ -458,6 +460,34 @@
     
   
     Quickstart
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../choosing_settings/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Before You Start
   
 
     
@@ -2287,8 +2317,8 @@ Some linked detail-page filenames still retain older names for compatibility.</p
 <td><code>thor</code></td>
 <td>Fully vendored THOR runtime (<code>tiny</code> / <code>small</code> / <code>base</code> / <code>large</code>)</td>
 <td>10m</td>
-<td>S2 SR 10-band</td>
-<td>clip <code>0..10000</code>; default <code>thor_stats</code> z-score after reflectance scaling</td>
+<td>S2 SR 10-band or S1 VV/VH</td>
+<td>S2: clip <code>0..10000</code>, then default <code>thor_stats</code> z-score after reflectance scaling; S1: shared <code>log1p</code> + p99 scaling by default</td>
 <td>default 288; bilinear resize; no pad</td>
 <td>pooled tokens and grouped token grid</td>
 <td>Medium-High</td>
@@ -2463,10 +2493,10 @@ Some linked detail-page filenames still retain older names for compatibility.</p
 </tr>
 <tr>
 <td><code>thor</code></td>
-<td>No (this adapter path)</td>
+<td>Yes (<code>S1</code>/<code>S2</code>)</td>
+<td>Yes (select one modality per call: <code>s1</code> or <code>s2</code>)</td>
 <td>No</td>
-<td>No</td>
-<td>No</td>
+<td>No hard extra metadata (optional S1 options: orbit, linear/DB path)</td>
 </tr>
 <tr>
 <td><code>agrifm</code></td>
@@ -2549,7 +2579,7 @@ Some linked detail-page filenames still retain older names for compatibility.</p
 </tr>
 <tr>
 <td><code>thor</code></td>
-<td><code>RS_EMBED_THOR_IMG</code>, <code>RS_EMBED_THOR_NORMALIZE</code></td>
+<td><code>RS_EMBED_THOR_IMG</code>, <code>RS_EMBED_THOR_NORMALIZE</code>, plus modality and sensor-side options (<code>s2</code>/<code>s1</code>)</td>
 </tr>
 <tr>
 <td><code>agrifm</code></td>
