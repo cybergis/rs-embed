@@ -291,7 +291,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../extending/" class="md-tabs__link">
+        <a href="../architecture/" class="md-tabs__link">
           
   
   
@@ -1698,6 +1698,8 @@
       
         
       
+        
+      
     
     
     
@@ -1744,6 +1746,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -2087,7 +2117,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <th>Type</th>
 <th>Primary Input / Source</th>
 <th>Default Resolution</th>
-<th>Outputs</th>
+<th>Dim</th>
 <th>Temporal mode</th>
 <th>Notes</th>
 <th>Detail</th>
@@ -2099,7 +2129,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>Precomputed</td>
 <td>GeoTessera embedding tiles</td>
 <td>10m</td>
-<td><code>pooled</code>, <code>grid</code></td>
+<td>128</td>
 <td>yearly coverage product</td>
 <td>Fast baseline, source-fixed precomputed workflow; product-native fixed CRS</td>
 <td><a href="tessera/">detail</a></td>
@@ -2109,7 +2139,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>Precomputed</td>
 <td>Google Satellite Embedding (annual)</td>
 <td>10m</td>
-<td><code>pooled</code>, <code>grid</code></td>
+<td>64</td>
 <td><code>TemporalSpec.year(...)</code></td>
 <td>Annual product via provider path</td>
 <td><a href="gse/">detail</a></td>
@@ -2119,7 +2149,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>Precomputed</td>
 <td>Copernicus embeddings</td>
 <td>0.25°</td>
-<td><code>pooled</code>, <code>grid</code></td>
+<td>768</td>
 <td>limited (2021)</td>
 <td>Coarse resolution product on fixed EPSG:4326 grid</td>
 <td><a href="copernicus/">detail</a></td>
@@ -2132,9 +2162,9 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <tr>
 <th>Model ID</th>
 <th>Primary Input</th>
+<th>Dim</th>
 <th>Default Resolution</th>
 <th>Temporal style</th>
-<th>Outputs</th>
 <th>Notable requirements</th>
 <th>Detail</th>
 </tr>
@@ -2143,145 +2173,145 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <tr>
 <td><code>remoteclip</code></td>
 <td>S2 RGB (<code>B4,B3,B2</code>)</td>
+<td>512</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>provider backend; RGB preprocessing</td>
+<td>single composite</td>
+<td>CLIP projection; RGB preprocessing</td>
 <td><a href="remoteclip/">detail</a></td>
 </tr>
 <tr>
 <td><code>satmae</code></td>
 <td>S2 RGB (<code>B4,B3,B2</code>)</td>
+<td>1024</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>RGB path; ViT token/grid behavior</td>
+<td>single composite</td>
+<td>ViT-L; MAE token/grid</td>
 <td><a href="satmae/">detail</a></td>
 </tr>
 <tr>
 <td><code>satmaepp</code></td>
 <td>S2 RGB (<code>B4,B3,B2</code>)</td>
+<td>1024</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>SatMAE++ fMoW-style eval preprocessing; channel order control</td>
+<td>single composite</td>
+<td>ViT-L; fMoW eval preprocessing</td>
 <td><a href="satmaepp/">detail</a></td>
 </tr>
 <tr>
 <td><code>satmaepp_s2_10b</code></td>
-<td>S2 SR 10-band (<code>B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12</code>)</td>
+<td>S2 10-band</td>
+<td>1024</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>strict 10-band order; grouped-channel token handling</td>
+<td>single composite</td>
+<td>strict band order; grouped-channel tokens</td>
 <td><a href="satmaepp/">detail</a></td>
 </tr>
 <tr>
 <td><code>scalemae</code></td>
 <td>S2 RGB + scale</td>
+<td>1024</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>requires <code>sensor.scale_m</code> / <code>input_res_m</code></td>
+<td>single composite</td>
+<td><code>sensor.scale_m</code> is a model input</td>
 <td><a href="scalemae/">detail</a></td>
 </tr>
 <tr>
 <td><code>wildsat</code></td>
 <td>S2 RGB</td>
+<td>256</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>normalization options</td>
+<td>single composite</td>
+<td>biodiversity training; image_head default</td>
 <td><a href="wildsat/">detail</a></td>
 </tr>
 <tr>
 <td><code>prithvi</code></td>
 <td>S2 6-band</td>
+<td>768</td>
 <td>30m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
+<td>single composite</td>
 <td>required temporal + location side inputs</td>
 <td><a href="prithvi/">detail</a></td>
 </tr>
 <tr>
 <td><code>terrafm</code></td>
 <td>S2 12-band or S1 VV/VH</td>
+<td>768</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>choose modality per call</td>
+<td>single composite</td>
+<td>dual-modality by channel count</td>
 <td><a href="terrafm/">detail</a></td>
 </tr>
 <tr>
 <td><code>terramind</code></td>
-<td>S2 SR 12-band</td>
+<td>S2 12-band</td>
+<td>384</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>strict normalization/channel semantics</td>
+<td>single composite</td>
+<td>ViT-S class; strict z-score normalization</td>
 <td><a href="terramind/">detail</a></td>
 </tr>
 <tr>
 <td><code>dofa</code></td>
 <td>Multispectral + wavelengths</td>
+<td>768</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>wavelength vector required/inferred</td>
+<td>single composite</td>
+<td>wavelength vector required</td>
 <td><a href="dofa/">detail</a></td>
 </tr>
 <tr>
 <td><code>fomo</code></td>
 <td>S2 12-band</td>
+<td>768</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>normalization mode choices</td>
+<td>single composite</td>
+<td>per-channel spectral modality keys</td>
 <td><a href="fomo/">detail</a></td>
 </tr>
 <tr>
 <td><code>thor</code></td>
-<td>S2 SR 10-band or S1 VV/VH</td>
+<td>S2 10-band or S1 VV/VH</td>
+<td>768</td>
 <td>10m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>choose modality per call; THOR stats on S2, shared log-style normalization on S1; bounded native-snap for near-square inputs</td>
+<td>single composite</td>
+<td>dual-modality; grouped tokens; native-snap</td>
 <td><a href="thor/">detail</a></td>
 </tr>
 <tr>
 <td><code>satvision</code></td>
-<td>TOA 14-channel</td>
+<td>TOA 14-channel (MODIS)</td>
+<td>4096</td>
 <td>1000m</td>
-<td>single composite window</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>strict channel order + calibration</td>
+<td>single composite</td>
+<td>SwinV2 Giant; strict channel calibration</td>
 <td><a href="satvision/">detail</a></td>
 </tr>
 <tr>
 <td><code>anysat</code></td>
 <td>S2 10-band time series</td>
+<td>768</td>
 <td>10m</td>
 <td>multi-frame</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>frame dates (<code>s2_dates</code>) side input</td>
+<td>JEPA; <code>s2_dates</code> DOY side input</td>
 <td><a href="anysat/">detail</a></td>
 </tr>
 <tr>
 <td><code>galileo</code></td>
 <td>S2 10-band time series</td>
+<td>128</td>
 <td>10m</td>
 <td>multi-frame</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>month tokens + grouped tensors</td>
+<td>nano default; month tokens</td>
 <td><a href="galileo/">detail</a></td>
 </tr>
 <tr>
 <td><code>agrifm</code></td>
 <td>S2 10-band time series</td>
+<td>1024</td>
 <td>10m</td>
 <td>multi-frame</td>
-<td><code>pooled</code>, <code>grid</code></td>
-<td>fixed <code>T</code> frame stack behavior</td>
+<td>Video Swin; fixed <code>T</code> frame stack</td>
 <td><a href="agrifm/">detail</a></td>
 </tr>
 </tbody>

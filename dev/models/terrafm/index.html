@@ -291,7 +291,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../../extending/" class="md-tabs__link">
+        <a href="../../architecture/" class="md-tabs__link">
           
   
   
@@ -1123,10 +1123,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#when-to-use-this-model" class="md-nav__link">
+  <a href="#input-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        When To Use This Model
+        Input Contract
       
     </span>
   </a>
@@ -1134,99 +1134,16 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#input-contract-current-adapter-path" class="md-nav__link">
+  <a href="#preprocessing-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Input Contract (Current Adapter Path)
+        Preprocessing Pipeline
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Input Contract (Current Adapter Path)">
+    <nav class="md-nav" aria-label="Preprocessing Pipeline">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#backend-modes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Backend modes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#modality-selection-modality-or-sensormodality" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Modality selection (modality or sensor.modality)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#sensor-fields-used-by-adapter-provider-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sensor fields used by adapter (provider path)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#preprocessing-pipeline-current-rs-embed-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Preprocessing Pipeline (Current rs-embed Path)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Preprocessing Pipeline (Current rs-embed Path)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#what-the-original-terrafm-model-assumes-for-s1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What the original TerraFM model assumes for S1
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#why-rs-embed-prefers-iw-on-gee" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why rs-embed prefers IW on GEE
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#s1-fetch-options-in-rs-embed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        S1 fetch options in rs-embed
-      
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#provider-path" class="md-nav__link">
@@ -1256,6 +1173,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#architecture-concept" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Concept
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#environment-variables-tuning-knobs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1274,34 +1202,6 @@
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Output Semantics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#outputspecpooled" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        OutputSpec.pooled()
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#outputspecgrid" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        OutputSpec.grid()
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -1345,10 +1245,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#common-failure-modes-debugging" class="md-nav__link">
+  <a href="#paper-links" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common Failure Modes / Debugging
+        Paper &amp; Links
       
     </span>
   </a>
@@ -1356,21 +1256,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reproducibility-notes" class="md-nav__link">
+  <a href="#reference" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reproducibility Notes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#source-of-truth-code-pointers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Source of Truth (Code Pointers)
+        Reference
       
     </span>
   </a>
@@ -1881,6 +1770,8 @@
       
         
       
+        
+      
     
     
     
@@ -1927,6 +1818,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -2122,10 +2041,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#when-to-use-this-model" class="md-nav__link">
+  <a href="#input-contract" class="md-nav__link">
     <span class="md-ellipsis">
       
-        When To Use This Model
+        Input Contract
       
     </span>
   </a>
@@ -2133,99 +2052,16 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#input-contract-current-adapter-path" class="md-nav__link">
+  <a href="#preprocessing-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Input Contract (Current Adapter Path)
+        Preprocessing Pipeline
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Input Contract (Current Adapter Path)">
+    <nav class="md-nav" aria-label="Preprocessing Pipeline">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#backend-modes" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Backend modes
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#modality-selection-modality-or-sensormodality" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Modality selection (modality or sensor.modality)
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#sensor-fields-used-by-adapter-provider-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Sensor fields used by adapter (provider path)
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#preprocessing-pipeline-current-rs-embed-path" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Preprocessing Pipeline (Current rs-embed Path)
-      
-    </span>
-  </a>
-  
-    <nav class="md-nav" aria-label="Preprocessing Pipeline (Current rs-embed Path)">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#what-the-original-terrafm-model-assumes-for-s1" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        What the original TerraFM model assumes for S1
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#why-rs-embed-prefers-iw-on-gee" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Why rs-embed prefers IW on GEE
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#s1-fetch-options-in-rs-embed" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        S1 fetch options in rs-embed
-      
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#provider-path" class="md-nav__link">
@@ -2255,6 +2091,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#architecture-concept" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Architecture Concept
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#environment-variables-tuning-knobs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2273,34 +2120,6 @@
       
     </span>
   </a>
-  
-    <nav class="md-nav" aria-label="Output Semantics">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#outputspecpooled" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        OutputSpec.pooled()
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#outputspecgrid" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        OutputSpec.grid()
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
   
 </li>
       
@@ -2344,10 +2163,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#common-failure-modes-debugging" class="md-nav__link">
+  <a href="#paper-links" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Common Failure Modes / Debugging
+        Paper &amp; Links
       
     </span>
   </a>
@@ -2355,21 +2174,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reproducibility-notes" class="md-nav__link">
+  <a href="#reference" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reproducibility Notes
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#source-of-truth-code-pointers" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Source of Truth (Code Pointers)
+        Reference
       
     </span>
   </a>
@@ -2397,9 +2205,6 @@
 
 
 <h1 id="terrafm-b-terrafm">TerraFM-B (<code>terrafm</code>)<a class="headerlink" href="#terrafm-b-terrafm" title="Permanent link">&para;</a></h1>
-<blockquote>
-<p>TerraFM-B adapter supporting both provider and tensor backends, with two input modalities (<code>s2</code> 12-band Sentinel-2 SR or <code>s1</code> VV/VH Sentinel-1) and model-native feature-map grids.</p>
-</blockquote>
 <h2 id="quick-facts">Quick Facts<a class="headerlink" href="#quick-facts" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2426,91 +2231,134 @@
 <td><code>on-the-fly</code></td>
 </tr>
 <tr>
-<td>Typical backend</td>
-<td>provider backend (<code>gee</code>), also supports <code>backend="tensor"</code></td>
-</tr>
-<tr>
-<td>Primary input</td>
-<td>S2 SR 12-band or S1 VV/VH (selected by <code>sensor.modality</code>)</td>
-</tr>
-<tr>
-<td>Default resolution</td>
-<td>10m default provider fetch (<code>sensor.scale_m</code>)</td>
-</tr>
-<tr>
-<td>Temporal mode</td>
-<td>provider path requires <code>TemporalSpec.range(...)</code> (v0.1 behavior)</td>
-</tr>
-<tr>
-<td>Output modes</td>
-<td><code>pooled</code>, <code>grid</code></td>
-</tr>
-<tr>
-<td>Extra side inputs</td>
-<td>modality settings on <code>sensor</code> (<code>modality</code>, <code>use_float_linear</code>, <code>s1_require_iw</code>, <code>s1_relax_iw_on_empty</code>)</td>
-</tr>
-<tr>
-<td>Training alignment (adapter path)</td>
+<td>Training alignment</td>
 <td>Medium-High when modality-specific preprocessing matches the intended TerraFM path</td>
 </tr>
 </tbody>
 </table>
+<div class="admonition success">
+<p class="admonition-title">TerraFM In 30 Seconds</p>
+<p>TerraFM-B is a dual-modality backbone that takes either Sentinel-2 12-band SR <strong>or</strong> Sentinel-1 <code>VV/VH</code> — the original model routes by channel count at the input (<code>C==2</code> → S1 branch, <code>C==12</code> → S2 branch) — and at output time it returns a model-native last-layer feature map via <code>extract_feature(...)</code> rather than a ViT token reshape.</p>
+<p>In <code>rs-embed</code>, its most important characteristics are:</p>
+<ul>
+<li>modality switch via <code>modality="s1"</code> or <code>modality="s2"</code>, strictly validated by channel count (<code>2</code> or <code>12</code>): see <a href="#input-contract">Input Contract</a></li>
+<li>S1 path prefers <code>IW</code> by default as an <code>rs-embed</code> adapter policy (not a TerraFM paper requirement) with an optional relaxed retry: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
+<li><code>grid</code> returns TerraFM's own last-layer feature map <code>(D,H,W)</code>, not a patch-token reshape: see <a href="#output-semantics">Output Semantics</a></li>
+</ul>
+</div>
 <hr />
-<h2 id="when-to-use-this-model">When To Use This Model<a class="headerlink" href="#when-to-use-this-model" title="Permanent link">&para;</a></h2>
-<p>TerraFM is most useful when you want to compare S2 and S1 representations within one backbone family, switch between provider fetch and direct tensor inputs, or work with model-native feature-map grids instead of token-only grids. The main things to watch are modality drift between S1 and S2 runs, wrong tensor channel counts, and the mistaken assumption that <code>backend="auto"</code> selects something other than the provider-backed path.</p>
+<h2 id="input-contract">Input Contract<a class="headerlink" href="#input-contract" title="Permanent link">&para;</a></h2>
+<div class="tabbed-set tabbed-alternate" data-tabs="1:2"><input checked="checked" id="__tabbed_1_1" name="__tabbed_1" type="radio" /><input id="__tabbed_1_2" name="__tabbed_1" type="radio" /><div class="tabbed-labels"><label for="__tabbed_1_1">Provider backend (<code>gee</code> / <code>auto</code>)</label><label for="__tabbed_1_2">Tensor backend (<code>tensor</code>)</label></div>
+<div class="tabbed-content">
+<div class="tabbed-block">
+<table>
+<thead>
+<tr>
+<th>Modality</th>
+<th>Collection</th>
+<th>Bands (order)</th>
+<th><code>input_chw</code> (override)</th>
+<th>Extra sensor fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>s2</code> (default)</td>
+<td><code>COPERNICUS/S2_SR_HARMONIZED</code></td>
+<td><code>B1,B2,B3,B4,B5,B6,B7,B8,B8A,B9,B11,B12</code> (12-band)</td>
+<td><code>CHW</code>, <code>C=12</code>, raw SR <code>0..10000</code></td>
+<td><code>scale_m</code>, <code>cloudy_pct</code>, <code>composite</code></td>
+</tr>
+<tr>
+<td><code>s1</code></td>
+<td><code>COPERNICUS/S1_GRD_FLOAT</code></td>
+<td><code>VV, VH</code> (2-band)</td>
+<td><code>CHW</code>, <code>C=2</code> in <code>VV,VH</code>, raw VV/VH</td>
+<td><code>use_float_linear</code>, <code>s1_require_iw</code>, <code>s1_relax_iw_on_empty</code></td>
+</tr>
+</tbody>
+</table>
+</div>
+<div class="tabbed-block">
+<table>
+<thead>
+<tr>
+<th>Modality</th>
+<th><code>input_chw</code></th>
+<th>Adapter normalization</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>s2</code> (default)</td>
+<td><code>CHW</code>, <code>C=12</code>, raw SR <code>0..10000</code></td>
+<td>raw SR → <code>/10000</code> → clip <code>[0,1]</code> (provider-equivalent)</td>
+</tr>
+<tr>
+<td><code>s1</code></td>
+<td><code>CHW</code>, <code>C=2</code> in <code>VV, VH</code>, raw Sentinel-1 values</td>
+<td>shared <code>log1p</code> + percentile scaling (provider-equivalent)</td>
+</tr>
+</tbody>
+</table>
+</div>
+</div>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Strict channel-count routing</p>
+<p>TerraFM's original model routes by channel count: <code>C == 12</code> → S2 branch, <code>C == 2</code> → S1 branch. Setting <code>modality</code> alone is not enough if <code>input_chw</code> has the wrong <code>C</code>.</p>
+</div>
 <hr />
-<h2 id="input-contract-current-adapter-path">Input Contract (Current Adapter Path)<a class="headerlink" href="#input-contract-current-adapter-path" title="Permanent link">&para;</a></h2>
-<h3 id="backend-modes">Backend modes<a class="headerlink" href="#backend-modes" title="Permanent link">&para;</a></h3>
-<p><code>backend="tensor"</code> requires <code>input_chw</code> as <code>CHW</code>, batch tensor usage should go through <code>get_embeddings_batch_from_inputs(...)</code>, and the adapter resizes inputs to <code>224</code>. The provider-backed path, including <code>backend="auto"</code>, requires <code>TemporalSpec.range(...)</code> in v0.1 and fetches either S2 or S1 according to <code>modality</code> or <code>sensor.modality</code>.</p>
-<h3 id="modality-selection-modality-or-sensormodality">Modality selection (<code>modality</code> or <code>sensor.modality</code>)<a class="headerlink" href="#modality-selection-modality-or-sensormodality" title="Permanent link">&para;</a></h3>
-<p>For <code>s2</code>, which is the default, TerraFM expects 12-band Sentinel-2 SR input <code>B1,B2,B3,B4,B5,B6,B7,B8,B8A,B9,B11,B12</code>. Provider fetch normalizes that path to <code>[0,1]</code>, while an <code>input_chw</code> override should still carry raw SR values in <code>0..10000</code> so the adapter can apply the same scaling.</p>
-<p>For <code>s1</code>, TerraFM expects two-band Sentinel-1 <code>VV</code> and <code>VH</code>. The provider path fetches raw VV/VH and normalizes it with the shared S1 helper. An <code>input_chw</code> override is expected to carry raw VV/VH so the adapter can apply the same <code>log1p</code> plus percentile scaling path.</p>
-<h3 id="sensor-fields-used-by-adapter-provider-path">Sensor fields used by adapter (provider path)<a class="headerlink" href="#sensor-fields-used-by-adapter-provider-path" title="Permanent link">&para;</a></h3>
-<p>The common provider-side sensor fields are <code>scale_m</code>, <code>cloudy_pct</code>, and <code>composite</code>. On the S1 path, TerraFM also uses <code>use_float_linear</code>, <code>s1_require_iw</code>, and <code>s1_relax_iw_on_empty</code>.</p>
-<p>Channel sanity:</p>
-<p>TerraFM is strict about channel count: <code>C</code> must be <code>12</code> for S2 or <code>2</code> for S1.</p>
-<hr />
-<h2 id="preprocessing-pipeline-current-rs-embed-path">Preprocessing Pipeline (Current rs-embed Path)<a class="headerlink" href="#preprocessing-pipeline-current-rs-embed-path" title="Permanent link">&para;</a></h2>
-<h3 id="what-the-original-terrafm-model-assumes-for-s1">What the original TerraFM model assumes for S1<a class="headerlink" href="#what-the-original-terrafm-model-assumes-for-s1" title="Permanent link">&para;</a></h3>
+<h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
+<div class="admonition tip">
+<p class="admonition-title">Resize is the default — tiling is also available</p>
+<p>The pipeline below shows the default <code>input_prep="resize"</code> path. For large ROIs, use <code>input_prep="tile"</code> to split the input into tiles and preserve spatial detail. See <a href="../../choosing_settings/#input-preparation-resize-vs-tile">Choosing Settings</a>.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">What the original TerraFM model assumes for S1</p>
 <p>TerraFM treats Sentinel-1 as a 2-channel input branch (<code>VV</code>, <code>VH</code>). The official model code routes the S1 path by channel count (<code>C == 2</code>). The TerraFM paper describes S1 pretraining data as Sentinel-1 RTC patches, so the strongest original assumption is dual-pol <code>VV/VH</code> plus an analysis-ready S1 product, not a hard-coded <code>IW</code> rule.</p>
-<h3 id="why-rs-embed-prefers-iw-on-gee">Why rs-embed prefers <code>IW</code> on GEE<a class="headerlink" href="#why-rs-embed-prefers-iw-on-gee" title="Permanent link">&para;</a></h3>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Why rs-embed prefers <code>IW</code> on GEE</p>
 <p>Earth Engine Sentinel-1 collections are heterogeneous: different instrument modes, coverage patterns, and product characteristics can appear in the same collection. rs-embed therefore prefers <code>IW</code> by default as a conservative proxy for a more homogeneous land-observation subset when approximating TerraFM's S1 training distribution from <code>COPERNICUS/S1_GRD_FLOAT</code> / <code>COPERNICUS/S1_GRD</code>. This <code>IW</code> preference is an adapter policy, not a TerraFM paper requirement.</p>
-<h3 id="s1-fetch-options-in-rs-embed">S1 fetch options in rs-embed<a class="headerlink" href="#s1-fetch-options-in-rs-embed" title="Permanent link">&para;</a></h3>
+</div>
+<div class="admonition info">
+<p class="admonition-title">S1 fetch options in rs-embed</p>
 <p>With <code>s1_require_iw=True</code>, rs-embed first tries <code>instrumentMode == "IW"</code> together with dual-pol <code>VV/VH</code>. If <code>s1_relax_iw_on_empty=True</code>, a strict <code>IW</code> miss triggers one retry without the <code>IW</code> filter. With <code>s1_require_iw=False</code>, the adapter queries dual-pol <code>VV/VH</code> directly and does not enforce <code>IW</code>.</p>
-<p>Metadata behavior:</p>
 <p>When provider-backed S1 fetch succeeds, metadata records <code>s1_iw_requested</code>, <code>s1_iw_applied</code>, <code>s1_iw_relaxed_on_empty</code>, and <code>s1_relax_iw_on_empty</code>, so you can tell whether a sample came from strict <code>IW</code> filtering or from the relaxed fallback path.</p>
+</div>
 <h3 id="provider-path">Provider path<a class="headerlink" href="#provider-path" title="Permanent link">&para;</a></h3>
-<pre class="pipeline-flow"><code><span class="pipeline-root">PROVIDER</span>  validate TemporalSpec.range(...)
-  <span class="pipeline-arrow">-&gt;</span> select modality
-     <span class="pipeline-branch">s2:</span> 12-band Sentinel-2 SR
-     <span class="pipeline-branch">s1:</span> dual-pol Sentinel-1 VV/VH
-  <span class="pipeline-arrow">-&gt;</span> provider fetch + modality-specific normalization
-     <span class="pipeline-branch">s2:</span> raw SR -&gt; [0,1]
-     <span class="pipeline-branch">s1:</span> prefer IW -&gt; optional relaxed retry -&gt; shared S1 normalization -&gt; [0,1]
-  <span class="pipeline-arrow">-&gt;</span> optional inspection on normalized input
-  <span class="pipeline-arrow">-&gt;</span> resize to fixed 224x224
-  <span class="pipeline-arrow">-&gt;</span> load TerraFM-B runtime + HF weights
-  <span class="pipeline-arrow">-&gt;</span> forward / feature extraction
-     <span class="pipeline-branch">pooled:</span> TerraFM CLS embedding (D,)
-     <span class="pipeline-branch">grid:</span>   extract_feature(...) last-layer map (D,H,W)</code></pre>
-
+<pre class="mermaid"><code>flowchart LR
+    INPUT["Provider fetch"] --&gt; MOD{Modality}
+    MOD -- s2 --&gt; S2["12-band S2\n→ SR/10000 → [0,1]"]
+    MOD -- s1 --&gt; S1["S1 VV/VH\n→ IW pref → log1p"]
+    S2 --&gt; FWD["Resize 224×224\n→ TerraFM-B forward"]
+    S1 --&gt; FWD
+    FWD --&gt; POOL["pooled: CLS embedding"]
+    FWD --&gt; GRID["grid: feature map (D,H,W)"]</code></pre>
 <h3 id="tensor-backend-path">Tensor backend path<a class="headerlink" href="#tensor-backend-path" title="Permanent link">&para;</a></h3>
-<pre class="pipeline-flow"><code><span class="pipeline-root">TENSOR</span>  read input_chw
-  <span class="pipeline-arrow">-&gt;</span> validate channel count
-     <span class="pipeline-branch">s2:</span> 12 channels
-     <span class="pipeline-branch">s1:</span> 2 channels
-  <span class="pipeline-arrow">-&gt;</span> apply provider-equivalent modality normalization
-     <span class="pipeline-branch">s2:</span> raw SR 0..10000 -&gt; /10000 -&gt; clip [0,1]
-     <span class="pipeline-branch">s1:</span> shared VV/VH normalization helper
-     <span class="pipeline-detail">log1p + percentile scaling</span>
-  <span class="pipeline-arrow">-&gt;</span> resize to fixed 224x224
-  <span class="pipeline-arrow">-&gt;</span> load TerraFM-B
-  <span class="pipeline-arrow">-&gt;</span> run same forward / grid extraction path
-     <span class="pipeline-branch">pooled:</span> TerraFM CLS embedding
-     <span class="pipeline-branch">grid:</span>   extract_feature(...) last-layer map</code></pre>
-
-<p>Notes:</p>
+<pre class="mermaid"><code>flowchart LR
+    INPUT["Read input_chw"] --&gt; VAL{C = ?}
+    VAL -- "12" --&gt; S2["S2 norm → [0,1]"]
+    VAL -- "2" --&gt; S1["S1 log1p + percentile"]
+    S2 --&gt; FWD["Resize 224×224\n→ TerraFM-B forward"]
+    S1 --&gt; FWD
+    FWD --&gt; POOL["pooled: CLS embedding"]
+    FWD --&gt; GRID["grid: feature map"]</code></pre>
+<div class="admonition note">
+<p class="admonition-title">Tensor backend normalization</p>
 <p>The tensor backend does apply the adapter's modality-specific normalization. In practice, <code>input_chw</code> should still be raw S2 SR values for <code>s2</code>, or raw Sentinel-1 <code>VV/VH</code> values for <code>s1</code>, so that the tensor path matches the provider path semantics.</p>
+</div>
+<hr />
+<h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    IN["Input CHW"] --&gt; R{C = ?}
+    R -- "C=12" --&gt; S2["S2: SR/10000 → [0,1]"]
+    R -- "C=2" --&gt; S1["S1: IW pref, log1p"]
+    S2 --&gt; ENC["TerraFM-B\nextract_feature(...)"]
+    S1 --&gt; ENC
+    ENC --&gt; POOL["pooled: CLS embedding"]
+    ENC --&gt; GRID["grid: feature map (D,H,W)"]</code></pre>
 <hr />
 <h2 id="environment-variables-tuning-knobs">Environment Variables / Tuning Knobs<a class="headerlink" href="#environment-variables-tuning-knobs" title="Permanent link">&para;</a></h2>
 <table>
@@ -2534,16 +2382,15 @@
 </tr>
 </tbody>
 </table>
-<p>Related cache envs (used by HF asset download path):</p>
-<p>The related Hugging Face cache environment variables are <code>HUGGINGFACE_HUB_CACHE</code>, <code>HF_HOME</code>, and <code>HUGGINGFACE_HOME</code>.</p>
-<p>Adapter behavior notes:</p>
+<div class="admonition note">
+<p class="admonition-title">Cache and adapter behavior</p>
+<p>HF cache environment variables: <code>HUGGINGFACE_HUB_CACHE</code>, <code>HF_HOME</code>, <code>HUGGINGFACE_HOME</code>.</p>
 <p>Image size is fixed at <code>224</code> in the current implementation, the runtime code is vendored inside <code>rs-embed</code>, and weights are fetched from <code>MBZUAI/TerraFM</code> as <code>TerraFM-B.pth</code>. Although the vendored runtime also exposes a <code>large</code> factory, the current adapter only wires up the TerraFM-B weight path, so variant switching is not exposed yet.</p>
+</div>
 <hr />
 <h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
-<h3 id="outputspecpooled"><code>OutputSpec.pooled()</code><a class="headerlink" href="#outputspecpooled" title="Permanent link">&para;</a></h3>
-<p><code>OutputSpec.pooled()</code> returns TerraFM's own pooled forward output <code>(D,)</code>. This is not token pooling; it is the model's pooled embedding path.</p>
-<h3 id="outputspecgrid"><code>OutputSpec.grid()</code><a class="headerlink" href="#outputspecgrid" title="Permanent link">&para;</a></h3>
-<p><code>OutputSpec.grid()</code> returns the last-layer TerraFM feature map via <code>extract_feature(...)</code> as <code>xarray.DataArray</code> <code>(D,H,W)</code>. Metadata includes <code>grid_type="feature_map"</code>. This is model feature-map layout, not georeferenced raster pixels.</p>
+<p><strong><code>pooled</code></strong>: TerraFM's own pooled forward output <code>(D,)</code> — not token pooling.</p>
+<p><strong><code>grid</code></strong>: last-layer feature map via <code>extract_feature(...)</code> <code>(D,H,W)</code>; metadata records <code>grid_type="feature_map"</code>.</p>
 <hr />
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <h3 id="minimal-provider-backed-s2-example">Minimal provider-backed S2 example<a class="headerlink" href="#minimal-provider-backed-s2-example" title="Permanent link">&para;</a></h3>
@@ -2581,27 +2428,23 @@
     <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
-<p>Notes:</p>
+<div class="admonition note">
+<p class="admonition-title">Modality switching</p>
 <p>Prefer passing <code>modality="s1"</code> or <code>modality="s2"</code> directly at the public API layer. Setting <code>modality="s1"</code> is what actually switches TerraFM onto the S1 path; changing only <code>collection</code> or <code>bands</code> is not enough. <code>use_float_linear=True</code> matches <code>COPERNICUS/S1_GRD_FLOAT</code>, while <code>False</code> matches <code>COPERNICUS/S1_GRD</code>. The conservative default is <code>s1_require_iw=True</code>, and <code>s1_relax_iw_on_empty=True</code> keeps that strict path but retries without <code>IW</code> if the strict query is empty. For maximum reproducibility, keep <code>s1_require_iw=True</code> and set <code>s1_relax_iw_on_empty=False</code>.</p>
+</div>
 <hr />
-<h2 id="common-failure-modes-debugging">Common Failure Modes / Debugging<a class="headerlink" href="#common-failure-modes-debugging" title="Permanent link">&para;</a></h2>
+<h2 id="paper-links">Paper &amp; Links<a class="headerlink" href="#paper-links" title="Permanent link">&para;</a></h2>
 <ul>
-<li>using an unsupported backend; use <code>backend="auto"</code>, an explicit provider backend, or <code>tensor</code></li>
-<li>provider path with non-<code>range</code> temporal spec</li>
-<li>tensor backend without <code>input_chw</code></li>
-<li>wrong channel count (<code>C</code> must be <code>2</code> or <code>12</code>)</li>
-<li>S1/S2 modality mismatch between data and <code>modality</code></li>
-<li>strict S1 <code>IW</code> filtering returning an empty collection for the chosen AOI / time window</li>
-<li>HF weight download issues (<code>.pth</code> weights)</li>
+<li><strong>Publication</strong>: <a href="https://arxiv.org/abs/2506.06281">ICLR 2026</a></li>
+<li><strong>Code</strong>: <a href="https://github.com/mbzuai-oryx/TerraFM">mbzuai-oryx/TerraFM</a></li>
 </ul>
-<p>Recommended first checks:</p>
-<p>Inspect metadata such as <code>modality</code>, <code>source</code>, <code>grid_type</code>, and weight file info first. On the S1 path, also inspect <code>s1_iw_requested</code>, <code>s1_iw_applied</code>, and <code>s1_iw_relaxed_on_empty</code>. If you are using <code>backend="tensor"</code>, verify input scale and normalization before debugging anything else. For a clean baseline, start with the default S2 path before adding S1 overrides.</p>
 <hr />
-<h2 id="reproducibility-notes">Reproducibility Notes<a class="headerlink" href="#reproducibility-notes" title="Permanent link">&para;</a></h2>
-<p>Keep the backend mode, modality, S1-specific options, temporal window, compositing settings, output mode, and TerraFM asset snapshot fixed and recorded. Those settings change both the data path and the model path.</p>
-<hr />
-<h2 id="source-of-truth-code-pointers">Source of Truth (Code Pointers)<a class="headerlink" href="#source-of-truth-code-pointers" title="Permanent link">&para;</a></h2>
-<p>The main code paths are <code>src/rs_embed/embedders/catalog.py</code> for registration and <code>src/rs_embed/embedders/onthefly_terrafm.py</code> for the adapter implementation.</p>
+<h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
+<ul>
+<li>S1 <code>IW</code> filtering can return an empty collection for some AOI/time combinations — set <code>s1_relax_iw_on_empty=True</code> to allow a retry without <code>IW</code>.</li>
+<li>Setting <code>modality="s1"</code> is what switches to the S1 path; changing only <code>collection</code> or <code>bands</code> is not enough.</li>
+<li>Grid output is a native feature map via <code>extract_feature(...)</code>, not a ViT patch-token reshape — the spatial dimensions differ from token-based models.</li>
+</ul>
 
 
 

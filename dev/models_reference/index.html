@@ -291,7 +291,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../extending/" class="md-tabs__link">
+        <a href="../architecture/" class="md-tabs__link">
           
   
   
@@ -678,23 +678,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="How To Use This Page">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#reading-tips" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Reading tips
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -719,17 +702,6 @@
   
     <nav class="md-nav" aria-label="On-the-fly Foundation Models">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#quick-comparison" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Comparison
-      
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#temporal-handling" class="md-nav__link">
@@ -1737,6 +1709,8 @@
       
         
       
+        
+      
     
     
     
@@ -1783,6 +1757,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -1975,23 +1977,6 @@
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="How To Use This Page">
-      <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#reading-tips" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Reading tips
-      
-    </span>
-  </a>
-  
-</li>
-        
-      </ul>
-    </nav>
-  
 </li>
       
         <li class="md-nav__item">
@@ -2016,17 +2001,6 @@
   
     <nav class="md-nav" aria-label="On-the-fly Foundation Models">
       <ul class="md-nav__list">
-        
-          <li class="md-nav__item">
-  <a href="#quick-comparison" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Quick Comparison
-      
-    </span>
-  </a>
-  
-</li>
         
           <li class="md-nav__item">
   <a href="#temporal-handling" class="md-nav__link">
@@ -2109,18 +2083,8 @@
 
 
 <h1 id="supported-models-advanced-reference">Supported Models (Advanced Reference)<a class="headerlink" href="#supported-models-advanced-reference" title="Permanent link">&para;</a></h1>
-<p>This page is for <strong>cross-model comparison after you already have a shortlist</strong>.</p>
-<p>If you are choosing a model for the first time, start with <a href="../models/">Supported Models (Overview)</a>.</p>
-<p>If you need the exact contract for one specific model, use the per-model detail pages in <strong>Reference -&gt; Model Details</strong>.</p>
-<p>If you are authoring a new per-model doc page, use <a href="../model_detail_template/">Model Detail Template</a>.</p>
-<hr />
-<p>Use this page to compare preprocessing assumptions, temporal packaging, side-input requirements, and the environment variables that materially change model behavior. The main sections are <a href="#precomputed-embeddings">Precomputed Embeddings</a>, <a href="#quick-comparison">Quick Comparison</a>, <a href="#temporal-handling">Temporal Handling</a>, <a href="#multi-frame-semantics">Multi-frame Semantics</a>, <a href="#modality-and-extra-inputs-matrix">Modality and Extra Inputs Matrix</a>, and <a href="#preprocessing-and-temporal-env-vars">Preprocessing and Temporal Env Vars</a>.</p>
-<hr />
 <h2 id="how-to-use-this-page">How To Use This Page<a class="headerlink" href="#how-to-use-this-page" title="Permanent link">&para;</a></h2>
-<h3 id="reading-tips">Reading tips<a class="headerlink" href="#reading-tips" title="Permanent link">&para;</a></h3>
-<p>Start with <strong>Quick Comparison</strong> if you are deciding between models. Read <strong>Temporal Handling</strong> and <strong>Multi-frame Semantics</strong> before comparing temporal models, and use <strong>Modality and Extra Inputs Matrix</strong> when you need a fair benchmark across models with different side inputs. <strong>Preprocessing and Temporal Env Vars</strong> matters mainly when you are tuning preprocessing or reproducing training pipelines.</p>
-<p>Canonical model IDs in this page use the short public names from <code>MODEL_SPECS</code>, such as <code>remoteclip</code>, <code>prithvi</code>, <code>terrafm</code>, and <code>thor</code>.
-Some linked detail-page filenames still retain older names for compatibility.</p>
+<p>Read <a href="#temporal-handling">Temporal Handling</a> and <a href="#multi-frame-semantics">Multi-frame Semantics</a> before comparing temporal models. Use <a href="#modality-and-extra-inputs-matrix">Modality and Extra Inputs Matrix</a> when you need a fair benchmark across models with different side inputs. <a href="#preprocessing-and-temporal-env-vars">Preprocessing and Temporal Env Vars</a> matters mainly when tuning preprocessing or reproducing training pipelines.</p>
 <h2 id="precomputed-embeddings">Precomputed Embeddings<a class="headerlink" href="#precomputed-embeddings" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2166,186 +2130,7 @@ Some linked detail-page filenames still retain older names for compatibility.</p
 </table>
 <hr />
 <h2 id="on-the-fly-foundation-models">On-the-fly Foundation Models<a class="headerlink" href="#on-the-fly-foundation-models" title="Permanent link">&para;</a></h2>
-<p>The source of truth for this section is the adapter code in <code>src/rs_embed/embedders/catalog.py</code>, <code>src/rs_embed/embedders/onthefly_*.py</code>, <code>src/rs_embed/embedders/_vit_mae_utils.py</code>, and <code>src/rs_embed/embedders/runtime_utils.py</code>.</p>
-<h3 id="quick-comparison">Quick Comparison<a class="headerlink" href="#quick-comparison" title="Permanent link">&para;</a></h3>
-<p>Use this table for a first-pass side-by-side comparison of input assumptions and preprocessing behavior.</p>
-<table>
-<thead>
-<tr>
-<th>Model ID</th>
-<th>Architecture / Backbone</th>
-<th>Default Fetch Resolution</th>
-<th>Input</th>
-<th>Default Preprocessing</th>
-<th>Resize / Crop / Pad</th>
-<th>Output Structure</th>
-<th>Training Alignment</th>
-</tr>
-</thead>
-<tbody>
-<tr>
-<td><code>remoteclip</code></td>
-<td><code>rshf.remoteclip.RemoteCLIP</code> (open_clip style CLIP ViT)</td>
-<td>10m</td>
-<td>S2 RGB (<code>B4,B3,B2</code>)</td>
-<td>raw SR <code>0..10000</code> -&gt; <code>/10000</code> -&gt; RGB <code>uint8</code>; then model transform if available, else CLIP norm</td>
-<td>image size 224; fallback path uses <code>Resize + CenterCrop</code>; no pad</td>
-<td>pooled vector or ViT token grid</td>
-<td>Medium (high if wrapper transform matches training; fallback is generic CLIP pipeline)</td>
-</tr>
-<tr>
-<td><code>satmae</code></td>
-<td><code>rshf.satmae.SatMAE</code></td>
-<td>10m</td>
-<td>S2 RGB (<code>B4,B3,B2</code>)</td>
-<td>raw SR -&gt; <code>/10000</code> -&gt; RGB <code>uint8</code>; prefer model transform, else CLIP norm</td>
-<td>default 224; CLIP fallback has <code>Resize + CenterCrop</code>; no pad</td>
-<td>token sequence -&gt; pooled or patch-token grid</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td><code>satmaepp</code></td>
-<td><code>rshf.satmaepp.SatMAEPP</code></td>
-<td>10m</td>
-<td>S2 RGB (<code>B4,B3,B2</code>)</td>
-<td>raw SR -&gt; <code>/10000</code> -&gt; RGB <code>uint8</code>; SatMAE++ fMoW eval preprocessing (<code>Normalize + Resize(short side) + CenterCrop</code>), default channel order <code>rgb</code></td>
-<td>default 224; source-aligned short-side resize + center crop; no pad</td>
-<td>token sequence -&gt; pooled or patch-token grid</td>
-<td>High</td>
-</tr>
-<tr>
-<td><code>satmaepp_s2_10b</code></td>
-<td>SatMAE++ grouped-channel source branch (<code>models_mae_group_channels.py</code>, <code>base</code> / <code>large</code> runtime families)</td>
-<td>10m</td>
-<td>S2 SR 10-band (<code>B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12</code>)</td>
-<td>raw 10-band CHW; source Sentinel min/max mapping to <code>uint8</code>; <code>ToTensor + Resize(short side) + CenterCrop</code></td>
-<td>default 96 with patch size 8; source-style resize/crop; no pad</td>
-<td>grouped token sequence -&gt; pooled or group-reduced spatial token grid</td>
-<td>High</td>
-</tr>
-<tr>
-<td><code>scalemae</code></td>
-<td><code>rshf.scalemae.ScaleMAE</code> (ViT style)</td>
-<td>10m</td>
-<td>S2 RGB (<code>B4,B3,B2</code>) + <code>input_res_m</code></td>
-<td>raw SR -&gt; <code>/10000</code> -&gt; RGB <code>uint8</code>; ImageNet eval normalize; derive effective <code>input_res_m</code> after preprocess</td>
-<td>default 224; <code>Resize(short side) + CenterCrop</code>; no pad</td>
-<td>token sequence or pooled vector depending on wrapper output</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td><code>anysat</code></td>
-<td>AnySat from upstream <code>hubconf.py</code> (<code>AnySat</code>, <code>tiny</code> / <code>small</code> / <code>base</code>)</td>
-<td>10m</td>
-<td>S2 10-band TCHW (or CHW auto-expanded)</td>
-<td>clip to <code>0..10000</code>; normalize mode default <code>per_tile_zscore</code>; builds per-frame <code>s2_dates</code></td>
-<td>resize TCHW to default 24; no crop, no pad</td>
-<td>grid defaults to dense sub-patch output <code>[D,H,W]</code>; pooled defaults to patch-grid mean/max, optional native tile vector</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td><code>galileo</code></td>
-<td><code>Encoder</code> from official <code>single_file_galileo.py</code></td>
-<td>10m</td>
-<td>S2 10-band TCHW (or CHW auto-expanded)</td>
-<td>clip to <code>0..10000</code>; normalize mode default <code>none</code> with optional <code>official_stats</code>; constructs Galileo tensors with configurable <code>T</code> + per-frame <code>months</code></td>
-<td>default 64 with patch 8; bilinear resize; no pad</td>
-<td>pooled token vector and official-style patch-mean token grid</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td><code>wildsat</code></td>
-<td>WildSAT backbone + optional image head from checkpoint</td>
-<td>10m</td>
-<td>S2 RGB CHW</td>
-<td>clip to <code>0..10000</code> then <code>/10000</code>; default normalization <code>minmax</code>; convert to <code>uint8</code> then unit tensor</td>
-<td>default 224; resize RGB; no pad</td>
-<td>pooled branch output and optional grid (token or feature path)</td>
-<td>Medium-Low</td>
-</tr>
-<tr>
-<td><code>prithvi</code></td>
-<td>Vendored <code>PrithviMAE</code> runtime with HF checkpoints</td>
-<td>30m</td>
-<td>S2 6-band (<code>BLUE,GREEN,RED,NIR_NARROW,SWIR_1,SWIR_2</code>)</td>
-<td>raw SR -&gt; <code>/10000</code> -&gt; clamp <code>[0,1]</code>; prep mode from env</td>
-<td>default mode <code>resize</code> to 224; optional <code>pad</code> to patch multiple (legacy)</td>
-<td>token sequence -&gt; pooled or patch-token grid</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td><code>terrafm</code></td>
-<td>TerraFM-B from vendored runtime + HF weights</td>
-<td>10m</td>
-<td>S2 12-band or S1 VV/VH</td>
-<td>S2: <code>/10000</code> to <code>[0,1]</code>; S1: <code>log1p</code> + p99 scaling to <code>[0,1]</code></td>
-<td>resize to 224; no pad</td>
-<td>pooled embedding, optional feature-map grid</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td><code>terramind</code></td>
-<td>TerraTorch <code>BACKBONE_REGISTRY</code> TerraMind backbone</td>
-<td>10m</td>
-<td>S2 SR 12-band</td>
-<td>raw <code>0..10000</code>; resize 224; z-score with TerraMind v1/v01 pretrained mean/std</td>
-<td>fixed 224; no pad</td>
-<td>token sequence -&gt; pooled or patch-token grid</td>
-<td>High</td>
-</tr>
-<tr>
-<td><code>dofa</code></td>
-<td>DOFA ViT (<code>base</code> / <code>large</code>, official checkpoints)</td>
-<td>10m</td>
-<td>multi-band SR CHW + wavelengths</td>
-<td>raw SR <code>0..10000</code> -&gt; <code>0..255</code>-like scale -&gt; official per-band mean/std; provide/infer wavelengths</td>
-<td>bilinear resize to 224; explicitly no crop/pad</td>
-<td>pooled vector or token grid (usually 14x14)</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td><code>fomo</code></td>
-<td>FoMo <code>MultiSpectralViT</code> (FoMo-Bench)</td>
-<td>10m</td>
-<td>S2 SR 12-band</td>
-<td>clip <code>0..10000</code>; default <code>unit_scale</code> (optional minmax/none)</td>
-<td>default 64; bilinear resize; no pad</td>
-<td>token sequence pooled; grid as spectral-mean patch-token map</td>
-<td>Medium</td>
-</tr>
-<tr>
-<td><code>thor</code></td>
-<td>Fully vendored THOR runtime (<code>tiny</code> / <code>small</code> / <code>base</code> / <code>large</code>)</td>
-<td>10m</td>
-<td>S2 SR 10-band or S1 VV/VH</td>
-<td>S2: clip <code>0..10000</code>, then default <code>thor_stats</code> z-score after reflectance scaling; S1: shared <code>log1p</code> + p99 scaling by default</td>
-<td>default 288; bilinear resize; no pad</td>
-<td>pooled tokens and grouped token grid</td>
-<td>Medium-High</td>
-</tr>
-<tr>
-<td><code>agrifm</code></td>
-<td>AgriFM <code>PretrainingSwinTransformer3DEncoder</code></td>
-<td>10m</td>
-<td>S2 10-band time series <code>[T,C,H,W]</code></td>
-<td>clip <code>0..10000</code>; default <code>agrifm_stats</code> z-score using official config stats</td>
-<td>default 224; TCHW resize; no pad</td>
-<td>feature map grid <code>[D,H,W]</code>, pooled by spatial mean/max</td>
-<td>High</td>
-</tr>
-<tr>
-<td><code>satvision</code></td>
-<td><code>timm</code> <code>SwinTransformerV2</code> (SatVision-TOA checkpoints)</td>
-<td>1000m</td>
-<td>TOA 14 channels in strict order</td>
-<td>channel-aware normalization to <code>[0,1]</code> (<code>auto/raw/unit</code>, reflectance + emissive calibration)</td>
-<td>default 128; bilinear resize; no pad</td>
-<td>model output as pooled or grid depending on tensor shape</td>
-<td>High (if band order and calibration match checkpoint)</td>
-</tr>
-</tbody>
-</table>
-<p>Here, "Default Fetch Resolution" refers to the default source-side resolution used when fetching raw inputs. It does not mean the final spatial size of the tensor after model-specific resize, crop, or pad.</p>
+<p>For per-model input contracts, preprocessing pipelines, and environment variables, see each model's detail page (linked from <a href="../models/">Models Overview</a>). The tables below focus on <strong>cross-model comparison dimensions</strong> that are hard to see from individual pages.</p>
 <h3 id="temporal-handling">Temporal Handling<a class="headerlink" href="#temporal-handling" title="Permanent link">&para;</a></h3>
 <p>Read this section before comparing any model that accepts <code>TemporalSpec.range(...)</code>.</p>
 <p>For most on-the-fly adapters, <code>TemporalSpec.range(start, end)</code> means "filter imagery in <code>[start, end)</code> and build one composite patch for model input," usually with <code>median</code> and optionally <code>mosaic</code> through <code>SensorSpec.composite</code>.</p>
@@ -2387,8 +2172,10 @@ Some linked detail-page filenames still retain older names for compatibility.</p
 </table>
 <h3 id="modality-and-extra-inputs-matrix">Modality and Extra Inputs Matrix<a class="headerlink" href="#modality-and-extra-inputs-matrix" title="Permanent link">&para;</a></h3>
 <p>Use this table to avoid unfair comparisons between plain image encoders and adapters that require side inputs.</p>
-<p>Interpretation:</p>
+<div class="admonition info">
+<p class="admonition-title">Interpretation</p>
 <p>"Backbone multimodal" means the upstream model family supports multiple modalities. "Current rs-embed path" means what this implementation actually feeds today. "Requires extra metadata" means the forward path needs non-image inputs as a hard requirement.</p>
+</div>
 <table>
 <thead>
 <tr>

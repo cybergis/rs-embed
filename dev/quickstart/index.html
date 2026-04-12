@@ -291,7 +291,7 @@
     
     
       <li class="md-tabs__item">
-        <a href="../extending/" class="md-tabs__link">
+        <a href="../architecture/" class="md-tabs__link">
           
   
   
@@ -1703,6 +1703,8 @@
       
         
       
+        
+      
     
     
     
@@ -1749,6 +1751,34 @@
 
           </label>
           <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../architecture/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Architecture
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
             
               
                 
@@ -2083,9 +2113,10 @@ pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </s
     <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 
-<span class="n">vec</span> <span class="o">=</span> <span class="n">emb</span><span class="o">.</span><span class="n">data</span>
-<span class="n">meta</span> <span class="o">=</span> <span class="n">emb</span><span class="o">.</span><span class="n">meta</span>
+<span class="n">vec</span> <span class="o">=</span> <span class="n">emb</span><span class="o">.</span><span class="n">data</span>   <span class="c1"># numpy ndarray, shape (D,) — e.g. (128,) for tessera</span>
+<span class="n">meta</span> <span class="o">=</span> <span class="n">emb</span><span class="o">.</span><span class="n">meta</span>  <span class="c1"># dict with model-specific metadata (normalization, grid_hw, etc.)</span>
 </code></pre></div>
+<p><code>emb.data</code> is always a <code>numpy.ndarray</code>. For <code>OutputSpec.pooled()</code> the shape is <code>(D,)</code> where <code>D</code> depends on the model (see the <code>Dim</code> column in <a href="../models/">Models</a>). For <code>OutputSpec.grid()</code> the shape is <code>(D, H, W)</code> in model token space.</p>
 <p>Use <code>backend="auto"</code> unless you need to force a provider path such as <code>backend="gee"</code>.</p>
 <h3 id="2-many-rois-one-model-get_embeddings_batch">2. Many ROIs, one model: <code>get_embeddings_batch(...)</code><a class="headerlink" href="#2-many-rois-one-model-get_embeddings_batch" title="Permanent link">&para;</a></h3>
 <p>Use this when the model is fixed and you have multiple ROIs.</p>
