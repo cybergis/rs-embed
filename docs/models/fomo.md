@@ -1,63 +1,75 @@
 # FoMo (`fomo`)
 
-> Multispectral Sentinel-2 adapter for FoMo-Bench (MultiSpectralViT), with explicit S2 modality-key mapping and token/grid outputs averaged across spectral modalities.
 
 ## Quick Facts
 
-| Field                             | Value                                                                                    |
-| --------------------------------- | ---------------------------------------------------------------------------------------- |
-| Model ID                          | `fomo`                                                                                   |
-| Family / Backbone                 | FoMo-Bench `MultiSpectralViT` (vendored local code + checkpoint loader)                  |
-| Adapter type                      | `on-the-fly`                                                                             |
-| Typical backend                   | provider backend (`gee`)                                                                 |
-| Primary input                     | S2 SR 12-band (`B1,B2,B3,B4,B5,B6,B7,B8,B8A,B9,B11,B12`)                                 |
-| Default resolution                | 10m default provider fetch (`sensor.scale_m`)                                            |
-| Temporal mode                     | `range` in practice (normalized via shared helper)                                       |
-| Output modes                      | `pooled`, `grid`                                                                         |
-| Extra side inputs                 | **required modality keys** (adapter provides S2 defaults, configurable via env)          |
-| Training alignment (adapter path) | Medium-High when `S2_KEYS`, normalization, and model config match checkpoint assumptions |
+| Field                | Value                                                                                    |
+| -------------------- | ---------------------------------------------------------------------------------------- |
+| Model ID             | `fomo`                                                                                   |
+| Family / Backbone    | FoMo-Bench `MultiSpectralViT` (vendored local code + checkpoint loader)                  |
+| Adapter type         | `on-the-fly`                                                                             |
+| Training alignment   | Medium-High when `S2_KEYS`, normalization, and model config match checkpoint assumptions |
+
+!!! success "FoMo In 30 Seconds"
+    FoMo (FoMo-Bench `MultiSpectralViT`) treats each Sentinel-2 band as its own spectral *modality*: alongside the 12-band image the adapter passes 12 modality keys, and the model emits a token sequence whose layout is `[modalities, H, W, D]`, which `rs-embed` then averages over the modality dimension to produce a single spatial grid.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - **required** 12-value spectral modality key mapping (one integer per S2 channel), overridable via `RS_EMBED_FOMO_S2_KEYS`: see [Input Contract](#input-contract)
+    - `grid` output is a modality-averaged patch grid, with a `1×1` vector grid fallback when token layout is incompatible: see [Output Semantics](#output-semantics)
+    - small default input size (`64`) and patch size (`16`) that must stay aligned with the checkpoint — changing model-config envs silently breaks loading: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
 
 ---
 
-## When To Use This Model
+## Input Contract
 
-FoMo is a good fit for strict multispectral S2 experiments with spectral-token modeling, for testing modality-aware token layouts beyond plain RGB ViT pipelines, and for analyses where averaging spectral tokens into one spatial grid is acceptable. The main pitfalls are changing `RS_EMBED_FOMO_S2_KEYS` without understanding FoMo modality indexing, treating the FoMo grid as georeferenced pixels, or modifying architecture envs while keeping an incompatible checkpoint.
+| Field                 | Value                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| Backend               | provider only (`gee` / `auto`)                                                     |
+| `TemporalSpec`        | `range` recommended (normalized via shared helper)                                 |
+| Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                                                      |
+| Default bands (order) | `B1, B2, B3, B4, B5, B6, B7, B8, B8A, B9, B11, B12` (12-band)                      |
+| Default fetch         | `scale_m=10`, `cloudy_pct=30`, `composite="median"`, `fill_value=0.0`              |
+| `input_chw`           | `CHW`, `C=12` in adapter band order, raw SR `0..10000`                             |
+| Side inputs           | **required** 12 spectral modality keys — adapter provides S2 defaults              |
 
----
-
-## Input Contract (Current Adapter Path)
-
-### Spatial / temporal
-
-FoMo is provider-backed, so use `backend="gee"` or another provider-compatible backend. `TemporalSpec` is normalized through the shared helper, and `TemporalSpec.range(...)` is the clearest option.
-
-### Sensor / channels
-
-If `sensor` is omitted, FoMo uses `COPERNICUS/S2_SR_HARMONIZED` with bands `B1,B2,B3,B4,B5,B6,B7,B8,B8A,B9,B11,B12`, `scale_m=10`, `cloudy_pct=30`, `composite="median"`, and `fill_value=0.0`. If you pass `input_chw`, it must be `CHW` with `C=12` in that adapter band order and raw S2 SR values in `0..10000`.
-
-### Modality keys
-
-The FoMo forward path requires one modality key per channel. The default S2 mapping is encoded in `_DEFAULT_S2_MODALITY_KEYS`, and you can override it with `RS_EMBED_FOMO_S2_KEYS`, which must provide exactly 12 comma-separated integers.
+!!! note "Spectral modality keys"
+    The FoMo forward path requires one modality key per channel. The default S2 mapping is encoded in `_DEFAULT_S2_MODALITY_KEYS`, and can be overridden via `RS_EMBED_FOMO_S2_KEYS` (exactly 12 comma-separated integers).
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Preprocessing Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  provider fetch / input_chw
-  <span class="pipeline-arrow">-&gt;</span> S2 SR 12-band patch
-  <span class="pipeline-arrow">-&gt;</span> normalize with RS_EMBED_FOMO_NORM
-     <span class="pipeline-branch">unit_scale:</span> /10000
-     <span class="pipeline-branch">per_tile_minmax:</span> per-channel min-max after unit scaling
-     <span class="pipeline-branch">none / raw:</span> keep clipped raw values
-  <span class="pipeline-arrow">-&gt;</span> resize to RS_EMBED_FOMO_IMG=64
-  <span class="pipeline-arrow">-&gt;</span> load FoMo runtime + checkpoint
-     <span class="pipeline-detail">vendored local runtime with local / auto-downloaded weights</span>
-  <span class="pipeline-arrow">-&gt;</span> forward(x, spectral_keys, pool=False)
-  <span class="pipeline-arrow">-&gt;</span> token output [N,D]
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> mean / max over all tokens
-     <span class="pipeline-branch">grid:</span>   modality-averaged patch grid when available
-     <span class="pipeline-branch">fallback:</span> 1x1 vector grid</code></pre>
+!!! tip "Resize is the default — tiling is also available"
+    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
+
+```mermaid
+flowchart LR
+    INPUT["S2 12-band"] --> PREP["Normalize → resize 64×64"]
+    PREP --> FWD["forward(x, spectral_keys)"]
+    FWD --> POOL["pooled: mean/max over tokens"]
+    FWD --> GRID["grid: modality-averaged\npatch grid"]
+```
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    subgraph Input
+        S2["S2 12-band"] --> K["12 spectral\nmodality keys"]
+    end
+    subgraph "MultiSpectralViT"
+        K --> |"Band 0→Key 0\nBand 1→Key 1\n...\nBand 11→Key 11"| FWD["forward(image,\nspectral_keys)"]
+        FWD --> TOK["Token output\n[modalities, H, W, D]"]
+    end
+    subgraph Output
+        TOK --> AVG["Modality averaging\n(mean across modality axis)"]
+        AVG --> GRID["grid: (D,H,W)"]
+        AVG --> POOL["pooled: mean/max"]
+    end
+```
 
 ---
 
@@ -98,13 +110,9 @@ The FoMo forward path requires one modality key per channel. The default S2 mapp
 
 ## Output Semantics
 
-### `OutputSpec.pooled()`
+**`pooled`**: token mean/max over the full sequence; metadata records `token_count`, `token_dim`, and pooling mode.
 
-`OutputSpec.pooled()` pools the FoMo token sequence across tokens. `mean` becomes `token_mean`, `max` becomes `token_max`, and metadata records `token_count`, `token_dim`, and pooling mode.
-
-### `OutputSpec.grid()`
-
-The preferred path interprets tokens as `[modalities, H, W, D]`, averages over modalities, and returns `(D,H,W)` with `grid_kind="spectral_mean_patch_tokens"`. If token layout is incompatible with the expected modality or grid structure, the adapter falls back to a `1x1` vector grid with `grid_kind="vector_as_1x1"`. In either case, this remains model token structure rather than georeferenced raster space.
+**`grid`**: tokens are interpreted as `[modalities, H, W, D]`, averaged over modalities → `(D,H,W)` with `grid_kind="spectral_mean_patch_tokens"`; falls back to a `1x1` vector grid with `grid_kind="vector_as_1x1"` when token layout is incompatible.
 
 ---
 
@@ -128,35 +136,23 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_FOMO_IMG=64
-# export RS_EMBED_FOMO_PATCH=16
-# export RS_EMBED_FOMO_NORM=unit_scale
-# export RS_EMBED_FOMO_S2_KEYS=6,7,8,9,10,11,12,13,14,15,17,18
+export RS_EMBED_FOMO_IMG=64
+export RS_EMBED_FOMO_PATCH=16
+export RS_EMBED_FOMO_NORM=unit_scale
+export RS_EMBED_FOMO_S2_KEYS=6,7,8,9,10,11,12,13,14,15,17,18
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- backend mismatch (`fomo` is provider-only)
-- wrong `input_chw` shape (`C` must be `12`)
-- `RS_EMBED_FOMO_S2_KEYS` length mismatch (must be 12 values)
-- missing `torch` / `einops` dependency or checkpoint/import failures
-- changed model config envs incompatible with checkpoint architecture
-- grid returns `1x1` fallback because token layout is not modality-grid compatible
-
-Recommended first checks:
-
-Inspect metadata such as `spectral_keys`, `token_count`, `grid_kind`, and `grid_expected_tokens` first. Revert architecture envs to defaults before benchmarking, and verify normalization mode together with image and patch sizes.
+- **Publication**: [AAAI 2025](https://arxiv.org/abs/2312.10114)
+- **Code**: [RolnickLab/FoMo-Bench](https://github.com/RolnickLab/FoMo-Bench)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-Keep the checkpoint source or path, vendored FoMo runtime version, `IMG`, `PATCH`, normalization mode, `S2_KEYS` mapping, model config envs, and temporal plus compositing settings fixed and recorded.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main code paths are `src/rs_embed/embedders/catalog.py` for registration and `src/rs_embed/embedders/onthefly_fomo.py` for the adapter implementation.
+- `RS_EMBED_FOMO_S2_KEYS` must have exactly 12 values — length mismatches raise immediately.
+- Grid output uses modality-averaging over spectral keys; if the token layout is incompatible, the adapter falls back to a `1×1` grid.
+- The default image size is `64` (not 224) — this is intentional and matches FoMo's architecture.

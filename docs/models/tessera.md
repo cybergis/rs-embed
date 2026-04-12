@@ -1,67 +1,74 @@
 # Tessera (`tessera`)
 
-> Precomputed embedding adapter backed by GeoTessera tiles, with strict tile mosaic + ROI crop behavior. Use `backend="auto"`.
-
 ## Quick Facts
 
-| Field                             | Value                                                                    |
-| --------------------------------- | ------------------------------------------------------------------------ |
-| Model ID                          | `tessera`                                                                |
-| Family / Source                   | GeoTessera precomputed embeddings                                        |
-| Adapter type                      | `precomputed`                                                            |
-| Typical backend                   | `auto`                                                                   |
-| Primary input                     | `BBox` / `PointBuffer` in EPSG:4326 (converted to bbox)                  |
-| Product grid CRS                  | fixed tile-native CRS (not the common provider-backed EPSG:3857 default) |
-| Default resolution                | 10m source product resolution                                            |
-| Temporal mode                     | year-like selection (`year`; `range` uses start year fallback)           |
-| Output modes                      | `pooled`, `grid`                                                         |
-| Extra side inputs                 | none                                                                     |
-| Training alignment (adapter path) | N/A (precomputed product)                                                |
+| Field              | Value                             |
+| ------------------ | --------------------------------- |
+| Model ID           | `tessera`                         |
+| Family / Source    | GeoTessera precomputed embeddings |
+| Adapter type       | `precomputed`                     |
+| Training alignment | N/A (precomputed product)         |
+
+!!! success "Tessera In 30 Seconds"
+    Tessera is a precomputed 10 m global embedding product distributed as local GeoTessera tiles — `rs-embed` does no model inference here; it mosaics the tiles covering your ROI, reprojects the ROI into each tile's native CRS if needed, and returns the cropped `(D,H,W)` embedding grid in that tile-native CRS.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - strict north-up mosaic requiring consistent tile CRS/resolution — rotated/sheared or heterogeneous tiles raise: see [Preprocessing / Retrieval Pipeline](#preprocessing-retrieval-pipeline)
+    - year-selector temporal semantics: `TemporalSpec.range(...)` silently uses the `start` year rather than doing real temporal filtering: see [Retrieval Contract](#retrieval-contract)
+    - output CRS follows the tile-native CRS, not the EPSG:3857 default used by provider-backed paths elsewhere: see [Output Semantics](#output-semantics)
 
 ---
 
-## When To Use This Model
+## Retrieval Contract
 
-Tessera is a strong choice for fast precomputed baselines, large-area ROI extraction without model inference runtime, and workflows that benefit from local tile mosaic and crop behavior rather than provider fetches. It is easy to misuse if you expect arbitrary backends, treat `TemporalSpec.range(...)` as exact temporal semantics, or work across tiles with incompatible CRS or resolution.
+| Field              | Value                                                                                              |
+| ------------------ | -------------------------------------------------------------------------------------------------- |
+| Backend            | `auto` (legacy `local` still accepted)                                                             |
+| `SpatialSpec`      | `BBox` direct, or `PointBuffer` converted to EPSG:4326 BBox (approximate meter-to-degree)          |
+| `TemporalSpec`     | `year(YYYY)` — uses `.year`; `range(start, end)` falls back to `start`'s year; default year `2021` |
+| Source             | GeoTessera precomputed tiles                                                                       |
+| Product CRS        | tile-native (varies by tile), **not** EPSG:3857                                                    |
+| Product resolution | 10 m                                                                                               |
+| Cache directory    | `RS_EMBED_TESSERA_CACHE`, or per-call `sensor.collection="cache:/path/to/cache"`                   |
+| Side inputs        | none                                                                                               |
 
----
-
-## Input Contract (Current Adapter Path)
-
-### Spatial
-
-The adapter accepts `BBox` directly and `PointBuffer`, which it converts to `BBox` in EPSG:4326 using an approximate meter-to-degree conversion. Unsupported spatial types raise `ModelError`.
-
-!!! warning
-    Tessera still reads and returns embeddings in the product-native tile CRS after crop. That CRS may differ from the more common provider-backed EPSG:3857 sampling default used elsewhere in `rs-embed`, even though the public spatial input is still `EPSG:4326`.
-
-### Temporal
-
-`temporal=None` defaults to year `2021`. `TemporalSpec.year(...)` uses `temporal.year`, and `TemporalSpec.range(start, end)` uses the year parsed from `start`. This is a year selector for tile-product lookup, not scene-level temporal filtering.
-
-### Backend / cache
-
-The backend should be `auto`, although legacy `local` is still accepted for compatibility. The adapter reads the GeoTessera cache from `RS_EMBED_TESSERA_CACHE` or from a per-call override such as `sensor.collection="cache:/path/to/cache"`.
+!!! warning "Output CRS and temporal semantics"
+    Tessera reads and returns embeddings in the **product-native tile CRS** after mosaic + crop. This differs from the EPSG:3857 default used by provider-backed models. `TemporalSpec.range(...)` is a year selector here, **not** scene-level temporal filtering.
 
 ---
 
-## Preprocessing / Retrieval Pipeline (Current rs-embed Path)
+## Preprocessing / Retrieval Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  SpatialSpec + TemporalSpec
-  <span class="pipeline-arrow">-&gt;</span> convert SpatialSpec to EPSG:4326 BBox
-  <span class="pipeline-arrow">-&gt;</span> resolve year from TemporalSpec
-     <span class="pipeline-detail">with adapter fallback behavior</span>
-  <span class="pipeline-arrow">-&gt;</span> open / cache geotessera.GeoTessera by cache_dir
-  <span class="pipeline-arrow">-&gt;</span> query tile blocks covering ROI + year
-  <span class="pipeline-arrow">-&gt;</span> fetch tile embeddings and normalize layout
-     <span class="pipeline-detail">HWC or CHW -&gt; internal HWC</span>
-  <span class="pipeline-arrow">-&gt;</span> strict mosaic + crop
-     <span class="pipeline-detail">requires north-up transforms and consistent tile CRS / resolution</span>
-     <span class="pipeline-detail">reprojects ROI bbox into tile CRS if needed</span>
-  <span class="pipeline-arrow">-&gt;</span> cropped result -&gt; CHW
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> vector
-     <span class="pipeline-branch">grid:</span>   embedding grid</code></pre>
+```mermaid
+flowchart LR
+    INPUT["SpatialSpec\n+ TemporalSpec"] --> QUERY["ROI → EPSG:4326\n→ query tile blocks"]
+    QUERY --> MOSAIC["Fetch tiles\n→ mosaic + crop"]
+    MOSAIC --> POOL["pooled: vector"]
+    MOSAIC --> GRID["grid: (D,H,W)\nin tile-native CRS"]
+```
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    subgraph "Precomputed Tiled Product"
+        RES["10 m per pixel"]
+        STORE["GeoTessera tile blocks\n(local cache)"]
+    end
+    subgraph Retrieval
+        RES --> BBOX["ROI → EPSG:4326 bbox"]
+        STORE --> TILES["Query + fetch\ntile blocks"]
+        BBOX --> TILES
+        TILES --> MOS["Strict north-up\nmosaic + crop"]
+    end
+    subgraph Output
+        MOS --> POOL["pooled: spatial\npooling over grid"]
+        MOS --> GRID["grid: (D,H,W)\nin tile-native CRS"]
+    end
+```
 
 ---
 
@@ -72,17 +79,16 @@ The backend should be `auto`, although legacy `local` is still accepted for comp
 | `RS_EMBED_TESSERA_CACHE`         | unset (GeoTessera default) | Local GeoTessera cache directory                   |
 | `RS_EMBED_TESSERA_BATCH_WORKERS` | `4`                        | Batch worker count for `get_embeddings_batch(...)` |
 
-Non-env override:
-
-`sensor.collection="cache:/path/to/cache"` overrides the cache directory for one call.
+!!! info "Non-env override"
+    `sensor.collection="cache:/path/to/cache"` overrides the cache directory for one call.
 
 ---
 
 ## Output Semantics
 
-Tessera follows the standard precomputed-product behavior. `pooled` applies spatial pooling over the cropped embedding grid, and `grid` returns the cropped `(D,H,W)` embedding grid in product pixel space after mosaic and crop rather than raw imagery space.
+**`pooled`**: spatial pooling over the cropped embedding grid.
 
-The current adapter exposes this explicitly in metadata: `input_crs` stays `EPSG:4326`, while `output_crs` follows the fixed tile CRS used by the fetched product tiles.
+**`grid`**: cropped `(D,H,W)` in product pixel space after mosaic + crop; metadata records `input_crs=EPSG:4326` and `output_crs` follows the tile-native CRS.
 
 ---
 
@@ -106,31 +112,19 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_TESSERA_CACHE=/data/geotessera
+export RS_EMBED_TESSERA_CACHE=/data/geotessera
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- backend is not `auto`
-- no tiles found for ROI/year
-- tile CRS/resolution mismatch during mosaic
-- tile transform has rotation/shear (not north-up)
-- missing optional deps for CRS reprojection (`pyproj`) on non-4326 tiles
-
-Recommended first checks:
-
-Inspect `preferred_year`, `bbox_4326`, and `chw_shape` first, then inspect crop metadata such as `tile_crs`, `mosaic_hw`, and `crop_px_window`. If no tiles are found, try a larger ROI before assuming the cache is broken.
+- **Publication**: [CVPR 2026](https://arxiv.org/abs/2506.20380v4)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-Keep the GeoTessera cache snapshot or path, year-selection logic, ROI geometry, CRS, and output mode fixed and recorded.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main code paths are `src/rs_embed/embedders/catalog.py` for registration and `src/rs_embed/embedders/precomputed_tessera.py` for the adapter implementation.
+- Tile mosaic requires all tiles to be north-up with consistent CRS and resolution — tiles with rotation/shear are rejected.
+- Output CRS is tile-native (not EPSG:3857) — do not compare grids with provider-backed models without reprojecting.
+- "No tiles found" usually means the ROI/year combination has no coverage in the GeoTessera cache, not that the cache is broken.

@@ -1,68 +1,70 @@
 # Galileo (`galileo`)
 
-> Multi-frame Sentinel-2 adapter that constructs Galileo encoder inputs (including `months`) from a temporal window and returns pooled vectors or patch-token grids.
-
 ## Quick Facts
 
-| Field                             | Value                                                                                       |
-| --------------------------------- | ------------------------------------------------------------------------------------------- |
-| Model ID                          | `galileo`                                                                                   |
-| Family / Backbone                 | Galileo `Encoder` from vendored local runtime                                               |
-| Adapter type                      | `on-the-fly`                                                                                |
-| Typical backend                   | provider-backed; prefer `backend="auto"` in public API                                      |
-| Primary input                     | S2 10-band time series (`T,C,H,W`)                                                          |
-| Default resolution                | 10m default provider fetch (`sensor.scale_m`)                                               |
-| Temporal mode                     | `range` in practice (adapter normalizes via shared helper)                                  |
-| Output modes                      | `pooled`, `grid`                                                                            |
-| Extra side inputs                 | **required** `months` (per-frame month tokens), plus Galileo masks/tensors built by adapter |
-| Training alignment (adapter path) | Medium (depends on `FRAMES`, `IMG`, `PATCH`, normalization)                                 |
+| Field                | Value                                                               |
+| -------------------- | ------------------------------------------------------------------- |
+| Model ID             | `galileo`                                                           |
+| Family / Backbone    | Galileo `Encoder` from vendored local runtime                       |
+| Adapter type         | `on-the-fly`                                                        |
+| Training alignment   | Medium (depends on `FRAMES`, `IMG`, `PATCH`, normalization)         |
+
+!!! success "Galileo In 30 Seconds"
+    Galileo is NASA Harvest's masked-modeling multi-modal encoder with structured token groups (space-time / space / time / static), and in `rs-embed` it runs as a Sentinel-2 multi-frame path that derives per-frame `months` tokens from frame-bin midpoints and does both pooled and grid output from visible (unmasked) tokens at Galileo's own patch level.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - **required** per-frame `months` side input, optionally forced to a constant via `RS_EMBED_GALILEO_MONTH`: see [Input Contract](#input-contract)
+    - hard constraint: `image_size % patch_size == 0`: see [Preprocessing Pipeline](#preprocessing-pipeline)
+    - pooled/grid use Galileo's own visible-token averaging at the patch level rather than a generic token reshape: see [Output Semantics](#output-semantics)
 
 ---
 
-## When To Use This Model
+## Input Contract
 
-Galileo is a good fit for temporal S2 sequence modeling with explicit month tokens, comparisons against other multi-frame adapters such as `anysat` and `agrifm`, and feature-grid analysis over Galileo's S2-related token groups. The main pitfalls are comparing it to single-composite models without matching temporal assumptions, changing `image_size` and `patch_size` inconsistently, or changing month handling without documenting it.
+| Field                 | Value                                                                                              |
+| --------------------- | -------------------------------------------------------------------------------------------------- |
+| Backend               | provider (`auto` recommended in public API)                                                        |
+| `TemporalSpec`        | `range` recommended — split into `T` sub-windows by the shared helper                              |
+| Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                                                                      |
+| Default bands (order) | `B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12` (10-band)                                              |
+| Default fetch         | `scale_m=10`, `cloudy_pct=30`, `composite="median"`, `fill_value=0.0`                              |
+| `input_chw`           | `CHW` (`C=10`, repeated to `T`) **or** `TCHW` (`C=10`, padded/truncated to exact `T`); raw SR `0..10000` |
+| Side inputs           | **required** `months` `[1,T]` — derived from frame-bin midpoints, or forced via `RS_EMBED_GALILEO_MONTH` |
 
----
-
-## Input Contract (Current Adapter Path)
-
-### Spatial / temporal
-
-The adapter accepts `BBox` and `PointBuffer`, and normalizes `TemporalSpec` to a range through the shared helper; `TemporalSpec.range(...)` is still the clearest choice for reproducibility. Galileo builds `T` frames by splitting the requested window into equal sub-windows and compositing one frame per bin. The `months` side input is derived from frame-bin midpoints unless you force a constant month with `RS_EMBED_GALILEO_MONTH`.
-
-### Sensor / channels
-
-If `sensor` is omitted, Galileo uses `COPERNICUS/S2_SR_HARMONIZED` with bands `B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12`, `scale_m=10`, `cloudy_pct=30`, `composite="median"`, and `fill_value=0.0`.
-
-For `input_chw`, the adapter accepts `CHW` or `TCHW` with `C=10` through the shared coercion helper. `CHW` repeats to `T`, `TCHW` pads or truncates to exact `T`, and values are clipped to the raw-SR range `0..10000`.
+`T` is controlled by `RS_EMBED_GALILEO_FRAMES` (default `8`). `image_size % patch_size == 0` is a hard constraint — see [Preprocessing Pipeline](#preprocessing-pipeline).
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Preprocessing Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  provider fetch / input_chw
-  <span class="pipeline-arrow">-&gt;</span> S2 10-band raw_tchw
-     <span class="pipeline-detail">input_chw path: coerce to exact TCHW</span>
-  <span class="pipeline-arrow">-&gt;</span> resolve months sequence
-     <span class="pipeline-detail">frame-bin midpoints or RS_EMBED_GALILEO_MONTH override</span>
-  <span class="pipeline-arrow">-&gt;</span> resize frames to RS_EMBED_GALILEO_IMG=64 if needed
-  <span class="pipeline-arrow">-&gt;</span> normalize series with RS_EMBED_GALILEO_NORM
-     <span class="pipeline-branch">default:</span> none
-     <span class="pipeline-detail">use `official_stats` to match Galileo pretraining normalization</span>
-  <span class="pipeline-arrow">-&gt;</span> build encoder tensors + masks
-     <span class="pipeline-branch">inputs:</span> s_t_x, sp_x, t_x, st_x
-     <span class="pipeline-branch">masks:</span>  s_t_m, sp_m, t_m, st_m
-     <span class="pipeline-branch">side input:</span> months
-  <span class="pipeline-arrow">-&gt;</span> Galileo encoder forward
-     <span class="pipeline-detail">patch_size=RS_EMBED_GALILEO_PATCH=8</span>
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> visible-token average
-     <span class="pipeline-branch">grid:</span>   official-style patch mean over visible tokens</code></pre>
+!!! tip "Resize is the default — tiling is also available"
+    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
 
-Constraint:
+```mermaid
+flowchart LR
+    INPUT["S2 10-band TCHW"] --> PREP["Resolve months\n→ resize 64×64\n→ normalize"]
+    PREP --> ENC["Build 4 token groups\n(s_t, sp, t, st)\n+ masks"]
+    ENC --> FWD["Galileo encoder\n(patch_size=8)"]
+    FWD --> POOL["pooled: visible-token mean"]
+    FWD --> GRID["grid: patch mean\nper spatial position"]
+```
 
-`image_size % patch_size == 0` is required.
+!!! warning "Constraint"
+    `image_size % patch_size == 0` is required.
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    F["S2 10-band\n× T frames"] --> M["Per-frame month\n(side input)"]
+    M --> TG["4 token groups:\nspace-time · space\ntime · static"]
+    TG --> VIS["Masked-modeling\n(visible tokens only)"]
+    VIS --> POOL["pooled: visible-token mean"]
+    VIS --> GRID["grid: patch mean\nper spatial position"]
+```
 
 ---
 
@@ -87,13 +89,9 @@ Constraint:
 
 ## Output Semantics
 
-### `OutputSpec.pooled()`
+**`pooled`**: uses Galileo's pooled token output (`token_mean`); `pooling="max"` max-pools the grid instead (`grid_max`).
 
-The default pooled path uses Galileo's pooled token output, recorded with `token_mean` semantics in metadata. If `OutputSpec.pooling="max"`, the adapter max-pools the produced grid instead and records `grid_max`.
-
-### `OutputSpec.grid()`
-
-`OutputSpec.grid()` returns a Galileo patch-token grid as `xarray.DataArray` `(D,H,W)`. The adapter now follows Galileo's own patch-level token averaging path when available, so each spatial position is the mean of visible tokens assigned to that patch. This is model token structure rather than georeferenced raster space.
+**`grid`**: Galileo's own patch-level visible-token averaging — each spatial position is the mean of visible tokens assigned to that patch.
 
 ---
 
@@ -117,35 +115,23 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_GALILEO_FRAMES=8
-# export RS_EMBED_GALILEO_IMG=64
-# export RS_EMBED_GALILEO_PATCH=8
-# export RS_EMBED_GALILEO_NORM=official_stats
+export RS_EMBED_GALILEO_FRAMES=8
+export RS_EMBED_GALILEO_IMG=64
+export RS_EMBED_GALILEO_PATCH=8
+export RS_EMBED_GALILEO_NORM=official_stats
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- backend is not provider-compatible
-- `image_size` not divisible by `patch_size`
-- wrong `input_chw` channel count (must be 10)
-- unexpected effects from `RS_EMBED_GALILEO_MONTH` forcing a constant month
-- missing `huggingface_hub` / `einops` dependency
-- missing local model folder when auto-download is disabled
-
-Recommended first checks:
-
-Verify temporal window, frame count, and month sequence in metadata first. Inspect raw inputs before changing normalization or model settings.
+- **Publication**: [ICML 2025](https://arxiv.org/abs/2502.09356)
+- **Code**: [nasaharvest/galileo](https://github.com/nasaharvest/galileo)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-Keep the temporal window, `RS_EMBED_GALILEO_FRAMES`, `RS_EMBED_GALILEO_IMG`, `RS_EMBED_GALILEO_PATCH`, normalization mode, month override, and model source fixed and recorded.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main code paths are `src/rs_embed/embedders/catalog.py` for registration, `src/rs_embed/embedders/onthefly_galileo.py` for the adapter, and `src/rs_embed/embedders/runtime_utils.py` for shared TCHW coercion.
+- `image_size % patch_size == 0` is a hard constraint — violations raise immediately.
+- Forcing a constant month via `RS_EMBED_GALILEO_MONTH` overrides the auto-derived temporal signal and changes embedding semantics.
+- The `months` side input is derived from frame-bin midpoints; an unusual temporal window may produce unexpected month values.

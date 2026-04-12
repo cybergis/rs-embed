@@ -1,71 +1,78 @@
 # Copernicus Embed (`copernicus`)
 
-> Precomputed embedding adapter using a vendored local GeoTIFF reader over the published `torchgeo/copernicus_embed` Hugging Face dataset, with strict bbox slicing.
 
 ## Quick Facts
 
-| Field                             | Value                                                                          |
-| --------------------------------- | ------------------------------------------------------------------------------ |
-| Model ID                          | `copernicus`                                                                   |
-| Aliases                           | `copernicus_embed`                                                             |
-| Family / Source                   | `torchgeo/copernicus_embed` GeoTIFF redistribution on Hugging Face             |
-| Adapter type                      | `precomputed`                                                                  |
-| Typical backend                   | `auto`                                                                         |
-| Primary input                     | `BBox` / `PointBuffer` in EPSG:4326, sliced via vendored GeoTIFF bbox indexing |
-| Product grid CRS                  | fixed `EPSG:4326` grid (not the common provider-backed EPSG:3857 default)      |
-| Default resolution                | 0.25° source product resolution                                                |
-| Temporal mode                     | **strict** `TemporalSpec.year(2021)` in v0.1                                   |
-| Output modes                      | `pooled`, `grid`                                                               |
-| Extra side inputs                 | none                                                                           |
-| Training alignment (adapter path) | N/A (precomputed product)                                                      |
+| Field             | Value                                                              |
+| ----------------- | ------------------------------------------------------------------ |
+| Model ID          | `copernicus`                                                       |
+| Aliases           | `copernicus_embed`                                                 |
+| Family / Source   | `torchgeo/copernicus_embed` GeoTIFF redistribution on Hugging Face |
+| Adapter type      | `precomputed`                                                      |
+| Training alignment | N/A (precomputed product)                                         |
+
+!!! success "Copernicus Embed In 30 Seconds"
+    Copernicus Embed is a precomputed global embedding product redistributed as local GeoTIFFs via the `torchgeo/copernicus_embed` Hugging Face dataset. `rs-embed` does no model inference here, it just slices the requested bbox out of a local GeoTIFF on a fixed `EPSG:4326` 0.25° grid.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - **strict** `TemporalSpec.year(2021)`; no other years are currently supported: see [Retrieval Contract](#retrieval-contract)
+    - product CRS is a fixed `EPSG:4326` 0.25° grid, differing from the EPSG:3857 default used by provider-backed paths elsewhere: see [Retrieval Contract](#retrieval-contract)
+    - ROIs smaller than one full 0.25° pixel raise immediately instead of silently returning an empty grid: see [Retrieval Pipeline](#retrieval-pipeline)
 
 ---
 
-## When To Use This Model
+## Retrieval Contract
 
-Copernicus Embed is a good fit for precomputed embedding workflows via local GeoTIFF access, quick spatial baselines without provider requests, and experiments where coarse precomputed coverage is acceptable. It is easy to misuse if you request years other than `2021`, pass ROIs smaller than one 0.25° pixel, or use non-`auto` backends.
+| Field              | Value                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| Backend            | `auto` (legacy `local` still accepted)                                             |
+| `SpatialSpec`      | `BBox` direct, or `PointBuffer` converted to EPSG:4326 bbox                        |
+| `TemporalSpec`     | **strict** `TemporalSpec.year(2021)` — only year 2021 supported                    |
+| Source             | `torchgeo/copernicus_embed` local GeoTIFF                                          |
+| Product CRS        | fixed `EPSG:4326` 0.25° grid                                                       |
+| Product resolution | 0.25° (~28 km at equator)                                                          |
+| Data directory     | `RS_EMBED_COP_DIR` (default `data/copernicus_embed`), or per-call `sensor.collection="dir:/path/to/copernicus_embed"` |
+| Side inputs        | none                                                                               |
 
----
-
-## Input Contract (Current Adapter Path)
-
-### Spatial
-
-The adapter accepts `BBox` directly and `PointBuffer`, which it converts to an EPSG:4326 bbox. Internally it slices the local GeoTIFF with bbox indexing via `ds[minlon:maxlon, minlat:maxlat]`.
-
-!!! warning
-    Copernicus keeps the product's fixed `EPSG:4326` grid with 0.25 degree pixels. That differs from the more common provider-backed EPSG:3857 sampling default used elsewhere in `rs-embed`, even though the public spatial input is still `EPSG:4326`.
-
-### Temporal
-
-Copernicus Embed requires `TemporalSpec.year(...)`, currently supports only `2021`, and validates the year before dataset access.
-
-### Backend / data directory
-
-The backend should be `auto`, although legacy `local` is still accepted for compatibility. Data directory resolution comes from `RS_EMBED_COP_DIR` by default, or from a per-call override such as `sensor.collection="dir:/path/to/copernicus_embed"`.
+!!! warning "CRS differs from provider-backed models"
+    Copernicus Embed keeps its product-native `EPSG:4326` 0.25° grid even though the public spatial input is still `EPSG:4326`. Other provider-backed models sample on EPSG:3857 by default — do not compare grids across these two paths without reprojecting.
 
 ---
 
-## Retrieval Pipeline (Current rs-embed Path)
+## Retrieval Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  TemporalSpec.year(...) + SpatialSpec
-  <span class="pipeline-arrow">-&gt;</span> validate supported year
-     <span class="pipeline-detail">current adapter supports 2021</span>
-  <span class="pipeline-arrow">-&gt;</span> resolve data_dir
-     <span class="pipeline-branch">default:</span> RS_EMBED_COP_DIR
-     <span class="pipeline-branch">override:</span> sensor.collection
-  <span class="pipeline-arrow">-&gt;</span> load / cache CopernicusEmbedGeoTiff dataset
-     <span class="pipeline-detail">download=True in current adapter</span>
-  <span class="pipeline-arrow">-&gt;</span> convert SpatialSpec to EPSG:4326 bbox
-  <span class="pipeline-arrow">-&gt;</span> validate ROI covers at least one full Copernicus pixel
-  <span class="pipeline-arrow">-&gt;</span> bbox slice -&gt; sample["image"] as CHW
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> vector
-     <span class="pipeline-branch">grid:</span>   embedding grid</code></pre>
+```mermaid
+flowchart LR
+    INPUT["TemporalSpec.year(2021)\n+ SpatialSpec"] --> LOAD["Resolve data_dir\n→ load GeoTIFF"]
+    LOAD --> SLICE["Convert ROI → EPSG:4326\n→ bbox slice"]
+    SLICE --> POOL["pooled: vector"]
+    SLICE --> GRID["grid: (D,H,W)"]
+```
 
-Notes:
+!!! note "Temporal metadata"
+    `temporal` is validated, but metadata in the current adapter is built with `temporal=None`, so record the requested year externally if strict provenance matters.
 
-`temporal` is validated, but metadata in the current adapter is built with `temporal=None`, so record the requested year externally if strict provenance matters.
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    subgraph "Precomputed Product"
+        GRID_DEF["Fixed EPSG:4326 grid\n0.25° resolution ≈28 km\nYear 2021 only"]
+        STORE["Local GeoTIFFs\n(not provider-backed)"]
+    end
+    subgraph Retrieval
+        GRID_DEF --> BBOX["Convert ROI\nto EPSG:4326 bbox"]
+        STORE --> SLICE["Bbox slice\nfrom GeoTIFF"]
+        BBOX --> SLICE
+    end
+    subgraph Output
+        SLICE --> POOL["pooled: spatial\npooling over grid"]
+        SLICE --> GRID["grid: (D,H,W)\nin EPSG:4326"]
+    end
+```
 
 ---
 
@@ -76,9 +83,8 @@ Notes:
 | `RS_EMBED_COP_DIR`                  | `data/copernicus_embed` | Local Copernicus embed GeoTIFF directory           |
 | `RS_EMBED_COPERNICUS_BATCH_WORKERS` | `4`                     | Batch worker count for `get_embeddings_batch(...)` |
 
-Non-env override:
-
-`sensor.collection="dir:/path/to/copernicus_embed"` overrides the data directory per call.
+!!! info "Non-env override"
+    `sensor.collection="dir:/path/to/copernicus_embed"` overrides the data directory per call.
 
 Current fixed adapter behavior (not env-configurable in v0.1):
 
@@ -88,9 +94,9 @@ The current adapter keeps `download=True`, and that is not env-configurable in v
 
 ## Output Semantics
 
-Copernicus follows the same precomputed-product pattern as the other local or provider-sampled embedding products. `pooled` applies spatial pooling over the sampled `CHW` embedding grid, and `grid` returns `(D,H,W)` in product space rather than raw imagery pixel space.
+**`pooled`**: spatial pooling over the sampled `CHW` embedding grid.
 
-The current adapter exposes this explicitly in metadata: `input_crs` is `EPSG:4326`, `output_crs` is the fixed product CRS `EPSG:4326`, and `product_resolution_deg` records the 0.25 degree grid spacing.
+**`grid`**: `(D,H,W)` slice of the product grid; metadata records `input_crs=EPSG:4326`, `output_crs=EPSG:4326`, and `product_resolution_deg=0.25`.
 
 ---
 
@@ -114,31 +120,19 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_COP_DIR=/data/copernicus_embed
+export RS_EMBED_COP_DIR=/data/copernicus_embed
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- year not supported (`2021` only in current adapter)
-- backend is not `auto`
-- broken local install missing the GeoTIFF stack (`tifffile` / `imagecodecs`)
-- dataset files missing/corrupt under `RS_EMBED_COP_DIR`
-- ROI is smaller than one Copernicus pixel (raises immediately)
-
-Recommended first checks:
-
-Confirm `TemporalSpec.year(2021)` first, then inspect metadata such as `data_dir`, `chw_shape`, and `bbox_4326`. If coverage seems empty, test a larger ROI before assuming the dataset is broken.
+- **Publication**: [ICCV 2025](https://arxiv.org/abs/2503.11849)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-Keep the dataset path or version snapshot, requested year, ROI geometry, and output mode fixed and recorded.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main code paths are `src/rs_embed/embedders/catalog.py` for registration, `src/rs_embed/embedders/precomputed_copernicus_embed.py` for the adapter, and `src/rs_embed/embedders/_vendor/copernicus_embed.py` for the vendored GeoTIFF reader.
+- Only year `2021` is supported in the current adapter — other years raise immediately.
+- The grid is EPSG:4326 at 0.25° resolution (≈28 km) — ROIs smaller than one pixel raise an error.
+- This is a local GeoTIFF product, not provider-backed — `tifffile` / `imagecodecs` must be installed.

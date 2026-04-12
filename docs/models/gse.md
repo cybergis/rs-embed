@@ -1,57 +1,74 @@
 # Google Satellite Embedding Annual (`gse`)
 
-> Provider-backed precomputed annual embedding adapter for `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`, supporting pooled vectors or provider-sampled embedding grids.
+
 
 ## Quick Facts
 
-| Field                             | Value                                                                              |
-| --------------------------------- | ---------------------------------------------------------------------------------- |
-| Model ID                          | `gse`                                                                              |
-| Aliases                           | `gse_annual`                                                                       |
-| Family / Source                   | Google Satellite Embedding annual product (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) |
-| Adapter type                      | `precomputed`                                                                      |
-| Typical backend                   | provider-backed; prefer `backend="auto"` in public API                             |
-| Primary input                     | Provider-sampled annual embedding image collection                                 |
-| Default resolution                | 10m default provider sampling (`fetch.scale_m` / `sensor.scale_m`)                 |
-| Temporal mode                     | **strict** `TemporalSpec.year(...)`                                                |
-| Output modes                      | `pooled`, `grid`                                                                   |
-| Extra side inputs                 | none                                                                               |
-| Training alignment (adapter path) | N/A (precomputed product)                                                          |
+| Field              | Value                                                                              |
+| ------------------ | ---------------------------------------------------------------------------------- |
+| Model ID           | `gse`                                                                              |
+| Aliases            | `gse_annual`                                                                       |
+| Family / Source    | Google Satellite Embedding annual product (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) |
+| Adapter type       | `precomputed`                                                                      |
+| Training alignment | N/A (precomputed product)                                                          |
+
+!!! success "Google Satellite Embedding In 30 Seconds"
+    GSE is Google's precomputed annual Satellite Embedding product (`GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`) — no model inference happens locally; the adapter just provider-samples the already-computed embedding image at your ROI, so the "embedding" is a Google-produced global annual feature map rather than anything `rs-embed` runs a forward pass for.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - **strict** `TemporalSpec.year(...)` temporal mode; `range` is explicitly not supported in v0.1: see [Retrieval Contract](#retrieval-contract)
+    - `fetch.scale_m` / `sensor.scale_m` still controls provider *sampling* resolution even though the underlying product is precomputed: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
+    - product fill value `-9999` is automatically converted to `NaN` in the returned grid: see [Retrieval Pipeline](#retrieval-pipeline)
 
 ---
 
-## When To Use This Model
+## Retrieval Contract
 
-GSE is a good fit for quick annual baselines, low-friction comparisons with `OutputSpec.pooled()`, and workflows that prefer provider-based sampling over local tile cache management. The main caveats are that `TemporalSpec.range(...)` is not supported in v0.1, the product is an embedding image rather than native imagery, and `fetch.scale_m` still affects provider sampling resolution.
-
----
-
-## Input Contract (Current Adapter Path)
-
-### Backend / temporal
-
-This is a provider-backed path, and the public API should usually use `backend="auto"`. It requires `TemporalSpec.year(year=...)`, and the adapter validates `temporal.mode == "year"`.
-
-### Spatial / sampling
-
-The adapter accepts the normal `SpatialSpec` provider sampling path, fetches all embedding bands from the annual collection through the provider helper, and uses `fetch.scale_m` or `sensor.scale_m` as the provider sampling scale.
-
-Fixed provider fetch settings in current adapter:
-
-The provider fetch settings are fixed to collection `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`, `fill_value=-9999.0`, and `composite="mosaic"`.
+| Field               | Value                                                                    |
+| ------------------- | ------------------------------------------------------------------------ |
+| Backend             | provider (`auto` recommended) — provider-sampled, not local              |
+| `SpatialSpec`       | `BBox` or `PointBuffer` via standard provider sampling                   |
+| `TemporalSpec`      | **strict** `TemporalSpec.year(...)` — `range` not supported in v0.1      |
+| Collection          | `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` (fixed)                           |
+| Sampling resolution | `fetch.scale_m` or `sensor.scale_m` (default `10 m`)                     |
+| Composite           | `mosaic` (fixed)                                                         |
+| Fill value          | `-9999` (converted to `NaN` in returned grid)                            |
+| Side inputs         | none                                                                     |
 
 ---
 
-## Retrieval Pipeline (Current rs-embed Path)
+## Retrieval Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  provider-compatible backend + TemporalSpec.year(...)
-  <span class="pipeline-arrow">-&gt;</span> fetch annual embedding product as CHW
-  <span class="pipeline-arrow">-&gt;</span> replace fill value -9999 with NaN
-  <span class="pipeline-arrow">-&gt;</span> build metadata
-     <span class="pipeline-detail">year + scale + band names</span>
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> pool_chw_to_vec(...)
-     <span class="pipeline-branch">grid:</span>   xarray.DataArray (D,H,W) with d coords = band names</code></pre>
+```mermaid
+flowchart LR
+    INPUT["TemporalSpec.year(...)"] --> FETCH["Fetch annual embedding\n→ replace -9999 with NaN"]
+    FETCH --> POOL["pooled: spatial pooling"]
+    FETCH --> GRID["grid: (D,H,W)\nwith band-name coords"]
+```
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    subgraph "Google Satellite Embedding"
+        SRC["Precomputed annual product"]
+        TEMP["TemporalSpec.year(...)\nonly"]
+        SAMP["Provider-sampled\nat fetch scale_m"]
+    end
+    subgraph Retrieval
+        SRC --> FETCH["Fetch as CHW"]
+        TEMP --> FETCH
+        SAMP --> FETCH
+        FETCH --> CLEAN["Replace -9999\nwith NaN"]
+    end
+    subgraph Output
+        CLEAN --> POOL["pooled:\nspatial pooling"]
+        CLEAN --> GRID["grid: (D,H,W)\nwith band-name coords"]
+    end
+```
 
 ---
 
@@ -61,15 +78,16 @@ The provider fetch settings are fixed to collection `GOOGLE/SATELLITE_EMBEDDING/
 | ---------------------------- | ------- | -------------------------------------------------- |
 | `RS_EMBED_GSE_BATCH_WORKERS` | `4`     | Batch worker count for `get_embeddings_batch(...)` |
 
-Primary non-env sampling knob:
-
-The main non-env sampling knob is `fetch.scale_m`, or the more explicit `sensor.scale_m`.
+!!! info "Primary non-env sampling knob"
+    The main non-env sampling knob is `fetch.scale_m`, or the more explicit `sensor.scale_m`.
 
 ---
 
 ## Output Semantics
 
-GSE also follows the standard precomputed-product pattern. `pooled` applies spatial pooling over the sampled embedding grid, and `grid` returns `(D,H,W)` in embedding-product space rather than raw imagery space. The main GSE-specific detail is that the `d` coordinate uses product band names.
+**`pooled`**: spatial pooling over the sampled embedding grid.
+
+**`grid`**: `(D,H,W)` in product space; the `d` coordinate uses product band names, and fill value `-9999` is converted to `NaN`.
 
 ---
 
@@ -99,26 +117,14 @@ fetch = FetchSpec(scale_m=30)
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- backend is not provider-compatible
-- missing `TemporalSpec.year(...)`
-- `TemporalSpec.range(...)` used instead of `year`
-- provider sampling issues / permissions (GEE auth or provider config)
-- unexpected NaNs due to fill regions (`-9999` -> `NaN`)
-
-Recommended first checks:
-
-Inspect metadata such as `year`, `scale_m`, and `bands` first. If access itself is in doubt, try `OutputSpec.pooled()` before debugging the grid path. If the result looks too coarse or too fine, adjust `fetch.scale_m`.
+- **Publication**: [arXiv 2025](https://arxiv.org/abs/2507.22291)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-Keep the requested year, provider auth context, `fetch.scale_m`, and output mode fixed and recorded.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main code paths are `src/rs_embed/embedders/catalog.py` for registration and `src/rs_embed/embedders/precomputed_gse_annual.py` for the adapter implementation.
+- Only `TemporalSpec.year(...)` is supported — `range(...)` raises an error.
+- Fill regions in the source product use `-9999`, which the adapter converts to `NaN` — downstream code must handle NaN values.
+- Resolution is controlled by `fetch.scale_m` (or `sensor.scale_m`) at the provider level, not by the adapter.

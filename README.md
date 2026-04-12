@@ -14,7 +14,7 @@
 ![License](https://img.shields.io/github/license/cybergis/rs-embed)
 [![PyPI Downloads](https://static.pepy.tech/personalized-badge/rs-embed?period=total&units=INTERNATIONAL_SYSTEM&left_color=GREY&right_color=GREEN&left_text=downloads)](https://pepy.tech/projects/rs-embed)
 
-[Docs](https://cybergis.github.io/rs-embed/) · [Releases](https://github.com/cybergis/rs-embed/releases) · [Changelog](https://github.com/cybergis/rs-embed/blob/main/CHANGELOG.md) · [StartNow](https://github.com/cybergis/rs-embed/blob/main/examples/playground.ipynb) · [UseCase](https://github.com/cybergis/rs-embed/blob/main/examples/demo.ipynb) · [Paper](https://arxiv.org/abs/2602.23678)
+[Docs](https://cybergis.github.io/rs-embed/) · [StartNow](https://github.com/cybergis/rs-embed/blob/main/examples/playground.ipynb) · [Releases](https://github.com/cybergis/rs-embed/releases) · [Changelog](https://github.com/cybergis/rs-embed/blob/main/CHANGELOG.md) · [UseCase](https://github.com/cybergis/rs-embed/blob/main/examples/demo.ipynb) · [Paper](https://arxiv.org/abs/2602.23678)
 
 </div>
 

@@ -86,17 +86,15 @@ def _doy0_from_iso(iso_date: str) -> int:
 def _normalize_anysat_model_size(model_size: Any) -> str:
     raw = str(model_size).strip().lower()
     aliases = {
-        "t": "tiny",
-        "tiny": "tiny",
-        "s": "small",
-        "small": "small",
         "b": "base",
         "base": "base",
     }
     resolved = aliases.get(raw)
     if resolved is None:
         raise ModelError(
-            f"Unknown AnySat model_size='{model_size}' (expected one of: tiny, small, base)."
+            f"Unknown AnySat variant='{model_size}'. rs-embed currently exposes only "
+            "variant='base' because the published Hugging Face weights wired by this "
+            "adapter are base-only."
         )
     return resolved
 
@@ -184,12 +182,6 @@ def _resolve_anysat_runtime_config(
     )
 
     hf_min_bytes = int(os.environ.get("RS_EMBED_ANYSAT_CKPT_MIN_BYTES", str(50 * 1024 * 1024)))
-
-    if model_size != "base":
-        raise ModelError(
-            "AnySat currently exposes only variant='base' in rs-embed, because the "
-            "published Hugging Face weights wired by this adapter are base-only."
-        )
 
     return {
         "model_size": model_size,

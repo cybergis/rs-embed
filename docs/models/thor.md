@@ -2,20 +2,14 @@
 
 ## Quick Facts
 
-| Field                             | Value                                                                                             |
-| --------------------------------- | ------------------------------------------------------------------------------------------------- |
-| Model ID                          | `thor`                                                                                            |
-| Aliases                           | `thor_1_0_base`                                                                                   |
-| Family / Backbone                 | Fully vendored THOR runtime (`thor_v1_tiny` / `thor_v1_small` / `thor_v1_base` / `thor_v1_large`) |
-| Adapter type                      | `on-the-fly`                                                                                      |
-| Typical backend                   | provider backend (`gee`)                                                                          |
-| Primary input                     | S2 SR 10-band or S1 VV/VH `CHW`                                                                   |
-| Default resolution                | 10m default provider fetch (`sensor.scale_m`)                                                     |
-| Temporal mode                     | `range` in practice (composite window)                                                            |
-| Output modes                      | `pooled`, `grid`                                                                                  |
-| Model config keys                 | `variant` (default: `base`; choices: `tiny`, `small`, `base`, `large`)                            |
-| Extra side inputs                 | none required in current adapter                                                                  |
-| Training alignment (adapter path) | High when `thor_stats` normalization and default S2 SR setup are preserved                        |
+| Field              | Value                                                                                             |
+| ------------------ | ------------------------------------------------------------------------------------------------- |
+| Model ID           | `thor`                                                                                            |
+| Aliases            | `thor_1_0_base`                                                                                   |
+| Family / Backbone  | Fully vendored THOR runtime (`thor_v1_tiny` / `thor_v1_small` / `thor_v1_base` / `thor_v1_large`) |
+| Adapter type       | `on-the-fly`                                                                                      |
+| Model config keys  | `variant` (default: `base`; choices: `tiny`, `small`, `base`, `large`)                            |
+| Training alignment | High when `thor_stats` normalization and default S2 SR setup are preserved                        |
 
 !!! success "THOR In 30 Seconds"
     THOR in `rs-embed` can run either a Sentinel-2 SR 10-band path or a Sentinel-1 VV/VH path, and it works well when you want either a pooled embedding or a grid-like token output while preserving THOR's channel-group structure.
@@ -24,18 +18,9 @@
 
     - grouped token layout instead of one ready-made spatial feature map: see [Output Semantics](#output-semantics)
     - patch-size-sensitive token density and geometry: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
-    - bounded `native_snap` preprocessing for small near-square projection mismatches: see [Preprocessing Pipeline](#preprocessing-pipeline-current-rs-embed-path)
+    - bounded `native_snap` preprocessing for small near-square projection mismatches: see [Preprocessing Pipeline](#preprocessing-pipeline)
 
 ---
-
-## When To Use This Model
-
-THOR is a strong S2/S1 baseline when you want pretrained THOR weights, both pooled and token-grid outputs, or experiments where group-aware spatial aggregation matters.
-
-The two THOR choices that most affect representation semantics are:
-
-- preprocessing and size policy: see [Preprocessing Pipeline](#preprocessing-pipeline-current-rs-embed-path) and [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
-- token-to-grid reconstruction: see [Output Semantics](#output-semantics)
 
 ## Quick Decision Guide
 
@@ -62,53 +47,45 @@ The two THOR choices that most affect representation semantics are:
 
 ---
 
-## Input Contract (Current Adapter Path)
+## Input Contract
 
-### Spatial / temporal
+Provider-only backend (`gee` / `auto`). `TemporalSpec` is normalized to a range via the shared helper; `TemporalSpec.range(...)` is recommended for reproducibility — the temporal window controls compositing rather than locking to one acquisition. Side inputs: none.
 
-The current adapter path is provider-only, so use `backend="gee"` or another provider-compatible backend. `TemporalSpec` is normalized to a range via the shared helper, with `TemporalSpec.range(...)` recommended for reproducibility. The temporal window controls compositing rather than locking the request to a single source scene.
+| Modality       | Collection                    | Bands (order)                                | `input_chw`                        | Default normalization              | Extra fetch fields                                                        |
+| -------------- | ----------------------------- | -------------------------------------------- | ---------------------------------- | ---------------------------------- | ------------------------------------------------------------------------- |
+| `s2` (default) | `COPERNICUS/S2_SR_HARMONIZED` | `B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12` (10-band) | `CHW`, `C=10`, raw SR `0..10000`   | `thor_stats` z-score after `/10000` | `scale_m=10`, `cloudy_pct=30`, `composite="median"`, `fill_value=0.0`     |
+| `s1`           | `COPERNICUS/S1_GRD_FLOAT`     | `VV, VH` (2-band)                            | `CHW`, `C=2` in `VV,VH`, raw VV/VH | shared S1 `log1p` + p99 scaling    | `use_float_linear=True`, `s1_require_iw=True`, `s1_relax_iw_on_empty=True` |
 
-### Sensor / channels
-
-Default `SensorSpec` if omitted: the default path is `modality="s2"`, which resolves to `COPERNICUS/S2_SR_HARMONIZED` with adapter band order `B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12`, `scale_m=10`, `cloudy_pct=30`, `composite="median"`, and `fill_value=0.0`.
-
-Set `modality="s1"` to switch onto the Sentinel-1 path. That resolves to `COPERNICUS/S1_GRD_FLOAT` by default with band order `VV,VH`, `use_float_linear=True`, `s1_require_iw=True`, and `s1_relax_iw_on_empty=True`.
-
-`input_chw` contract:
-
-- `modality="s2"`: `input_chw` must be `CHW` with `C=10`, and raw Sentinel-2 SR values are expected in `0..10000`. Before normalization, the adapter clips NaN and Inf values and clamps the range to `0..10000`.
-- `modality="s1"`: `input_chw` must be `CHW` with `C=2` in `VV,VH` order. The adapter applies the shared S1 log-style normalization by default unless you set `RS_EMBED_THOR_NORMALIZE=none`.
+Before normalization, the adapter clips NaN/Inf values and clamps raw SR to `0..10000`. Set `RS_EMBED_THOR_NORMALIZE=none` to bypass the default normalization on either modality.
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Preprocessing Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  provider fetch / input_chw
-  <span class="pipeline-arrow">-&gt;</span> modality branch
-     <span class="pipeline-branch">s2:</span> S2 SR 10-band composite patch
-     <span class="pipeline-branch">s1:</span> S1 VV/VH composite patch with IW-preferred fetch
-  <span class="pipeline-arrow">-&gt;</span> optional raw-value inspection
-     <span class="pipeline-detail">s2 expects 10 channels in 0..10000; s1 expects 2 channels in VV/VH order</span>
-  <span class="pipeline-arrow">-&gt;</span> THOR geometry policy
-     <span class="pipeline-branch">native_snap:</span> small near-square mismatch -&gt; center crop/pad to square -&gt; snap side to valid THOR grid -&gt; keep native side when limits allow
-     <span class="pipeline-branch">fixed:</span> keep raw geometry here; final tensor will be resized to RS_EMBED_THOR_IMG
-     <span class="pipeline-branch">tile mode:</span> force fixed per-tile resize to preserve stitch geometry
-  <span class="pipeline-arrow">-&gt;</span> normalize with RS_EMBED_THOR_NORMALIZE
-     <span class="pipeline-branch">s2 + thor_stats:</span> /10000 -&gt; THOR z-score stats
-     <span class="pipeline-branch">s2 + unit_scale:</span> /10000 -&gt; clip [0,1]
-     <span class="pipeline-branch">s1 + thor_stats:</span> shared `log1p` + p99 scaling
-     <span class="pipeline-branch">none / raw:</span> keep raw values
-  <span class="pipeline-arrow">-&gt;</span> optional final resize
-     <span class="pipeline-branch">fixed / tile:</span> resize to RS_EMBED_THOR_IMG=288
-     <span class="pipeline-branch">native_snap:</span> skip final resize and use snapped native side
-  <span class="pipeline-arrow">-&gt;</span> build/load THOR backbone
-     <span class="pipeline-detail">ground_cover_m = sensor.scale_m * image_size</span>
-     <span class="pipeline-detail">patch_size passed through THOR build params</span>
-  <span class="pipeline-arrow">-&gt;</span> forward model to token sequence [N,D]
-  <span class="pipeline-arrow">-&gt;</span> grid construction
-     <span class="pipeline-branch">preferred:</span> THOR group-aware token layout (group_merge)
-     <span class="pipeline-branch">fallback:</span>  generic square patch-token reshape
-     <span class="pipeline-branch">failure:</span>   grid unavailable</code></pre>
+```mermaid
+flowchart LR
+    INPUT["Provider fetch\n/ input_chw"] --> MOD{Modality}
+    MOD -- "s2 (default)" --> S2["S2 10-band"]
+    MOD -- s1 --> S1["S1 VV/VH"]
+    S2 --> PIPE["Geometry policy → Normalize\n→ Optional resize to 288×288"]
+    S1 --> PIPE
+    PIPE --> FWD["THOR backbone\n→ tokens [N,D]"]
+    FWD --> POOL["pooled: mean/max"]
+    FWD --> GRID["grid: group-aware layout"]
+```
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    S2["S2 10-band\n/ S1 VV/VH"] --> GRP["Channel groups\n→ per-group patch embed"]
+    GRP --> TF["Transformer"]
+    TF --> GM{group_merge}
+    GM -- mean --> MEAN["Averaged grid (D,H,W)"]
+    GM -- concat --> CAT["Per-group channels (D×G,H,W)"]
+```
 
 ---
 
@@ -216,15 +193,15 @@ The group-aware path exists because native THOR emits one token sequence plus la
 Minimal example:
 
 ```python
-    from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec
+from rs_embed import get_embedding, PointBuffer, TemporalSpec, OutputSpec
 
-    emb = get_embedding(
-        "thor",
-        spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
-        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
-        output=OutputSpec.pooled(),
-        backend="gee",
-    )
+emb = get_embedding(
+    "thor",
+    spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
+    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+    output=OutputSpec.pooled(),
+    backend="gee",
+)
 ```
 
 === "S1 Via Modality"
@@ -328,26 +305,16 @@ Minimal example:
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- broken runtime deps (`torch`, `timm`, `einops`)
-- wrong `input_chw` shape (`C` must be `10`)
-- invalid `RS_EMBED_THOR_GROUP_MERGE` (must be `mean` / `sum` / `concat`)
-- grid unavailable for chosen config (token layout not square and group parsing failed)
-- normalization mismatch causing unstable comparison across runs
-
-Recommended first checks:
-
-Start by verifying metadata such as `model_key`, `normalization`, `group_merge`, `patch_size`, and `ground_cover_m`. `OutputSpec.pooled()` is the simpler way to isolate grid-layout issues because it avoids THOR's group-grid reconstruction path. If the issue looks geometric, jump back to [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs); if it looks like token-layout confusion, re-check [Output Semantics](#output-semantics).
+- **Publication**: [arXiv 2026](https://arxiv.org/abs/2601.16011)
+- **Code**: [FM4CS/THOR](https://github.com/FM4CS/THOR)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-For reproducibility, keep `RS_EMBED_THOR_MODEL_KEY`, `RS_EMBED_THOR_PRETRAINED`, and any local checkpoint path fixed, together with normalization mode, image size, patch size, `group_merge`, temporal window, and provider compositing settings.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main implementation files are `src/rs_embed/embedders/catalog.py`, `src/rs_embed/embedders/onthefly_thor.py`, and the shared token/grid helpers in `src/rs_embed/embedders/_vit_mae_utils.py`.
+- Changing `patch_size` without updating `image_size` to divide cleanly is the most common misconfiguration.
+- `native_snap` only applies in `input_prep="resize"` mode — tiled inference always uses fixed per-tile resize.
+- `group_merge=concat` and `group_merge=mean` produce different channel dimensions; do not compare them directly.
+- Grid construction can fail if the token layout is not square and group parsing cannot resolve it — fall back to `pooled` to isolate the issue.

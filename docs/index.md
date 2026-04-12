@@ -28,6 +28,7 @@ Use the documentation the same way you would approach a mature library: start wi
 | understand settings first     | [Before You Start](choosing_settings.md): learn which settings change embedding quality, semantics, and runtime before you tune anything |
 | choose a model                | [Models](models.md): shortlist model IDs by task, input type, and temporal behavior                  |
 | check exact signatures        | [API](api.md): exact signatures for specs, embedding, export, and inspection                         |
+| understand internals          | [Architecture](architecture.md): module map, call flows, and registration mechanics                  |
 | add support for a new model   | [Extending](extending.md): add a new model adapter or integrate with the registry/export flow        |
 
 ---

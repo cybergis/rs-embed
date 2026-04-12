@@ -34,7 +34,11 @@ markdown_extensions:
   - pymdownx.details
   - pymdownx.highlight
   - pymdownx.inlinehilite
-  - pymdownx.superfences
+  - pymdownx.superfences:
+      custom_fences:
+        - name: mermaid
+          class: mermaid
+          format: !!python/name:pymdownx.superfences.fence_code_format
   - pymdownx.tabbed:
       alternate_style: true
   - pymdownx.emoji:
@@ -99,6 +103,7 @@ nav:
       - Load API: api_load.md
       - Inspect API: api_inspect.md
   - Extending:
+      - Architecture: architecture.md
       - Overview: extending.md
       - Contributing Guide: contributing.md
   - Project:

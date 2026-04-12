@@ -55,9 +55,11 @@ emb = get_embedding(
     backend="auto",
 )
 
-vec = emb.data
-meta = emb.meta
+vec = emb.data   # numpy ndarray, shape (D,) — e.g. (128,) for tessera
+meta = emb.meta  # dict with model-specific metadata (normalization, grid_hw, etc.)
 ```
+
+`emb.data` is always a `numpy.ndarray`. For `OutputSpec.pooled()` the shape is `(D,)` where `D` depends on the model (see the `Dim` column in [Models](models.md)). For `OutputSpec.grid()` the shape is `(D, H, W)` in model token space.
 
 Use `backend="auto"` unless you need to force a provider path such as `backend="gee"`.
 

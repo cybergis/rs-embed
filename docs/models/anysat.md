@@ -1,69 +1,78 @@
 # AnySat (`anysat`)
 
-> Multi-frame Sentinel-2 time-series adapter that builds AnySat inputs (`s2` + `s2_dates`) from a temporal window and returns dense sub-patch grids by default or pooled vectors.
 
 ## Quick Facts
 
-| Field                             | Value                                                               |
-| --------------------------------- | ------------------------------------------------------------------- |
-| Model ID                          | `anysat`                                                            |
-| Family / Backbone                 | AnySat (vendored local runtime)                                     |
-| Adapter type                      | `on-the-fly`                                                        |
-| Typical backend                   | provider-backed; prefer `backend="auto"` in public API              |
-| Primary input                     | S2 10-band time series (`T,C,H,W`)                                  |
-| Default resolution                | 10m default provider fetch (`sensor.scale_m`)                       |
-| Temporal mode                     | `range` in practice (adapter normalizes `year`/`None` to range)     |
-| Output modes                      | `pooled`, `grid`                                                    |
-| Model config keys                 | `variant` (default: `base`; choices: `base`)                        |
-| Extra side inputs                 | **required** `s2_dates` (per-frame DOY values)                      |
-| Training alignment (adapter path) | Medium (depends on frame count, normalization mode, and image size) |
+| Field                | Value                                                               |
+| -------------------- | ------------------------------------------------------------------- |
+| Model ID             | `anysat`                                                            |
+| Family / Backbone    | AnySat (vendored local runtime)                                     |
+| Adapter type         | `on-the-fly`                                                        |
+| Model config keys    | `variant` (default: `base`; choices: `base`)                        |
+| Training alignment   | Medium (depends on frame count, normalization mode, and image size) |
+
+!!! success "AnySat In 30 Seconds"
+    AnySat is a JEPA-style foundation model designed to absorb *any* spatial resolution and *any* sensor modality, and in `rs-embed` it runs as a Sentinel-2 multi-frame path that builds its own `s2_dates` day-of-year side input from per-frame midpoints — so you are running real temporal sequence modeling, not a single composite.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - **required** `s2_dates` (per-frame DOY) derived from frame-bin midpoints: see [Input Contract](#input-contract)
+    - dense sub-patch grid as the default `grid` path, denser than the usual ViT patch grid: see [Output Semantics](#output-semantics)
+    - `sensor.scale_m` / `fetch.scale_m` must be a positive multiple of 10 m: see [Preprocessing Pipeline](#preprocessing-pipeline)
 
 ---
 
-## When To Use This Model
+## Input Contract
 
-AnySat is a good fit when you want actual temporal S2 sequence modeling rather than a single composite, when day-of-year context matters, or when you are explicitly comparing multi-frame adapters such as `anysat`, `galileo`, and `agrifm`. It becomes easy to misuse if you compare it against single-composite models without matching temporal assumptions, if you change frame count or normalization without recording it, or if you read `grid` output as a georeferenced raster instead of model patch output.
+| Field                 | Value                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| Backend               | provider (`auto` recommended in public API)                                        |
+| `TemporalSpec`        | `range` recommended — window split into `T` sub-windows for temporal modeling      |
+| Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                                                      |
+| Default bands (order) | `B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12` (10-band)                              |
+| Default fetch         | `scale_m=10` (must be a positive multiple of 10), `cloudy_pct=30`, `composite="median"`, `fill_value=0.0` |
+| `input_chw`           | `CHW` (`C=10`, repeated to `T`) **or** `TCHW` (`C=10`, padded/truncated to exact `T`); raw SR `0..10000` |
+| Side inputs           | **required** `s2_dates` `[1,T]` — auto-derived from per-frame midpoint DOY         |
 
----
-
-## Input Contract (Current Adapter Path)
-
-### Spatial / temporal
-
-The adapter accepts `BBox` and `PointBuffer`, and normalizes `TemporalSpec` to a range internally; using `TemporalSpec.range(...)` directly is still the clearest and most reproducible choice. The requested window is split into `T` sub-windows, one composite is built per bin, and the midpoint of each bin is converted into AnySat-style day-of-year values in `s2_dates`.
-
-### Sensor / channels
-
-If `sensor` is omitted, AnySat uses `COPERNICUS/S2_SR_HARMONIZED` with bands `("B2","B3","B4","B5","B6","B7","B8","B8A","B11","B12")`, `scale_m=10`, `cloudy_pct=30`, `composite="median"`, and `fill_value=0.0`.
-
-For `input_chw`, the adapter accepts either `CHW` or `TCHW` with `C=10`. A `CHW` tensor is repeated to `T` frames, while `TCHW` is padded or truncated to the exact configured frame count. Values are clipped to the raw-SR range `0..10000`.
+`T` is controlled by `RS_EMBED_ANYSAT_FRAMES` (default `8`). `sensor.scale_m` / `fetch.scale_m` must be a positive multiple of 10 m.
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Preprocessing Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  provider fetch / input_chw
-  <span class="pipeline-arrow">-&gt;</span> S2 10-band time series in TCHW
-     <span class="pipeline-detail">input_chw path: coerce CHW / TCHW to exact T</span>
-  <span class="pipeline-arrow">-&gt;</span> optional resize to RS_EMBED_ANYSAT_IMG=24
-  <span class="pipeline-arrow">-&gt;</span> normalize series with RS_EMBED_ANYSAT_NORM
-     <span class="pipeline-branch">per_tile_zscore:</span> default
-     <span class="pipeline-branch">unit_scale / reflectance:</span> /10000 -&gt; [0,1]
-     <span class="pipeline-branch">raw / none:</span> keep raw values
-  <span class="pipeline-arrow">-&gt;</span> build AnySat side inputs
-     <span class="pipeline-branch">s2:</span> [1,T,10,H,W]
-     <span class="pipeline-branch">s2_dates:</span> [1,T] from frame-bin DOY midpoints
-  <span class="pipeline-arrow">-&gt;</span> forward with AnySat spatial output
-     <span class="pipeline-branch">grid path:</span> default `output="dense"` (`grid_feature_mode="dense"`)
-     <span class="pipeline-branch">pooled path:</span> default compatibility path keeps `output="patch"`; optional `pooled_source="tile"` uses native AnySat tile output
-  <span class="pipeline-arrow">-&gt;</span> map [B,H,W,D] -&gt; rs-embed grid [D,H,W]
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> spatial mean / max over patch grid
-     <span class="pipeline-branch">grid:</span>   dense sub-patch grid by default (or patch grid when overridden)</code></pre>
+!!! tip "Resize is the default — tiling is also available"
+    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
 
-Important constraint:
+```mermaid
+flowchart LR
+    INPUT["S2 10-band TCHW"] --> PREP["Resize 24×24 → normalize\n→ build side inputs (s2_dates)"]
+    PREP --> FWD{AnySat forward}
+    FWD -- grid --> DENSE["dense sub-patch\nfeatures (D,H,W)"]
+    FWD -- pooled --> POOL["spatial mean/max"]
+```
 
-`sensor.scale_m` or `fetch.scale_m` must be a positive multiple of 10 meters.
+!!! warning "Important constraint"
+    `sensor.scale_m` or `fetch.scale_m` must be a positive multiple of 10 meters.
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    subgraph "Input (T frames)"
+        F["S2 10-band\n× T frames"] --> DOY["Per-frame DOY\n(day-of-year)"]
+    end
+    subgraph "JEPA Encoder"
+        DOY --> FWD["JEPA forward\nwith s2_dates"]
+    end
+    subgraph "Output Mode"
+        FWD --> D["dense (default for grid)\nsub-patch resolution"]
+        FWD --> P["patch (default for pooled)\none token per patch"]
+        D --> GRID["grid: (D,H,W)\nfiner than patch grid"]
+        P --> POOL["pooled:\nspatial mean/max"]
+    end
+```
 
 ---
 
@@ -88,7 +97,9 @@ Important constraint:
 
 ## Output Semantics
 
-AnySat now uses two spatial output paths inside the adapter. `pooled` defaults to the historical rs-embed behavior and applies spatial pooling over the AnySat `patch` grid, which preserves the previous pooled vector dimensionality; pass `pooled_source="tile"` (or set `RS_EMBED_ANYSAT_POOLED_SOURCE=tile`) to use the native AnySat tile embedding instead. `grid` defaults to AnySat `dense`, so the returned `(D,H,W)` is a denser sub-patch feature map by default; pass `grid_feature_mode="patch"` to the public API (or set `RS_EMBED_ANYSAT_GRID_MODE=patch`) to recover the older patch-grid behavior. As with other on-the-fly models, this grid is model space rather than guaranteed georeferenced raster pixels.
+**`pooled`**: defaults to spatial pooling over AnySat's `patch` grid; pass `pooled_source="tile"` (or `RS_EMBED_ANYSAT_POOLED_SOURCE=tile`) to use the native AnySat tile embedding instead.
+
+**`grid`**: defaults to AnySat `dense` sub-patch features `(D,H,W)`; pass `grid_feature_mode="patch"` (or `RS_EMBED_ANYSAT_GRID_MODE=patch`) to recover the older patch-grid behavior.
 
 ---
 
@@ -112,34 +123,22 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_ANYSAT_FRAMES=8
-# export RS_EMBED_ANYSAT_NORM=per_tile_zscore
-# export RS_EMBED_ANYSAT_IMG=24
+export RS_EMBED_ANYSAT_FRAMES=8
+export RS_EMBED_ANYSAT_NORM=per_tile_zscore
+export RS_EMBED_ANYSAT_IMG=24
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- backend is not provider-compatible
-- wrong channel count for `input_chw` (must be 10 channels)
-- `fetch.scale_m` / `sensor.scale_m` is not a positive multiple of 10
-- missing `torch` / `einops` / `huggingface_hub` dependency for vendored runtime + checkpoint path
-- local checkpoint missing / too small / invalid format
-- inconsistent results from untracked changes to `FRAMES`, `NORM`, or image size
-
-Recommended first check:
-
-Inspect the input patches first and confirm that the temporal window and frame construction match the experiment you think you are running.
+- **Publication**: [CVPR 2025](https://arxiv.org/abs/2412.14123)
+- **Code**: [gastruc/AnySat](https://github.com/gastruc/AnySat)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-For fair comparisons and stable reruns, record the temporal window, `RS_EMBED_ANYSAT_FRAMES`, `RS_EMBED_ANYSAT_NORM`, `RS_EMBED_ANYSAT_IMG`, the effective provider resolution from `fetch.scale_m` or `sensor.scale_m`, and the exact checkpoint source.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main code paths are `src/rs_embed/embedders/catalog.py` for registration, `src/rs_embed/embedders/onthefly_anysat.py` for the adapter, and `src/rs_embed/embedders/runtime_utils.py` for TCHW coercion helpers.
+- `sensor.scale_m` / `fetch.scale_m` must be a positive multiple of 10 m — non-multiples raise immediately.
+- The default grid output uses `dense` (sub-patch resolution), which differs from most other models' patch-level grids.
+- Single-frame `CHW` input is silently repeated to `T` frames — this is valid but produces a different temporal signal than actual multi-frame data.

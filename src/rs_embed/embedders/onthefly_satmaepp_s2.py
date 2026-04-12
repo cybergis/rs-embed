@@ -88,7 +88,6 @@ _S2_10_CHANNEL_GROUPS: tuple[tuple[int, ...], ...] = (
 )
 
 _SATMAEPP_S2_MODEL_FN_BY_VARIANT = {
-    "base": "mae_vit_base_patch16",
     "large": "mae_vit_large_patch16",
 }
 
@@ -96,15 +95,15 @@ _SATMAEPP_S2_MODEL_FN_BY_VARIANT = {
 def _normalize_satmaepp_s2_variant(variant: Any) -> str:
     raw = str(variant).strip().lower()
     aliases = {
-        "b": "base",
-        "base": "base",
         "l": "large",
         "large": "large",
     }
     resolved = aliases.get(raw)
     if resolved is None:
         raise ModelError(
-            f"Unknown satmaepp_s2_10b variant='{variant}' (expected one of: base, large)."
+            f"Unknown satmaepp_s2_10b variant='{variant}'. rs-embed currently exposes "
+            "only variant='large' because this adapter is wired to the published "
+            "ViT-Large Sentinel checkpoint."
         )
     return resolved
 
@@ -128,11 +127,16 @@ def _resolve_satmaepp_s2_runtime_config(
     variant_v = model_config_value(model_config, "variant")
     if variant_v is not None:
         variant = _normalize_satmaepp_s2_variant(variant_v)
-        variant_model_fn = _SATMAEPP_S2_MODEL_FN_BY_VARIANT[variant]
-        model_fn = variant_model_fn
+        model_fn = _SATMAEPP_S2_MODEL_FN_BY_VARIANT[variant]
     else:
         model_fn = os.environ.get("RS_EMBED_SATMAEPP_S2_MODEL_FN", default_model_fn).strip()
         variant = _variant_from_satmaepp_s2_model_fn(model_fn)
+        if variant is None:
+            raise ModelError(
+                f"Unknown satmaepp_s2_10b model_fn='{model_fn}' from "
+                "RS_EMBED_SATMAEPP_S2_MODEL_FN. rs-embed currently exposes only the "
+                "large Sentinel checkpoint ('mae_vit_large_patch16')."
+            )
 
     ckpt_repo = os.environ.get("RS_EMBED_SATMAEPP_S2_CKPT_REPO", default_ckpt_repo).strip()
 
@@ -141,12 +145,6 @@ def _resolve_satmaepp_s2_runtime_config(
     image_size = int(os.environ.get("RS_EMBED_SATMAEPP_S2_IMG", str(default_image_size)))
 
     patch_size = int(os.environ.get("RS_EMBED_SATMAEPP_S2_PATCH", str(default_patch_size)))
-
-    if model_fn == _SATMAEPP_S2_MODEL_FN_BY_VARIANT["base"]:
-        raise ModelError(
-            "satmaepp_s2_10b currently exposes only variant='large' in rs-embed, "
-            "because this adapter is wired to the published ViT-Large Sentinel checkpoint."
-        )
 
     return {
         "variant": variant,

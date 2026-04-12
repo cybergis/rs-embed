@@ -1,63 +1,74 @@
 # AgriFM (`agrifm`)
 
-> Multi-frame Sentinel-2 adapter for AgriFM (Video Swin-style backbone), with fixed-frame temporal packaging and provider-backed S2 sequence fetching.
-
 ## Quick Facts
 
-| Field                             | Value                                                                 |
-| --------------------------------- | --------------------------------------------------------------------- |
-| Model ID                          | `agrifm`                                                              |
-| Family / Backbone                 | AgriFM (vendored Video Swin runtime + checkpoint loader)              |
-| Adapter type                      | `on-the-fly`                                                          |
-| Typical backend                   | provider backend (`gee`)                                              |
-| Primary input                     | S2 SR 10-band time series (`T,10,H,W`)                                |
-| Default resolution                | 10m default provider fetch (`sensor.scale_m`)                         |
-| Temporal mode                     | `range` in practice (window split into `T` frames)                    |
-| Output modes                      | `pooled`, `grid`                                                      |
-| Extra side inputs                 | none required (adapter builds fixed frame stack)                      |
-| Training alignment (adapter path) | High when `n_frames`, normalization, and checkpoint version are fixed |
+| Field                | Value                                                                 |
+| -------------------- | --------------------------------------------------------------------- |
+| Model ID             | `agrifm`                                                              |
+| Family / Backbone    | AgriFM (vendored Video Swin runtime + checkpoint loader)              |
+| Adapter type         | `on-the-fly`                                                          |
+| Training alignment   | High when `n_frames`, normalization, and checkpoint version are fixed |
+
+!!! success "AgriFM In 30 Seconds"
+    AgriFM is a Video-Swin-style temporal backbone trained on Sentinel-2 time series for agricultural/crop targets, and in `rs-embed` it fits best when you want a fixed-length multi-frame S2 stack turned into a pooled vector or a model feature-map grid.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - fixed-`T`-frame stack with silent `CHW -> T` repeat behavior for single-frame inputs: see [Input Contract](#input-contract)
+    - crop-oriented AgriFM S2 normalization statistics (`agrifm_stats`) as the default path: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
+    - model feature-grid output `(D,H,W)` rather than a ViT patch-token reshape: see [Output Semantics](#output-semantics)
 
 ---
 
-## When To Use This Model
+## Input Contract
 
-AgriFM is a good fit for crop-oriented temporal S2 experiments, comparisons against other multi-frame adapters such as `anysat` and `galileo`, and workflows where a fixed-length frame stack is useful. The main pitfalls are changing `RS_EMBED_AGRIFM_FRAMES` between runs, forgetting that `CHW` inputs are repeated to `T` frames, and comparing it to single-window models without documenting the temporal packaging.
+| Field                 | Value                                                                              |
+| --------------------- | ---------------------------------------------------------------------------------- |
+| Backend               | provider only (`gee` / `auto`)                                                     |
+| `TemporalSpec`        | `range` recommended — window split into `T` frames by the shared helper            |
+| Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                                                      |
+| Default bands (order) | `B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12` (10-band)                              |
+| Default fetch         | `scale_m=10`, `cloudy_pct=30`, `composite="median"`, `fill_value=0.0`              |
+| `input_chw`           | `CHW` (`C=10`, repeated to `T`) **or** `TCHW` (`C=10`, padded/truncated to exact `T`); raw SR `0..10000` |
+| Side inputs           | none (adapter builds the `T`-frame stack from provider fetch)                      |
 
----
-
-## Input Contract (Current Adapter Path)
-
-### Spatial / temporal
-
-AgriFM is provider-backed, so use `backend="gee"` or another provider-compatible backend. `TemporalSpec` is normalized to a range through the shared helper, and `TemporalSpec.range(...)` is the clearest choice. The provider path fetches a multi-frame S2 sequence over that range and composes it into a fixed `T`-frame stack.
-
-### Sensor / channels
-
-If `sensor` is omitted, AgriFM uses `COPERNICUS/S2_SR_HARMONIZED` with bands `B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12`, `scale_m=10`, `cloudy_pct=30`, `composite="median"`, and `fill_value=0.0`.
-
-For `input_chw`, the adapter accepts `CHW` with `C=10` and repeats that frame to `T = RS_EMBED_AGRIFM_FRAMES`, or `TCHW` with `C=10` and pads or truncates to the exact configured frame count. Values are clipped to the raw S2 SR range `0..10000`.
+`T` is controlled by `RS_EMBED_AGRIFM_FRAMES` (default `8`). Values are clipped to raw S2 SR range `0..10000` before normalization.
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Preprocessing Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">SETUP</span>  runtime settings
-  <span class="pipeline-arrow">-&gt;</span> n_frames + image_size + normalization mode
-  <span class="pipeline-arrow">-&gt;</span> checkpoint path (local or auto-download)
-<span class="pipeline-root">INPUT</span>  provider fetch / input_chw
-  <span class="pipeline-arrow">-&gt;</span> multi-frame raw TCHW
-     <span class="pipeline-detail">input_chw path: coerce CHW / TCHW to exact T</span>
-  <span class="pipeline-arrow">-&gt;</span> optional inspection on frame 0
-  <span class="pipeline-arrow">-&gt;</span> normalize with RS_EMBED_AGRIFM_NORM
-     <span class="pipeline-branch">agrifm_stats:</span> z-score with AgriFM S2 statistics
-     <span class="pipeline-branch">unit_scale:</span> /10000 -&gt; clip [0,1]
-     <span class="pipeline-branch">none / raw:</span> keep clipped raw values
-  <span class="pipeline-arrow">-&gt;</span> resize all frames to RS_EMBED_AGRIFM_IMG=224
-  <span class="pipeline-arrow">-&gt;</span> load checkpoint + vendored runtime
-  <span class="pipeline-arrow">-&gt;</span> forward to embedding grid (D,H,W)
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> spatial mean / max over grid
-     <span class="pipeline-branch">grid:</span>   xarray.DataArray</code></pre>
+!!! tip "Resize is the default — tiling is also available"
+    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
+
+```mermaid
+flowchart LR
+    INPUT["S2 10-band TCHW\n(coerce to T frames)"] --> PREP["Normalize → resize\nall frames 224×224"]
+    PREP --> FWD["Video-Swin forward\n→ feature grid"]
+    FWD --> POOL["pooled: spatial mean/max"]
+    FWD --> GRID["grid: (D,H,W)"]
+```
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    subgraph Input
+        F["S2 10-band"] --> T{Temporal?}
+        T -- "multi-frame TCHW" --> USE["Use as-is\n(trim/pad to T)"]
+        T -- "single-frame CHW" --> REP["Repeat to\nT frames"]
+    end
+    subgraph "Video-Swin Backbone"
+        USE --> VS["Video-Swin\nencoder"]
+        REP --> VS
+    end
+    subgraph "Output (feature-map, not patch tokens)"
+        VS --> POOL["pooled:\nspatial mean/max"]
+        VS --> GRID["grid: (D,H,W)\nfeature-map"]
+    end
+```
 
 ---
 
@@ -85,7 +96,9 @@ For `input_chw`, the adapter accepts `CHW` with `C=10` and repeats that frame to
 
 ## Output Semantics
 
-AgriFM uses the standard feature-grid pattern for multi-frame encoders. `pooled` applies spatial pooling over the model feature grid, and `grid` returns `(D,H,W)` in model feature-map space rather than georeferenced raster pixels. The useful model-specific details are mostly carried in metadata, including frame count and normalization settings.
+**`pooled`**: spatial mean/max pooling over the AgriFM feature grid; metadata records frame count and normalization settings.
+
+**`grid`**: `(D,H,W)` feature-map output from the Video-Swin encoder, not a ViT patch-token reshape.
 
 ---
 
@@ -109,33 +122,22 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_AGRIFM_FRAMES=8
-# export RS_EMBED_AGRIFM_IMG=224
-# export RS_EMBED_AGRIFM_NORM=agrifm_stats
+export RS_EMBED_AGRIFM_FRAMES=8
+export RS_EMBED_AGRIFM_IMG=224
+export RS_EMBED_AGRIFM_NORM=agrifm_stats
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- backend mismatch (`agrifm` is provider-only)
-- wrong `input_chw` shape (must be `CHW`/`TCHW` with `C=10`)
-- silent temporal mismatch from `CHW` repeat-to-`T` behavior
-- checkpoint download failure or invalid local checkpoint path
-- missing lightweight import deps (`torch`, `timm`, `einops`) for vendored backbone import
-
-Recommended first checks:
-
-Inspect metadata for `n_frames`, `norm_mode`, `input_frames`, and `grid_hw` first. Verify whether the input came from provider fetch or from repeated `CHW`, and pin the checkpoint source or path before benchmarking.
+- **Publication**: [RSE 2026](https://www.sciencedirect.com/science/article/pii/S0034425726000040)
+- **Code**: [flyakon/AgriFM](https://github.com/flyakon/AgriFM)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-Keep `RS_EMBED_AGRIFM_FRAMES`, `RS_EMBED_AGRIFM_IMG`, normalization mode, checkpoint source or path, temporal window, compositing settings, and output mode fixed and recorded. Multi-frame models are very sensitive to frame count and frame construction, so changing `FRAMES` is a different experiment rather than a small tuning tweak.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main code paths are `src/rs_embed/embedders/catalog.py` for registration, `src/rs_embed/embedders/onthefly_agrifm.py` for the adapter, and `src/rs_embed/embedders/runtime_utils.py` for shared temporal fetch and coercion helpers.
+- Single-frame `CHW` input is silently repeated to `T` identical frames — this runs but does not represent real temporal variation.
+- Output is a Video-Swin feature-map grid, not ViT patch tokens — the spatial dimensions are backbone-dependent, not `image_size / patch_size`.
+- The default normalization (`agrifm_stats`) uses crop-oriented statistics; `unit_scale` may be more appropriate for non-agricultural scenes.

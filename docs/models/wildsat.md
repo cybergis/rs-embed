@@ -1,71 +1,70 @@
 # WildSAT (`wildsat`)
 
-> Sentinel-2 RGB on-the-fly adapter for WildSAT checkpoints, supporting multiple backbone architectures (ViT/ResNet/Swin), optional decoder image-head features, and token-grid fallback behavior.
-
 ## Quick Facts
 
-| Field                             | Value                                                                                         |
-| --------------------------------- | --------------------------------------------------------------------------------------------- |
-| Model ID                          | `wildsat`                                                                                     |
-| Family / Backbone                 | WildSAT checkpoint loader + torchvision backbones (`vitb16`, `vitl16`, `resnet50`, `swint`)   |
-| Adapter type                      | `on-the-fly`                                                                                  |
-| Typical backend                   | provider backend (`gee`)                                                                      |
-| Primary input                     | S2 RGB (`B4,B3,B2`)                                                                           |
-| Default resolution                | 10m default provider fetch (`sensor.scale_m`)                                                 |
-| Temporal mode                     | `range` in practice (normalized via shared helper)                                            |
-| Output modes                      | `pooled`, `grid`                                                                              |
-| Extra side inputs                 | none (but checkpoint/arch/image-head settings matter)                                         |
-| Training alignment (adapter path) | Medium (depends on checkpoint source, arch inference, normalization mode, and feature source) |
+| Field                | Value                                                                                         |
+| -------------------- | --------------------------------------------------------------------------------------------- |
+| Model ID             | `wildsat`                                                                                     |
+| Family / Backbone    | WildSAT checkpoint loader + torchvision backbones (`vitb16`, `vitl16`, `resnet50`, `swint`)   |
+| Adapter type         | `on-the-fly`                                                                                  |
+| Training alignment   | Medium (depends on checkpoint source, arch inference, normalization mode, and feature source) |
+
+!!! success "WildSAT In 30 Seconds"
+    WildSAT is trained jointly on satellite imagery, **species occurrence maps, and habitat text** — so its embeddings carry biodiversity- and habitat-level signal rather than only generic visual similarity, which makes it the best fit in `rs-embed` for ecological and environmental downstream tasks. The same adapter hosts several backbone families (`vitb16`, `vitl16`, `resnet50`, `swint`) behind one checkpoint loader.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - multiple supported backbones (`vitb16`, `vitl16`, `resnet50`, `swint`) with auto-inference that should be pinned via `RS_EMBED_WILDSAT_ARCH` when ambiguous: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
+    - selectable feature source: the WildSAT **decoder image head** (default `image_head`) vs raw backbone features: see [Output Semantics](#output-semantics)
+    - `grid` silently falls back to a `1×1` vector grid (`grid_kind="vector_as_1x1"`) for non-ViT backbones instead of failing: see [Output Semantics](#output-semantics)
 
 ---
 
-## When To Use This Model
+## Input Contract
 
-WildSAT is useful when you want to experiment with different checkpoints and feature targets in one adapter, compare backbone features against image-head features through `RS_EMBED_WILDSAT_FEATURE`, or keep RGB workflows unified across ViT, ResNet, and Swin-style backbones. It is especially relevant for ecological and environmental downstream tasks, because the original WildSAT training objective jointly used satellite images, species occurrence maps, and habitat text to encode biodiversity-related and habitat-level signals rather than only generic visual similarity.
+| Field                 | Value                                                       |
+| --------------------- | ----------------------------------------------------------- |
+| Backend               | provider only (`gee` / `auto`)                              |
+| `TemporalSpec`        | `range` recommended (normalized via shared helper)          |
+| Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                               |
+| Default bands (order) | `B4, B3, B2`                                                |
+| Default fetch         | `scale_m=10`, `cloudy_pct=30`, `composite="median"`         |
+| `input_chw`           | `CHW`, `C=3` in `(B4,B3,B2)` order, raw SR `0..10000`       |
+| Side inputs           | none (but checkpoint/arch/feature-source settings matter)   |
 
-Its flexibility also makes configuration drift easier. If architecture inference is ambiguous, set `RS_EMBED_WILDSAT_ARCH` explicitly. Normalization mode changes such as `minmax` versus `unit_scale` should be logged, and `grid` should not be assumed to mean a ViT patch grid because some paths intentionally return a `1x1` vector grid instead.
-
----
-
-## Input Contract (Current Adapter Path)
-
-### Spatial / temporal
-
-The current adapter path is provider-only, so use `backend="gee"` or another provider-compatible backend. `TemporalSpec` is normalized via the shared helper, and `TemporalSpec.range(...)` is still the safest path for reproducible runs.
-
-### Sensor / channels
-
-Default `SensorSpec` if omitted:
-
-The default sensor is `COPERNICUS/S2_SR_HARMONIZED` with bands `("B4", "B3", "B2")`, `scale_m=10`, `cloudy_pct=30`, and `composite="median"`.
-
-`input_chw` contract:
-
-`input_chw` must be `CHW` with `C=3` in `(B4,B3,B2)` order. The adapter expects raw values in `0..10000`, clips NaN and Inf values, and converts the normalized result to `uint8` RGB.
+The adapter clips NaN/Inf values and converts the normalized result to `uint8` RGB before backbone preprocessing.
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Preprocessing Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">SETUP</span>  resolve checkpoint path
-  <span class="pipeline-arrow">-&gt;</span> local checkpoint or auto-download
-<span class="pipeline-root">INPUT</span>  provider fetch / input_chw
-  <span class="pipeline-arrow">-&gt;</span> S2 RGB patch
-  <span class="pipeline-arrow">-&gt;</span> normalize raw_chw with RS_EMBED_WILDSAT_NORM
-     <span class="pipeline-branch">minmax:</span> per-tile min-max after unit scaling
-     <span class="pipeline-branch">unit_scale / none:</span> keep unit-scaled values
-  <span class="pipeline-arrow">-&gt;</span> uint8 HWC + resize to RS_EMBED_WILDSAT_IMG=224
-  <span class="pipeline-arrow">-&gt;</span> load backbone + optional decoder image head
-  <span class="pipeline-arrow">-&gt;</span> forward pass
-     <span class="pipeline-branch">feature source:</span> image_head | backbone | auto
-     <span class="pipeline-detail">optional ViT token extraction for token pooling / grid</span>
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> vector
-     <span class="pipeline-branch">grid:</span>   token grid or 1x1 fallback</code></pre>
+!!! tip "Resize is the default — tiling is also available"
+    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
 
-Important behavior:
+```mermaid
+flowchart LR
+    INPUT["S2 RGB"] --> PREP["Normalize → uint8\n→ resize 224×224"]
+    PREP --> LOAD["Load backbone\n(vitb16/vitl16/resnet50/swint)"]
+    LOAD --> FS{Feature source}
+    FS -- image_head --> VEC["pooled: decoder vector"]
+    FS -- backbone --> GRID["grid: ViT tokens (D,H,W)\nor 1×1 fallback"]
+```
 
-If `grid` is requested but ViT tokens are unavailable, for example with a non-ViT architecture or when token extraction is disabled, the adapter returns a `1x1` grid with `grid_kind="vector_as_1x1"` instead of failing.
+!!! note "Grid fallback behavior"
+    If `grid` is requested but ViT tokens are unavailable, for example with a non-ViT architecture or when token extraction is disabled, the adapter returns a `1x1` grid with `grid_kind="vector_as_1x1"` instead of failing.
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    RGB["S2 RGB"] --> ARCH["Multi-backbone\n(vitb16 / vitl16 /\nresnet50 / swint)"]
+    ARCH --> FS{Feature source}
+    FS -- "image_head (default)" --> VEC["Decoder → vector"]
+    FS -- "backbone tokens" --> TOK["ViT → grid (D,H,W)\nnon-ViT → 1×1"]
+    TRAIN["Training signal: satellite +\nspecies occurrence + habitat text"]
+```
 
 ---
 
@@ -101,13 +100,9 @@ If `grid` is requested but ViT tokens are unavailable, for example with a non-Vi
 
 ## Output Semantics
 
-### `OutputSpec.pooled()`
+**`pooled`**: defaults to the `image_head` feature vector; set `RS_EMBED_WILDSAT_POOLED_FROM_TOKENS=1` to use token pooling instead; metadata records `feature_source`, `tokens_available`, and `pooled_from_tokens`.
 
-By default, `OutputSpec.pooled()` usually returns the selected feature-source vector, with `image_head` preferred unless configuration says otherwise. If `RS_EMBED_WILDSAT_POOLED_FROM_TOKENS=1` and ViT tokens are available, the adapter instead pools tokens with `mean` or `max`. Metadata records `feature_source`, `tokens_available`, and `pooled_from_tokens`.
-
-### `OutputSpec.grid()`
-
-If ViT tokens are available and token-grid extraction is enabled, `OutputSpec.grid()` returns a ViT patch-token grid with `grid_kind="vit_patch_tokens"`. Otherwise it returns a `1x1` vector grid with `grid_kind="vector_as_1x1"`. In either case, the result is model feature layout rather than georeferenced raster pixels.
+**`grid`**: ViT patch-token grid (`grid_kind="vit_patch_tokens"`) when tokens are available, else `1x1` fallback with `grid_kind="vector_as_1x1"`.
 
 ---
 
@@ -131,35 +126,23 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_WILDSAT_ARCH=vitb16
-# export RS_EMBED_WILDSAT_FEATURE=image_head
-# export RS_EMBED_WILDSAT_NORM=minmax
-# export RS_EMBED_WILDSAT_GRID_FROM_TOKENS=1
+export RS_EMBED_WILDSAT_ARCH=vitb16
+export RS_EMBED_WILDSAT_FEATURE=image_head
+export RS_EMBED_WILDSAT_NORM=minmax
+export RS_EMBED_WILDSAT_GRID_FROM_TOKENS=1
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- backend mismatch (`wildsat` is provider-only)
-- missing/invalid checkpoint path or auto-download failure
-- unsupported / mis-inferred architecture (`RS_EMBED_WILDSAT_ARCH`)
-- invalid `RS_EMBED_WILDSAT_FEATURE` value
-- misunderstanding `grid` fallback (`1x1` vector grid is expected in some configs)
-- token-based pooling requested but tokens unavailable (adapter silently falls back to vector path and records metadata)
-
-Recommended first checks:
-
-Inspect metadata for `arch`, `feature_source`, `tokens_available`, and `grid_kind` first. If checkpoint inference is ambiguous, set `RS_EMBED_WILDSAT_ARCH` explicitly, and stabilize the checkpoint source before tuning feature branch or normalization details.
+- **Publication**: [ICCV 2025](https://arxiv.org/abs/2412.14428)
+- **Code**: [mdchuc/HRSFM](https://github.com/mdchuc/HRSFM)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-For reproducibility, keep the checkpoint path or source fixed and record a file hash when possible. It is also worth fixing `RS_EMBED_WILDSAT_ARCH`, normalization mode, feature source, image branch, token-grid toggles, temporal window, and provider compositing settings.
-
----
-
-## Source of Truth (Code Pointers)
-
-The implementation details are in `src/rs_embed/embedders/catalog.py`, `src/rs_embed/embedders/onthefly_wildsat.py`, and the shared helpers in `src/rs_embed/embedders/_vit_mae_utils.py`.
+- The default checkpoint (`vitb16-imagenet-bnfc.pth`) is the only one that auto-downloads; other architectures require a user-provided checkpoint.
+- Backbone architecture is auto-inferred from checkpoint keys — set `RS_EMBED_WILDSAT_ARCH` explicitly if inference is ambiguous.
+- Non-ViT backbones (resnet50, swint) cannot produce patch-token grids; the adapter returns a `1×1` grid with `grid_kind="vector_as_1x1"` instead.

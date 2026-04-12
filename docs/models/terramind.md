@@ -1,85 +1,91 @@
 # TerraMind (`terramind`)
-
-> TerraTorch-backed TerraMind adapter for Sentinel-2 SR 12-band inputs, supporting provider and tensor backends with TerraMind-specific z-score normalization.
-
 ## Quick Facts
 
-| Field                             | Value                                                          |
-| --------------------------------- | -------------------------------------------------------------- |
-| Model ID                          | `terramind`                                                    |
-| Family / Backbone                 | TerraMind via TerraTorch `BACKBONE_REGISTRY`                   |
-| Adapter type                      | `on-the-fly`                                                   |
-| Typical backend                   | provider backend (`gee`), also supports `backend="tensor"`     |
-| Primary input                     | S2 SR 12-band (`B1..B12` subset used by adapter order)         |
-| Default resolution                | 10m default provider fetch (`sensor.scale_m`)                  |
-| Temporal mode                     | `range` (provider path normalized via shared helper)           |
-| Output modes                      | `pooled`, `grid`                                               |
-| Extra side inputs                 | none required in current adapter                               |
-| Training alignment (adapter path) | High when default TerraMind z-score normalization is preserved |
+| Field                | Value                                                          |
+| -------------------- | -------------------------------------------------------------- |
+| Model ID             | `terramind`                                                    |
+| Family / Backbone    | TerraMind via TerraTorch `BACKBONE_REGISTRY`                   |
+| Adapter type         | `on-the-fly`                                                   |
+| Training alignment   | High when default TerraMind z-score normalization is preserved |
+
+!!! success "TerraMind In 30 Seconds"
+    TerraMind is IBM's any-to-any multimodal geospatial foundation model, accessed in `rs-embed` through TerraTorch's `BACKBONE_REGISTRY` as a strict Sentinel-2 12-band encoder. Its defining subtlety is that TerraMind's z-score normalization statistics are selected by model key prefix — `v1` and `v01` use *different* stats — so switching the model key silently changes the input distribution the backbone sees.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - z-score statistics selected by model key prefix (`v1` vs `v01`); moving away from `zscore` changes what the model sees: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
+    - strict 12-band S2 order `B1,B2,B3,B4,B5,B6,B7,B8,B8A,B9,B11,B12` on both provider and tensor backends: see [Input Contract](#input-contract)
+    - provider and `tensor` backends share the same preprocessing and forward path, including the fixed `224×224` resize: see [Preprocessing Pipeline](#preprocessing-pipeline)
 
 ---
 
-## When To Use This Model
+## Input Contract
 
-TerraMind is a good fit for strict multispectral Sentinel-2 experiments with TerraMind checkpoints, for comparisons that need a strong 12-band S2 encoder, and for workflows that want both provider-backed and direct tensor input paths.
+=== "Provider backend (`gee` / `auto`)"
 
-Treat normalization mode as part of the model definition. Moving away from TerraMind's default `zscore` path changes the semantics of the input, and `grid` should still be read as a patch-token grid rather than georeferenced raster space. The tensor backend is useful, but only if the supplied channel order and preprocessing assumptions match the adapter contract.
+    | Field                 | Value                                                                                |
+    | --------------------- | ------------------------------------------------------------------------------------ |
+    | `TemporalSpec`        | `range` recommended (normalized via shared helper)                                   |
+    | Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                                                        |
+    | Default bands (order) | `B1, B2, B3, B4, B5, B6, B7, B8, B8A, B9, B11, B12` (12-band; `_S2_SR_12_BANDS`)     |
+    | Default fetch         | `scale_m=10`, `cloudy_pct=30`, `composite="median"`, `fill_value=0.0`                |
+    | `input_chw` override  | `CHW`, `C=12` in adapter fetch order, raw SR `0..10000`                              |
+    | Side inputs           | none                                                                                 |
 
----
+=== "Tensor backend (`tensor`)"
 
-## Input Contract (Current Adapter Path)
+    | Field          | Value                                                                                 |
+    | -------------- | ------------------------------------------------------------------------------------- |
+    | `TemporalSpec` | ignored (no provider fetch)                                                           |
+    | `input_chw`    | **required**, `CHW`, `C=12`                                                           |
+    | Batch API      | use `get_embeddings_batch_from_inputs(...)` for batched tensor inputs                 |
+    | Preprocessing  | same as provider path — resize to 224×224, then TerraMind z-score normalization       |
+    | Side inputs    | none                                                                                  |
 
-### Spatial / temporal
-
-On the provider path, `SpatialSpec` is paired with temporal input normalized to a range via the shared helper. On the tensor path, there is no provider fetch, and the adapter reads `input_chw` directly as `CHW`.
-
-### Sensor / channels (provider path)
-
-Default `SensorSpec` if omitted:
-
-The default sensor is `COPERNICUS/S2_SR_HARMONIZED` with adapter fetch order `_S2_SR_12_BANDS = B1,B2,B3,B4,B5,B6,B7,B8,B8A,B9,B11,B12`, `scale_m=10`, `cloudy_pct=30`, `composite="median"`, and `fill_value=0.0`.
-
-TerraMind internal semantic mapping is also tracked in metadata (`bands_terramind`).
-
-`input_chw` contract (provider override path):
-
-For provider overrides, `input_chw` must be `CHW` with 12 bands in the adapter fetch order, and raw SR values are expected in `0..10000`.
-
-### Tensor backend contract
-
-`backend="tensor"` requires `input_chw` in `CHW` format, with `C=12`. Batch tensor inputs should go through `get_embeddings_batch_from_inputs(...)`. Before the forward pass, the adapter resizes to `224` and applies the same TerraMind normalization used on the provider path.
+!!! note "TerraMind semantic band mapping"
+    The adapter's fetch order `_S2_SR_12_BANDS` is separate from TerraMind's internal semantic band naming. The internal mapping is tracked in metadata as `bands_terramind`.
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Preprocessing Pipeline
+
+!!! tip "Resize is the default — tiling is also available"
+    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
 
 ### Provider path
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">PROVIDER</span>  fetch raw 12-band S2 SR patch
-  <span class="pipeline-arrow">-&gt;</span> composite over temporal window
-  <span class="pipeline-arrow">-&gt;</span> optional raw-value inspection
-     <span class="pipeline-detail">value_range=(0,10000)</span>
-  <span class="pipeline-arrow">-&gt;</span> resize to fixed 224x224
-  <span class="pipeline-arrow">-&gt;</span> TerraMind normalization
-     <span class="pipeline-branch">zscore:</span> TerraMind v1 / v01 stats by model key prefix
-     <span class="pipeline-branch">raw / none:</span> nan_to_num only
-  <span class="pipeline-arrow">-&gt;</span> forward TerraMind backbone
-  <span class="pipeline-arrow">-&gt;</span> token tensor
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> token pooling
-     <span class="pipeline-branch">grid:</span>   patch-token grid</code></pre>
+```mermaid
+flowchart LR
+    FETCH["Fetch 12-band\nS2 SR"] --> PREP["Composite → resize 224×224\n→ z-score (v1/v01 stats)"]
+    PREP --> FWD["TerraMind backbone\n→ token tensor"]
+    FWD --> POOL["pooled: token pooling"]
+    FWD --> GRID["grid: patch-token (D,H,W)"]
+```
 
 ### Tensor path
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">TENSOR</span>  read input_chw
-  <span class="pipeline-arrow">-&gt;</span> resize to fixed 224x224
-  <span class="pipeline-arrow">-&gt;</span> apply the same TerraMind normalization
-     <span class="pipeline-branch">zscore:</span> TerraMind v1 / v01 stats by model key prefix
-     <span class="pipeline-branch">raw / none:</span> nan_to_num only
-  <span class="pipeline-arrow">-&gt;</span> forward TerraMind backbone
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> token pooling
-     <span class="pipeline-branch">grid:</span>   patch-token grid</code></pre>
+```mermaid
+flowchart LR
+    INPUT["Read input_chw"] --> PREP["Resize 224×224\n→ same z-score normalize"]
+    PREP --> FWD["TerraMind backbone"]
+    FWD --> POOL["pooled: token pooling"]
+    FWD --> GRID["grid: patch-token grid"]
+```
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    S2["S2 12-band\n(B1–B12)"] --> KEY{Model key\nprefix}
+    KEY -- "v1_*" --> V1["v1 z-score stats"]
+    KEY -- "v01_*" --> V01["v01 z-score stats"]
+    V1 --> BB["TerraTorch backbone"]
+    V01 --> BB
+    BB --> POOL["pooled: token pooling"]
+    BB --> GRID["grid: (D,H,W)"]
+```
 
 ---
 
@@ -94,15 +100,8 @@ For provider overrides, `input_chw` must be `CHW` with 12 bands in the adapter f
 | `RS_EMBED_TERRAMIND_PRETRAINED`    | `1`                  | Use pretrained weights                                               |
 | `RS_EMBED_TERRAMIND_FETCH_WORKERS` | `8`                  | Provider prefetch workers for batch APIs                             |
 
-Fixed adapter behavior:
-
-In the current implementation, image size is fixed to `224`.
-
----
-
-## Output Semantics
-
-TerraMind behaves like a standard token model at output time: `pooled` applies token pooling according to `OutputSpec.pooling`, and `grid` returns a ViT-style token grid `(D,H,W)` in model space rather than georeferenced raster pixels. Metadata still records the key details such as pooling mode, `grid_hw`, and CLS removal.
+!!! note "Fixed adapter behavior"
+    In the current implementation, image size is fixed to `224`.
 
 ---
 
@@ -126,32 +125,22 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_TERRAMIND_MODEL_KEY=terramind_v1_small
-# export RS_EMBED_TERRAMIND_NORMALIZE=zscore
-# export RS_EMBED_TERRAMIND_MODALITY=S2L2A
+export RS_EMBED_TERRAMIND_MODEL_KEY=terramind_v1_small
+export RS_EMBED_TERRAMIND_NORMALIZE=zscore
+export RS_EMBED_TERRAMIND_MODALITY=S2L2A
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- wrong channel count for `input_chw` / tensor backend (`C` must be 12)
-- backend mismatch (`tensor` path requires `input_chw`; provider path requires provider backend)
-- hidden normalization changes via `RS_EMBED_TERRAMIND_NORMALIZE`
-- TerraTorch import/build issues for selected model key or optional deps
-
-Recommended first checks:
-
-Verify provider raw input channel order and value range before normalization, then inspect metadata for the model key, modality, normalization mode, and selected layer index.
+- **Publication**: [ICCV 2025](https://arxiv.org/abs/2504.11171)
+- **Code**: [IBM/terramind](https://github.com/IBM/terramind)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-For reproducibility, keep the model key fixed, because `v1` versus `v01` changes which z-score statistics are used. It is also worth keeping normalization mode, modality, output mode, pooling choice, and provider-side temporal and compositing settings fixed across runs.
-
----
-
-## Source of Truth (Code Pointers)
-
-The implementation details are in `src/rs_embed/embedders/catalog.py`, `src/rs_embed/embedders/onthefly_terramind.py`, and `src/rs_embed/embedders/_vit_mae_utils.py`.
+- Model key prefix matters: `v1_*` and `v01_*` use **different** z-score statistics — switching keys without awareness changes normalization silently.
+- Requires `terratorch` (`pip install "rs-embed[terratorch]"`) — missing this dependency fails at import time.
+- Image size is fixed at `224` in the current adapter; the env var table documents this but it is not yet configurable.

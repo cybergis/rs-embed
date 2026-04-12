@@ -1,61 +1,78 @@
 # RemoteCLIP (`remoteclip`)
 
-> Sentinel-2 RGB on-the-fly embedding via `rshf.remoteclip.RemoteCLIP`, with pooled vector or ViT token-grid outputs.
-
 ## Quick Facts
 
-| Field                             | Value                                                                                                            |
-| --------------------------------- | ---------------------------------------------------------------------------------------------------------------- |
-| Model ID                          | `remoteclip`                                                                                                     |
-| Aliases                           | `remoteclip_s2rgb`                                                                                               |
-| Family / Backbone                 | RemoteCLIP (CLIP-style ViT via `rshf.remoteclip.RemoteCLIP`)                                                     |
-| Adapter type                      | `on-the-fly`                                                                                                     |
-| Typical backend                   | provider-backed; prefer `backend="auto"` in public API                                                           |
-| Primary input                     | S2 RGB (`B4,B3,B2`)                                                                                              |
-| Default resolution                | 10m default provider fetch (`sensor.scale_m`)                                                                    |
-| Temporal mode                     | `TemporalSpec.range(...)` required                                                                               |
-| Output modes                      | `pooled`, `grid`                                                                                                 |
-| Extra side inputs                 | none                                                                                                             |
-| Training alignment (adapter path) | Medium (higher if wrapper `model.transform(...)` matches training pipeline; fallback is generic CLIP preprocess) |
+| Field                | Value                                                                                                            |
+| -------------------- | ---------------------------------------------------------------------------------------------------------------- |
+| Model ID             | `remoteclip`                                                                                                     |
+| Aliases              | `remoteclip_s2rgb`                                                                                               |
+| Family / Backbone    | RemoteCLIP (CLIP-style ViT via `rshf.remoteclip.RemoteCLIP`)                                                     |
+| Adapter type         | `on-the-fly`                                                                                                     |
+| Training alignment   | Medium (higher if wrapper `model.transform(...)` matches training pipeline; fallback is generic CLIP preprocess) |
+
+!!! success "RemoteCLIP In 30 Seconds"
+    RemoteCLIP is a CLIP-style vision-language ViT continually fine-tuned on remote-sensing image-text pairs, so its embeddings live in a *shared* image/text space that supports caption-based retrieval — in `rs-embed` you are getting the visual side of that shared space from a 3-band RGB Sentinel-2 input.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - RGB-only (`B4,B3,B2`) with a fixed `224×224` preprocessing path: see [Input Contract](#input-contract)
+    - checkpoint override goes through `sensor.collection="hf:<repo>"` rather than an environment variable: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
+    - preprocessing prefers the wrapper `model.transform(...)` but falls back to a generic CLIP pipeline — these paths are **not** identical and should be logged: see [Preprocessing Pipeline](#preprocessing-pipeline)
 
 ---
 
-## When To Use This Model
+## Input Contract
 
-RemoteCLIP is a good fit for fast Sentinel-2 RGB baselines, CLIP-style retrieval experiments, and simple cross-model comparisons where `OutputSpec.pooled()` is enough. Be more careful if you need strict multispectral semantics, if you plan to treat `grid` output as georeferenced pixels, or if your wrapper build only exposes pooled outputs and therefore cannot serve a token grid.
+| Field                 | Value                                                                                  |
+| --------------------- | -------------------------------------------------------------------------------------- |
+| Backend               | provider (`auto` recommended)                                                          |
+| `TemporalSpec`        | **required** `TemporalSpec.range(start, end)` — treated as filter-and-composite window |
+| Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                                                          |
+| Default bands (order) | `B4, B3, B2`                                                                           |
+| Default fetch         | `scale_m=10`, `cloudy_pct=30`, `composite="median"`                                    |
+| `input_chw`           | `CHW`, `C=3` in `(B4,B3,B2)` order                                                     |
+| Side inputs           | none                                                                                   |
+
+!!! note "Checkpoint override via `sensor.collection`"
+    Use `sensor.collection="hf:<repo_or_path>"` (e.g. `hf:MVRL/remote-clip-vit-base-patch32`) to swap in a different RemoteCLIP checkpoint — the `hf:` prefix is how this adapter distinguishes checkpoint overrides from regular provider collections.
 
 ---
 
-## Input Contract (Current Adapter Path)
+## Preprocessing Pipeline
 
-### Spatial / temporal
+!!! tip "Resize is the default — tiling is also available"
+    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
 
-The adapter accepts `BBox` and `PointBuffer`. `TemporalSpec` must be `TemporalSpec.range(start, end)`, and that range is treated as a filter-and-composite window, not as a guarantee of one exact acquisition.
+```mermaid
+flowchart LR
+    INPUT["S2 RGB"] --> PREP["Normalize → uint8\n→ model.transform or CLIP fallback"]
+    PREP --> FWD["CLIP ViT forward"]
+    FWD --> POOL["pooled: token mean/max"]
+    FWD --> GRID["grid: patch-token (D,H,W)"]
+```
 
-### Sensor / channels
-
-If `sensor` is omitted, the default path uses `COPERNICUS/S2_SR_HARMONIZED` with bands `("B4", "B3", "B2")`, `scale_m=10`, `cloudy_pct=30`, and `composite="median"`. `sensor.collection` can also be used as a checkpoint override in the form `hf:<repo_or_path>`, for example `hf:MVRL/remote-clip-vit-base-patch32`. If you bypass provider fetch with `input_chw`, it must be `CHW` with exactly three bands in `(B4,B3,B2)` order.
+!!! note "Current adapter image size"
+    The image size is fixed at `224` in this adapter path.
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Architecture Concept
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">INPUT</span>  provider fetch / input_chw
-  <span class="pipeline-arrow">-&gt;</span> S2 RGB patch
-  <span class="pipeline-arrow">-&gt;</span> normalize raw SR to [0,1]
-     <span class="pipeline-detail">input_chw path: /10000 -&gt; clip</span>
-  <span class="pipeline-arrow">-&gt;</span> optional checks + quicklook export
-  <span class="pipeline-arrow">-&gt;</span> CHW [0,1] -&gt; uint8 HWC
-  <span class="pipeline-arrow">-&gt;</span> model preprocess
-     <span class="pipeline-branch">preferred:</span> model.transform(rgb_u8, image_size)
-     <span class="pipeline-branch">fallback:</span>  Resize(224) -&gt; CenterCrop(224) -&gt; ToTensor -&gt; CLIP normalization
-  <span class="pipeline-arrow">-&gt;</span> forward pass
-     <span class="pipeline-branch">preferred:</span> token sequence
-     <span class="pipeline-branch">fallback:</span>  pooled vector</code></pre>
-
-Current adapter image size:
-
-The image size is fixed at `224` in this adapter path.
+```mermaid
+flowchart LR
+    subgraph Input
+        RGB["S2 RGB\n(B4,B3,B2)"]
+    end
+    subgraph "CLIP ViT"
+        RGB --> PRE["Preprocess\n(model.transform\nor CLIP fallback)"]
+        PRE --> FWD["CLIP ViT\nforward"]
+    end
+    subgraph "Shared Image ↔ Text Space"
+        FWD --> EMB["Embeddings support\ncaption-based\nsimilarity & retrieval"]
+        EMB --> POOL["pooled:\ntoken mean/max"]
+        EMB --> GRID["grid:\npatch-token (D,H,W)"]
+    end
+```
 
 ---
 
@@ -67,15 +84,8 @@ The image size is fixed at `224` in this adapter path.
 | `RS_EMBED_REMOTECLIP_BATCH_SIZE`                         | CPU:`8`, CUDA:`64` | Inference batch size for batch APIs                      |
 | `HUGGINGFACE_HUB_CACHE` / `HF_HOME` / `HUGGINGFACE_HOME` | unset              | Controls HF cache path used for model snapshot downloads |
 
-Checkpoint override (not env-based in this adapter):
-
-Set `sensor.collection="hf:<repo_or_local_path>"`.
-
----
-
-## Output Semantics
-
-RemoteCLIP mostly follows the standard pooled and patch-token grid behavior. `pooled` returns a vector `(D,)`, usually via token mean pooling when tokens are available, while `grid` returns a ViT token grid `(D,H,W)` in model token space rather than georeferenced raster pixels.
+!!! info "Checkpoint override"
+    Set `sensor.collection="hf:<repo_or_local_path>"` (not env-based in this adapter).
 
 ---
 
@@ -118,26 +128,15 @@ emb = get_embedding(
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- `backend` is not provider-compatible (`backend="auto"` is the recommended public default)
-- `TemporalSpec` is missing or not `range`
-- `input_chw` shape is not `CHW` with 3 channels
-- missing optional dependencies (`rshf`, `huggingface_hub`, torch stack)
-- `grid` requested but wrapper only exposes pooled outputs / no token path
-
-Recommended first check:
-
-Use `inspect_provider_patch(...)` or `inspect_gee_patch(...)` to verify raw RGB inputs and temporal composite quality before debugging the model path.
+- **Publication**: [TGRS 2024](https://arxiv.org/abs/2306.11029)
+- **Code**: [ChenDelong1999/RemoteCLIP](https://github.com/ChenDelong1999/RemoteCLIP)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-For fair comparisons, keep the ROI, temporal window, `SensorSpec.composite`, `OutputSpec` mode, checkpoint choice, and preprocessing path fixed. In particular, log whether the run used the wrapper transform or the CLIP-style fallback, because those paths are not identical.
-
----
-
-## Source of Truth (Code Pointers)
-
-The main code paths are `src/rs_embed/embedders/catalog.py` for registration and `src/rs_embed/embedders/onthefly_remoteclip.py` for the adapter itself, including the token reshape helpers.
+- Provider-only — `backend="tensor"` is not supported.
+- The adapter prefers `model.transform` when available; otherwise falls back to CLIP-style preprocessing — the two paths may produce slightly different embeddings.
+- Grid output depends on the wrapper exposing a token sequence; some RemoteCLIP wrappers only return pooled vectors.

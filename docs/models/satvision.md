@@ -1,75 +1,70 @@
 # SatVision-TOA (`satvision`)
 
-> Provider-backed SatVision-TOA adapter for 14-channel TOA inputs (default MODIS band order), with channel-aware reflectance/emissive normalization and token/grid outputs.
-
 ## Quick Facts
 
-| Field                             | Value                                                                    |
-| --------------------------------- | ------------------------------------------------------------------------ |
-| Model ID                          | `satvision`                                                              |
-| Aliases                           | `satvision_toa`                                                          |
-| Family / Backbone                 | SatVision-TOA checkpoint (HF/local checkpoint loader)                    |
-| Adapter type                      | `on-the-fly`                                                             |
-| Typical backend                   | provider backend (`gee`)                                                 |
-| Primary input                     | 14-channel TOA `CHW` (default MODIS/061/MOD021KM band order)             |
-| Default resolution                | 1000m default provider fetch (`sensor.scale_m`)                          |
-| Temporal mode                     | `range` in practice (normalized via shared helper)                       |
-| Output modes                      | `pooled`, `grid`                                                         |
-| Extra side inputs                 | none (but channel calibration settings matter)                           |
-| Training alignment (adapter path) | High only when channel order + calibration match checkpoint expectations |
+| Field                | Value                                                                    |
+| -------------------- | ------------------------------------------------------------------------ |
+| Model ID             | `satvision`                                                              |
+| Aliases              | `satvision_toa`                                                          |
+| Family / Backbone    | SatVision-TOA checkpoint (HF/local checkpoint loader)                    |
+| Adapter type         | `on-the-fly`                                                             |
+| Training alignment   | High only when channel order + calibration match checkpoint expectations |
+
+!!! success "SatVision-TOA In 30 Seconds"
+    SatVision-TOA is a 14-channel MODIS top-of-atmosphere backbone, and its defining feature in `rs-embed` is **channel-type-aware calibration**: reflectance channels go through a divisor (`REF_DIV`) while emissive/thermal channels go through per-channel min-max calibration (`EMISSIVE_MINS/MAXS`), all driven by a strict MODIS band order the adapter does not try to guess.
+
+    In `rs-embed`, its most important characteristics are:
+
+    - strict 14-channel MODIS band order (`1,2,3,26,6,20,7,27,28,29,31,32,33,34`) — the adapter does **not** infer semantic channel order from values: see [Input Contract](#input-contract)
+    - split reflectance/emissive normalization driven by `REF_DIV` plus `EMISSIVE_MINS`/`EMISSIVE_MAXS` calibration arrays: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
+    - `1000 m` default `scale_m` matching MODIS native resolution rather than the usual Sentinel-2 10 m default: see [Input Contract](#input-contract)
 
 ---
 
-## When To Use This Model
+## Input Contract
 
-SatVision is a better fit for TOA-based experiments where you want SatVision checkpoints rather than Sentinel-2 SR-specific encoders, for MODIS-style provider workflows with explicit normalization and calibration control, and for cases where you want to compare pooled versus patch-token outputs from the same model path.
+| Field                 | Value                                                                                                   |
+| --------------------- | ------------------------------------------------------------------------------------------------------- |
+| Backend               | provider only (`gee` / `auto`)                                                                          |
+| `TemporalSpec`        | `range` recommended (normalized via shared helper)                                                      |
+| Default collection    | `MODIS/061/MOD021KM`                                                                                    |
+| Default bands (order) | **strict** `1, 2, 3, 26, 6, 20, 7, 27, 28, 29, 31, 32, 33, 34` (14-band MODIS order)                    |
+| Default fetch         | `scale_m=1000`, `cloudy_pct=100`, `composite="mosaic"`, `fill_value=0.0`                                |
+| `input_chw`           | `CHW`, `C == RS_EMBED_SATVISION_TOA_IN_CHANS` (default `14`); raw TOA or unit-scaled per norm mode      |
+| Side inputs           | none (but channel calibration arrays `REFLECTANCE_IDXS` / `EMISSIVE_IDXS` / `REF_DIV` / `EMISSIVE_MINS/MAXS` matter) |
 
-Be careful when changing `SensorSpec.bands` order without updating the matching `RS_EMBED_SATVISION_TOA_*` channel settings. The page also assumes you will log whether the effective normalization path was raw, auto, or unit-scaled, because mixing those modes makes results hard to compare. Arbitrary 14-channel tensors are not enough on their own if they do not match the checkpoint's training semantics.
-
----
-
-## Input Contract (Current Adapter Path)
-
-### Spatial / temporal
-
-`SpatialSpec` may be either `BBox` or `PointBuffer`. `TemporalSpec` is normalized to a range through the shared helper, and `TemporalSpec.range(...)` is the recommended path for reproducible requests. The current adapter path is provider-only, so use `backend="gee"` or another provider-compatible backend.
-
-### Sensor / channels
-
-Default `SensorSpec` if omitted:
-
-The default sensor is `MODIS/061/MOD021KM` with the strict band order `1,2,3,26,6,20,7,27,28,29,31,32,33,34`, `scale_m=1000`, `cloudy_pct=100`, `composite="mosaic"`, and `fill_value=0.0`.
-
-`input_chw` contract:
-
-`input_chw` must be `CHW`, and `C` must match `RS_EMBED_SATVISION_TOA_IN_CHANS`, which defaults to `14`. The adapter also checks that `len(sensor.bands) == in_chans`. Values may be raw TOA-like inputs or already unit-scaled data, depending on the active normalization mode.
-
-Important:
-
-The adapter does not infer semantic channel order from the values themselves, so `sensor.bands` must match the checkpoint's expected order exactly.
+!!! warning "Strict band order"
+    The adapter does **not** infer semantic channel order from values. `sensor.bands` must match the checkpoint's expected order exactly, and `len(sensor.bands) == in_chans` is checked.
 
 ---
 
-## Preprocessing Pipeline (Current rs-embed Path)
+## Preprocessing Pipeline
 
-<pre class="pipeline-flow"><code><span class="pipeline-root">SETUP</span>  runtime settings
-  <span class="pipeline-arrow">-&gt;</span> checkpoint / model ID
-  <span class="pipeline-arrow">-&gt;</span> in_chans + normalization + calibration arrays
-<span class="pipeline-root">INPUT</span>  provider fetch / input_chw
-  <span class="pipeline-arrow">-&gt;</span> CHW patch
-  <span class="pipeline-arrow">-&gt;</span> provider unit-scale override
-     <span class="pipeline-detail">if metadata says unit-scaled, effective norm mode becomes unit</span>
-  <span class="pipeline-arrow">-&gt;</span> normalize with RS_EMBED_SATVISION_TOA_NORM
-     <span class="pipeline-branch">auto:</span> use [0,1] if values look unit-scaled, else raw scaling
-     <span class="pipeline-branch">raw:</span>  channel-wise scaling
-     <span class="pipeline-detail">reflectance: divide by RS_EMBED_SATVISION_TOA_REF_DIV=100</span>
-     <span class="pipeline-detail">emissive: min-max with RS_EMBED_SATVISION_TOA_EMISSIVE_MINS/MAXS</span>
-     <span class="pipeline-branch">unit:</span> clip to [0,1]
-  <span class="pipeline-arrow">-&gt;</span> resize to RS_EMBED_SATVISION_TOA_IMG=128
-  <span class="pipeline-arrow">-&gt;</span> forward model + decode output tensor
-  <span class="pipeline-arrow">-&gt;</span> output projection
-     <span class="pipeline-branch">pooled:</span> token pooling or model-pooled vector
-     <span class="pipeline-branch">grid:</span>   token reshape when output is [N,D]</code></pre>
+!!! tip "Resize is the default — tiling is also available"
+    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
+
+```mermaid
+flowchart LR
+    INPUT["14-band MODIS\nCHW patch"] --> NORM["Calibrate:\nreflectance /REF_DIV\nemissive min-max"]
+    NORM --> RESIZE["Resize to 128×128"]
+    RESIZE --> FWD["Swin-style forward"]
+    FWD --> POOL["pooled: token pooling"]
+    FWD --> GRID["grid: token reshape (D,H,W)"]
+```
+
+---
+
+## Architecture Concept
+
+```mermaid
+flowchart LR
+    M["14-band MODIS"] --> R["Reflectance (7 ch)\n/REF_DIV → [0,1]"]
+    M --> E["Emissive (7 ch)\nper-ch min-max"]
+    R --> FWD["Recombine →\nSwin-style encoder"]
+    E --> FWD
+    FWD --> POOL["pooled: token pooling"]
+    FWD --> GRID["grid: (D,H,W)"]
+```
 
 ---
 
@@ -113,13 +108,9 @@ The adapter does not infer semantic channel order from the values themselves, so
 
 ## Output Semantics
 
-### `OutputSpec.pooled()`
+**`pooled`**: if model returns `[N,D]`, pools patch tokens with `mean`/`max`; if model already returns `(D,)`, returned directly as `model_pooled`.
 
-If the model output is a token sequence `[N,D]`, `OutputSpec.pooled()` pools patch tokens with `mean` or `max`. If the model already returns a vector `(D,)`, the adapter returns it directly as `model_pooled`. Metadata records the pooling behavior together with whether a CLS token was removed.
-
-### `OutputSpec.grid()`
-
-`OutputSpec.grid()` requires token-sequence output `[N,D]` and reshapes patch tokens into an `xarray.DataArray` with shape `(D,H,W)`. The result is model patch-token layout rather than georeferenced raster pixels.
+**`grid`**: requires token-sequence output `[N,D]` and reshapes patch tokens to `(D,H,W)`.
 
 ---
 
@@ -143,35 +134,23 @@ emb = get_embedding(
 
 ```python
 # Example (shell):
-# export RS_EMBED_SATVISION_TOA_NORM=raw
-# export RS_EMBED_SATVISION_TOA_IMG=128
-# export RS_EMBED_SATVISION_TOA_REF_DIV=100
-# export RS_EMBED_SATVISION_TOA_IN_CHANS=14
+export RS_EMBED_SATVISION_TOA_NORM=raw
+export RS_EMBED_SATVISION_TOA_IMG=128
+export RS_EMBED_SATVISION_TOA_REF_DIV=100
+export RS_EMBED_SATVISION_TOA_IN_CHANS=14
 ```
 
 ---
 
-## Common Failure Modes / Debugging
+## Paper & Links
 
-- backend is not provider-compatible (`satvision` is provider-only)
-- `sensor.bands` count does not match `RS_EMBED_SATVISION_TOA_IN_CHANS`
-- calibration list lengths mismatch (`EMISSIVE_IDXS` vs `EMISSIVE_MINS/MAXS`)
-- wrong channel order for the chosen checkpoint (results look unstable even if shapes pass)
-- grid requested but model output is not a token sequence
-- HF download/auth issues when using gated/private checkpoints
-
-Recommended first checks:
-
-Start by inspecting metadata for `norm_mode` and `norm_mode_effective`, then log the effective `sensor.collection`, `sensor.bands`, and calibration environment values. As with other token models, `OutputSpec.pooled()` is the simpler first check before debugging `grid`.
+- **Publication**: [arXiv 2024](https://arxiv.org/abs/2411.17000)
+- **Code**: [nasa-nccs-hpda/pytorch-caney](https://github.com/nasa-nccs-hpda/pytorch-caney)
 
 ---
 
-## Reproducibility Notes
+## Reference
 
-For reproducibility, keep the checkpoint source fixed, whether that is `RS_EMBED_SATVISION_TOA_ID` or a local checkpoint path, and record the exact band order, `in_chans`, normalization mode, calibration arrays, divisor, temporal window, compositing settings, output mode, and pooling choice.
-
----
-
-## Source of Truth (Code Pointers)
-
-The implementation lives in `src/rs_embed/embedders/catalog.py`, `src/rs_embed/embedders/onthefly_satvision_toa.py`, and the shared token-grid helpers in `src/rs_embed/embedders/_vit_mae_utils.py`.
+- Provider-only — `backend="tensor"` is not supported.
+- The 14-band MODIS channel order is strict and checkpoint-specific — wrong order produces silently bad embeddings even if shapes pass.
+- Reflectance and emissive bands use different calibration (divisor vs min-max); mixing up `EMISSIVE_IDXS` or calibration arrays breaks normalization.
