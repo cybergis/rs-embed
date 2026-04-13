@@ -30,6 +30,7 @@ from ._vit_mae_utils import (
     tokens_to_grid_dhw,
 )
 from .base import EmbedderBase
+from .config_utils import model_config_value
 from .meta_utils import build_meta, temporal_to_range
 from .runtime_utils import (
     fetch_s2_rgb_chw as _fetch_s2_rgb_chw,
@@ -44,9 +45,29 @@ from .runtime_utils import (
     resolve_device_auto_torch as _resolve_device,
 )
 
-_SUPPORTED_ARCHES = {"vitb16", "vitl16", "resnet50", "swint"}
-_WILDSAT_DEFAULT_GDRIVE_FILE_ID = "1IxBpf3nbEMzny4YJWS6stMBxel6gMiYE"
-_WILDSAT_DEFAULT_CKPT_FILENAME = "vitb16-imagenet-bnfc.pth"
+_SUPPORTED_ARCHES = {"vitb16", "resnet50", "swint"}
+
+_WILDSAT_VARIANT_SPECS: dict[str, dict[str, str]] = {
+    "vitb16": {
+        "arch": "vitb16",
+        "gdrive_id": "1IxBpf3nbEMzny4YJWS6stMBxel6gMiYE",
+        "filename": "vitb16-imagenet-bnfc.pth",
+    },
+    "resnet50": {
+        "arch": "resnet50",
+        "gdrive_id": "1LwCjzT1p0yFOtv1m0YD-rl7tP0eYXTb2",
+        "filename": "resnet50-imagenet-bnfc.pth",
+    },
+    "swint": {
+        "arch": "swint",
+        "gdrive_id": "12rfb3ES9-RuIAk_RjzYrMQJG_5J1Iq5H",
+        "filename": "swint-imagenet-bnfc.pth",
+    },
+}
+
+_WILDSAT_DEFAULT_VARIANT = "vitb16"
+_WILDSAT_DEFAULT_GDRIVE_FILE_ID = _WILDSAT_VARIANT_SPECS[_WILDSAT_DEFAULT_VARIANT]["gdrive_id"]
+_WILDSAT_DEFAULT_CKPT_FILENAME = _WILDSAT_VARIANT_SPECS[_WILDSAT_DEFAULT_VARIANT]["filename"]
 _WILDSAT_DEFAULT_CACHE_DIR = "~/.cache/rs_embed/wildsat"
 _WILDSAT_DEFAULT_MIN_BYTES = 50 * 1024 * 1024
 
@@ -158,7 +179,59 @@ def _download_wildsat_ckpt_from_gdrive(
     return dst
 
 
-def _resolve_wildsat_ckpt_path() -> str:
+def _normalize_arch_name(name: str | None) -> str | None:
+    if name is None:
+        return None
+    x = str(name).strip().lower().replace("-", "").replace("_", "")
+    alias = {
+        "vitb16": "vitb16",
+        "vitbase16": "vitb16",
+        "vitbasepatch16": "vitb16",
+        "resnet50": "resnet50",
+        "swint": "swint",
+        "swintiny": "swint",
+    }
+    return alias.get(x, x)
+
+
+def _normalize_wildsat_variant(variant: Any) -> str:
+    raw = str(variant).strip().lower().replace("-", "").replace("_", "")
+    aliases = {
+        "vitb16": "vitb16",
+        "vitbase16": "vitb16",
+        "vit": "vitb16",
+        "resnet50": "resnet50",
+        "resnet": "resnet50",
+        "swint": "swint",
+        "swintiny": "swint",
+        "swin": "swint",
+    }
+    resolved = aliases.get(raw)
+    if resolved is None:
+        raise ModelError(
+            f"Unknown WildSAT variant='{variant}' "
+            f"(expected one of: {', '.join(sorted(_WILDSAT_VARIANT_SPECS))})"
+        )
+    return resolved
+
+
+def _resolve_wildsat_variant(
+    *,
+    model_config: dict[str, Any] | None,
+) -> str:
+    variant_v = model_config_value(model_config, "variant")
+    if variant_v is not None:
+        return _normalize_wildsat_variant(variant_v)
+    env_arch = os.environ.get("RS_EMBED_WILDSAT_ARCH", "").strip()
+    if env_arch and env_arch.lower() != "auto":
+        normalized = _normalize_arch_name(env_arch)
+        if normalized in _WILDSAT_VARIANT_SPECS:
+            return str(normalized)
+    return _WILDSAT_DEFAULT_VARIANT
+
+
+def _resolve_wildsat_ckpt_path_for_variant(variant: str) -> str:
+    """Resolve checkpoint path, taking variant into account for auto-download."""
     ckpt_path = str(os.environ.get("RS_EMBED_WILDSAT_CKPT") or "").strip()
     if ckpt_path:
         return os.path.expanduser(ckpt_path)
@@ -189,38 +262,17 @@ def _resolve_wildsat_ckpt_path() -> str:
             min_bytes=min_bytes,
         )
 
-    gdrive_id = str(
-        os.environ.get("RS_EMBED_WILDSAT_GDRIVE_ID", _WILDSAT_DEFAULT_GDRIVE_FILE_ID)
-    ).strip()
-    filename = str(
-        os.environ.get("RS_EMBED_WILDSAT_CKPT_FILE", _WILDSAT_DEFAULT_CKPT_FILENAME)
-    ).strip()
+    spec = _WILDSAT_VARIANT_SPECS[variant]
+    gdrive_id = str(os.environ.get("RS_EMBED_WILDSAT_GDRIVE_ID", spec["gdrive_id"])).strip()
+    filename = str(os.environ.get("RS_EMBED_WILDSAT_CKPT_FILE", spec["filename"])).strip()
     if not filename:
-        filename = _WILDSAT_DEFAULT_CKPT_FILENAME
+        filename = spec["filename"]
     return _download_wildsat_ckpt_from_gdrive(
         file_id=gdrive_id,
         cache_dir=cache_dir,
         filename=filename,
         min_bytes=min_bytes,
     )
-
-
-def _normalize_arch_name(name: str | None) -> str | None:
-    if name is None:
-        return None
-    x = str(name).strip().lower().replace("-", "").replace("_", "")
-    alias = {
-        "vitb16": "vitb16",
-        "vitbase16": "vitb16",
-        "vitbasepatch16": "vitb16",
-        "vitl16": "vitl16",
-        "vitlarge16": "vitl16",
-        "vitlargepatch16": "vitl16",
-        "resnet50": "resnet50",
-        "swint": "swint",
-        "swintiny": "swint",
-    }
-    return alias.get(x, x)
 
 
 def _clean_state_key(key: str) -> str:
@@ -321,7 +373,7 @@ def _resolve_wildsat_arch(
 
     raise ModelError(
         "Failed to infer WildSAT backbone architecture from checkpoint. "
-        "Set RS_EMBED_WILDSAT_ARCH explicitly (one of: vitb16, vitl16, resnet50, swint)."
+        "Set RS_EMBED_WILDSAT_ARCH explicitly (one of: vitb16, resnet50, swint)."
     )
 
 
@@ -331,8 +383,6 @@ def _build_backbone(arch: str):
 
     if arch == "vitb16":
         return torchvision.models.vit_b_16(weights=None)
-    if arch == "vitl16":
-        return torchvision.models.vit_l_16(weights=None)
     if arch == "resnet50":
         return torchvision.models.resnet50(weights=None)
     if arch == "swint":
@@ -602,11 +652,7 @@ def _wildsat_forward(
 
     with torch.no_grad():
         tok_np: np.ndarray | None = None
-        if (
-            (arch in {"vitb16", "vitl16"})
-            and (make_grid or pooled_from_tokens)
-            and grid_from_tokens
-        ):
+        if (arch == "vitb16") and (make_grid or pooled_from_tokens) and grid_from_tokens:
             try:
                 toks = _torchvision_vit_tokens(backbone, x)
                 tok_np = toks[0].detach().float().cpu().numpy().astype(np.float32)
@@ -717,6 +763,12 @@ class WildSATEmbedder(EmbedderBase):
             },
             "temporal": {"mode": "range"},
             "output": ["pooled", "grid"],
+            "model_config_keys": {
+                "variant": {
+                    "default": _WILDSAT_DEFAULT_VARIANT,
+                    "choices": sorted(_WILDSAT_VARIANT_SPECS),
+                },
+            },
             "defaults": {
                 "scale_m": 10,
                 "cloudy_pct": 30,
@@ -759,6 +811,7 @@ class WildSATEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
         if not is_provider_backend(backend_l, allow_auto=True):
@@ -767,9 +820,10 @@ class WildSATEmbedder(EmbedderBase):
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
 
-        ckpt_path = _resolve_wildsat_ckpt_path()
+        variant = _resolve_wildsat_variant(model_config=model_config)
+        ckpt_path = _resolve_wildsat_ckpt_path_for_variant(variant)
 
-        arch_hint = os.environ.get("RS_EMBED_WILDSAT_ARCH", "auto").strip()
+        arch_hint = _WILDSAT_VARIANT_SPECS[variant]["arch"]
         image_size = int(os.environ.get("RS_EMBED_WILDSAT_IMG", str(self.DEFAULT_IMAGE_SIZE)))
         norm_mode = os.environ.get("RS_EMBED_WILDSAT_NORM", "minmax").strip()
         feature_source = os.environ.get("RS_EMBED_WILDSAT_FEATURE", "image_head").strip()
@@ -893,6 +947,7 @@ class WildSATEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -953,6 +1008,7 @@ class WildSATEmbedder(EmbedderBase):
                     backend=backend,
                     device=device,
                     input_chw=raw,
+                    model_config=model_config,
                 )
             )
         return out

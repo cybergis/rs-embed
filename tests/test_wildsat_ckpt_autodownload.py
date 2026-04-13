@@ -34,7 +34,7 @@ def test_resolve_wildsat_ckpt_uses_local_env_path(monkeypatch, tmp_path):
     monkeypatch.setattr(ws, "_download_wildsat_ckpt_from_hf", _should_not_be_called)
     monkeypatch.setattr(ws, "_download_wildsat_ckpt_from_gdrive", _should_not_be_called)
 
-    assert ws._resolve_wildsat_ckpt_path() == os.path.expanduser(str(p))
+    assert ws._resolve_wildsat_ckpt_path_for_variant("vitb16") == os.path.expanduser(str(p))
 
 
 def test_resolve_wildsat_ckpt_auto_download_disabled_raises(monkeypatch):
@@ -42,7 +42,7 @@ def test_resolve_wildsat_ckpt_auto_download_disabled_raises(monkeypatch):
     monkeypatch.setenv("RS_EMBED_WILDSAT_AUTO_DOWNLOAD", "0")
 
     with pytest.raises(ModelError, match="checkpoint is required"):
-        ws._resolve_wildsat_ckpt_path()
+        ws._resolve_wildsat_ckpt_path_for_variant("vitb16")
 
 
 def test_resolve_wildsat_ckpt_hf_vars_must_be_paired(monkeypatch):
@@ -53,7 +53,7 @@ def test_resolve_wildsat_ckpt_hf_vars_must_be_paired(monkeypatch):
         ModelError,
         match="Set both RS_EMBED_WILDSAT_HF_REPO and RS_EMBED_WILDSAT_HF_FILE",
     ):
-        ws._resolve_wildsat_ckpt_path()
+        ws._resolve_wildsat_ckpt_path_for_variant("vitb16")
 
 
 def test_resolve_wildsat_ckpt_prefers_hf_when_configured(monkeypatch):
@@ -79,7 +79,7 @@ def test_resolve_wildsat_ckpt_prefers_hf_when_configured(monkeypatch):
         lambda **_kw: "/tmp/should_not_happen.pth",
     )
 
-    out = ws._resolve_wildsat_ckpt_path()
+    out = ws._resolve_wildsat_ckpt_path_for_variant("vitb16")
     assert out == "/tmp/from_hf/model.pth"
     assert seen == {
         "repo_id": "repo/name",
@@ -105,7 +105,7 @@ def test_resolve_wildsat_ckpt_uses_default_gdrive_source(monkeypatch):
     )
     monkeypatch.setattr(ws, "_download_wildsat_ckpt_from_gdrive", _fake_gdrive)
 
-    out = ws._resolve_wildsat_ckpt_path()
+    out = ws._resolve_wildsat_ckpt_path_for_variant("vitb16")
     assert out == "/tmp/from_gdrive/model.pth"
     assert seen["file_id"] == ws._WILDSAT_DEFAULT_GDRIVE_FILE_ID
     assert seen["filename"] == ws._WILDSAT_DEFAULT_CKPT_FILENAME
