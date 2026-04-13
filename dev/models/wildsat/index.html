@@ -1100,6 +1100,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#model-specific-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model-specific Settings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#environment-variables-tuning-knobs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -1166,6 +1177,17 @@
     <span class="md-ellipsis">
       
         Minimal provider-backed example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#selecting-a-variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting a variant
       
     </span>
   </a>
@@ -2074,6 +2096,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#model-specific-settings" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Model-specific Settings
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#environment-variables-tuning-knobs" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2140,6 +2173,17 @@
     <span class="md-ellipsis">
       
         Minimal provider-backed example
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#selecting-a-variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Selecting a variant
       
     </span>
   </a>
@@ -2220,11 +2264,15 @@
 </tr>
 <tr>
 <td>Family / Backbone</td>
-<td>WildSAT checkpoint loader + torchvision backbones (<code>vitb16</code>, <code>vitl16</code>, <code>resnet50</code>, <code>swint</code>)</td>
+<td>WildSAT checkpoint loader + torchvision backbones (<code>vitb16</code>, <code>resnet50</code>, <code>swint</code>)</td>
 </tr>
 <tr>
 <td>Adapter type</td>
 <td><code>on-the-fly</code></td>
+</tr>
+<tr>
+<td>Model config keys</td>
+<td><code>variant</code> (default: <code>vitb16</code>; choices: <code>vitb16</code>, <code>resnet50</code>, <code>swint</code>)</td>
 </tr>
 <tr>
 <td>Training alignment</td>
@@ -2234,10 +2282,10 @@
 </table>
 <div class="admonition success">
 <p class="admonition-title">WildSAT In 30 Seconds</p>
-<p>WildSAT is trained jointly on satellite imagery, <strong>species occurrence maps, and habitat text</strong> — so its embeddings carry biodiversity- and habitat-level signal rather than only generic visual similarity, which makes it the best fit in <code>rs-embed</code> for ecological and environmental downstream tasks. The same adapter hosts several backbone families (<code>vitb16</code>, <code>vitl16</code>, <code>resnet50</code>, <code>swint</code>) behind one checkpoint loader.</p>
+<p>WildSAT is trained jointly on satellite imagery, <strong>species occurrence maps, and habitat text</strong> — so its embeddings carry biodiversity- and habitat-level signal rather than only generic visual similarity, which makes it the best fit in <code>rs-embed</code> for ecological and environmental downstream tasks. The same adapter hosts several backbone families (<code>vitb16</code>, <code>resnet50</code>, <code>swint</code>) behind one checkpoint loader.</p>
 <p>In <code>rs-embed</code>, its most important characteristics are:</p>
 <ul>
-<li>multiple supported backbones (<code>vitb16</code>, <code>vitl16</code>, <code>resnet50</code>, <code>swint</code>) with auto-inference that should be pinned via <code>RS_EMBED_WILDSAT_ARCH</code> when ambiguous: see <a href="#environment-variables-tuning-knobs">Environment Variables / Tuning Knobs</a></li>
+<li><code>variant</code> selects the backbone architecture — each variant auto-downloads its own ImageNet-pretrained checkpoint: see <a href="#model-specific-settings">Model-specific Settings</a></li>
 <li>selectable feature source: the WildSAT <strong>decoder image head</strong> (default <code>image_head</code>) vs raw backbone features: see <a href="#output-semantics">Output Semantics</a></li>
 <li><code>grid</code> silently falls back to a <code>1×1</code> vector grid (<code>grid_kind="vector_as_1x1"</code>) for non-ViT backbones instead of failing: see <a href="#output-semantics">Output Semantics</a></li>
 </ul>
@@ -2291,7 +2339,7 @@
 </div>
 <pre class="mermaid"><code>flowchart LR
     INPUT["S2 RGB"] --&gt; PREP["Normalize → uint8\n→ resize 224×224"]
-    PREP --&gt; LOAD["Load backbone\n(vitb16/vitl16/resnet50/swint)"]
+    PREP --&gt; LOAD["Load backbone\n(vitb16/resnet50/swint)"]
     LOAD --&gt; FS{Feature source}
     FS -- image_head --&gt; VEC["pooled: decoder vector"]
     FS -- backbone --&gt; GRID["grid: ViT tokens (D,H,W)\nor 1×1 fallback"]</code></pre>
@@ -2302,11 +2350,64 @@
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
-    RGB["S2 RGB"] --&gt; ARCH["Multi-backbone\n(vitb16 / vitl16 /\nresnet50 / swint)"]
+    RGB["S2 RGB"] --&gt; ARCH["Multi-backbone\n(vitb16 / resnet50 / swint)"]
     ARCH --&gt; FS{Feature source}
     FS -- "image_head (default)" --&gt; VEC["Decoder → vector"]
     FS -- "backbone tokens" --&gt; TOK["ViT → grid (D,H,W)\nnon-ViT → 1×1"]
     TRAIN["Training signal: satellite +\nspecies occurrence + habitat text"]</code></pre>
+<hr />
+<h2 id="model-specific-settings">Model-specific Settings<a class="headerlink" href="#model-specific-settings" title="Permanent link">&para;</a></h2>
+<p><code>variant</code> selects the WildSAT backbone architecture. Each variant auto-downloads its corresponding ImageNet-pretrained checkpoint from Google Drive.</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Backbone</th>
+<th>Pre-training</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>vitb16</code></td>
+<td>ViT-B/16</td>
+<td>ImageNet1k</td>
+<td>Default. Best overall performance (77.4% avg).</td>
+</tr>
+<tr>
+<td><code>resnet50</code></td>
+<td>ResNet-50</td>
+<td>ImageNet1k</td>
+<td>Lightweight CNN backbone.</td>
+</tr>
+<tr>
+<td><code>swint</code></td>
+<td>Swin Transformer-T</td>
+<td>ImageNet1k</td>
+<td>Strong base performance (76.4% avg).</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition info">
+<p class="admonition-title">Other pre-training initializations</p>
+<p>The WildSAT paper evaluates additional pre-training initializations (CLIP, Prithvi, SatCLIP, Satlas, MoCov3, SeCo) for each backbone. These are not built-in as variants, but you can use any of them by downloading the checkpoint manually and setting <code>RS_EMBED_WILDSAT_CKPT</code> to its local path. See the <a href="https://github.com/cvl-umass/wildsat">official WildSAT repo</a> for all available checkpoints.</p>
+</div>
+<p>Example:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
+
+<span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
+    <span class="s2">&quot;wildsat&quot;</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;swint&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Note</p>
+<p>Use <code>variant</code> only for backbone selection. Other WildSAT runtime knobs such as image size, normalization, feature source, and checkpoint override still use the environment-variable path below.</p>
+</div>
 <hr />
 <h2 id="environment-variables-tuning-knobs">Environment Variables / Tuning Knobs<a class="headerlink" href="#environment-variables-tuning-knobs" title="Permanent link">&para;</a></h2>
 <h3 id="runtime-feature-extraction">Runtime / feature extraction<a class="headerlink" href="#runtime-feature-extraction" title="Permanent link">&para;</a></h3>
@@ -2322,7 +2423,7 @@
 <tr>
 <td><code>RS_EMBED_WILDSAT_ARCH</code></td>
 <td><code>auto</code></td>
-<td>Backbone arch hint (<code>vitb16</code>, <code>vitl16</code>, <code>resnet50</code>, <code>swint</code>, or <code>auto</code>)</td>
+<td>Backbone arch hint (<code>vitb16</code>, <code>resnet50</code>, <code>swint</code>, or <code>auto</code>); overridden by <code>variant</code> in <code>model_config</code></td>
 </tr>
 <tr>
 <td><code>RS_EMBED_WILDSAT_IMG</code></td>
@@ -2374,7 +2475,7 @@
 <tr>
 <td><code>RS_EMBED_WILDSAT_CKPT</code></td>
 <td>unset</td>
-<td>Local checkpoint path</td>
+<td>Local checkpoint path (overrides variant auto-download)</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_WILDSAT_AUTO_DOWNLOAD</code></td>
@@ -2393,12 +2494,12 @@
 </tr>
 <tr>
 <td><code>RS_EMBED_WILDSAT_GDRIVE_ID</code></td>
-<td>official sample file id</td>
-<td>Google Drive source (default auto-download path)</td>
+<td>per-variant default</td>
+<td>Google Drive source (overrides variant default)</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_WILDSAT_CKPT_FILE</code></td>
-<td><code>vitb16-imagenet-bnfc.pth</code></td>
+<td>per-variant default</td>
 <td>Local cached filename for GDrive path</td>
 </tr>
 <tr>
@@ -2430,9 +2531,18 @@
     <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
+<h3 id="selecting-a-variant">Selecting a variant<a class="headerlink" href="#selecting-a-variant" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
+    <span class="s2">&quot;wildsat&quot;</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;swint&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
 <h3 id="example-featurearch-tuning-env-controlled">Example feature/arch tuning (env-controlled)<a class="headerlink" href="#example-featurearch-tuning-env-controlled" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Example (shell):</span>
-<span class="n">export</span> <span class="n">RS_EMBED_WILDSAT_ARCH</span><span class="o">=</span><span class="n">vitb16</span>
 <span class="n">export</span> <span class="n">RS_EMBED_WILDSAT_FEATURE</span><span class="o">=</span><span class="n">image_head</span>
 <span class="n">export</span> <span class="n">RS_EMBED_WILDSAT_NORM</span><span class="o">=</span><span class="n">minmax</span>
 <span class="n">export</span> <span class="n">RS_EMBED_WILDSAT_GRID_FROM_TOKENS</span><span class="o">=</span><span class="mi">1</span>
@@ -2441,13 +2551,13 @@
 <h2 id="paper-links">Paper &amp; Links<a class="headerlink" href="#paper-links" title="Permanent link">&para;</a></h2>
 <ul>
 <li><strong>Publication</strong>: <a href="https://arxiv.org/abs/2412.14428">ICCV 2025</a></li>
-<li><strong>Code</strong>: <a href="https://github.com/mdchuc/HRSFM">mdchuc/HRSFM</a></li>
+<li><strong>Code</strong>: <a href="https://github.com/cvl-umass/wildsat">cvl-umass/wildsat</a></li>
 </ul>
 <hr />
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
-<li>The default checkpoint (<code>vitb16-imagenet-bnfc.pth</code>) is the only one that auto-downloads; other architectures require a user-provided checkpoint.</li>
-<li>Backbone architecture is auto-inferred from checkpoint keys — set <code>RS_EMBED_WILDSAT_ARCH</code> explicitly if inference is ambiguous.</li>
+<li>The default variant (<code>vitb16</code>) auto-downloads the ImageNet-pretrained checkpoint; other variants (<code>resnet50</code>, <code>swint</code>) also auto-download their respective checkpoints.</li>
+<li>Backbone architecture is determined by the selected variant. When using <code>RS_EMBED_WILDSAT_CKPT</code> to provide a custom checkpoint, set <code>RS_EMBED_WILDSAT_ARCH</code> explicitly if architecture inference is ambiguous.</li>
 <li>Non-ViT backbones (resnet50, swint) cannot produce patch-token grids; the adapter returns a <code>1×1</code> grid with <code>grid_kind="vector_as_1x1"</code> instead.</li>
 </ul>
 
