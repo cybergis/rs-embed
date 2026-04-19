@@ -136,3 +136,10 @@ ignore = [
 "src/rs_embed/__init__.py" = ["F401"]     # public re-exports
 "src/rs_embed/api.py" = ["F401"]          # public re-exports
 "src/rs_embed/core/specs.py" = ["F811"]  # dataclass field vs staticmethod name collision
+
+[tool.coverage.run]
+source = ["src/rs_embed"]
+omit = [
+    "src/rs_embed/embedders/_vendor/*",
+    "src/rs_embed/__main__.py",
+]
