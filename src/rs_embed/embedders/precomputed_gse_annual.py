@@ -30,13 +30,9 @@ def _gse_pixel_threshold() -> int:
     try:
         threshold = int(raw_value)
     except (TypeError, ValueError) as exc:
-        raise ModelError(
-            "Invalid RS_EMBED_GSE_MAX_PIXELS value: must be an integer."
-        ) from exc
+        raise ModelError("Invalid RS_EMBED_GSE_MAX_PIXELS value: must be an integer.") from exc
     if threshold < 1:
-        raise ModelError(
-            f"RS_EMBED_GSE_MAX_PIXELS must be >= 1, got {threshold}."
-        )
+        raise ModelError(f"RS_EMBED_GSE_MAX_PIXELS must be >= 1, got {threshold}.")
     return threshold
 
 
