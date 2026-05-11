@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import warnings
+
 from ..providers import has_provider
 from .errors import ModelError
 from .specs import OutputSpec, SpatialSpec, TemporalSpec
@@ -114,10 +116,13 @@ def assert_supported(
     if isinstance(temporal_hint, dict) and "mode" in temporal_hint:
         mode_hint = str(temporal_hint["mode"])
         if (
-            "year" in mode_hint
+            mode_hint == "year"
             and temporal is not None
             and getattr(temporal, "mode", None) != "year"
         ):
-            raise ModelError(
-                f"Model '{embedder.model_name}' expects TemporalSpec.mode='year' (or None)."
+            warnings.warn(
+                f"Model '{embedder.model_name}' only supports TemporalSpec.year; "
+                f"got mode='{temporal.mode}'. The start year will be used for lookup.",
+                UserWarning,
+                stacklevel=2,
             )

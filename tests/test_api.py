@@ -501,7 +501,7 @@ def test_assert_supported_wrong_output():
 def test_assert_supported_wrong_temporal():
     emb = _BackendLimitedEmbedder()
     emb.model_name = "limited"
-    with pytest.raises(ModelError, match="expects TemporalSpec.mode='year'"):
+    with pytest.warns(UserWarning, match="only supports TemporalSpec.year"):
         _assert_supported(
             emb,
             backend="gee",

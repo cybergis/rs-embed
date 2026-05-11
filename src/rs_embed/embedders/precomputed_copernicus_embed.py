@@ -158,8 +158,16 @@ class CopernicusEmbedder(EmbedderBase):
     ) -> Embedding:
         if temporal is None:
             raise ModelError("copernicus_embed requires TemporalSpec.year(YYYY).")
-        if temporal.mode != "year":
-            raise ModelError("copernicus_embed only supports TemporalSpec.year(YYYY).")
+        temporal.validate()
+        if temporal.mode == "range":
+            year = int(str(temporal.start)[:4])
+            warnings.warn(
+                f"copernicus_embed only supports annual embeddings; "
+                f"TemporalSpec.range will use start year {year} for lookup.",
+                UserWarning,
+                stacklevel=2,
+            )
+            temporal = TemporalSpec.year(year)
         if temporal.year not in SUPPORTED_YEARS:
             raise ModelError(
                 f"copernicus_embed only provides embeddings for year(s) {sorted(SUPPORTED_YEARS)}; "

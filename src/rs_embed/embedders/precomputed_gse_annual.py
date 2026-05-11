@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -105,8 +106,15 @@ class GSEAnnualEmbedder(EmbedderBase):
         if temporal is None:
             raise ModelError("gse_annual requires TemporalSpec.year(year=...).")
         temporal.validate()
-        if temporal.mode != "year":
-            raise ModelError("gse_annual only supports TemporalSpec.year in v0.1.")
+        if temporal.mode == "range":
+            year = int(str(temporal.start)[:4])
+            warnings.warn(
+                f"gse_annual only supports annual embeddings; "
+                f"TemporalSpec.range will use start year {year} for lookup.",
+                UserWarning,
+                stacklevel=2,
+            )
+            temporal = TemporalSpec.year(year)
 
         scale_m = int(getattr(sensor, "scale_m", 10) if sensor is not None else 10)
 
