@@ -166,10 +166,7 @@ class InferenceEngine:
             and skey is not None
         )
         can_batch_no_input = (
-            prefer_batch
-            and allow_nonresize
-            and supports_batch_api(embedder)
-            and not needs_provider_input
+            prefer_batch and supports_batch_api(embedder) and not needs_provider_input
         )
         return can_batch_prefetched, can_batch_no_input
 
@@ -423,7 +420,7 @@ class InferenceEngine:
                 needs_provider_input=ctx.needs_provider_input,
                 sensor=mc.sensor,
                 skey=ctx.skey,
-                prefer_batch=self.prefer_batch,
+                prefer_batch=(self.prefer_batch or mc.is_precomputed),
                 allow_nonresize=not self._explicit_nonresize,
             )
 

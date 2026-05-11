@@ -8,6 +8,16 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- `gse` now automatically tiles large spatial requests. If the estimated pixel footprint of a `BBox` at the requested `scale_m` exceeds the GEE `sampleRectangle` limit (default 512×512, overridable via `RS_EMBED_GSE_MAX_PIXELS`), the region is split into a sub-BBox grid, each tile is fetched from `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL`, and the embedding arrays are concatenated before pooling or grid output is applied. This removes the previous hard cap on request size and makes the result equivalent to a single large fetch.
+
+### Fixed
+
+- `gse` batch inference now runs concurrently on CPU in `export_batch`. Previously, chunk-level batching was only enabled when a GPU was detected; precomputed models that do their own remote IO benefit from batching regardless of device.
+- `get_embedding` and `get_embeddings_batch` no longer raise `ModelError` when `input_prep='tile'` is passed with `model='gse'`. `export_batch` no longer silently ignores `input_prep` for GSE. Both APIs now emit a `UserWarning` when a non-default `input_prep` is passed alongside `model='gse'`, clarifying that GSE manages its own tiling.
+- `input_prep='tile'` no longer disables `get_embeddings_batch` for precomputed models in `export_batch`. The `allow_nonresize` guard in `_evaluate_batch_capability` now applies only to prefetched-input batch APIs; no-input batch APIs (which never receive an `input_chw` to tile) are unaffected.
+
 ## [0.1.3] — 2026-04-12
 
 ### Added

@@ -93,6 +93,26 @@ from .tools.runtime import (
 from .tools.runtime import (
     run_embedding_request as _run_embedding_request_shared,
 )
+from .tools.tiling import _resolve_input_prep_spec as _resolve_input_prep_spec
+
+# -----------------------------------------------------------------------------
+# Internal helpers
+# -----------------------------------------------------------------------------
+
+
+def _warn_gse_input_prep(model_n: str, input_prep: Any) -> None:
+    import warnings
+
+    if model_n != "gse":
+        return
+    if _resolve_input_prep_spec(input_prep).mode != "resize":
+        warnings.warn(
+            "model='gse' manages spatial tiling automatically based on request size; "
+            "input_prep is ignored.",
+            UserWarning,
+            stacklevel=3,
+        )
+
 
 # -----------------------------------------------------------------------------
 # Public: embeddings
@@ -238,6 +258,7 @@ def get_embedding(
     >>> emb = get_embedding("dofa", spatial=point, temporal=t, variant="large")
     """
     model_config = model_kwargs or None
+    _warn_gse_input_prep(_normalize_model_name(model), input_prep)
     _validate_specs(spatial=spatial, temporal=temporal, output=output)
     sensor_eff = _resolve_sensor_for_model(
         _normalize_model_name(model),
@@ -329,6 +350,7 @@ def get_embeddings_batch(
     >>> embs = get_embeddings_batch("dofa", spatials=points, temporal=t, variant="large")
     """
     model_config = model_kwargs or None
+    _warn_gse_input_prep(_normalize_model_name(model), input_prep)
     _validate_spatial_list(spatials=spatials, temporal=temporal, output=output)
     sensor_eff = _resolve_sensor_for_model(
         _normalize_model_name(model),
@@ -440,6 +462,12 @@ def export_batch(
 
     if not isinstance(spatials, list) or len(spatials) == 0:
         raise ModelError("spatials must be a non-empty list[SpatialSpec].")
+
+    if _resolve_input_prep_spec(config.input_prep).mode != "resize":
+        for _m in models:
+            if _normalize_model_name(_m if isinstance(_m, str) else _m.name) == "gse":
+                _warn_gse_input_prep("gse", config.input_prep)
+                break
 
     backend_n = _normalize_backend_name(backend)
     device_n = _normalize_device_name(device)

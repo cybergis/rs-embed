@@ -357,6 +357,10 @@ def fetch_api_side_inputs(
     if not use_api_side_input_prep:
         return None
 
+    # Precomputed models manage their own fetch/tiling internally.
+    if getattr(type(embedder), "_is_precomputed", False):
+        return None
+
     factory = provider_factory_for_backend(backend_n)
     if factory is None:
         if mode == "tile":

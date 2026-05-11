@@ -12,6 +12,7 @@ build/
 _gee_checks/
 exports/
 examples/**
+demo_export/
 
 !examples/
 

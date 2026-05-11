@@ -185,9 +185,9 @@ class BatchExporter:
                         self._prefetch_chunk, next_prefetch, chunk_groups[chunk_idx + 1]
                     )
 
-                # Batch inference (GPU path)
+                # Chunk-level batch inference when useful for GPU or precomputed models.
                 chunk_embed_results: dict[tuple[int, str], Any] = {}
-                use_batch = bool(cfg.save_embeddings and self.inference.prefer_batch)
+                use_batch = bool(cfg.save_embeddings and self._should_batch_per_item())
                 if use_batch:
                     chunk_embed_results = self.inference.infer_chunk(
                         idxs=idxs,
@@ -495,6 +495,14 @@ class BatchExporter:
                 bar.update(1)
 
         return model_progress, _on_model_done
+
+    def _should_batch_per_item(self) -> bool:
+        """Return True when per-item export should precompute chunk embeddings."""
+        if self.inference.prefer_batch:
+            return True
+        # Precomputed provider models such as gse perform their own remote IO in
+        # get_embeddings_batch(); this is useful on CPU and independent of input_prep.
+        return any(bool(mc.is_precomputed) for mc in self.models)
 
     def _prefetch_chunk(self, prefetch: PrefetchManager, idxs: list[int]) -> None:
         """Prefetch a chunk of inputs (for use in pipelined prefetch)."""

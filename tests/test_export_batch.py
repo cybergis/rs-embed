@@ -1774,6 +1774,74 @@ def test_export_batch_per_item_cpu_honors_config_input_prep_tile(tmp_path, monke
     assert meta["input_prep"]["tile_count"] == 4
 
 
+def test_export_batch_per_item_cpu_batches_precomputed_with_tile_input_prep(tmp_path, monkeypatch):
+    class DummyPrecomputedBatch:
+        batch_calls = []
+        single_calls = 0
+
+        def describe(self):
+            return {"type": "precomputed", "backend": ["local"], "output": ["pooled"]}
+
+        def get_embedding(
+            self,
+            *,
+            spatial,
+            temporal,
+            sensor,
+            output,
+            backend,
+            device="auto",
+            input_chw=None,
+        ):
+            type(self).single_calls += 1
+            return Embedding(data=np.array([99.0], dtype=np.float32), meta={"path": "single"})
+
+        def get_embeddings_batch(
+            self, *, spatials, temporal, sensor, output, backend, device="auto"
+        ):
+            type(self).batch_calls.append(len(spatials))
+            return [
+                Embedding(data=np.array([float(i)], dtype=np.float32), meta={"path": "batch"})
+                for i, _sp in enumerate(spatials)
+            ]
+
+    registry.register("dummy_precomputed_batch_tile")(DummyPrecomputedBatch)
+
+    import rs_embed.api as api
+
+    get_embedder_bundle_cached.cache_clear()
+    monkeypatch.setattr(
+        "rs_embed.pipelines.inference._device_has_gpu",
+        lambda device: False,
+    )
+
+    spatials = [
+        PointBuffer(lon=0, lat=0, buffer_m=10),
+        PointBuffer(lon=1, lat=1, buffer_m=10),
+        PointBuffer(lon=2, lat=2, buffer_m=10),
+    ]
+    manifests = api.export_batch(
+        spatials=spatials,
+        temporal=TemporalSpec.year(2022),
+        models=["dummy_precomputed_batch_tile"],
+        target=ExportTarget.per_item(str(tmp_path / "precomputed_batch")),
+        config=ExportConfig(
+            save_inputs=False,
+            save_embeddings=True,
+            chunk_size=2,
+            show_progress=False,
+            input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9),
+        ),
+        backend="local",
+        device="cpu",
+        output=OutputSpec.pooled(),
+    )
+
+    assert DummyPrecomputedBatch.batch_calls == [2, 1]
+    assert DummyPrecomputedBatch.single_calls == 0
+    assert [m["models"][0]["meta"]["path"] for m in manifests] == ["batch", "batch", "batch"]
+
+
 def test_export_batch_combined_honors_config_input_prep_tile(tmp_path, monkeypatch):
     class DummyTileCombined:
         batch_sizes = []
