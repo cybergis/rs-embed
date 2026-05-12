@@ -18,7 +18,7 @@ import numpy as np
 
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ExportLayout, ExportTarget, ModelConfig
-from ..providers import gee_utils as _gee_utils
+from ..providers import fetch as _providers_fetch
 from ..tools.manifest import (
     point_failure_manifest,
     point_resume_manifest,
@@ -96,8 +96,8 @@ class BatchExporter:
         self.resolved_backend = resolved_backend
         self.device = device
         self.provider_factory = provider_factory
-        self.fetch_fn = fetch_fn or _gee_utils.fetch_gee_patch_raw
-        self.inspect_fn = inspect_fn or _gee_utils.inspect_input_raw
+        self.fetch_fn = fetch_fn or _providers_fetch.fetch_sensor_patch_chw
+        self.inspect_fn = inspect_fn or _providers_fetch.inspect_fetch_result
         self.create_progress = progress_factory or _default_create_progress
 
         # Model name lists for convenience

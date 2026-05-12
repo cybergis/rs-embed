@@ -22,6 +22,21 @@ from ..core.specs import (
 )
 from ..core.types import FetchResult
 from ..providers import ProviderBase
+from ..providers.fetch import (
+    fetch_sensor_patch_chw as _fetch_sensor_patch_chw,
+)
+from ..providers.resolution import (
+    is_provider_backend,
+)
+from ..tools.runtime import (
+    load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    resolve_device_auto_torch as _resolve_device,
+)
+from .base import EmbedderBase
+from .meta import build_meta, temporal_to_range
+
 
 def ensure_torch() -> None:
     try:
@@ -29,14 +44,27 @@ def ensure_torch() -> None:
     except Exception as e:
         raise ModelError("This embedder requires torch installed.") from e
 
-from .meta import build_meta, temporal_to_range
 
-def base_meta(*, model_name, hf_id, backend, image_size, sensor,
-              temporal=None, source=None, embed_type="on_the_fly", extra=None):
+def base_meta(
+    *,
+    model_name,
+    hf_id,
+    backend,
+    image_size,
+    sensor,
+    temporal=None,
+    source=None,
+    embed_type="on_the_fly",
+    extra=None,
+):
     m = build_meta(
-        model=model_name, kind=embed_type, backend=backend,
+        model=model_name,
+        kind=embed_type,
+        backend=backend,
         source=source or getattr(sensor, "collection", None),
-        sensor=sensor, temporal=temporal, image_size=image_size,
+        sensor=sensor,
+        temporal=temporal,
+        image_size=image_size,
     )
     m["hf_id"] = hf_id
     if extra:
@@ -64,22 +92,11 @@ def tokens_to_grid_dhw(tokens):
     has_cls = n > 1 and h2 * h2 == n - 1
     patch = tokens[1:] if has_cls else tokens
     p, d = patch.shape
-    hw = int(p ** 0.5)
+    hw = int(p**0.5)
     if hw * hw != p:
         raise ModelError(f"Patch token count {p} is not a perfect square.")
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
-from .base import EmbedderBase
-from ..providers.fetch import (
-    fetch_sensor_patch_chw as _fetch_sensor_patch_chw,
-)
-from ..providers.resolution import (
-    is_provider_backend,
-)
-from ..tools.runtime import (
-    load_cached_with_device as _load_cached_with_device,
-    resolve_device_auto_torch as _resolve_device,
-)
 
 # SatVision-TOA model defaults from published config/model card.
 _DEFAULT_MODEL_ID = "nasa-cisto-data-science-group/satvision-toa-giant-patch8-window8-128"

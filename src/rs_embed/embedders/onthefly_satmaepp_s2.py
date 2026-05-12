@@ -20,29 +20,6 @@ from ..core.specs import (
     TemporalSpec,
 )
 from ..providers.base import ProviderBase
-
-def ensure_torch() -> None:
-    try:
-        import torch  # noqa: F401
-    except Exception as e:
-        raise ModelError("This embedder requires torch installed.") from e
-
-from .meta import build_meta, temporal_to_range
-
-def base_meta(*, model_name, hf_id, backend, image_size, sensor,
-              temporal=None, source=None, embed_type="on_the_fly", extra=None):
-    m = build_meta(
-        model=model_name, kind=embed_type, backend=backend,
-        source=source or getattr(sensor, "collection", None),
-        sensor=sensor, temporal=temporal, image_size=image_size,
-    )
-    m["hf_id"] = hf_id
-    if extra:
-        m.update(extra)
-    return m
-
-from .base import EmbedderBase
-from .config import model_config_value
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
 )
@@ -52,6 +29,44 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from .base import EmbedderBase
+from .config import model_config_value
+from .meta import build_meta, temporal_to_range
+
+
+def ensure_torch() -> None:
+    try:
+        import torch  # noqa: F401
+    except Exception as e:
+        raise ModelError("This embedder requires torch installed.") from e
+
+
+def base_meta(
+    *,
+    model_name,
+    hf_id,
+    backend,
+    image_size,
+    sensor,
+    temporal=None,
+    source=None,
+    embed_type="on_the_fly",
+    extra=None,
+):
+    m = build_meta(
+        model=model_name,
+        kind=embed_type,
+        backend=backend,
+        source=source or getattr(sensor, "collection", None),
+        sensor=sensor,
+        temporal=temporal,
+        image_size=image_size,
+    )
+    m["hf_id"] = hf_id
+    if extra:
+        m.update(extra)
+    return m
+
 
 # SatMAE++ Sentinel branch in source repo drops [B1, B9, B10] and uses 10 channels.
 # GEE S2 SR does not expose B10, so we directly fetch the final 10-channel subset.

@@ -22,21 +22,26 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-def ensure_torch() -> None:
-    try:
-        import torch  # noqa: F401
-    except Exception as e:
-        raise ModelError("This embedder requires torch installed.") from e
-from .base import EmbedderBase
-from .meta import build_meta, temporal_to_range
-from .onthefly_terramind import _fetch_s2_sr_12_raw_chw
 from ..providers.resolution import (
     is_provider_backend,
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
+from .base import EmbedderBase
+from .meta import build_meta, temporal_to_range
+from .onthefly_terramind import _fetch_s2_sr_12_raw_chw
+
+
+def ensure_torch() -> None:
+    try:
+        import torch  # noqa: F401
+    except Exception as e:
+        raise ModelError("This embedder requires torch installed.") from e
+
 
 _S2_SR_12_BANDS = [
     "B1",

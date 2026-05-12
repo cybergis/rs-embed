@@ -23,12 +23,16 @@ from ..core.specs import (
 )
 from ..core.types import FetchResult
 from ..providers import ProviderBase
-from .base import EmbedderBase
-from .meta import build_meta
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from ..providers.fetch import (
     fetch_s1_vvvh_raw_chw as _fetch_s1_vvvh_raw_chw_shared,
+)
+from ..providers.fetch import (
     fetch_s1_vvvh_raw_chw_with_meta as _fetch_s1_vvvh_raw_chw_with_meta_shared,
+)
+from ..providers.fetch import (
     normalize_s1_vvvh_chw as _normalize_s1_vvvh_chw,
 )
 from ..tools.normalization import (
@@ -37,6 +41,8 @@ from ..tools.normalization import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _auto_device,
 )
+from .base import EmbedderBase
+from .meta import build_meta
 
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"

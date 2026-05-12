@@ -5,10 +5,10 @@ from __future__ import annotations
 from dataclasses import asdict
 from typing import Any
 
-from .core.errors import ProviderError
+from .core.errors import ModelError, ProviderError
 from .core.specs import SensorSpec, SpatialSpec, TemporalSpec
-from .providers import get_provider
-from .providers.gee_utils import fetch_provider_patch_raw
+from .providers.fetch import fetch_sensor_patch_chw as _fetch_sensor_patch_chw
+from .providers.resolution import create_provider_for_backend
 from .tools.inspection import checks_save_dir, inspect_chw, save_quicklook_rgb
 
 
@@ -63,10 +63,11 @@ def inspect_provider_patch(
     backend_name = str(backend).strip().lower()
     if not backend_name:
         raise ProviderError("backend must be a non-empty provider name.")
-    kwargs = {"auto_auth": True} if backend_name == "gee" else {}
-    provider = get_provider(backend_name, **kwargs)
-    provider.ensure_ready()
-    x_chw = fetch_provider_patch_raw(
+    try:
+        provider = create_provider_for_backend(backend_name, allow_auto=False)
+    except ModelError as exc:
+        raise ProviderError(str(exc)) from exc
+    x_chw = _fetch_sensor_patch_chw(
         provider,
         spatial=spatial,
         temporal=temporal,

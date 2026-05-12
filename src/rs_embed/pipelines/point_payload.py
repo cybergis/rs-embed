@@ -14,7 +14,7 @@ import numpy as np
 
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig
-from ..providers import gee_utils as _gee_utils
+from ..providers import fetch as _providers_fetch
 from ..tools.manifest import summarize_status
 from ..tools.normalization import normalize_model_name
 from ..tools.runtime import (
@@ -71,8 +71,8 @@ def build_one_point_payload(
     continue_on_error = config.continue_on_error
     max_retries = config.max_retries
     retry_backoff_s = config.retry_backoff_s
-    fetch = fetch_fn or _gee_utils.fetch_gee_patch_raw
-    inspect = inspect_fn or _gee_utils.inspect_input_raw
+    fetch = fetch_fn or _providers_fetch.fetch_sensor_patch_chw
+    inspect = inspect_fn or _providers_fetch.inspect_fetch_result
 
     arrays: dict[str, np.ndarray] = {}
     manifest: dict[str, Any] = {

@@ -23,14 +23,6 @@ from ..core.specs import (
     TemporalSpec,
 )
 from ..providers import ProviderBase
-from ..tools.temporal import temporal_frame_midpoints
-def ensure_torch() -> None:
-    try:
-        import torch  # noqa: F401
-    except Exception as e:
-        raise ModelError("This embedder requires torch installed.") from e
-from .base import EmbedderBase
-from .meta import build_meta, temporal_to_range
 from ..providers.fetch import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
 )
@@ -42,8 +34,21 @@ from ..tools.normalization import (
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
+from ..tools.temporal import temporal_frame_midpoints
+from .base import EmbedderBase
+from .meta import build_meta, temporal_to_range
+
+
+def ensure_torch() -> None:
+    try:
+        import torch  # noqa: F401
+    except Exception as e:
+        raise ModelError("This embedder requires torch installed.") from e
+
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 _GALILEO_PRETRAIN_STATS = {

@@ -1,15 +1,16 @@
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
 
-from ..core.errors import ModelError
+from ..core.errors import ModelError, ProviderError, SpecError
 from ..core.specs import BBox, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers.base import ProviderBase
-from ..tools.normalization import normalize_input_array, normalize_input_chw
-from ..tools.serialization import jsonable as _jsonable
+from ..tools.normalization import normalize_input_chw
+from ..tools.temporal import split_date_range as _split_date_range_core
 
 _WEB_MERCATOR_R = 6378137.0
 _WEB_MERCATOR_MAX_LAT = 85.05112878
@@ -95,6 +96,17 @@ def _web_mercator_xy_to_lonlat(x_m: float, y_m: float) -> tuple[float, float]:
     return (float(lon), float(lat))
 
 
+def _validated_mid(candidate: float, lo: float, hi: float, coord_name: str) -> float:
+    mid = min(max(candidate, lo), hi)
+    if not (lo < mid < hi):
+        mid = 0.5 * (lo + hi)
+    if not (lo < mid < hi):
+        raise ModelError(
+            f"Failed to split BBox along {coord_name} for GEE sampleRectangle fallback."
+        )
+    return mid
+
+
 def _bbox_span_pixels_estimate(bbox: BBox, *, scale_m: int) -> tuple[int, int]:
     x0, y0 = _lonlat_to_web_mercator_xy(bbox.minlon, bbox.minlat)
     x1, y1 = _lonlat_to_web_mercator_xy(bbox.maxlon, bbox.maxlat)
@@ -107,8 +119,7 @@ def _bbox_span_pixels_estimate(bbox: BBox, *, scale_m: int) -> tuple[int, int]:
 def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BBox, BBox, str]:
     x0, y0 = _lonlat_to_web_mercator_xy(bbox.minlon, bbox.minlat)
     x1, y1 = _lonlat_to_web_mercator_xy(bbox.maxlon, bbox.maxlat)
-    dx = abs(x1 - x0)
-    dy = abs(y1 - y0)
+    dx, dy = abs(x1 - x0), abs(y1 - y0)
 
     axis = str(prefer_axis).lower()
     if axis not in {"x", "y"}:
@@ -122,25 +133,19 @@ def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BB
             "Cannot split degenerate BBox while handling GEE sampleRectangle pixel-limit error."
         )
 
+    xm, ym = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
     if axis == "x":
-        xm = 0.5 * (x0 + x1)
-        lon_mid, _ = _web_mercator_xy_to_lonlat(xm, 0.5 * (y0 + y1))
-        lon_mid = min(max(lon_mid, float(bbox.minlon)), float(bbox.maxlon))
-        if not (float(bbox.minlon) < lon_mid < float(bbox.maxlon)):
-            lon_mid = 0.5 * (float(bbox.minlon) + float(bbox.maxlon))
-        if not (float(bbox.minlon) < lon_mid < float(bbox.maxlon)):
-            raise ModelError(
-                "Failed to split BBox along longitude for GEE sampleRectangle fallback."
-            )
+        lon_raw, _ = _web_mercator_xy_to_lonlat(xm, ym)
+        lon_mid = _validated_mid(lon_raw, float(bbox.minlon), float(bbox.maxlon), "longitude")
         west = BBox(
             minlon=float(bbox.minlon),
             minlat=float(bbox.minlat),
-            maxlon=float(lon_mid),
+            maxlon=lon_mid,
             maxlat=float(bbox.maxlat),
             crs=bbox.crs,
         )
         east = BBox(
-            minlon=float(lon_mid),
+            minlon=lon_mid,
             minlat=float(bbox.minlat),
             maxlon=float(bbox.maxlon),
             maxlat=float(bbox.maxlat),
@@ -148,17 +153,11 @@ def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BB
         )
         return (west, east, "x")
 
-    ym = 0.5 * (y0 + y1)
-    _, lat_mid = _web_mercator_xy_to_lonlat(0.5 * (x0 + x1), ym)
-    lat_mid = min(max(lat_mid, float(bbox.minlat)), float(bbox.maxlat))
-    if not (float(bbox.minlat) < lat_mid < float(bbox.maxlat)):
-        lat_mid = 0.5 * (float(bbox.minlat) + float(bbox.maxlat))
-    if not (float(bbox.minlat) < lat_mid < float(bbox.maxlat)):
-        raise ModelError("Failed to split BBox along latitude for GEE sampleRectangle fallback.")
-
+    _, lat_raw = _web_mercator_xy_to_lonlat(xm, ym)
+    lat_mid = _validated_mid(lat_raw, float(bbox.minlat), float(bbox.maxlat), "latitude")
     north = BBox(
         minlon=float(bbox.minlon),
-        minlat=float(lat_mid),
+        minlat=lat_mid,
         maxlon=float(bbox.maxlon),
         maxlat=float(bbox.maxlat),
         crs=bbox.crs,
@@ -167,10 +166,227 @@ def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BB
         minlon=float(bbox.minlon),
         minlat=float(bbox.minlat),
         maxlon=float(bbox.maxlon),
-        maxlat=float(lat_mid),
+        maxlat=lat_mid,
         crs=bbox.crs,
     )
     return (north, south, "y")
+
+
+# ── Band alias tables ────────────────────────────────────────────────────────
+
+_ALIAS_S2 = {
+    "BLUE": "B2",
+    "GREEN": "B3",
+    "RED": "B4",
+    "NIR": "B8",
+    "NIR_BROAD": "B8",
+    "NIR_WIDE": "B8",
+    "NIR_NARROW": "B8A",
+    "NIRN": "B8A",
+    "NIRNARROW": "B8A",
+    "NIR_N": "B8A",
+    "RE1": "B5",
+    "RED_EDGE_1": "B5",
+    "RE2": "B6",
+    "RED_EDGE_2": "B6",
+    "RE3": "B7",
+    "RED_EDGE_3": "B7",
+    "RE4": "B8A",
+    "RED_EDGE_4": "B8A",
+    "SWIR1": "B11",
+    "SWIR_1": "B11",
+    "SWIR2": "B12",
+    "SWIR_2": "B12",
+}
+_ALIAS_LS89_SR = {
+    "BLUE": "SR_B2",
+    "GREEN": "SR_B3",
+    "RED": "SR_B4",
+    "NIR": "SR_B5",
+    "SWIR1": "SR_B6",
+    "SWIR2": "SR_B7",
+}
+_ALIAS_LS457_SR = {
+    "BLUE": "SR_B1",
+    "GREEN": "SR_B2",
+    "RED": "SR_B3",
+    "NIR": "SR_B4",
+    "SWIR1": "SR_B5",
+    "SWIR2": "SR_B7",
+}
+
+_NO_IMAGES_FOUND_MSG = "No images found for the selected region/time window."
+
+
+# ── GEE auth / init helpers ───────────────────────────────────────────────────
+
+
+def _gee_init_kwargs(project: str | None) -> dict[str, str]:
+    return {"project": project} if project else {}
+
+
+def _gee_error_message(exc: Exception) -> str:
+    msg = str(exc).strip()
+    low = msg.lower()
+    if any(
+        token in low
+        for token in (
+            "quota project",
+            "cloud project",
+            "project is required",
+            "user project",
+            "quota_project_id",
+            "no project",
+        )
+    ):
+        return (
+            "Earth Engine requires a Google Cloud project. Pass "
+            "project='your-gcp-project-id', set EE_PROJECT or "
+            "GOOGLE_CLOUD_PROJECT, or configure a default project with "
+            "`earthengine set_project your-gcp-project-id` or "
+            "`gcloud auth application-default set-quota-project your-gcp-project-id`."
+        )
+    if any(
+        token in low
+        for token in (
+            "authenticate",
+            "authorization",
+            "credentials",
+            "credential",
+            "login required",
+            "invalid_grant",
+            "refresh token",
+            "reauth",
+        )
+    ):
+        return (
+            "Earth Engine authentication is required. Run `earthengine authenticate` and try again."
+        )
+    detail = msg or repr(exc)
+    return f"Failed to initialize GEE: {detail}"
+
+
+# ── Band alias resolution ─────────────────────────────────────────────────────
+
+
+def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str, ...]:
+    if not bands:
+        return bands
+    c = (collection or "").upper()
+    if "COPERNICUS/S2" in c:
+        amap = _ALIAS_S2
+    elif "LANDSAT/LC08/C02/T1_L2" in c or "LANDSAT/LC09/C02/T1_L2" in c:
+        amap = _ALIAS_LS89_SR
+    elif (
+        "LANDSAT/LE07/C02/T1_L2" in c
+        or "LANDSAT/LT05/C02/T1_L2" in c
+        or "LANDSAT/LT04/C02/T1_L2" in c
+    ):
+        amap = _ALIAS_LS457_SR
+    else:
+        amap = {}
+    return tuple(amap.get((b or "").upper(), b) for b in bands)
+
+
+# ── Temporal split helper ─────────────────────────────────────────────────────
+
+
+def _split_date_range(start: str, end: str, n_parts: int) -> tuple[tuple[str, str], ...]:
+    try:
+        return _split_date_range_core(start, end, n_parts)
+    except SpecError as e:
+        raise ProviderError(str(e)) from e
+
+
+# ── Collection utilities ──────────────────────────────────────────────────────
+
+
+def _no_images_found_message(*, collection: str | None = None) -> str:
+    if collection:
+        return f"{_NO_IMAGES_FOUND_MSG} collection={collection!r}"
+    return _NO_IMAGES_FOUND_MSG
+
+
+def _collection_size_or_none(col: Any) -> int | None:
+    try:
+        return int(col.size().getInfo())
+    except Exception:
+        return None
+
+
+def _raise_if_empty_collection(col: Any, *, collection: str | None = None) -> None:
+    if _collection_size_or_none(col) == 0:
+        raise ProviderError(_no_images_found_message(collection=collection))
+
+
+def _order_collection_for_mosaic(col: Any) -> Any:
+    """Stabilize mosaic priority by preferring chronological collection order."""
+    try:
+        return col.sort("system:time_start")
+    except Exception:
+        return col
+
+
+def _format_s1_empty_collection_message(
+    *,
+    collection_id: str,
+    temporal: TemporalSpec,
+    counts: dict[str, int | None],
+    require_iw: bool,
+    relax_iw_on_empty: bool,
+) -> str:
+    detail_parts = [
+        f"base(date+bounds)={counts.get('base')}",
+        f"iw={counts.get('iw')}",
+        f"vv={counts.get('vv')}",
+        f"vh={counts.get('vh')}",
+    ]
+    if "vh_no_iw" in counts:
+        detail_parts.append(f"vh_no_iw={counts.get('vh_no_iw')}")
+    details = ", ".join(detail_parts)
+    return (
+        f"{_NO_IMAGES_FOUND_MSG} collection={collection_id!r} "
+        f"time=({temporal.start!r}, {temporal.end!r}) "
+        f"filters=[{details}]. "
+        f"requested_iw={require_iw} relax_iw_on_empty={relax_iw_on_empty}. "
+        "TerraFM S1 expects dual-pol VV/VH input; try a wider time window or a different AOI."
+    )
+
+
+def _build_s1_dualpol_collection(base: Any, *, require_iw: bool) -> Any:
+    import ee
+
+    col = base
+    if require_iw:
+        col = col.filter(ee.Filter.eq("instrumentMode", "IW"))
+    col = col.filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VV"))
+    col = col.filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VH"))
+    return col
+
+
+def _sample_image_bands_raw_chw(
+    img: Any,
+    *,
+    region: Any,
+    bands: Sequence[str],
+    scale_m: int,
+    fill_value: float,
+) -> np.ndarray:
+    img = img.select(list(bands)).reproject(crs="EPSG:3857", scale=int(scale_m))
+    rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
+    props = rect.get("properties", {}) if isinstance(rect, dict) else {}
+    if not props:
+        raise ProviderError(_NO_IMAGES_FOUND_MSG)
+    arrs = [np.array(props.get(str(b), []), dtype=np.float32) for b in bands]
+    try:
+        raw = np.stack(arrs, axis=0).astype(np.float32)
+    except Exception as e:
+        raise ProviderError("Failed to sample rectangle from GEE image.") from e
+    raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
+    return np.clip(raw, 0.0, 10000.0).astype(np.float32)
+
+
+# ── Tile fetch helpers ────────────────────────────────────────────────────────
 
 
 def _flip_sample_tile_y(arr: np.ndarray) -> np.ndarray:
@@ -179,6 +395,83 @@ def _flip_sample_tile_y(arr: np.ndarray) -> np.ndarray:
     if a.ndim < 2:
         raise ModelError(f"Expected fetched tile with spatial last2 dims, got shape={a.shape}")
     return np.flip(a, axis=a.ndim - 2).astype(np.float32, copy=False)
+
+
+def _bbox_recursive_fallback(
+    *,
+    spatial: SpatialSpec,
+    scale_m: int,
+    fill_value: float,
+    fetch_fn: Any,
+    stitch_fn: Any,
+    _depth: int = 0,
+) -> Any:
+    """Generic recursive BBox-splitting fallback for GEE pixel-limit errors.
+
+    Calls fetch_fn(spatial); on a pixel-limit error splits the bbox, recurses,
+    then calls stitch_fn(result_a, result_b, bbox, axis, scale_m, fill_value).
+    """
+    try:
+        return fetch_fn(spatial)
+    except Exception as e:
+        if not (_looks_like_gee_sample_too_many_pixels(e) and _looks_like_bbox_spatial(spatial)):
+            raise
+        if _depth >= _MAX_GEE_BBOX_SPLIT_DEPTH:
+            raise ModelError(
+                "GEE sampleRectangle pixel-limit fallback exceeded max recursive BBox splits "
+                f"({_MAX_GEE_BBOX_SPLIT_DEPTH})."
+            ) from e
+        spatial_bbox = _coerce_bbox_like(spatial)
+        h_est, w_est = _bbox_span_pixels_estimate(spatial_bbox, scale_m=scale_m)
+        prefer_axis = "x" if w_est >= h_est else "y"
+        a_sp, b_sp, axis = _split_bbox_for_recursive_fetch(spatial_bbox, prefer_axis=prefer_axis)
+        kw: dict[str, Any] = dict(
+            scale_m=scale_m,
+            fill_value=fill_value,
+            fetch_fn=fetch_fn,
+            stitch_fn=stitch_fn,
+            _depth=_depth + 1,
+        )
+        return stitch_fn(
+            _bbox_recursive_fallback(spatial=a_sp, **kw),
+            _bbox_recursive_fallback(spatial=b_sp, **kw),
+            spatial_bbox,
+            axis,
+            scale_m,
+            fill_value,
+        )
+
+
+def _fetch_with_bbox_fallback(
+    *,
+    spatial: SpatialSpec,
+    scale_m: int,
+    fill_value: float,
+    fetch_fn: Any,
+    split_depth: int = 0,
+) -> np.ndarray:
+    """BBox-splitting fallback for fetch functions returning np.ndarray."""
+
+    def _stitch(
+        a: Any, b: Any, bbox: Any, axis: str, scale_m: int, fill_value: float
+    ) -> np.ndarray:
+        return _stitch_bbox_split_arrays(
+            arr_a=np.asarray(a, dtype=np.float32),
+            arr_b=np.asarray(b, dtype=np.float32),
+            parent_spatial=bbox,
+            axis=axis,
+            scale_m=scale_m,
+            fill_value=fill_value,
+        )
+
+    return _bbox_recursive_fallback(
+        spatial=spatial,
+        scale_m=scale_m,
+        fill_value=fill_value,
+        fetch_fn=lambda sp: np.asarray(fetch_fn(sp), dtype=np.float32),
+        stitch_fn=_stitch,
+        _depth=split_depth,
+    )
 
 
 def _fetch_provider_array_chw_with_bbox_fallback(
@@ -190,10 +483,9 @@ def _fetch_provider_array_chw_with_bbox_fallback(
     scale_m: int,
     fill_value: float,
     collection: str | None,
-    split_depth: int = 0,
 ) -> np.ndarray:
-    region = provider.get_region(spatial)
-    try:
+    def _do(sp: SpatialSpec) -> np.ndarray:
+        region = provider.get_region(sp)
         arr = provider.fetch_array_chw(
             image=image,
             bands=bands,
@@ -202,52 +494,14 @@ def _fetch_provider_array_chw_with_bbox_fallback(
             fill_value=float(fill_value),
             collection=collection,
         )
-        return _flip_sample_tile_y(
-            np.asarray(arr, dtype=np.float32)
-        )  # _flip_sample_tile_y(np.asarray(arr, dtype=np.float32))
-    except Exception as e:
-        if not (_looks_like_gee_sample_too_many_pixels(e) and _looks_like_bbox_spatial(spatial)):
-            raise
-        if int(split_depth) >= _MAX_GEE_BBOX_SPLIT_DEPTH:
-            raise ModelError(
-                "GEE sampleRectangle pixel-limit fallback exceeded max recursive BBox splits "
-                f"({_MAX_GEE_BBOX_SPLIT_DEPTH})."
-            ) from e
+        return _flip_sample_tile_y(np.asarray(arr, dtype=np.float32))
 
-        spatial_bbox = _coerce_bbox_like(spatial)
-        h_est, w_est = _bbox_span_pixels_estimate(spatial_bbox, scale_m=int(scale_m))
-        prefer_axis = "x" if int(w_est) >= int(h_est) else "y"
-        a_sp, b_sp, axis = _split_bbox_for_recursive_fetch(spatial_bbox, prefer_axis=prefer_axis)
-
-        arr_a = _fetch_provider_array_chw_with_bbox_fallback(
-            provider,
-            image=image,
-            spatial=a_sp,
-            bands=bands,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
-            collection=collection,
-            split_depth=int(split_depth) + 1,
-        )
-        arr_b = _fetch_provider_array_chw_with_bbox_fallback(
-            provider,
-            image=image,
-            spatial=b_sp,
-            bands=bands,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
-            collection=collection,
-            split_depth=int(split_depth) + 1,
-        )
-
-        return _stitch_bbox_split_arrays(
-            arr_a=arr_a,
-            arr_b=arr_b,
-            parent_spatial=spatial_bbox,
-            axis=axis,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
-        )
+    return _fetch_with_bbox_fallback(
+        spatial=spatial,
+        scale_m=int(scale_m),
+        fill_value=float(fill_value),
+        fetch_fn=_do,
+    )
 
 
 def _stitch_bbox_split_arrays(
@@ -365,28 +619,3 @@ def fetch_provider_patch_raw(
 
 # Backwards-compatible alias kept for existing imports/tests.
 fetch_gee_patch_raw = fetch_provider_patch_raw
-
-
-def inspect_input_raw(x_chw: np.ndarray, *, sensor: SensorSpec, name: str) -> dict[str, Any]:
-    from ..tools.inspection import inspect_chw
-
-    x = normalize_input_array(
-        x_chw,
-        expected_channels=len(sensor.bands),
-        name=name,
-    )
-    x_inspect = x[0] if x.ndim == 4 else x
-    rep = inspect_chw(
-        x_inspect,
-        name=name,
-        expected_channels=len(sensor.bands),
-        value_range=None,
-        fill_value=float(sensor.fill_value),
-    )
-    return {
-        "ok": bool(rep.get("ok", False)),
-        "report": rep,
-        "sensor": _jsonable(sensor),
-        "input_ndim": int(x.ndim),
-        "n_frames": (int(x.shape[0]) if x.ndim == 4 else None),
-    }

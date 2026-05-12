@@ -7,228 +7,26 @@ from typing import Any
 import numpy as np
 from pyproj import Transformer
 
-from ..core.errors import ProviderError, SpecError
+from ..core.errors import ModelError, ProviderError
 from ..core.specs import BBox, PointBuffer, SensorSpec, SpatialSpec, TemporalSpec
-from ..tools.temporal import split_date_range as _split_date_range_core
 from .base import ProviderBase
-
-_ALIAS_S2 = {
-    "BLUE": "B2",
-    "GREEN": "B3",
-    "RED": "B4",
-    # NIR
-    "NIR": "B8",
-    "NIR_BROAD": "B8",
-    "NIR_WIDE": "B8",
-    # Narrow NIR (S2 band B8A)
-    "NIR_NARROW": "B8A",
-    "NIRN": "B8A",
-    "NIRNARROW": "B8A",
-    "NIR_N": "B8A",
-    # Red edge (optional but common)
-    "RE1": "B5",
-    "RED_EDGE_1": "B5",
-    "RE2": "B6",
-    "RED_EDGE_2": "B6",
-    "RE3": "B7",
-    "RED_EDGE_3": "B7",
-    "RE4": "B8A",
-    "RED_EDGE_4": "B8A",
-    # SWIR
-    "SWIR1": "B11",
-    "SWIR_1": "B11",
-    "SWIR2": "B12",
-    "SWIR_2": "B12",
-}
-_ALIAS_LS89_SR = {
-    "BLUE": "SR_B2",
-    "GREEN": "SR_B3",
-    "RED": "SR_B4",
-    "NIR": "SR_B5",
-    "SWIR1": "SR_B6",
-    "SWIR2": "SR_B7",
-}
-
-_ALIAS_LS457_SR = {
-    "BLUE": "SR_B1",
-    "GREEN": "SR_B2",
-    "RED": "SR_B3",
-    "NIR": "SR_B4",
-    "SWIR1": "SR_B5",
-    "SWIR2": "SR_B7",
-}
-
-_NO_IMAGES_FOUND_MSG = "No images found for the selected region/time window."
-
-
-def _gee_init_kwargs(project: str | None) -> dict[str, str]:
-    return {"project": project} if project else {}
-
-
-def _gee_error_message(exc: Exception) -> str:
-    msg = str(exc).strip()
-    low = msg.lower()
-
-    if any(
-        token in low
-        for token in (
-            "quota project",
-            "cloud project",
-            "project is required",
-            "user project",
-            "quota_project_id",
-            "no project",
-        )
-    ):
-        return (
-            "Earth Engine requires a Google Cloud project. Pass "
-            "project='your-gcp-project-id', set EE_PROJECT or "
-            "GOOGLE_CLOUD_PROJECT, or configure a default project with "
-            "`earthengine set_project your-gcp-project-id` or "
-            "`gcloud auth application-default set-quota-project your-gcp-project-id`."
-        )
-
-    if any(
-        token in low
-        for token in (
-            "authenticate",
-            "authorization",
-            "credentials",
-            "credential",
-            "login required",
-            "invalid_grant",
-            "refresh token",
-            "reauth",
-        )
-    ):
-        return (
-            "Earth Engine authentication is required. Run `earthengine authenticate` and try again."
-        )
-
-    detail = msg or repr(exc)
-    return f"Failed to initialize GEE: {detail}"
-
-
-def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str, ...]:
-    """Resolve semantic band aliases to real band names based on collection id."""
-    if not bands:
-        return bands
-
-    c = (collection or "").upper()
-    # Sentinel-2 (SR/TOA/HARMONIZED etc.)
-    if "COPERNICUS/S2" in c:
-        amap = _ALIAS_S2
-    # Landsat Collection 2 L2 SR (typical ids)
-    elif "LANDSAT/LC08/C02/T1_L2" in c or "LANDSAT/LC09/C02/T1_L2" in c:
-        amap = _ALIAS_LS89_SR
-    elif (
-        "LANDSAT/LE07/C02/T1_L2" in c
-        or "LANDSAT/LT05/C02/T1_L2" in c
-        or "LANDSAT/LT04/C02/T1_L2" in c
-    ):
-        amap = _ALIAS_LS457_SR
-    else:
-        # Unknown collection: do not map
-        amap = {}
-
-    out = []
-    for b in bands:
-        key = (b or "").upper()
-        out.append(amap.get(key, b))
-    return tuple(out)
-
-
-def _split_date_range(start: str, end: str, n_parts: int) -> tuple[tuple[str, str], ...]:
-    try:
-        return _split_date_range_core(start, end, n_parts)
-    except SpecError as e:
-        raise ProviderError(str(e)) from e
-
-
-def _no_images_found_message(*, collection: str | None = None) -> str:
-    if collection:
-        return f"{_NO_IMAGES_FOUND_MSG} collection={collection!r}"
-    return _NO_IMAGES_FOUND_MSG
-
-
-def _collection_size_or_none(col: Any) -> int | None:
-    try:
-        return int(col.size().getInfo())
-    except Exception as _e:
-        return None
-
-
-def _raise_if_empty_collection(col: Any, *, collection: str | None = None) -> None:
-    n = _collection_size_or_none(col)
-    if n == 0:
-        raise ProviderError(_no_images_found_message(collection=collection))
-
-
-def _order_collection_for_mosaic(col: Any) -> Any:
-    """Stabilize mosaic priority by preferring chronological collection order."""
-    try:
-        return col.sort("system:time_start")
-    except Exception:
-        return col
-
-
-def _format_s1_empty_collection_message(
-    *,
-    collection_id: str,
-    temporal: TemporalSpec,
-    counts: dict[str, int | None],
-    require_iw: bool,
-    relax_iw_on_empty: bool,
-) -> str:
-    detail_parts = [
-        f"base(date+bounds)={counts.get('base')}",
-        f"iw={counts.get('iw')}",
-        f"vv={counts.get('vv')}",
-        f"vh={counts.get('vh')}",
-    ]
-    if "vh_no_iw" in counts:
-        detail_parts.append(f"vh_no_iw={counts.get('vh_no_iw')}")
-    details = ", ".join(detail_parts)
-    return (
-        f"{_NO_IMAGES_FOUND_MSG} collection={collection_id!r} "
-        f"time=({temporal.start!r}, {temporal.end!r}) "
-        f"filters=[{details}]. "
-        f"requested_iw={require_iw} relax_iw_on_empty={relax_iw_on_empty}. "
-        "TerraFM S1 expects dual-pol VV/VH input; try a wider time window or a different AOI."
-    )
-
-
-def _build_s1_dualpol_collection(base: Any, *, require_iw: bool) -> Any:
-    import ee
-
-    col = base
-    if require_iw:
-        col = col.filter(ee.Filter.eq("instrumentMode", "IW"))
-    col = col.filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VV"))
-    col = col.filter(ee.Filter.listContains("transmitterReceiverPolarisation", "VH"))
-    return col
-
-
-def _sample_image_bands_raw_chw(
-    img: Any,
-    *,
-    region: Any,
-    bands: Sequence[str],
-    scale_m: int,
-    fill_value: float,
-) -> np.ndarray:
-    img = img.select(list(bands)).reproject(crs="EPSG:3857", scale=int(scale_m))
-    rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
-    props = rect.get("properties", {}) if isinstance(rect, dict) else {}
-    if not props:
-        raise ProviderError(_NO_IMAGES_FOUND_MSG)
-    arrs = [np.array(props.get(str(b), []), dtype=np.float32) for b in bands]
-    try:
-        raw = np.stack(arrs, axis=0).astype(np.float32)
-    except Exception as e:
-        raise ProviderError("Failed to sample rectangle from GEE image.") from e
-    raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
-    return np.clip(raw, 0.0, 10000.0).astype(np.float32)
+from .gee_utils import (
+    _bbox_recursive_fallback,
+    _build_s1_dualpol_collection,
+    _collection_size_or_none,
+    _fetch_with_bbox_fallback,
+    _format_s1_empty_collection_message,
+    _gee_error_message,
+    _gee_init_kwargs,
+    _no_images_found_message,
+    _order_collection_for_mosaic,
+    _raise_if_empty_collection,
+    _resolve_band_aliases,
+    _sample_image_bands_raw_chw,
+    _split_date_range,
+    _stitch_bbox_split_arrays,
+    fetch_provider_patch_raw,
+)
 
 
 class GEEProvider(ProviderBase):
@@ -392,6 +190,22 @@ class GEEProvider(ProviderBase):
     ) -> tuple[str, ...]:
         return _resolve_band_aliases(collection, tuple(str(b) for b in bands))
 
+    def fetch_sensor_patch_chw(
+        self,
+        *,
+        spatial: SpatialSpec,
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec,
+        to_float_image: bool = False,
+    ) -> np.ndarray:
+        return fetch_provider_patch_raw(
+            self,
+            spatial=spatial,
+            temporal=temporal,
+            sensor=sensor,
+            to_float_image=bool(to_float_image),
+        )
+
     def fetch_s1_vvvh_raw_chw(
         self,
         *,
@@ -405,7 +219,7 @@ class GEEProvider(ProviderBase):
         require_iw: bool = True,
         relax_iw_on_empty: bool = True,
     ) -> np.ndarray:
-        arr, _meta = self.fetch_s1_vvvh_raw_chw_with_meta(
+        arr, _ = self.fetch_s1_vvvh_raw_chw_with_meta(
             spatial=spatial,
             temporal=temporal,
             scale_m=scale_m,
@@ -419,6 +233,54 @@ class GEEProvider(ProviderBase):
         return arr
 
     def fetch_s1_vvvh_raw_chw_with_meta(
+        self,
+        *,
+        spatial: SpatialSpec,
+        temporal: TemporalSpec,
+        scale_m: int = 10,
+        orbit: str | None = None,
+        use_float_linear: bool = True,
+        composite: str = "median",
+        fill_value: float = 0.0,
+        require_iw: bool = True,
+        relax_iw_on_empty: bool = True,
+    ) -> tuple[np.ndarray, dict[str, Any]]:
+        def _fetch(sp: SpatialSpec) -> tuple[np.ndarray, dict[str, Any]]:
+            return self._fetch_s1_impl(
+                spatial=sp,
+                temporal=temporal,
+                scale_m=scale_m,
+                orbit=orbit,
+                use_float_linear=use_float_linear,
+                composite=composite,
+                fill_value=fill_value,
+                require_iw=require_iw,
+                relax_iw_on_empty=relax_iw_on_empty,
+            )
+
+        def _stitch(
+            res_a: Any, res_b: Any, bbox: Any, axis: str, scale_m: int, fill_value: float
+        ) -> tuple[np.ndarray, dict[str, Any]]:
+            arr_a, meta = res_a
+            arr_b, _ = res_b
+            return _stitch_bbox_split_arrays(
+                arr_a=arr_a,
+                arr_b=arr_b,
+                parent_spatial=bbox,
+                axis=axis,
+                scale_m=scale_m,
+                fill_value=fill_value,
+            ), meta
+
+        return _bbox_recursive_fallback(
+            spatial=spatial,
+            scale_m=scale_m,
+            fill_value=fill_value,
+            fetch_fn=_fetch,
+            stitch_fn=_stitch,
+        )
+
+    def _fetch_s1_impl(
         self,
         *,
         spatial: SpatialSpec,
@@ -529,6 +391,39 @@ class GEEProvider(ProviderBase):
         composite: str = "median",
         fill_value: float = 0.0,
     ) -> np.ndarray:
+        def _do(sp: SpatialSpec) -> np.ndarray:
+            return self._fetch_multiframe_impl(
+                spatial=sp,
+                temporal=temporal,
+                collection=collection,
+                bands=bands,
+                n_frames=n_frames,
+                scale_m=scale_m,
+                cloudy_pct=cloudy_pct,
+                composite=composite,
+                fill_value=fill_value,
+            )
+
+        return _fetch_with_bbox_fallback(
+            spatial=spatial,
+            scale_m=int(scale_m),
+            fill_value=float(fill_value),
+            fetch_fn=_do,
+        )
+
+    def _fetch_multiframe_impl(
+        self,
+        *,
+        spatial: SpatialSpec,
+        temporal: TemporalSpec,
+        collection: str,
+        bands: Sequence[str],
+        n_frames: int = 8,
+        scale_m: int = 10,
+        cloudy_pct: int | None = 30,
+        composite: str = "median",
+        fill_value: float = 0.0,
+    ) -> np.ndarray:
         import ee
 
         temporal.validate()
@@ -614,6 +509,50 @@ class GEEProvider(ProviderBase):
         return arr
 
     def fetch_collection_patch_all_bands_chw(
+        self,
+        *,
+        spatial: SpatialSpec,
+        temporal: TemporalSpec | None,
+        collection: str,
+        scale_m: int = 10,
+        fill_value: float = 0.0,
+        composite: str = "median",
+    ) -> tuple[np.ndarray, tuple[str, ...]]:
+        def _fetch(sp: SpatialSpec) -> tuple[np.ndarray, tuple[str, ...]]:
+            return self._fetch_all_bands_impl(
+                spatial=sp,
+                temporal=temporal,
+                collection=collection,
+                scale_m=scale_m,
+                fill_value=fill_value,
+                composite=composite,
+            )
+
+        def _stitch(
+            res_a: Any, res_b: Any, bbox: Any, axis: str, scale_m: int, fill_value: float
+        ) -> tuple[np.ndarray, tuple[str, ...]]:
+            arr_a, names_a = res_a
+            arr_b, names_b = res_b
+            if tuple(names_a) != tuple(names_b):
+                raise ModelError("Band names mismatch while stitching all-band bbox tiles.")
+            return _stitch_bbox_split_arrays(
+                arr_a=arr_a,
+                arr_b=arr_b,
+                parent_spatial=bbox,
+                axis=axis,
+                scale_m=scale_m,
+                fill_value=fill_value,
+            ), tuple(names_a)
+
+        return _bbox_recursive_fallback(
+            spatial=spatial,
+            scale_m=scale_m,
+            fill_value=fill_value,
+            fetch_fn=_fetch,
+            stitch_fn=_stitch,
+        )
+
+    def _fetch_all_bands_impl(
         self,
         *,
         spatial: SpatialSpec,

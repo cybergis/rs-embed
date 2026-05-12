@@ -27,8 +27,8 @@ from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import FetchResult
 from ..core.validation import assert_supported
 from ..providers import ProviderBase, get_provider, has_provider
+from ..providers.fetch import fetch_sensor_patch_chw as _fetch_sensor_patch_chw
 from ..providers.resolution import default_provider_backend_name
-from ..providers.gee_utils import fetch_gee_patch_raw
 from .model_defaults import default_sensor_for_model
 from .normalization import (
     _resolve_embedding_api_backend,
@@ -427,7 +427,7 @@ def fetch_api_side_inputs(
             if fr is not None:
                 results.append(fr)
             else:
-                raw = fetch_gee_patch_raw(
+                raw = _fetch_sensor_patch_chw(
                     provider,
                     spatial=spatial,
                     temporal=temporal,

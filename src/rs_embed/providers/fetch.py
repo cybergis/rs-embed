@@ -2,12 +2,12 @@
 
 from __future__ import annotations
 
-from collections.abc import Callable, Sequence
+from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
 
-from ..core.errors import ModelError
+from ..core.errors import ModelError, ProviderError
 from ..core.specs import NormalizationSpec, SensorSpec, SpatialSpec, TemporalSpec
 from .base import ProviderBase
 
@@ -21,8 +21,6 @@ def fetch_sensor_patch_chw(
     to_float_image: bool = False,
 ) -> np.ndarray:
     """Fetch a CHW patch from a concrete SensorSpec, re-raising ProviderError as ModelError."""
-    from ..core.errors import ProviderError
-
     try:
         return provider.fetch_sensor_patch_chw(
             spatial=spatial,
@@ -63,83 +61,6 @@ def fetch_collection_patch_chw(
     )
 
 
-def _stitch_spatial_last2_arrays(
-    *,
-    a: np.ndarray,
-    b: np.ndarray,
-    parent_spatial: Any,
-    axis: str,
-    scale_m: int,
-    fill_value: float,
-) -> np.ndarray:
-    from .gee_utils import _stitch_bbox_split_arrays
-
-    return _stitch_bbox_split_arrays(
-        arr_a=np.asarray(a, dtype=np.float32),
-        arr_b=np.asarray(b, dtype=np.float32),
-        parent_spatial=parent_spatial,
-        axis=axis,
-        scale_m=scale_m,
-        fill_value=fill_value,
-    )
-
-
-def _fetch_spatial_array_with_bbox_fallback(
-    provider: ProviderBase,
-    *,
-    spatial: SpatialSpec,
-    scale_m: int,
-    fill_value: float,
-    fetch_fn: Callable[[SpatialSpec], np.ndarray],
-    split_depth: int = 0,
-) -> np.ndarray:
-    from . import gee_utils as _ah
-
-    try:
-        return np.asarray(fetch_fn(spatial), dtype=np.float32)
-    except Exception as e:
-        if not (
-            _ah._looks_like_gee_sample_too_many_pixels(e) and _ah._looks_like_bbox_spatial(spatial)
-        ):
-            raise
-        max_depth = int(getattr(_ah, "_MAX_GEE_BBOX_SPLIT_DEPTH", 12))
-        if int(split_depth) >= max_depth:
-            raise ModelError(
-                f"GEE bbox fallback exceeded max recursive splits ({max_depth})."
-            ) from e
-
-        spatial_bbox = _ah._coerce_bbox_like(spatial)
-        h_est, w_est = _ah._bbox_span_pixels_estimate(spatial_bbox, scale_m=int(scale_m))
-        prefer_axis = "x" if int(w_est) >= int(h_est) else "y"
-        a_sp, b_sp, axis = _ah._split_bbox_for_recursive_fetch(
-            spatial_bbox, prefer_axis=prefer_axis
-        )
-        arr_a = _fetch_spatial_array_with_bbox_fallback(
-            provider,
-            spatial=a_sp,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
-            fetch_fn=fetch_fn,
-            split_depth=int(split_depth) + 1,
-        )
-        arr_b = _fetch_spatial_array_with_bbox_fallback(
-            provider,
-            spatial=b_sp,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
-            fetch_fn=fetch_fn,
-            split_depth=int(split_depth) + 1,
-        )
-        return _stitch_spatial_last2_arrays(
-            a=arr_a,
-            b=arr_b,
-            parent_spatial=spatial_bbox,
-            axis=axis,
-            scale_m=int(scale_m),
-            fill_value=float(fill_value),
-        )
-
-
 def fetch_collection_patch_all_bands_chw(
     provider: ProviderBase,
     *,
@@ -150,11 +71,10 @@ def fetch_collection_patch_all_bands_chw(
     fill_value: float = 0.0,
     composite: str = "median",
 ) -> tuple[np.ndarray, tuple[str, ...]]:
-    """Fetch all bands for a collection with BBox fallback stitching for large GEE samples."""
-
-    def _fetch_once(sp: SpatialSpec) -> tuple[np.ndarray, tuple[str, ...]]:
+    """Fetch all bands for a collection as CHW float32."""
+    try:
         arr, names = provider.fetch_collection_patch_all_bands_chw(
-            spatial=sp,
+            spatial=spatial,
             temporal=temporal,
             collection=str(collection),
             scale_m=int(scale_m),
@@ -162,55 +82,8 @@ def fetch_collection_patch_all_bands_chw(
             composite=str(composite),
         )
         return np.asarray(arr, dtype=np.float32), tuple(str(b) for b in names)
-
-    try:
-        arr, names = _fetch_once(spatial)
-        return np.asarray(arr, dtype=np.float32), tuple(names)
-    except Exception as e:
-        from . import gee_utils as _ah
-
-        if not (
-            _ah._looks_like_gee_sample_too_many_pixels(e) and _ah._looks_like_bbox_spatial(spatial)
-        ):
-            raise
-
-        def _rec(sp: SpatialSpec, depth: int = 0) -> tuple[np.ndarray, tuple[str, ...]]:
-            max_depth = int(getattr(_ah, "_MAX_GEE_BBOX_SPLIT_DEPTH", 12))
-            try:
-                return _fetch_once(sp)
-            except Exception as ee:
-                if not (
-                    _ah._looks_like_gee_sample_too_many_pixels(ee)
-                    and _ah._looks_like_bbox_spatial(sp)
-                ):
-                    raise
-                if int(depth) >= max_depth:
-                    raise ModelError(
-                        f"GEE bbox fallback exceeded max recursive splits ({max_depth})."
-                    ) from ee
-                sp_bbox = _ah._coerce_bbox_like(sp)
-                h_est, w_est = _ah._bbox_span_pixels_estimate(sp_bbox, scale_m=int(scale_m))
-                prefer_axis = "x" if int(w_est) >= int(h_est) else "y"
-                a_sp, b_sp, axis = _ah._split_bbox_for_recursive_fetch(
-                    sp_bbox, prefer_axis=prefer_axis
-                )
-                arr_a, names_a = _rec(a_sp, depth + 1)
-                arr_b, names_b = _rec(b_sp, depth + 1)
-                if tuple(names_a) != tuple(names_b):
-                    raise ModelError(
-                        "Band names mismatch while stitching all-band bbox tiles."
-                    ) from None
-                stitched = _stitch_spatial_last2_arrays(
-                    a=arr_a,
-                    b=arr_b,
-                    parent_spatial=sp_bbox,
-                    axis=axis,
-                    scale_m=int(scale_m),
-                    fill_value=float(fill_value),
-                )
-                return stitched, tuple(names_a)
-
-        return _rec(spatial, 0)
+    except ProviderError as exc:
+        raise ModelError(str(exc)) from exc
 
 
 def fetch_s2_rgb_chw(
@@ -237,6 +110,14 @@ def fetch_s2_rgb_chw(
     return np.clip(raw / 10000.0, 0.0, 1.0).astype(np.float32)
 
 
+def _require_s1_support(provider: ProviderBase, method: str) -> None:
+    if not hasattr(provider, method):
+        raise ModelError(
+            f"Provider '{getattr(provider, 'name', type(provider).__name__)}' does not support "
+            "Sentinel-1 VV/VH fetch. Use fetch_sensor_patch_chw with an S1 SensorSpec instead."
+        )
+
+
 def fetch_s1_vvvh_raw_chw(
     provider: ProviderBase,
     *,
@@ -251,13 +132,10 @@ def fetch_s1_vvvh_raw_chw(
     relax_iw_on_empty: bool = True,
 ) -> np.ndarray:
     """Fetch Sentinel-1 VV/VH as raw float32 CHW."""
-    arr = _fetch_spatial_array_with_bbox_fallback(
-        provider,
-        spatial=spatial,
-        scale_m=int(scale_m),
-        fill_value=float(fill_value),
-        fetch_fn=lambda sp: provider.fetch_s1_vvvh_raw_chw(
-            spatial=sp,
+    _require_s1_support(provider, "fetch_s1_vvvh_raw_chw")
+    try:
+        arr = provider.fetch_s1_vvvh_raw_chw(  # type: ignore[attr-defined]
+            spatial=spatial,
             temporal=temporal,
             scale_m=int(scale_m),
             orbit=orbit,
@@ -266,8 +144,9 @@ def fetch_s1_vvvh_raw_chw(
             fill_value=float(fill_value),
             require_iw=bool(require_iw),
             relax_iw_on_empty=bool(relax_iw_on_empty),
-        ),
-    )
+        )
+    except ProviderError as exc:
+        raise ModelError(str(exc)) from exc
     arr = np.asarray(arr, dtype=np.float32)
     if arr.ndim != 3 or int(arr.shape[0]) != 2:
         raise ModelError(f"Expected S1 VV/VH CHW with C=2, got shape={getattr(arr, 'shape', None)}")
@@ -288,8 +167,9 @@ def fetch_s1_vvvh_raw_chw_with_meta(
     relax_iw_on_empty: bool = True,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Fetch Sentinel-1 VV/VH as raw float32 CHW together with fetch metadata."""
-    if hasattr(provider, "fetch_s1_vvvh_raw_chw_with_meta"):
-        arr, meta = provider.fetch_s1_vvvh_raw_chw_with_meta(
+    _require_s1_support(provider, "fetch_s1_vvvh_raw_chw_with_meta")
+    try:
+        arr, meta = provider.fetch_s1_vvvh_raw_chw_with_meta(  # type: ignore[attr-defined]
             spatial=spatial,
             temporal=temporal,
             scale_m=int(scale_m),
@@ -300,30 +180,12 @@ def fetch_s1_vvvh_raw_chw_with_meta(
             require_iw=bool(require_iw),
             relax_iw_on_empty=bool(relax_iw_on_empty),
         )
-    else:
-        arr = fetch_s1_vvvh_raw_chw(
-            provider,
-            spatial=spatial,
-            temporal=temporal,
-            scale_m=int(scale_m),
-            orbit=orbit,
-            use_float_linear=bool(use_float_linear),
-            composite=str(composite),
-            fill_value=float(fill_value),
-            require_iw=bool(require_iw),
-            relax_iw_on_empty=bool(relax_iw_on_empty),
-        )
-        meta = {
-            "s1_iw_requested": bool(require_iw),
-            "s1_iw_applied": bool(require_iw),
-            "s1_iw_relaxed_on_empty": False,
-            "s1_relax_iw_on_empty": bool(relax_iw_on_empty),
-        }
+    except ProviderError as exc:
+        raise ModelError(str(exc)) from exc
     arr = np.asarray(arr, dtype=np.float32)
     if arr.ndim != 3 or int(arr.shape[0]) != 2:
         raise ModelError(f"Expected S1 VV/VH CHW with C=2, got shape={getattr(arr, 'shape', None)}")
-    meta_out = dict(meta or {})
-    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32), meta_out
+    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32), dict(meta or {})
 
 
 def fetch_s2_multiframe_raw_tchw(
@@ -340,13 +202,9 @@ def fetch_s2_multiframe_raw_tchw(
     fill_value: float = 0.0,
 ) -> np.ndarray:
     """Fetch an S2 time series as raw float32 [T,C,H,W] in [0,10000]."""
-    arr = _fetch_spatial_array_with_bbox_fallback(
-        provider,
-        spatial=spatial,
-        scale_m=int(scale_m),
-        fill_value=float(fill_value),
-        fetch_fn=lambda sp: provider.fetch_multiframe_collection_raw_tchw(
-            spatial=sp,
+    try:
+        arr = provider.fetch_multiframe_collection_raw_tchw(
+            spatial=spatial,
             temporal=temporal,
             collection=str(collection),
             bands=tuple(str(b) for b in bands),
@@ -355,8 +213,10 @@ def fetch_s2_multiframe_raw_tchw(
             cloudy_pct=(int(cloudy_pct) if cloudy_pct is not None else None),
             composite=str(composite),
             fill_value=float(fill_value),
-        ),
-    )
+            # fetch_fn=_fetch,
+        )
+    except ProviderError as exc:
+        raise ModelError(str(exc)) from exc
     arr = np.asarray(arr, dtype=np.float32)
     if arr.ndim != 4:
         raise ModelError(f"Expected TCHW array, got shape={getattr(arr, 'shape', None)}")
@@ -378,6 +238,35 @@ def normalize_s1_vvvh_chw(raw_chw: np.ndarray) -> np.ndarray:
     denom = np.percentile(x, 99) if np.isfinite(x).all() else 1.0
     denom = float(denom) if float(denom) > 0 else 1.0
     return np.clip(x / denom, 0.0, 1.0).astype(np.float32)
+
+
+def inspect_fetch_result(
+    x_chw: np.ndarray,
+    *,
+    sensor: SensorSpec,
+    name: str,
+) -> dict[str, Any]:
+    """Inspect a prefetched CHW (or TCHW) array and return a structured quality report."""
+    from ..tools.inspection import inspect_chw
+    from ..tools.normalization import normalize_input_array
+    from ..tools.serialization import jsonable as _jsonable
+
+    x = normalize_input_array(x_chw, expected_channels=len(sensor.bands), name=name)
+    x_inspect = x[0] if x.ndim == 4 else x
+    rep = inspect_chw(
+        x_inspect,
+        name=name,
+        expected_channels=len(sensor.bands),
+        value_range=None,
+        fill_value=float(sensor.fill_value),
+    )
+    return {
+        "ok": bool(rep.get("ok", False)),
+        "report": rep,
+        "sensor": _jsonable(sensor),
+        "input_ndim": int(x.ndim),
+        "n_frames": (int(x.shape[0]) if x.ndim == 4 else None),
+    }
 
 
 def apply_normalization(raw: np.ndarray, norm: NormalizationSpec) -> np.ndarray:

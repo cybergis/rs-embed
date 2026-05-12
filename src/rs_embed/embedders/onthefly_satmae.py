@@ -18,6 +18,15 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..providers.resolution import (
+    is_provider_backend,
+)
+from ..tools.runtime import (
+    load_cached_with_device as _load_cached_with_device,
+)
+from .base import EmbedderBase
+from .meta import build_meta, temporal_to_range
+
 
 def ensure_torch() -> None:
     try:
@@ -28,21 +37,27 @@ def ensure_torch() -> None:
 
 def fetch_s2_rgb_u8_from_provider(provider, *, spatial, temporal, sensor, out_size):
     from ..providers.fetch import fetch_s2_rgb_chw
+
     s2_chw = fetch_s2_rgb_chw(
-        provider, spatial=spatial, temporal=temporal,
-        scale_m=sensor.scale_m, cloudy_pct=sensor.cloudy_pct,
+        provider,
+        spatial=spatial,
+        temporal=temporal,
+        scale_m=sensor.scale_m,
+        cloudy_pct=sensor.cloudy_pct,
         composite=sensor.composite,
     )
     rgb_u8 = (np.clip(s2_chw, 0.0, 1.0).transpose(1, 2, 0) * 255.0).astype(np.uint8)
     if out_size is None:
         return rgb_u8
     from PIL import Image
+
     im = Image.fromarray(rgb_u8, mode="RGB")
     return np.array(im.resize((out_size, out_size), resample=Image.BICUBIC), dtype=np.uint8)
 
 
 def resize_rgb_u8(rgb_u8, out_size):
     from PIL import Image
+
     if rgb_u8.shape[0] == out_size and rgb_u8.shape[1] == out_size:
         return rgb_u8
     im = Image.fromarray(rgb_u8, mode="RGB")
@@ -52,6 +67,7 @@ def resize_rgb_u8(rgb_u8, out_size):
 def maybe_use_model_transform(model, rgb_u8, image_size):
     ensure_torch()
     import torch
+
     if hasattr(model, "transform") and callable(model.transform):
         x = model.transform(rgb_u8.astype(np.float32), image_size)
         if isinstance(x, torch.Tensor) and x.ndim == 3:
@@ -63,25 +79,41 @@ def rgb_u8_to_tensor_clipnorm(rgb_u8, image_size):
     ensure_torch()
     from PIL import Image
     from torchvision import transforms
-    preprocess = transforms.Compose([
-        transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
-        transforms.CenterCrop(image_size),
-        transforms.ToTensor(),
-        transforms.Normalize(
-            mean=(0.48145466, 0.4578275, 0.40821073),
-            std=(0.26862954, 0.26130258, 0.27577711),
-        ),
-    ])
+
+    preprocess = transforms.Compose(
+        [
+            transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=(0.48145466, 0.4578275, 0.40821073),
+                std=(0.26862954, 0.26130258, 0.27577711),
+            ),
+        ]
+    )
     return preprocess(Image.fromarray(rgb_u8, mode="RGB")).unsqueeze(0)
 
-from .meta import build_meta, temporal_to_range
 
-def base_meta(*, model_name, hf_id, backend, image_size, sensor,
-              temporal=None, source=None, embed_type="on_the_fly", extra=None):
+def base_meta(
+    *,
+    model_name,
+    hf_id,
+    backend,
+    image_size,
+    sensor,
+    temporal=None,
+    source=None,
+    embed_type="on_the_fly",
+    extra=None,
+):
     m = build_meta(
-        model=model_name, kind=embed_type, backend=backend,
+        model=model_name,
+        kind=embed_type,
+        backend=backend,
         source=source or getattr(sensor, "collection", None),
-        sensor=sensor, temporal=temporal, image_size=image_size,
+        sensor=sensor,
+        temporal=temporal,
+        image_size=image_size,
     )
     m["hf_id"] = hf_id
     if extra:
@@ -109,18 +141,10 @@ def tokens_to_grid_dhw(tokens):
     has_cls = n > 1 and h2 * h2 == n - 1
     patch = tokens[1:] if has_cls else tokens
     p, d = patch.shape
-    hw = int(p ** 0.5)
+    hw = int(p**0.5)
     if hw * hw != p:
         raise ModelError(f"Patch token count {p} is not a perfect square.")
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
-
-from .base import EmbedderBase
-from ..providers.resolution import (
-    is_provider_backend,
-)
-from ..tools.runtime import (
-    load_cached_with_device as _load_cached_with_device,
-)
 
 
 @lru_cache(maxsize=8)

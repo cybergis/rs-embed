@@ -94,9 +94,9 @@ def test_export_batch_prefetch_preserves_terrafm_s1_sensor_fields(tmp_path, monk
     monkeypatch.setattr(
         "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
     )
-    monkeypatch.setattr("rs_embed.providers.gee_utils.fetch_gee_patch_raw", fake_fetch)
+    monkeypatch.setattr("rs_embed.providers.fetch.fetch_sensor_patch_chw", fake_fetch)
     monkeypatch.setattr(
-        "rs_embed.providers.gee_utils.inspect_input_raw",
+        "rs_embed.providers.fetch.inspect_fetch_result",
         lambda x_chw, *, sensor, name: {"ok": True, "sensor": {"bands": list(sensor.bands)}},
     )
     get_embedder_bundle_cached.cache_clear()

@@ -22,9 +22,6 @@ from ..core.specs import (
     TemporalSpec,
 )
 from ..providers import ProviderBase
-from ._vendor.dofa_vit import vit_base_patch16, vit_large_patch16
-from .base import EmbedderBase
-from .meta import build_meta
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
 )
@@ -33,8 +30,13 @@ from ..tools.normalization import (
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device_auto,
 )
+from ._vendor.dofa_vit import vit_base_patch16, vit_large_patch16
+from .base import EmbedderBase
+from .meta import build_meta
 
 # -----------------------------
 # Defaults: Sentinel-2 SR (official DOFA 9-band order)

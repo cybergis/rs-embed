@@ -106,9 +106,7 @@ class TestProviderFactory:
 
     def test_auto_delegates_to_default_provider(self):
         """auto → uses default_provider_backend_name, not hard-coded gee."""
-        with patch(
-            "rs_embed.tools.runtime.default_provider_backend_name", return_value="gee"
-        ):
+        with patch("rs_embed.tools.runtime.default_provider_backend_name", return_value="gee"):
             with patch("rs_embed.tools.runtime.has_provider", return_value=True):
                 factory = provider_factory_for_backend("auto")
                 assert factory is not None

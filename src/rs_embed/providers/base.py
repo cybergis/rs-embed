@@ -139,57 +139,6 @@ class ProviderBase:
         """
         return tuple(str(b) for b in bands)
 
-    def fetch_s1_vvvh_raw_chw(
-        self,
-        *,
-        spatial: SpatialSpec,
-        temporal: TemporalSpec,
-        scale_m: int = 10,
-        orbit: str | None = None,
-        use_float_linear: bool = True,
-        composite: str = "median",
-        fill_value: float = 0.0,
-        require_iw: bool = True,
-        relax_iw_on_empty: bool = True,
-    ) -> np.ndarray:
-        """Fetch Sentinel-1 VV/VH patch as ``[C,H,W]``.
-
-        Parameters
-        ----------
-        spatial : SpatialSpec
-            Spatial request definition.
-        temporal : TemporalSpec
-            Temporal range/year request.
-        scale_m : int
-            Pixel scale in meters.
-        orbit : str or None
-            Optional orbit filter.
-        use_float_linear : bool
-            If ``True``, convert to linear float units when supported.
-        composite : str
-            Temporal compositing strategy.
-        fill_value : float
-            Fill value for missing pixels.
-        require_iw : bool
-            Whether to restrict Sentinel-1 fetch to IW scenes when supported.
-        relax_iw_on_empty : bool
-            Whether providers may retry without the IW restriction if the
-            strict query returns no imagery.
-
-        Returns
-        -------
-        np.ndarray
-            Array with shape ``[C,H,W]``.
-
-        Raises
-        ------
-        ProviderError
-            If this provider does not support Sentinel-1 VV/VH fetch operations.
-        """
-        raise ProviderError(
-            f"Provider '{self.name}' does not implement Sentinel-1 VV/VH fetch support."
-        )
-
     def fetch_multiframe_collection_raw_tchw(
         self,
         *,
@@ -310,25 +259,8 @@ class ProviderBase:
         Raises
         ------
         ProviderError
-            If returned array is not CHW or channel count mismatches sensor bands.
+            If this provider does not implement sensor patch fetch support.
         """
-        from ..providers.gee_utils import fetch_provider_patch_raw
-
-        x = fetch_provider_patch_raw(
-            self,
-            spatial=spatial,
-            temporal=temporal,
-            sensor=sensor,
-            to_float_image=bool(to_float_image),
+        raise ProviderError(
+            f"Provider '{self.name}' does not implement sensor patch fetch support."
         )
-        arr = np.asarray(x, dtype=np.float32)
-        if arr.ndim != 3:
-            raise ProviderError(
-                f"Expected CHW array from provider fetch, got shape={getattr(arr, 'shape', None)}"
-            )
-        if int(arr.shape[0]) != len(sensor.bands):
-            raise ProviderError(
-                f"Provider fetch channel mismatch: got C={int(arr.shape[0])}, "
-                f"expected C={len(sensor.bands)} for collection={sensor.collection}"
-            )
-        return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)

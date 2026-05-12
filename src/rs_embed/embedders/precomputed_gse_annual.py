@@ -12,15 +12,15 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import BBox, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..tools.tiling import _tile_subspatial, _tile_yx_starts
-from .base import EmbedderBase
-from .meta import build_meta
 from ..providers.fetch import (
     fetch_collection_patch_all_bands_chw as _fetch_collection_patch_all_bands_chw,
 )
 from ..providers.resolution import (
     is_provider_backend,
 )
+from ..tools.tiling import _tile_subspatial, _tile_yx_starts
+from .base import EmbedderBase
+from .meta import build_meta
 
 _GSE_DEFAULT_MAX_PIXELS = 512 * 512
 

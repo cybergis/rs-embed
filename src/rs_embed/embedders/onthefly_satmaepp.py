@@ -20,6 +20,15 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..providers.resolution import (
+    is_provider_backend,
+)
+from ..tools.runtime import (
+    load_cached_with_device as _load_cached_with_device,
+)
+from .base import EmbedderBase
+from .meta import build_meta, temporal_to_range
+
 
 def ensure_torch() -> None:
     try:
@@ -30,26 +39,44 @@ def ensure_torch() -> None:
 
 def fetch_s2_rgb_u8_from_provider(provider, *, spatial, temporal, sensor, out_size):
     from ..providers.fetch import fetch_s2_rgb_chw
+
     s2_chw = fetch_s2_rgb_chw(
-        provider, spatial=spatial, temporal=temporal,
-        scale_m=sensor.scale_m, cloudy_pct=sensor.cloudy_pct,
+        provider,
+        spatial=spatial,
+        temporal=temporal,
+        scale_m=sensor.scale_m,
+        cloudy_pct=sensor.cloudy_pct,
         composite=sensor.composite,
     )
     rgb_u8 = (np.clip(s2_chw, 0.0, 1.0).transpose(1, 2, 0) * 255.0).astype(np.uint8)
     if out_size is None:
         return rgb_u8
     from PIL import Image
+
     im = Image.fromarray(rgb_u8, mode="RGB")
     return np.array(im.resize((out_size, out_size), resample=Image.BICUBIC), dtype=np.uint8)
 
-from .meta import build_meta, temporal_to_range
 
-def base_meta(*, model_name, hf_id, backend, image_size, sensor,
-              temporal=None, source=None, embed_type="on_the_fly", extra=None):
+def base_meta(
+    *,
+    model_name,
+    hf_id,
+    backend,
+    image_size,
+    sensor,
+    temporal=None,
+    source=None,
+    embed_type="on_the_fly",
+    extra=None,
+):
     m = build_meta(
-        model=model_name, kind=embed_type, backend=backend,
+        model=model_name,
+        kind=embed_type,
+        backend=backend,
         source=source or getattr(sensor, "collection", None),
-        sensor=sensor, temporal=temporal, image_size=image_size,
+        sensor=sensor,
+        temporal=temporal,
+        image_size=image_size,
     )
     m["hf_id"] = hf_id
     if extra:
@@ -77,18 +104,11 @@ def tokens_to_grid_dhw(tokens):
     has_cls = n > 1 and h2 * h2 == n - 1
     patch = tokens[1:] if has_cls else tokens
     p, d = patch.shape
-    hw = int(p ** 0.5)
+    hw = int(p**0.5)
     if hw * hw != p:
         raise ModelError(f"Patch token count {p} is not a perfect square.")
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
-from .base import EmbedderBase
-from ..providers.resolution import (
-    is_provider_backend,
-)
-from ..tools.runtime import (
-    load_cached_with_device as _load_cached_with_device,
-)
 
 _SATMAEPP_RGB_MEAN = (0.4182007312774658, 0.4214799106121063, 0.3991275727748871)
 _SATMAEPP_RGB_STD = (0.28774282336235046, 0.27541765570640564, 0.2764017581939697)

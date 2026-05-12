@@ -21,6 +21,21 @@ from ..core.specs import (
     TemporalSpec,
 )
 from ..providers import ProviderBase
+from ..providers.fetch import (
+    fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from ..tools.normalization import (
+    coerce_single_input_chw,
+)
+from ..tools.runtime import (
+    load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    resolve_device_auto_torch as _resolve_device,
+)
+from .base import EmbedderBase
+from .meta import build_meta, temporal_to_range
+
 
 def ensure_torch() -> None:
     try:
@@ -31,8 +46,6 @@ def ensure_torch() -> None:
 
 def pool_from_tokens(tokens, pooling):
     n = len(tokens)
-    h = int(n ** 0.5 - 1) if n > 1 else 0
-    # check h+1 squared equals n for CLS detection
     h2 = int((n - 1) ** 0.5)
     has_cls = n > 1 and h2 * h2 == n - 1
     patch = tokens[1:] if has_cls else tokens
@@ -51,23 +64,11 @@ def tokens_to_grid_dhw(tokens):
     has_cls = n > 1 and h2 * h2 == n - 1
     patch = tokens[1:] if has_cls else tokens
     p, d = patch.shape
-    hw = int(p ** 0.5)
+    hw = int(p**0.5)
     if hw * hw != p:
         raise ModelError(f"Patch token count {p} is not a perfect square.")
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
-from .base import EmbedderBase
-from .meta import build_meta, temporal_to_range
-from ..providers.fetch import (
-    fetch_collection_patch_chw as _fetch_collection_patch_chw,
-)
-from ..tools.normalization import (
-    coerce_single_input_chw,
-)
-from ..tools.runtime import (
-    load_cached_with_device as _load_cached_with_device,
-    resolve_device_auto_torch as _resolve_device,
-)
 
 _S2_SR_12_BANDS = [
     "B1",

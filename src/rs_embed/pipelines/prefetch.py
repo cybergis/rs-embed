@@ -1,4 +1,4 @@
-"""GEE input prefetch manager.
+"""Provider input prefetch manager.
 
 This module owns prefetch planning, threaded fetch execution, and cache/error
 tracking for provider-backed input tensors used during export.
@@ -14,9 +14,9 @@ import numpy as np
 
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, FetchResult
-from ..providers import gee_utils as _gee_utils
+from ..providers import fetch as _providers_fetch
 from ..providers.prefetch_plan import (
-    build_gee_prefetch_plan,
+    build_prefetch_plan,
     select_prefetched_channels,
 )
 from ..tools.normalization import normalize_input_array
@@ -24,7 +24,7 @@ from .runner import run_with_retry
 
 
 class PrefetchManager:
-    """Manages GEE input prefetching, caching, and error tracking.
+    """Manages provider input prefetching, caching, and error tracking.
 
     After construction, call :meth:`plan` to build the fetch plan, then
     :meth:`fetch_chunk` for each batch of spatial indices.  Cached inputs
@@ -62,8 +62,8 @@ class PrefetchManager:
         self.resolved_sensor = resolved_sensor
         self.model_type = model_type
         self.config = config
-        self.fetch_fn = fetch_fn or _gee_utils.fetch_gee_patch_raw
-        self.inspect_fn = inspect_fn or _gee_utils.inspect_input_raw
+        self.fetch_fn = fetch_fn or _providers_fetch.fetch_sensor_patch_chw
+        self.inspect_fn = inspect_fn or _providers_fetch.inspect_fetch_result
         self.fetcher_by_key: dict[str, Any] = fetcher_by_key or {}
 
         # Caches populated by fetch_chunk / restored from checkpoint
@@ -93,7 +93,7 @@ class PrefetchManager:
             self.sensor_to_fetch,
             self.sensor_models,
             self.fetch_members,
-        ) = build_gee_prefetch_plan(
+        ) = build_prefetch_plan(
             models=self.models,
             resolved_sensor=self.resolved_sensor,
             model_type=self.model_type,
@@ -125,7 +125,7 @@ class PrefetchManager:
         *,
         progress: Any = None,
     ) -> None:
-        """Prefetch GEE inputs for *idxs* into ``self.cache``."""
+        """Prefetch provider inputs for *idxs* into ``self.cache``."""
         if not self.enabled or self.provider is None:
             return
 

@@ -23,6 +23,22 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..providers.fetch import (
+    fetch_s2_rgb_chw as _fetch_s2_rgb_chw,
+)
+from ..providers.resolution import (
+    is_provider_backend,
+)
+from ..tools.runtime import (
+    load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    resolve_device_auto_torch as _resolve_device,
+)
+from .base import EmbedderBase
+from .config import model_config_value
+from .meta import build_meta, temporal_to_range
+
 
 def ensure_torch() -> None:
     try:
@@ -33,6 +49,7 @@ def ensure_torch() -> None:
 
 def resize_rgb_u8(rgb_u8, out_size):
     from PIL import Image
+
     if rgb_u8.shape[0] == out_size and rgb_u8.shape[1] == out_size:
         return rgb_u8
     im = Image.fromarray(rgb_u8, mode="RGB")
@@ -59,24 +76,11 @@ def tokens_to_grid_dhw(tokens):
     has_cls = n > 1 and h2 * h2 == n - 1
     patch = tokens[1:] if has_cls else tokens
     p, d = patch.shape
-    hw = int(p ** 0.5)
+    hw = int(p**0.5)
     if hw * hw != p:
         raise ModelError(f"Patch token count {p} is not a perfect square.")
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
-from .base import EmbedderBase
-from .config import model_config_value
-from .meta import build_meta, temporal_to_range
-from ..providers.fetch import (
-    fetch_s2_rgb_chw as _fetch_s2_rgb_chw,
-)
-from ..providers.resolution import (
-    is_provider_backend,
-)
-from ..tools.runtime import (
-    load_cached_with_device as _load_cached_with_device,
-    resolve_device_auto_torch as _resolve_device,
-)
 
 _SUPPORTED_ARCHES = {"vitb16", "resnet50", "swint"}
 

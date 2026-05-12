@@ -50,43 +50,33 @@ def test_runtime_utils_fetch_sensor_patch_to_float_uses_shared_helper(monkeypatc
     assert calls["provider"] == 1
 
 
-def test_runtime_utils_fetch_s1_uses_bbox_fallback_wrapper(monkeypatch):
-    calls = {"wrapper": 0}
+def test_runtime_utils_fetch_s1_delegates_to_provider():
+    calls = {"provider": 0}
 
     class _FakeProvider:
-        def fetch_s1_vvvh_raw_chw(self, **kwargs):
-            raise AssertionError("Should be invoked through wrapper callback, not directly in test")
+        def fetch_s1_vvvh_raw_chw(self, *, spatial, **kwargs):
+            calls["provider"] += 1
+            assert isinstance(spatial, BBox)
+            return np.ones((2, 3, 4), dtype=np.float32)
 
-    def _fake_wrapper(provider, *, spatial, scale_m, fill_value, fetch_fn, split_depth=0):  # noqa: ARG001
-        calls["wrapper"] += 1
-        assert isinstance(provider, _FakeProvider)
-        assert isinstance(spatial, BBox)
-        return np.ones((2, 3, 4), dtype=np.float32)
-
-    monkeypatch.setattr(ru, "_fetch_spatial_array_with_bbox_fallback", _fake_wrapper)
     out = ru.fetch_s1_vvvh_raw_chw(
         _FakeProvider(),
         spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
         temporal=TemporalSpec.range("2024-01-01", "2024-02-01"),
     )
     assert out.shape == (2, 3, 4)
-    assert calls["wrapper"] == 1
+    assert calls["provider"] == 1
 
 
-def test_runtime_utils_fetch_multiframe_uses_bbox_fallback_wrapper(monkeypatch):
-    calls = {"wrapper": 0}
+def test_runtime_utils_fetch_multiframe_delegates_to_provider():
+    calls = {"provider": 0}
 
     class _FakeProvider:
-        def fetch_multiframe_collection_raw_tchw(self, **kwargs):
-            raise AssertionError("Should be invoked through wrapper callback, not directly in test")
+        def fetch_multiframe_collection_raw_tchw(self, *, spatial, **kwargs):
+            calls["provider"] += 1
+            assert isinstance(spatial, BBox)
+            return np.ones((4, 3, 2, 5), dtype=np.float32)
 
-    def _fake_wrapper(provider, *, spatial, scale_m, fill_value, fetch_fn, split_depth=0):  # noqa: ARG001
-        calls["wrapper"] += 1
-        assert isinstance(provider, _FakeProvider)
-        assert isinstance(spatial, BBox)
-        return np.ones((4, 3, 2, 5), dtype=np.float32)
-
-    monkeypatch.setattr(ru, "_fetch_spatial_array_with_bbox_fallback", _fake_wrapper)
     out = ru.fetch_s2_multiframe_raw_tchw(
         _FakeProvider(),
         spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
@@ -95,7 +85,7 @@ def test_runtime_utils_fetch_multiframe_uses_bbox_fallback_wrapper(monkeypatch):
         n_frames=4,
     )
     assert out.shape == (4, 3, 2, 5)
-    assert calls["wrapper"] == 1
+    assert calls["provider"] == 1
 
 
 def test_runtime_utils_fetch_all_bands_uses_provider_and_returns_names():

@@ -43,7 +43,7 @@ block-beta
 | **`api.py`** | Public facade. Validates inputs, resolves defaults, delegates to pipelines. Contains no heavy execution logic. |
 | **`core/`** | Spec dataclasses (`SpatialSpec`, `TemporalSpec`, `OutputSpec`, ...), the model registry, validation rules, and shared error types. |
 | **`embedders/`** | One module per model family. Each implements `EmbedderBase` and owns preprocessing, checkpoint loading, and forward inference. Vendored upstream code lives in `_vendor/`. |
-| **`providers/`** | Data access backends. `GEEProvider` fetches imagery from Google Earth Engine; `ProviderBase` defines the interface for future backends. |
+| **`providers/`** | Data access backends. `GEEProvider` fetches imagery from Google Earth Engine; `ProviderBase` defines the interface for future backends. `resolution.py` handles backend selection and provider lifecycle (auto-detection, caching, init kwargs). `fetch.py` provides satellite-specific fetch helpers (`fetch_s2_rgb_chw`, `fetch_s1_vvvh_raw_chw`, `fetch_s2_multiframe_raw_tchw`, etc.) and normalization used by embedders. |
 | **`pipelines/`** | Orchestration: `BatchExporter` (export lifecycle), `InferenceEngine` (single/batch dispatch), `PrefetchManager` (IO), `CheckpointManager` (resume). |
 | **`tools/`** | Stateless helpers: name normalization, sensor/model defaults, tiling, serialization, progress bars. Shared by both `api.py` and `pipelines/`. |
 | **`writers.py`** | Serializes results to disk (`.npz`, GeoTIFF, etc.). |

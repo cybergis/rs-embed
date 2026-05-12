@@ -13,12 +13,10 @@ def test_inspect_gee_patch_uses_shared_fetch_helper(monkeypatch):
 
         def fetch_sensor_patch_chw(self, **kwargs):  # pragma: no cover - should not be called
             calls["direct"] += 1
-            raise AssertionError(
-                "inspect_provider_patch should use fetch_provider_patch_raw helper"
-            )
+            raise AssertionError("inspect_provider_patch should use _fetch_sensor_patch_chw helper")
 
-    def _fake_get_provider(name, **kwargs):
-        assert name == "gee"
+    def _fake_create_provider(backend, *, allow_auto=True, auto_backend=None):
+        assert backend == "gee"
         return _FakeProvider()
 
     def _fake_fetch(provider, *, spatial, temporal, sensor):
@@ -27,8 +25,8 @@ def test_inspect_gee_patch_uses_shared_fetch_helper(monkeypatch):
         assert isinstance(spatial, BBox)
         return np.ones((1, 2, 3), dtype=np.float32)
 
-    monkeypatch.setattr(inspect_mod, "get_provider", _fake_get_provider)
-    monkeypatch.setattr(inspect_mod, "fetch_provider_patch_raw", _fake_fetch)
+    monkeypatch.setattr(inspect_mod, "create_provider_for_backend", _fake_create_provider)
+    monkeypatch.setattr(inspect_mod, "_fetch_sensor_patch_chw", _fake_fetch)
 
     out = inspect_mod.inspect_gee_patch(
         spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
