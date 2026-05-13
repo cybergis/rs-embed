@@ -15,7 +15,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -523,7 +522,6 @@ class AnySatEmbedder(EmbedderBase):
         cloudy_pct=30,
         temporal_mode="multi",
         n_frames=8,
-        normalization=NormalizationSpec(mode="none"),  # AnySat uses per-tile zscore internally
         image_size=24,
         expected_channels=10,
     )

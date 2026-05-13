@@ -83,8 +83,11 @@ class EmbedderBase:
 
         When ``input_spec`` is set and the method is not overridden, the
         default implementation performs a generic provider fetch using the
-        spec's collection, bands, scale, and normalization.  This ensures
-        both ``get_embedding()`` and ``export_batch()`` use identical fetch
+        spec's collection, bands, scale, and compositing parameters.  The
+        returned array contains raw provider values (DN / native units);
+        normalization to model input range is the embedder's responsibility
+        and must be applied in ``get_embedding()``.  This ensures both
+        ``get_embedding()`` and ``export_batch()`` use identical fetch
         semantics.
 
         Subclasses may override this for custom behavior (fallback chains,

@@ -12,7 +12,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -46,7 +45,7 @@ def fetch_s2_rgb_u8_from_provider(provider, *, spatial, temporal, sensor, out_si
         cloudy_pct=sensor.cloudy_pct,
         composite=sensor.composite,
     )
-    rgb_u8 = (np.clip(s2_chw, 0.0, 1.0).transpose(1, 2, 0) * 255.0).astype(np.uint8)
+    rgb_u8 = (np.clip(s2_chw / 10000.0, 0.0, 1.0).transpose(1, 2, 0) * 255.0).astype(np.uint8)
     if out_size is None:
         return rgb_u8
     from PIL import Image
@@ -254,7 +253,6 @@ class SatMAERGBEmbedder(EmbedderBase):
         bands=("B4", "B3", "B2"),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="s2_sr_clip"),
         image_size=224,
         expected_channels=3,
     )

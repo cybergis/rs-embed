@@ -16,7 +16,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -500,7 +499,6 @@ class FoMoEmbedder(EmbedderBase):
         bands=tuple(_S2_SR_12_BANDS),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="none"),  # FoMo uses unit_scale internally
         image_size=64,
         expected_channels=12,
     )

@@ -15,7 +15,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -411,7 +410,6 @@ class TerraFMBEmbedder(EmbedderBase):
         bands=tuple(_S2_SR_12_BANDS),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="s2_sr_clip"),
         image_size=224,
         expected_channels=12,
     )

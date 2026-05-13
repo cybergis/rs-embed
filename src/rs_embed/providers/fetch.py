@@ -8,7 +8,7 @@ from typing import Any
 import numpy as np
 
 from ..core.errors import ModelError, ProviderError
-from ..core.specs import NormalizationSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from .base import ProviderBase
 
 
@@ -95,8 +95,11 @@ def fetch_s2_rgb_chw(
     cloudy_pct: int = 30,
     composite: str = "median",
 ) -> np.ndarray:
-    """Fetch Sentinel-2 RGB as float32 CHW in [0,1]."""
-    raw = fetch_collection_patch_chw(
+    """Fetch Sentinel-2 RGB (B4/B3/B2) as float32 CHW in raw DN [0, 10000].
+
+    Normalization to model input range is the caller's responsibility.
+    """
+    return fetch_collection_patch_chw(
         provider,
         spatial=spatial,
         temporal=temporal,
@@ -107,7 +110,6 @@ def fetch_s2_rgb_chw(
         composite=str(composite),
         fill_value=0.0,
     )
-    return np.clip(raw / 10000.0, 0.0, 1.0).astype(np.float32)
 
 
 def _require_s1_support(provider: ProviderBase, method: str) -> None:
@@ -267,17 +269,3 @@ def inspect_fetch_result(
         "input_ndim": int(x.ndim),
         "n_frames": (int(x.shape[0]) if x.ndim == 4 else None),
     }
-
-
-def apply_normalization(raw: np.ndarray, norm: NormalizationSpec) -> np.ndarray:
-    """Apply a declarative normalization strategy to raw provider data."""
-    arr = np.asarray(raw, dtype=np.float32)
-    if norm.mode == "s2_sr_clip":
-        return np.clip(arr / 10000.0, 0.0, 1.0).astype(np.float32)
-    if norm.mode == "s2_sr_raw":
-        return np.clip(arr, 0.0, 10000.0).astype(np.float32)
-    if norm.mode == "s1_log_normalize":
-        return normalize_s1_vvvh_chw(arr)
-    if norm.mode == "none":
-        return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
-    raise ModelError(f"Unknown normalization mode: {norm.mode!r}")

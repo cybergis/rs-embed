@@ -13,7 +13,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -580,7 +579,6 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         bands=tuple(_S2_SR_10_BANDS),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="none"),
         image_size=96,
         expected_channels=10,
     )

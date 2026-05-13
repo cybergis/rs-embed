@@ -17,7 +17,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -782,7 +781,6 @@ class WildSATEmbedder(EmbedderBase):
         bands=("B4", "B3", "B2"),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="s2_sr_clip"),
         image_size=224,
         expected_channels=3,
     )
@@ -885,7 +883,7 @@ class WildSATEmbedder(EmbedderBase):
                 cloudy_pct=int(ss.cloudy_pct),
                 composite=str(ss.composite),
             )
-            raw = np.clip(s2_rgb_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
+            raw = np.clip(s2_rgb_chw, 0.0, 10000.0).astype(np.float32)
         else:
             raw = np.asarray(input_chw, dtype=np.float32)
             if raw.ndim != 3 or int(raw.shape[0]) != 3:
@@ -1016,7 +1014,7 @@ class WildSATEmbedder(EmbedderBase):
                 cloudy_pct=cloudy_pct,
                 composite=composite,
             )
-            raw = np.clip(s2_rgb_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
+            raw = np.clip(s2_rgb_chw, 0.0, 10000.0).astype(np.float32)
             return i, raw
 
         mw = self._resolve_fetch_workers(n)

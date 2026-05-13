@@ -10,6 +10,8 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ### Changed
 
+- **Normalization responsibility moved entirely to embedders.** `NormalizationSpec` has been removed from `ModelInputSpec` and from `rs_embed.core.specs`. The `apply_normalization()` helper in `rs_embed.providers.fetch` has been removed. `fetch_input()` and all fetch helpers (`fetch_collection_patch_chw`, `fetch_s2_rgb_chw`, `fetch_s2_multiframe_raw_tchw`, `fetch_s1_vvvh_raw_chw`) now consistently return raw provider values (S2 DN in [0, 10000], S1 linear float, etc.); each embedder applies its own normalization inside `get_embedding()`. This eliminates a misleading contract where `ModelInputSpec.normalization` was declared but never automatically applied, and removes a normalize→denormalize round-trip that existed in some batch paths (remoteclip, wildsat).
+
 - **Internal refactor: provider and embedder layer separation.** The `embedders/runtime_utils.py` grab-bag module has been removed and its contents redistributed by responsibility:
   - Provider selection and lifecycle management → `providers/resolution.py` (`default_provider_backend_name`, `resolve_provider_backend_name`, `is_provider_backend`, `get_cached_provider`, `create_provider_for_backend`)
   - Provider fetch helpers and satellite normalization → `providers/fetch.py` (`fetch_sensor_patch_chw`, `fetch_collection_patch_chw`, `fetch_s2_rgb_chw`, `fetch_s1_vvvh_raw_chw`, `fetch_s2_multiframe_raw_tchw`, `normalize_s1_vvvh_chw`, `apply_normalization`, etc.)

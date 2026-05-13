@@ -9,7 +9,6 @@ from rs_embed.core.embedding import Embedding
 from rs_embed.core.specs import (
     InputPrepSpec,
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     PointBuffer,
     SensorSpec,
@@ -2780,7 +2779,6 @@ def test_export_batch_multiframe_prefetch_accepts_tchw_inputs(tmp_path, monkeypa
             cloudy_pct=30,
             temporal_mode="multi",
             n_frames=4,
-            normalization=NormalizationSpec(mode="s2_sr_raw"),
             expected_channels=3,
         )
 

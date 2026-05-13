@@ -258,24 +258,7 @@ class FetchSpec:
     composite: Literal["median", "mosaic"] | None = None
 
 
-# ── Normalization & model input contract ──────────────────────────
-
-
-@dataclass(frozen=True)
-class NormalizationSpec:
-    """Declarative normalization strategy applied to raw provider data.
-
-    Attributes
-    ----------
-    mode : {"s2_sr_clip", "s2_sr_raw", "s1_log_normalize", "none"}
-        Normalization mode:
-        - ``s2_sr_clip``: divide by 10 000 then clip to [0, 1].
-        - ``s2_sr_raw``: clip to [0, 10 000] (model normalizes later).
-        - ``s1_log_normalize``: log1p + 99th-percentile scaling.
-        - ``none``: nan-to-zero passthrough.
-    """
-
-    mode: Literal["s2_sr_clip", "s2_sr_raw", "s1_log_normalize", "none"]
+# ── Model input contract ──────────────────────────────────────────
 
 
 @dataclass(frozen=True)
@@ -284,9 +267,13 @@ class ModelInputSpec:
 
     When set as a class attribute on an ``EmbedderBase`` subclass, the base
     class ``fetch_input()`` implementation reads this spec and performs
-    generic provider fetching + normalization automatically.  Models with
-    custom fetch logic (fallback chains, multi-sensor routing) can still
-    override ``fetch_input()`` directly.
+    generic provider fetching automatically.  Models with custom fetch logic
+    (fallback chains, multi-sensor routing) can still override
+    ``fetch_input()`` directly.
+
+    ``fetch_input()`` always returns raw provider values (DN / native units).
+    Normalization to model input range is the embedder's responsibility and
+    must be applied in ``get_embedding()``.
 
     Attributes
     ----------
@@ -307,8 +294,6 @@ class ModelInputSpec:
         series.
     n_frames : int or None
         Number of temporal frames when ``temporal_mode="multi"``.
-    normalization : NormalizationSpec
-        Post-fetch normalization strategy.
     image_size : int or None
         Target spatial size for resize (``None`` = no resize at this layer).
     expected_channels : int or None
@@ -323,7 +308,6 @@ class ModelInputSpec:
     fill_value: float = 0.0
     temporal_mode: Literal["single", "multi"] = "single"
     n_frames: int | None = None
-    normalization: NormalizationSpec = NormalizationSpec(mode="s2_sr_clip")
     image_size: int | None = None
     expected_channels: int | None = None
 

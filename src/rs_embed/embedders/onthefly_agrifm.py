@@ -20,7 +20,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -591,7 +590,6 @@ class AgriFMEmbedder(EmbedderBase):
         cloudy_pct=30,
         temporal_mode="multi",
         n_frames=8,
-        normalization=NormalizationSpec(mode="s2_sr_raw"),  # AgriFM normalizes internally
         image_size=224,
         expected_channels=10,
     )

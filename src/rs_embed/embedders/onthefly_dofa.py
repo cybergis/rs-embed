@@ -15,7 +15,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -646,7 +645,6 @@ class DOFAEmbedder(EmbedderBase):
         bands=tuple(_DOFA_S2_BANDS),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="s2_sr_raw"),
         image_size=224,
         expected_channels=9,
     )

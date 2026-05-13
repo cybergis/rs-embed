@@ -14,7 +14,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -582,7 +581,6 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         bands=tuple(PRITHVI_S2_BANDS_DST),
         scale_m=30,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="s2_sr_clip"),
         expected_channels=6,
     )
 

@@ -16,7 +16,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -680,9 +679,6 @@ class GalileoEmbedder(EmbedderBase):
         cloudy_pct=30,
         temporal_mode="multi",
         n_frames=8,
-        normalization=NormalizationSpec(
-            mode="s2_sr_raw"
-        ),  # adapter keeps raw SR; model-side prep is configurable
         image_size=64,
         expected_channels=10,
     )

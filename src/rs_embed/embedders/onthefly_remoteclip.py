@@ -15,7 +15,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -40,7 +39,7 @@ from .meta import build_meta, temporal_to_range
 
 
 def _s2_rgb_u8_from_chw(s2_chw):
-    x = np.clip(np.asarray(s2_chw, dtype=np.float32), 0.0, 1.0)
+    x = np.clip(np.asarray(s2_chw, dtype=np.float32) / 10000.0, 0.0, 1.0)
     return (x.transpose(1, 2, 0) * 255.0).astype(np.uint8)
 
 
@@ -536,7 +535,6 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         bands=("B4", "B3", "B2"),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="s2_sr_clip"),
         image_size=224,
         expected_channels=3,
     )
@@ -839,8 +837,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 cloudy_pct=cloudy_pct,
                 composite=composite,
             )
-            # get_embedding(input_chw=...) expects raw SR in [0..10000]
-            raw = np.clip(s2_rgb_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
+            raw = np.clip(s2_rgb_chw, 0.0, 10000.0).astype(np.float32)
             return i, raw
 
         mw = self._resolve_fetch_workers(n)

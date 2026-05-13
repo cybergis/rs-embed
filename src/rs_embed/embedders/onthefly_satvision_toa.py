@@ -14,7 +14,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -989,7 +988,6 @@ class SatVisionTOAEmbedder(EmbedderBase):
         scale_m=1000,
         cloudy_pct=100,
         composite="mosaic",
-        normalization=NormalizationSpec(mode="none"),
         image_size=_DEFAULT_IMAGE_SIZE,
         expected_channels=_DEFAULT_IN_CHANS,
     )

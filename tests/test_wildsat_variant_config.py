@@ -217,7 +217,7 @@ def test_wildsat_get_embeddings_batch_forwards_model_config(monkeypatch):
     monkeypatch.setattr(
         ws,
         "_fetch_s2_rgb_chw",
-        lambda *args, **kwargs: np.full((3, 8, 8), 0.05, dtype=np.float32),
+        lambda *args, **kwargs: np.full((3, 8, 8), 500.0, dtype=np.float32),
     )
 
     # Mock the heavy model loading and forward pass

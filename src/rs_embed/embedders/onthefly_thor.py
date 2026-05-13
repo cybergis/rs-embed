@@ -15,7 +15,6 @@ from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
-    NormalizationSpec,
     OutputSpec,
     SensorSpec,
     SpatialSpec,
@@ -969,7 +968,6 @@ class THORBaseEmbedder(EmbedderBase):
         bands=tuple(_S2_SR_10_BANDS),
         scale_m=10,
         cloudy_pct=30,
-        normalization=NormalizationSpec(mode="none"),  # THOR uses custom z-score normalization
         image_size=288,
         expected_channels=10,
     )

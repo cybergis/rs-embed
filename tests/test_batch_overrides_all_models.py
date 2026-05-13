@@ -33,7 +33,7 @@ def test_remoteclip_batch_prefetch_passes_input_chw(monkeypatch):
     monkeypatch.setattr(
         rc,
         "_fetch_s2_rgb_chw",
-        lambda provider, spatial, temporal, **kw: np.full((3, 8, 8), 0.5, dtype=np.float32),
+        lambda provider, spatial, temporal, **kw: np.full((3, 8, 8), 5000.0, dtype=np.float32),
     )
 
     seen = []
@@ -53,7 +53,7 @@ def test_remoteclip_batch_prefetch_passes_input_chw(monkeypatch):
     )
 
     assert len(out) == 3
-    assert all(v >= 4999.0 for v in seen)  # 0.5 * 10000
+    assert all(v >= 4999.0 for v in seen)
 
 
 def test_scalemae_batch_prefetch_and_single_model_load(monkeypatch):
@@ -566,7 +566,7 @@ def test_wildsat_batch_prefetch_passes_raw_input(monkeypatch):
     monkeypatch.setattr(
         ws,
         "_fetch_s2_rgb_chw",
-        lambda provider, spatial, temporal, **kw: np.full((3, 8, 8), 0.4, dtype=np.float32),
+        lambda provider, spatial, temporal, **kw: np.full((3, 8, 8), 4000.0, dtype=np.float32),
     )
 
     seen = []
@@ -587,7 +587,7 @@ def test_wildsat_batch_prefetch_passes_raw_input(monkeypatch):
 
     assert len(out) == 2
     assert seen[0][0] == 3
-    assert seen[0][1] >= 3999.0  # 0.4 * 10000
+    assert seen[0][1] >= 3999.0
 
 
 def test_galileo_batch_prefetch_passes_raw_input(monkeypatch):
