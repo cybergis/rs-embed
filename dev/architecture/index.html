@@ -2095,7 +2095,7 @@ For adding a new model, see <a href="../extending/">Extending</a>.</p>
 </tr>
 <tr>
 <td><strong><code>providers/</code></strong></td>
-<td>Data access backends. <code>GEEProvider</code> fetches imagery from Google Earth Engine; <code>ProviderBase</code> defines the interface for future backends.</td>
+<td>Data access backends. <code>GEEProvider</code> fetches imagery from Google Earth Engine; <code>ProviderBase</code> defines the interface for future backends. <code>resolution.py</code> handles backend selection and provider lifecycle (auto-detection, caching, init kwargs). <code>fetch.py</code> provides satellite-specific fetch helpers (<code>fetch_s2_rgb_chw</code>, <code>fetch_s1_vvvh_raw_chw</code>, <code>fetch_s2_multiframe_raw_tchw</code>, etc.) and normalization used by embedders.</td>
 </tr>
 <tr>
 <td><strong><code>pipelines/</code></strong></td>
