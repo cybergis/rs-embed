@@ -24,6 +24,7 @@ from ..tools.manifest import (
     point_resume_manifest,
     summarize_status,
 )
+from ..tools.progress import FetchStats
 from ..tools.progress import create_progress as _default_create_progress
 from ..tools.serialization import (
     sanitize_key,
@@ -155,6 +156,8 @@ class BatchExporter:
 
         model_progress, on_model_done = self._create_model_progress(total=len(pending_idxs))
 
+        fetch_stats = FetchStats() if (bool(cfg.show_progress) and need_prefetch) else None
+
         # Chunk pipeline
         csize = cfg.effective_chunk_size
         chunk_groups = [pending_idxs[s : s + csize] for s in range(0, len(pending_idxs), csize)]
@@ -166,7 +169,7 @@ class BatchExporter:
             if need_prefetch and chunk_groups:
                 prefetch_pipeline_ex = ThreadPoolExecutor(max_workers=1)
                 prefetched_chunk_fut = prefetch_pipeline_ex.submit(
-                    self._prefetch_chunk, active_prefetch, chunk_groups[0]
+                    self._prefetch_chunk, active_prefetch, chunk_groups[0], fetch_stats
                 )
 
             for chunk_idx, idxs in enumerate(chunk_groups):
@@ -174,6 +177,8 @@ class BatchExporter:
                 if prefetched_chunk_fut is not None:
                     prefetched_chunk_fut.result()
                     prefetched_chunk_fut = None
+                    if fetch_stats is not None:
+                        fetch_stats.log()
 
                 # Kick off next chunk prefetch
                 next_prefetch: PrefetchManager | None = None
@@ -182,7 +187,10 @@ class BatchExporter:
                     # is isolated from the current chunk while both are live.
                     next_prefetch = self._clone_prefetch(active_prefetch)
                     prefetched_chunk_fut = prefetch_pipeline_ex.submit(
-                        self._prefetch_chunk, next_prefetch, chunk_groups[chunk_idx + 1]
+                        self._prefetch_chunk,
+                        next_prefetch,
+                        chunk_groups[chunk_idx + 1],
+                        fetch_stats,
                     )
 
                 # Chunk-level batch inference when useful for GPU or precomputed models.
@@ -267,9 +275,17 @@ class BatchExporter:
             unit="step",
         )
 
+        fetch_stats = (
+            FetchStats() if (bool(cfg.show_progress) and prefetch.provider is not None) else None
+        )
+
         # Prefetch all inputs
         if prefetch.provider is not None and tasks:
-            prefetch.fetch_chunk(all_idxs, self.spatials, self.temporal, progress=progress)
+            prefetch.fetch_chunk(
+                all_idxs, self.spatials, self.temporal, progress=progress, fetch_stats=fetch_stats
+            )
+            if fetch_stats is not None:
+                fetch_stats.log()
 
         # Store prefetch checkpoint
         if prefetch.provider is not None:
@@ -504,9 +520,14 @@ class BatchExporter:
         # get_embeddings_batch(); this is useful on CPU and independent of input_prep.
         return any(bool(mc.is_precomputed) for mc in self.models)
 
-    def _prefetch_chunk(self, prefetch: PrefetchManager, idxs: list[int]) -> None:
+    def _prefetch_chunk(
+        self,
+        prefetch: PrefetchManager,
+        idxs: list[int],
+        fetch_stats: FetchStats | None = None,
+    ) -> None:
         """Prefetch a chunk of inputs (for use in pipelined prefetch)."""
-        prefetch.fetch_chunk(idxs, self.spatials, self.temporal)
+        prefetch.fetch_chunk(idxs, self.spatials, self.temporal, fetch_stats=fetch_stats)
 
     def _clone_prefetch(self, src: PrefetchManager) -> PrefetchManager:
         """Clone a PrefetchManager preserving the plan with fresh per-chunk caches."""

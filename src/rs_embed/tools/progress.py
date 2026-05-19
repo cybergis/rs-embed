@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import sys
+import threading
 from typing import Any
 
 
@@ -41,6 +42,84 @@ class SimpleProgress:
     def close(self) -> None:
         if self.total > 0 and self.done < self.total:
             sys.stderr.write("\n")
+            sys.stderr.flush()
+
+
+class FetchStats:
+    """Thread-safe accumulator for GEE image fetch statistics.
+
+    Updated by :class:`~rs_embed.pipelines.prefetch.PrefetchManager` during
+    ``fetch_chunk`` and surfaced as log messages when progress reporting is on.
+    """
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._total = 0
+        self._completed = 0
+        self._failed = 0
+        self._cache_hits = 0
+
+    @property
+    def total(self) -> int:
+        """Total GEE fetch operations planned across all chunks."""
+        with self._lock:
+            return self._total
+
+    @property
+    def completed(self) -> int:
+        """Number of fetch operations that succeeded."""
+        with self._lock:
+            return self._completed
+
+    @property
+    def failed(self) -> int:
+        """Number of fetch operations that failed."""
+        with self._lock:
+            return self._failed
+
+    @property
+    def cache_hits(self) -> int:
+        """Number of fetch operations skipped due to cache reuse."""
+        with self._lock:
+            return self._cache_hits
+
+    def record_planned(self, n: int = 1) -> None:
+        """Register *n* newly planned fetch tasks."""
+        with self._lock:
+            self._total += max(0, int(n))
+
+    def record_cache_hits(self, n: int = 1) -> None:
+        """Register *n* fetches skipped due to a cache hit."""
+        with self._lock:
+            self._cache_hits += max(0, int(n))
+
+    def record_success(self) -> None:
+        """Register one successful fetch."""
+        with self._lock:
+            self._completed += 1
+
+    def record_failure(self) -> None:
+        """Register one failed fetch."""
+        with self._lock:
+            self._failed += 1
+
+    def format_summary(self) -> str:
+        """Return a compact summary line suitable for stderr logging."""
+        with self._lock:
+            t, c, f, h = self._total, self._completed, self._failed, self._cache_hits
+        pct = int(100 * c / t) if t > 0 else 0
+        msg = f"[gee_fetch] total={t} | done={c} ({pct}%) | failed={f} | cached={h}"
+        return msg
+
+    def log(self) -> None:
+        """Write the current summary to stderr, respecting any active tqdm bar."""
+        msg = self.format_summary()
+        try:
+            from tqdm import tqdm
+
+            tqdm.write(msg, file=sys.stderr)
+        except Exception:
+            sys.stderr.write(msg + "\n")
             sys.stderr.flush()
 
 

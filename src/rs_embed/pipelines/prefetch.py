@@ -20,6 +20,7 @@ from ..providers.prefetch_plan import (
     select_prefetched_channels,
 )
 from ..tools.normalization import normalize_input_array
+from ..tools.progress import FetchStats
 from .runner import run_with_retry
 
 
@@ -124,12 +125,21 @@ class PrefetchManager:
         temporal: TemporalSpec | None,
         *,
         progress: Any = None,
+        fetch_stats: FetchStats | None = None,
     ) -> None:
         """Prefetch provider inputs for *idxs* into ``self.cache``."""
         if not self.enabled or self.provider is None:
             return
 
         tasks = self.build_tasks(idxs, spatials)
+
+        if fetch_stats is not None:
+            possible = len(idxs) * len(self.fetch_sensor_by_key)
+            cache_hits = possible - len(tasks)
+            if cache_hits > 0:
+                fetch_stats.record_cache_hits(cache_hits)
+            fetch_stats.record_planned(len(tasks))
+
         if not tasks:
             return
 
@@ -176,6 +186,8 @@ class PrefetchManager:
                     err_s = repr(e)
                     for member_skey in self.fetch_members.get(skey, []):
                         self.errors[(i, member_skey)] = err_s
+                    if fetch_stats is not None:
+                        fetch_stats.record_failure()
                     if progress is not None:
                         progress.update(1)
                     continue
@@ -203,12 +215,16 @@ class PrefetchManager:
                             if not cfg.continue_on_error:
                                 raise err
                             self.errors[(i, member_skey)] = repr(err)
+                            if fetch_stats is not None:
+                                fetch_stats.record_failure()
                             continue
                         self.input_reports[(i, member_skey)] = rep
                     self.cache[(i, member_skey)] = x_member
                     if fmeta:
                         self.fetch_meta[(i, member_skey)] = fmeta
 
+                if fetch_stats is not None:
+                    fetch_stats.record_success()
                 if progress is not None:
                     progress.update(1)
 
