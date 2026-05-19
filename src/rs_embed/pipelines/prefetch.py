@@ -224,7 +224,11 @@ class PrefetchManager:
                         self.fetch_meta[(i, member_skey)] = fmeta
 
                 if fetch_stats is not None:
-                    fetch_stats.record_success()
+                    fsensor = self.fetch_sensor_by_key.get(skey)
+                    fetch_stats.record_success(
+                        point=i,
+                        sensor=fsensor.collection if fsensor is not None else None,
+                    )
                 if progress is not None:
                     progress.update(1)
 

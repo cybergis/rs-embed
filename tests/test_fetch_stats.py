@@ -15,7 +15,6 @@ from rs_embed.core.types import ExportConfig, ExportTarget
 from rs_embed.tools.progress import FetchStats
 from rs_embed.tools.runtime import get_embedder_bundle_cached
 
-
 # ── FetchStats unit tests ──────────────────────────────────────────────────────
 
 
@@ -123,6 +122,32 @@ def test_fetch_stats_format_summary_100_percent():
         stats.record_success()
     s = stats.format_summary()
     assert "100%" in s
+
+
+def test_fetch_stats_format_summary_no_last_when_none():
+    stats = FetchStats()
+    stats.record_planned(1)
+    stats.record_success()
+    s = stats.format_summary()
+    assert "last=" not in s
+
+
+def test_fetch_stats_format_summary_shows_last_point_and_sensor():
+    stats = FetchStats()
+    stats.record_planned(2)
+    stats.record_success(point=3, sensor="COPERNICUS/S2_SR_HARMONIZED")
+    stats.record_success(point=7, sensor="COPERNICUS/S1_GRD")
+    s = stats.format_summary()
+    assert "last=point:7" in s
+    assert "sensor:COPERNICUS/S1_GRD" in s
+
+
+def test_fetch_stats_record_success_partial_info():
+    stats = FetchStats()
+    stats.record_planned(1)
+    stats.record_success(point=5)  # no sensor
+    s = stats.format_summary()
+    assert "last=" not in s  # both must be set to show the field
 
 
 def test_fetch_stats_log_writes_to_stderr(capsys):
@@ -373,7 +398,9 @@ def _register_onthefly(name: str):
                 },
             }
 
-        def get_embedding(self, *, spatial, temporal, sensor, output, backend, device="auto", input_chw=None):
+        def get_embedding(
+            self, *, spatial, temporal, sensor, output, backend, device="auto", input_chw=None
+        ):
             return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
 
     DummyOntheFly.__name__ = name
@@ -390,9 +417,7 @@ def _patch_gee(monkeypatch):
         def ensure_ready(self):
             pass
 
-    monkeypatch.setattr(
-        "rs_embed.tools.runtime.get_provider", lambda _name, **_kw: DummyProvider()
-    )
+    monkeypatch.setattr("rs_embed.tools.runtime.get_provider", lambda _name, **_kw: DummyProvider())
     monkeypatch.setattr(
         "rs_embed.providers.fetch.fetch_sensor_patch_chw",
         lambda provider, *, spatial, temporal, sensor: np.ones((3, 8, 8), dtype=np.float32),
@@ -603,7 +628,9 @@ def test_export_batch_fetch_stats_no_provider_no_log(tmp_path, monkeypatch, caps
         def describe(self):
             return {"type": "precomputed", "backend": ["local"], "output": ["pooled"]}
 
-        def get_embedding(self, *, spatial, temporal, sensor, output, backend, device="auto", input_chw=None):
+        def get_embedding(
+            self, *, spatial, temporal, sensor, output, backend, device="auto", input_chw=None
+        ):
             return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
 
     registry.register("dummy_precomputed_stats")(DummyPrecomputed)
@@ -627,3 +654,33 @@ def test_export_batch_fetch_stats_no_provider_no_log(tmp_path, monkeypatch, caps
 
     captured = capsys.readouterr()
     assert "[gee_fetch]" not in captured.err
+
+
+def test_export_batch_fetch_stats_last_point_and_sensor_in_log(tmp_path, monkeypatch, capsys):
+    """The log line includes last=point:N,sensor:collection after a successful fetch."""
+    import rs_embed.api as api
+
+    _register_onthefly("dummy_otf_last_field")
+    _patch_gee(monkeypatch)
+    get_embedder_bundle_cached.cache_clear()
+
+    spatials = [PointBuffer(lon=0, lat=0, buffer_m=10)]
+
+    api.export_batch(
+        spatials=spatials,
+        temporal=TemporalSpec.year(2022),
+        models=["dummy_otf_last_field"],
+        target=ExportTarget.per_item(str(tmp_path / "out")),
+        config=ExportConfig(
+            save_inputs=True,
+            save_embeddings=True,
+            show_progress=True,
+            num_workers=1,
+        ),
+        backend="gee",
+        output=OutputSpec.pooled(),
+    )
+
+    captured = capsys.readouterr()
+    assert "last=point:" in captured.err
+    assert "sensor:" in captured.err

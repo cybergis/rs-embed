@@ -58,6 +58,8 @@ class FetchStats:
         self._completed = 0
         self._failed = 0
         self._cache_hits = 0
+        self._last_point: int | None = None
+        self._last_sensor: str | None = None
 
     @property
     def total(self) -> int:
@@ -93,10 +95,14 @@ class FetchStats:
         with self._lock:
             self._cache_hits += max(0, int(n))
 
-    def record_success(self) -> None:
-        """Register one successful fetch."""
+    def record_success(self, *, point: int | None = None, sensor: str | None = None) -> None:
+        """Register one successful fetch, optionally recording the point/sensor."""
         with self._lock:
             self._completed += 1
+            if point is not None:
+                self._last_point = point
+            if sensor is not None:
+                self._last_sensor = sensor
 
     def record_failure(self) -> None:
         """Register one failed fetch."""
@@ -107,8 +113,11 @@ class FetchStats:
         """Return a compact summary line suitable for stderr logging."""
         with self._lock:
             t, c, f, h = self._total, self._completed, self._failed, self._cache_hits
+            last_pt, last_s = self._last_point, self._last_sensor
         pct = int(100 * c / t) if t > 0 else 0
         msg = f"[gee_fetch] total={t} | done={c} ({pct}%) | failed={f} | cached={h}"
+        if last_pt is not None and last_s is not None:
+            msg += f" | last=point:{last_pt},sensor:{last_s}"
         return msg
 
     def log(self) -> None:
