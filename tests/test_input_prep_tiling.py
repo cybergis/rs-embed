@@ -1,7 +1,8 @@
 import numpy as np
 
 from rs_embed.core.embedding import Embedding
-from rs_embed.core.specs import BBox, InputPrepSpec, OutputSpec
+from rs_embed.core.specs import BBox, InputPrepSpec, OutputSpec, SpatialSpec
+from rs_embed.core.types import ExportConfig, TaskResult
 from rs_embed.tools.tiling import (
     _call_embedder_get_embedding_with_input_prep,
     _tile_yx_starts,
@@ -168,3 +169,157 @@ def test_cover_shift_tile_positions_avoid_padding_for_300_with_224():
     assert out.meta["input_prep"]["tile_count"] == 4
     assert sorted(emb.batch_input_shapes) == [(1, 224, 224)] * 4
     assert sorted(int(v) for v in emb.batch_input_topleft) == [0, 76, 22800, 22876]
+
+
+# ---------------------------------------------------------------------------
+# Tiled batch inference across multiple spatial points
+# ---------------------------------------------------------------------------
+
+
+class _FakeTileEmbedderWithBase(_FakeTileEmbedder):
+    """Subclass that satisfies EmbedderBase contract checks used by InferenceEngine."""
+
+    def describe(self):
+        return {"defaults": {"image_size": 4}}
+
+    def get_embedding(self, *, spatial, temporal=None, sensor=None,
+                      output=OutputSpec.pooled(), backend="gee", device="cpu",
+                      input_chw=None):
+        self.single_calls += 1
+        x = np.asarray(input_chw, dtype=np.float32)
+        if output.mode == "grid":
+            return Embedding(
+                data=x[:1].copy(),
+                meta={"y_axis_direction": "north_to_south",
+                      "grid_hw": (int(x.shape[-2]), int(x.shape[-1]))},
+            )
+        return Embedding(data=np.asarray([float(x.mean())], dtype=np.float32), meta={})
+
+
+def _make_engine(tile_size: int = 4) -> tuple:
+    from rs_embed.pipelines.inference import InferenceEngine
+
+    cfg = ExportConfig(input_prep=InputPrepSpec.tile(tile_size=tile_size, max_tiles=16))
+    engine = InferenceEngine(device="cpu", output=OutputSpec.pooled("mean"), config=cfg)
+    return engine
+
+
+def test_run_batch_tiled_aggregates_multiple_points():
+    """_run_batch_tiled should tile each image and return one result per spatial point."""
+    import threading
+
+    from rs_embed.pipelines.inference import InferenceEngine
+
+    emb = _FakeTileEmbedderWithBase()
+    lock = threading.RLock()
+    engine = _make_engine(tile_size=4)
+
+    n_points = 3
+    # Each image is 6x6 → 4 tiles of size 4x4
+    images = {
+        i: np.arange(36, dtype=np.float32).reshape(1, 6, 6) * (i + 1)
+        for i in range(n_points)
+    }
+    spatials = [BBox(minlon=float(i), minlat=0.0, maxlon=float(i + 1), maxlat=1.0)
+                for i in range(n_points)]
+
+    done_indices: list[int] = []
+
+    out, succeeded = engine._run_batch_tiled(
+        idxs=list(range(n_points)),
+        spatials=spatials,
+        temporal=None,
+        sensor=None,
+        embedder=emb,
+        lock=lock,
+        backend="gee",
+        get_input_fn=lambda i: images[i],
+        batch_size=16,
+        continue_on_error=False,
+        on_done=done_indices.append,
+        use_lock=False,
+        model_name="fake_tile",
+    )
+
+    assert succeeded, "tiled batch should succeed"
+    assert set(out.keys()) == set(range(n_points))
+    for i in range(n_points):
+        assert out[i].status.value == "ok", f"point {i} failed: {out[i].error}"
+        assert out[i].embedding is not None
+
+    assert sorted(done_indices) == list(range(n_points))
+    # 3 points × 4 tiles each = 12 total tiles processed via batch API
+    assert emb.batch_calls >= 1
+    total_tiles = sum(len(s) for s in [emb.batch_input_shapes])
+    assert total_tiles == n_points * 4
+
+
+def test_infer_chunk_tile_mode_uses_batch_on_gpu(monkeypatch):
+    """infer_chunk with input_prep='tile' should reach _run_batch_tiled when GPU available."""
+    import threading
+
+    from rs_embed.pipelines import inference as inf_mod
+
+    emb = _FakeTileEmbedderWithBase()
+    lock = threading.RLock()
+
+    # Force prefer_batch=True without a real GPU
+    monkeypatch.setattr(inf_mod, "_device_has_gpu", lambda _: True)
+
+    from rs_embed.pipelines.inference import InferenceEngine
+    from rs_embed.core.types import ModelConfig, ExportConfig
+    from rs_embed.core.specs import InputPrepSpec, OutputSpec
+
+    cfg = ExportConfig(input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16))
+    engine = InferenceEngine(device="cpu", output=OutputSpec.pooled("mean"), config=cfg)
+
+    n = 2
+    images = {i: np.ones((1, 6, 6), dtype=np.float32) * (i + 1) for i in range(n)}
+    spatials = [BBox(minlon=float(i), minlat=0.0, maxlon=float(i + 1), maxlat=1.0)
+                for i in range(n)]
+
+    tiled_called: list[bool] = []
+    original_run_batch_tiled = engine._run_batch_tiled
+
+    def _spy_tiled(**kwargs):
+        tiled_called.append(True)
+        return original_run_batch_tiled(**kwargs)
+
+    engine._run_batch_tiled = _spy_tiled
+
+    from rs_embed.tools.serialization import sensor_cache_key
+    from rs_embed.core.specs import SensorSpec
+
+    sensor = SensorSpec(collection="FAKE/S2", bands=("B2", "B3", "B4"), scale_m=10, fill_value=0.0)
+    skey = sensor_cache_key(sensor)
+    prefetch_cache = {(i, skey): images[i] for i in range(n)}
+
+    # Patch resolve_model_context to return our fake embedder
+    from rs_embed.pipelines.inference import _ModelContext
+    monkeypatch.setattr(
+        engine,
+        "_resolve_model_context",
+        lambda **kw: _ModelContext(
+            embedder=emb,
+            lock=lock,
+            sensor_k=("s2",),
+            skey=skey,
+            needs_provider_input=True,
+        ),
+    )
+
+    mc = ModelConfig(name="fake_tile", backend="gee", sensor=sensor)
+    out = engine.infer_chunk(
+        idxs=list(range(n)),
+        spatials=spatials,
+        temporal=None,
+        models=[mc],
+        prefetch_cache=prefetch_cache,
+        prefetch_errors={},
+    )
+
+    assert len(tiled_called) >= 1, "_run_batch_tiled was not invoked"
+    for i in range(n):
+        key = (i, mc.name)
+        assert key in out, f"missing result for {key}"
+        assert out[key].status.value == "ok"
