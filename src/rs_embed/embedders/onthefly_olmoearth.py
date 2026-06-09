@@ -34,22 +34,31 @@ from .meta import build_meta, temporal_midpoint_str, temporal_to_range
 #   BandSet-2 (60 m): B01, B09
 # GEE COPERNICUS/S2_SR_HARMONIZED uses names without leading zeros.
 _S2_BANDS_GEE: tuple[str, ...] = (
-    "B2", "B3", "B4", "B8",          # 10 m
-    "B5", "B6", "B7", "B8A", "B11", "B12",  # 20 m
-    "B1", "B9",                        # 60 m
+    "B2",
+    "B3",
+    "B4",
+    "B8",  # 10 m
+    "B5",
+    "B6",
+    "B7",
+    "B8A",
+    "B11",
+    "B12",  # 20 m
+    "B1",
+    "B9",  # 60 m
 )
-_N_BANDS = len(_S2_BANDS_GEE)         # 12
-_N_BAND_SETS = 3                       # matches OlmoEarth S2 L2A
+_N_BANDS = len(_S2_BANDS_GEE)  # 12
+_N_BAND_SETS = 3  # matches OlmoEarth S2 L2A
 
 # Map canonical variant names to (ModelID enum string, size, version)
 _VARIANT_SPECS: dict[str, tuple[str, str, str]] = {
-    "nano":     ("OlmoEarth-v1-Nano",     "nano",  "v1"),
-    "tiny":     ("OlmoEarth-v1-Tiny",     "tiny",  "v1"),
-    "base":     ("OlmoEarth-v1-Base",     "base",  "v1"),
-    "large":    ("OlmoEarth-v1-Large",    "large", "v1"),
-    "nano_v1_1": ("OlmoEarth-v1_1-Nano",  "nano",  "v1.1"),
-    "tiny_v1_1": ("OlmoEarth-v1_1-Tiny",  "tiny",  "v1.1"),
-    "base_v1_1": ("OlmoEarth-v1_1-Base",  "base",  "v1.1"),
+    "nano": ("OlmoEarth-v1-Nano", "nano", "v1"),
+    "tiny": ("OlmoEarth-v1-Tiny", "tiny", "v1"),
+    "base": ("OlmoEarth-v1-Base", "base", "v1"),
+    "large": ("OlmoEarth-v1-Large", "large", "v1"),
+    "nano_v1_1": ("OlmoEarth-v1_1-Nano", "nano", "v1.1"),
+    "tiny_v1_1": ("OlmoEarth-v1_1-Tiny", "tiny", "v1.1"),
+    "base_v1_1": ("OlmoEarth-v1_1-Base", "base", "v1.1"),
 }
 
 _VARIANT_ALIASES: dict[str, str] = {
@@ -63,7 +72,7 @@ _VARIANT_ALIASES: dict[str, str] = {
 }
 
 _DEFAULT_VARIANT = "nano"
-_DEFAULT_IMAGE_SIZE = 256   # training tile size; model accepts any size divisible by patch_size
+_DEFAULT_IMAGE_SIZE = 256  # training tile size; model accepts any size divisible by patch_size
 _DEFAULT_PATCH_SIZE = 4
 _DEFAULT_SCALE_M = 10
 _DEFAULT_CLOUDY_PCT = 30
@@ -73,10 +82,12 @@ _DEFAULT_CLOUDY_PCT = 30
 # Package guard
 # ---------------------------------------------------------------------------
 
+
 def _ensure_olmoearth() -> Any:
     """Import and return olmoearth_pretrain_minimal, raising a clear error if absent."""
     try:
         import olmoearth_pretrain_minimal as om  # type: ignore[import-untyped]
+
         return om
     except ImportError as exc:
         raise ModelError(
@@ -88,6 +99,7 @@ def _ensure_olmoearth() -> Any:
 def _ensure_torch() -> Any:
     try:
         import torch  # noqa: F401
+
         return torch
     except ImportError as exc:
         raise ModelError("OlmoEarth requires torch. Install: uv pip install torch") from exc
@@ -97,6 +109,7 @@ def _ensure_torch() -> Any:
 # Variant helpers
 # ---------------------------------------------------------------------------
 
+
 def _normalize_variant(variant: Any) -> str:
     raw = str(variant).strip().lower().replace("-", "_").replace(".", "_")
     if raw in _VARIANT_SPECS:
@@ -104,8 +117,7 @@ def _normalize_variant(variant: Any) -> str:
     if raw in _VARIANT_ALIASES:
         return _VARIANT_ALIASES[raw]
     raise ModelError(
-        f"Unknown OlmoEarth variant='{variant}'. "
-        f"Valid choices: {sorted(_VARIANT_SPECS)}."
+        f"Unknown OlmoEarth variant='{variant}'. Valid choices: {sorted(_VARIANT_SPECS)}."
     )
 
 
@@ -146,6 +158,7 @@ def _resolve_image_size(model_config: dict[str, Any] | None) -> int:
 # Model loading (cached)
 # ---------------------------------------------------------------------------
 
+
 @lru_cache(maxsize=8)
 def _load_olmoearth_cached(model_id_str: str, dev: str):
     om = _ensure_olmoearth()
@@ -178,6 +191,7 @@ def _load_olmoearth(variant: str, *, device: str = "auto"):
 # ---------------------------------------------------------------------------
 # Preprocessing helpers
 # ---------------------------------------------------------------------------
+
 
 def _normalize_s2_chw(x_chw: np.ndarray) -> np.ndarray:
     """Normalize CHW S2 raw DN to OlmoEarth's expected range via mean±2σ clipping."""
@@ -212,9 +226,7 @@ def _prepare_chw(
 ) -> np.ndarray:
     """Normalize and resize CHW patch for OlmoEarth input."""
     if x_chw.ndim != 3 or x_chw.shape[0] != _N_BANDS:
-        raise ModelError(
-            f"OlmoEarth expects {_N_BANDS}-band CHW input, got {x_chw.shape}."
-        )
+        raise ModelError(f"OlmoEarth expects {_N_BANDS}-band CHW input, got {x_chw.shape}.")
     x = _normalize_s2_chw(x_chw)
 
     # Ensure H and W are divisible by patch_size
@@ -231,12 +243,13 @@ def _date_to_timestamp(date_str: str | None) -> tuple[int, int, int]:
     from datetime import date as _date  # noqa: PLC0415
 
     d = _date.fromisoformat(date_str)
-    return (d.day, d.month - 1, d.year)   # month is 0-indexed in OlmoEarth
+    return (d.day, d.month - 1, d.year)  # month is 0-indexed in OlmoEarth
 
 
 # ---------------------------------------------------------------------------
 # Inference helpers
 # ---------------------------------------------------------------------------
+
 
 def _build_sample(x_chw: np.ndarray, *, timestamp: tuple[int, int, int]):
     """Wrap a single CHW patch as a batched MaskedOlmoEarthSample (B=1, T=1)."""
@@ -250,7 +263,9 @@ def _build_sample(x_chw: np.ndarray, *, timestamp: tuple[int, int, int]):
     s2 = torch.from_numpy(x_chw).permute(1, 2, 0).unsqueeze(0).unsqueeze(3)  # [1,H,W,1,12]
     # Mask: all ONLINE_ENCODER (0)
     mask = torch.zeros(1, h, w, 1, _N_BAND_SETS, dtype=torch.float32)
-    ts = torch.tensor([[[*timestamp]]], dtype=torch.long)  # [1, T=1, 3]; must be int for month embedding
+    ts = torch.tensor(
+        [[[*timestamp]]], dtype=torch.long
+    )  # [1, T=1, 3]; must be int for month embedding
     return MaskedOlmoEarthSample(
         sentinel2_l2a=s2,
         sentinel2_l2a_mask=mask,
@@ -269,7 +284,9 @@ def _build_batch_sample(x_bchw: np.ndarray, *, timestamps: list[tuple[int, int, 
     # (B, H, W, T=1, C)
     s2 = torch.from_numpy(x_bchw).permute(0, 2, 3, 1).unsqueeze(3)
     mask = torch.zeros(b, h, w, 1, _N_BAND_SETS, dtype=torch.float32)
-    ts = torch.tensor([[list(t)] for t in timestamps], dtype=torch.long)  # [B, 1, 3]; int for month embedding
+    ts = torch.tensor(
+        [[list(t)] for t in timestamps], dtype=torch.long
+    )  # [B, 1, 3]; int for month embedding
     return MaskedOlmoEarthSample(
         sentinel2_l2a=s2,
         sentinel2_l2a_mask=mask,
@@ -304,6 +321,7 @@ def _encoder_forward(model, sample, *, patch_size: int, device: str) -> Any:
 # Output helpers
 # ---------------------------------------------------------------------------
 
+
 def _pool_tokens(tokens_and_masks, pooling: str) -> np.ndarray:
     """Pool spatial + temporal + band-set dims → (B, D) numpy array."""
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.nn.flexi_vit import (
@@ -322,7 +340,7 @@ def _tokens_to_grid(tokens_and_masks, pooling: str) -> np.ndarray:
         raise ModelError("No S2 L2A tokens in OlmoEarth encoder output.")
     # pool over T (dim 3) and band-sets (dim 4)
     if pooling == "mean":
-        spatial = s2.mean(dim=[3, 4])          # (B, H', W', D)
+        spatial = s2.mean(dim=[3, 4])  # (B, H', W', D)
     else:
         spatial = s2.max(dim=4).values.max(dim=3).values  # (B, H', W', D)
     # Take first batch item and move dim to (D, H', W')
@@ -333,6 +351,7 @@ def _tokens_to_grid(tokens_and_masks, pooling: str) -> np.ndarray:
 # ---------------------------------------------------------------------------
 # Embedder
 # ---------------------------------------------------------------------------
+
 
 @register("olmoearth")
 class OlmoEarthEmbedder(EmbedderBase):
@@ -631,7 +650,9 @@ class OlmoEarthEmbedder(EmbedderBase):
                     f"input_chw at index {i} must be CHW with {_N_BANDS} bands, "
                     f"got {getattr(x_chw, 'shape', None)}."
                 )
-            prepared.append(_prepare_chw(x_chw.astype(np.float32), image_size=image_size, patch_size=patch_size))
+            prepared.append(
+                _prepare_chw(x_chw.astype(np.float32), image_size=image_size, patch_size=patch_size)
+            )
 
         shape_groups: dict[tuple[int, int, int], list[int]] = {}
         for i, x in enumerate(prepared):
@@ -641,18 +662,23 @@ class OlmoEarthEmbedder(EmbedderBase):
         if output.mode == "grid":
             try:
                 import xarray as xr  # noqa: PLC0415
+
                 xr_mod = xr
             except ImportError as exc:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from exc
+                raise ModelError(
+                    "grid output requires xarray. Install: pip install xarray"
+                ) from exc
 
         out: list[Embedding | None] = [None] * len(spatials)
 
         for idxs in shape_groups.values():
             for s0 in range(0, len(idxs), infer_bs):
-                chunk = idxs[s0: s0 + infer_bs]
+                chunk = idxs[s0 : s0 + infer_bs]
                 xb = np.stack([prepared[i] for i in chunk], axis=0)
                 sample = _build_batch_sample(xb, timestamps=[timestamp] * len(chunk))
-                tokens_and_masks = _encoder_forward(model, sample, patch_size=patch_size, device=dev)
+                tokens_and_masks = _encoder_forward(
+                    model, sample, patch_size=patch_size, device=dev
+                )
 
                 if output.mode == "pooled":
                     pooled = _pool_tokens(tokens_and_masks, output.pooling)  # (B, D)
@@ -680,7 +706,7 @@ class OlmoEarthEmbedder(EmbedderBase):
                     if s2 is None:
                         raise ModelError("No S2 L2A tokens in OlmoEarth encoder output.")
                     if output.pooling == "mean":
-                        spatial_b = s2.mean(dim=[3, 4])          # (B, H', W', D)
+                        spatial_b = s2.mean(dim=[3, 4])  # (B, H', W', D)
                     else:
                         spatial_b = s2.max(dim=4).values.max(dim=3).values
                     spatial_b = spatial_b.detach().float().cpu()
@@ -724,6 +750,7 @@ class OlmoEarthEmbedder(EmbedderBase):
 # Internal helpers shared between single and batch paths
 # ---------------------------------------------------------------------------
 
+
 def _build_embedding_meta(
     *,
     model_name: str,
@@ -748,21 +775,25 @@ def _build_embedding_meta(
         temporal=temporal,
         image_size=image_size,
     )
-    meta.update({
-        "hf_repo": wmeta.get("hf_repo"),
-        "variant": variant,
-        "model_size": size,
-        "model_version": version,
-        "patch_size": patch_size,
-        "temporal_range": (temporal.start, temporal.end),
-        "date_str": date_str,
-    })
+    meta.update(
+        {
+            "hf_repo": wmeta.get("hf_repo"),
+            "variant": variant,
+            "model_size": size,
+            "model_version": version,
+            "patch_size": patch_size,
+            "temporal_range": (temporal.start, temporal.end),
+            "date_str": date_str,
+        }
+    )
     if extra:
         meta.update(extra)
     return meta
 
 
-def _make_grid_embedding(tokens_and_masks: Any, output: OutputSpec, meta: dict[str, Any]) -> Embedding:
+def _make_grid_embedding(
+    tokens_and_masks: Any, output: OutputSpec, meta: dict[str, Any]
+) -> Embedding:
     try:
         import xarray as xr  # noqa: PLC0415
     except ImportError as exc:
