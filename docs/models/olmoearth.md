@@ -15,6 +15,7 @@
 
     Key characteristics:
     - All 12 S2 L2A bands in the OlmoEarth band-set order (10 m → 20 m → 60 m groups)
+    - **S1 modality** via `modality="s1"`: Sentinel-1 GRD `VV/VH` in dB, like TerraFM
     - Per-band normalization using OlmoEarth's COMPUTED strategy (mean ± 2σ)
     - 4 size variants in v1 (`nano`/`tiny`/`base`/`large`) and 3 in v1.1 (`nano_v1_1`/`tiny_v1_1`/`base_v1_1`)
     - `patch_size` controls the spatial token density (1–8); default `4` matches the official inference example
@@ -29,14 +30,25 @@
 | --------------------- | ---------------------------------------------------------------------------------- |
 | Backend               | provider only (`gee` / `auto`)                                                     |
 | `TemporalSpec`        | `range` or `year` (normalized via shared helper; year → full year composite)       |
-| Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                                                      |
-| Default bands (order) | `B2, B3, B4, B8, B5, B6, B7, B8A, B11, B12, B1, B9`                              |
-| Default fetch         | `scale_m=10`, `cloudy_pct=30`, `composite="median"`                                |
-| `input_chw`           | `CHW`, `C=12` in the band order above, raw SR DN `0..10000`                        |
+| Modalities            | `s2` (default) or `s1` via `modality="s1"`                                         |
 | Side inputs           | timestamps (derived from temporal midpoint), none required from user                |
 
-The band order matches OlmoEarth's internal `Modality.SENTINEL2_L2A` definition:
-three band sets (10 m, 20 m, 60 m) totaling 12 channels.
+| Modality       | Collection                    | Bands (order)                                        | `input_chw` (override)              | Extra sensor fields                          |
+| -------------- | ----------------------------- | ---------------------------------------------------- | ----------------------------------- | --------------------------------------------- |
+| `s2` (default) | `COPERNICUS/S2_SR_HARMONIZED` | `B2,B3,B4,B8,B5,B6,B7,B8A,B11,B12,B1,B9` (12-band)   | `CHW`, `C=12`, raw SR DN `0..10000` | `scale_m=10`, `cloudy_pct=30`, `composite`    |
+| `s1`           | `COPERNICUS/S1_GRD`           | `VV, VH` (2-band, **dB**)                            | `CHW`, `C=2`, backscatter in dB     | `scale_m=10`, `s1_require_iw`, `composite`    |
+
+The S2 band order matches OlmoEarth's internal `Modality.SENTINEL2_L2A` definition:
+three band sets (10 m, 20 m, 60 m) totaling 12 channels. The S1 order matches
+`Modality.SENTINEL1` (`vv`, `vh`; single band set).
+
+!!! note "S1 values are dB"
+    OlmoEarth's S1 normalization statistics are computed in **dB** (VV mean ≈ −11.6,
+    VH mean ≈ −17.7), so the adapter fetches the dB collection `COPERNICUS/S1_GRD` by
+    default (`use_float_linear=False`). If you switch the sensor to the linear-power
+    collection (`use_float_linear=True` → `COPERNICUS/S1_GRD_FLOAT`), the adapter
+    converts to dB via `10·log10` before normalization. `input_chw` overrides for
+    `s1` must already be in dB.
 
 ---
 
@@ -192,6 +204,17 @@ emb_grid = rs.get_embedding(
 )
 print(emb_grid.data.shape)   # (128, 32, 32) for nano with patch_size=8
 
+# Sentinel-1 modality (VV/VH dB), same switch as TerraFM
+emb_s1 = rs.get_embedding(
+    "olmoearth",
+    spatial=BBox(minlon=-2.0, minlat=6.0, maxlon=-1.9, maxlat=6.1),
+    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+    modality="s1",
+    output=OutputSpec.pooled(),
+)
+print(emb_s1.data.shape)   # (128,) for nano
+print(emb_s1.meta["modality"])  # "s1"
+
 # Class-based API for repeated calls
 from rs_embed.model import Model
 from rs_embed.core.specs import PointBuffer
@@ -207,7 +230,7 @@ embeddings = model.get_embeddings_batch([
 
 ## Notes and Caveats
 
-- The OlmoEarth normalizer clips to `mean ± 2σ` before rescaling to `[0, 1]`. Values outside this range are clipped, not discarded.
+- The OlmoEarth normalizer linearly maps `mean ± 2σ` to `[0, 1]` (`(x − min) / (max − min)`); values outside that range fall outside `[0, 1]` rather than being clipped — matching the official `Normalizer` implementation.
 - `patch_size` is a **model input** (FlexiViT accepts variable patch sizes), not a preprocessing hyperparameter. Different `patch_size` values may produce embeddings with different spatial characteristics.
 - The `large` variant is only available in v1 (no v1.1 large release at time of writing).
 - Weights are cached by `huggingface_hub` in the default HF cache directory.

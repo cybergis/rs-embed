@@ -17,7 +17,14 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-from ..providers.fetch import fetch_collection_patch_chw as _fetch_collection_patch_chw
+from ..core.types import FetchResult
+from ..providers import ProviderBase
+from ..providers.fetch import (
+    fetch_collection_patch_chw as _fetch_collection_patch_chw,
+)
+from ..providers.fetch import (
+    fetch_s1_vvvh_raw_chw_with_meta as _fetch_s1_vvvh_raw_chw_with_meta,
+)
 from ..providers.resolution import is_provider_backend
 from ..tools.runtime import load_cached_with_device as _load_cached_with_device
 from .base import EmbedderBase
@@ -49,6 +56,12 @@ _S2_BANDS_GEE: tuple[str, ...] = (
 )
 _N_BANDS = len(_S2_BANDS_GEE)  # 12
 _N_BAND_SETS = 3  # matches OlmoEarth S2 L2A
+
+# S1 GRD VV/VH order matches OlmoEarth Modality.SENTINEL1 band_order ['vv', 'vh'].
+# OlmoEarth S1 normalization stats are in dB (COPERNICUS/S1_GRD units).
+_S1_BANDS_GEE: tuple[str, ...] = ("VV", "VH")
+_N_BANDS_S1 = len(_S1_BANDS_GEE)  # 2
+_N_BAND_SETS_S1 = 1  # matches OlmoEarth Modality.SENTINEL1 (single band set)
 
 # Map canonical variant names to (ModelID enum string, size, version)
 _VARIANT_SPECS: dict[str, tuple[str, str, str]] = {
@@ -155,6 +168,31 @@ def _resolve_image_size(model_config: dict[str, Any] | None) -> int:
 
 
 # ---------------------------------------------------------------------------
+# Modality helpers
+# ---------------------------------------------------------------------------
+
+
+def _normalize_modality(modality: Any) -> str:
+    m = str(modality or "s2").strip().lower()
+    if m not in ("s2", "s1"):
+        raise ModelError(f"olmoearth modality must be 's2' or 's1', got {modality!r}.")
+    return m
+
+
+def _modality_n_bands(modality: str) -> int:
+    return _N_BANDS if modality == "s2" else _N_BANDS_S1
+
+
+def _modality_n_band_sets(modality: str) -> int:
+    return _N_BAND_SETS if modality == "s2" else _N_BAND_SETS_S1
+
+
+def _modality_field(modality: str) -> str:
+    """MaskedOlmoEarthSample / tokens_and_masks field name for a modality."""
+    return "sentinel2_l2a" if modality == "s2" else "sentinel1"
+
+
+# ---------------------------------------------------------------------------
 # Model loading (cached)
 # ---------------------------------------------------------------------------
 
@@ -193,19 +231,29 @@ def _load_olmoearth(variant: str, *, device: str = "auto"):
 # ---------------------------------------------------------------------------
 
 
-def _normalize_s2_chw(x_chw: np.ndarray) -> np.ndarray:
-    """Normalize CHW S2 raw DN to OlmoEarth's expected range via mean±2σ clipping."""
+def _normalize_chw(x_chw: np.ndarray, *, modality: str = "s2") -> np.ndarray:
+    """Normalize CHW raw values (S2 DN or S1 dB) via OlmoEarth mean±2σ clipping."""
     om = _ensure_olmoearth()
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.constants import (
         Modality,  # type: ignore
     )
 
+    om_modality = Modality.SENTINEL2_L2A if modality == "s2" else Modality.SENTINEL1
     # Normalizer expects shape (..., C) — transpose to HWC, normalize, back to CHW
-    hwc = np.moveaxis(x_chw, 0, -1).astype(np.float32)  # [H, W, 12]
+    hwc = np.moveaxis(x_chw, 0, -1).astype(np.float32)  # [H, W, C]
     norm = om.Normalizer(std_multiplier=2.0)
-    hwc = norm.normalize(Modality.SENTINEL2_L2A, hwc).astype(np.float32)
+    hwc = norm.normalize(om_modality, hwc).astype(np.float32)
     hwc = np.nan_to_num(hwc, nan=0.0, posinf=1.0, neginf=0.0)
-    return np.moveaxis(hwc, -1, 0)  # [12, H, W]
+    return np.moveaxis(hwc, -1, 0)  # [C, H, W]
+
+
+def _s1_linear_to_db(x_chw: np.ndarray) -> np.ndarray:
+    """Convert linear-power S1 backscatter to dB (OlmoEarth S1 stats are in dB).
+
+    Mirrors the official ``convert_to_db`` in olmoearth_pretrain
+    (10·log10 with values clipped to 1e-10 to avoid log(0)).
+    """
+    return (10.0 * np.log10(np.clip(x_chw, 1e-10, None))).astype(np.float32)
 
 
 def _resize_chw(x_chw: np.ndarray, *, size: int) -> np.ndarray:
@@ -223,11 +271,15 @@ def _prepare_chw(
     *,
     image_size: int,
     patch_size: int,
+    modality: str = "s2",
 ) -> np.ndarray:
     """Normalize and resize CHW patch for OlmoEarth input."""
-    if x_chw.ndim != 3 or x_chw.shape[0] != _N_BANDS:
-        raise ModelError(f"OlmoEarth expects {_N_BANDS}-band CHW input, got {x_chw.shape}.")
-    x = _normalize_s2_chw(x_chw)
+    n_bands = _modality_n_bands(modality)
+    if x_chw.ndim != 3 or x_chw.shape[0] != n_bands:
+        raise ModelError(
+            f"OlmoEarth ({modality}) expects {n_bands}-band CHW input, got {x_chw.shape}."
+        )
+    x = _normalize_chw(x_chw, modality=modality)
 
     # Ensure H and W are divisible by patch_size
     target = max(patch_size, (image_size // patch_size) * patch_size)
@@ -251,7 +303,7 @@ def _date_to_timestamp(date_str: str | None) -> tuple[int, int, int]:
 # ---------------------------------------------------------------------------
 
 
-def _build_sample(x_chw: np.ndarray, *, timestamp: tuple[int, int, int]):
+def _build_sample(x_chw: np.ndarray, *, timestamp: tuple[int, int, int], modality: str = "s2"):
     """Wrap a single CHW patch as a batched MaskedOlmoEarthSample (B=1, T=1)."""
     torch = _ensure_torch()
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (  # type: ignore
@@ -260,20 +312,25 @@ def _build_sample(x_chw: np.ndarray, *, timestamp: tuple[int, int, int]):
 
     _, h, w = x_chw.shape
     # Model expects (B, H, W, T, C)
-    s2 = torch.from_numpy(x_chw).permute(1, 2, 0).unsqueeze(0).unsqueeze(3)  # [1,H,W,1,12]
+    data = torch.from_numpy(x_chw).permute(1, 2, 0).unsqueeze(0).unsqueeze(3)  # [1,H,W,1,C]
     # Mask: all ONLINE_ENCODER (0)
-    mask = torch.zeros(1, h, w, 1, _N_BAND_SETS, dtype=torch.float32)
+    mask = torch.zeros(1, h, w, 1, _modality_n_band_sets(modality), dtype=torch.float32)
     ts = torch.tensor(
         [[[*timestamp]]], dtype=torch.long
     )  # [1, T=1, 3]; must be int for month embedding
+    field = _modality_field(modality)
     return MaskedOlmoEarthSample(
-        sentinel2_l2a=s2,
-        sentinel2_l2a_mask=mask,
         timestamps=ts,
+        **{field: data, f"{field}_mask": mask},
     )
 
 
-def _build_batch_sample(x_bchw: np.ndarray, *, timestamps: list[tuple[int, int, int]]):
+def _build_batch_sample(
+    x_bchw: np.ndarray,
+    *,
+    timestamps: list[tuple[int, int, int]],
+    modality: str = "s2",
+):
     """Wrap a BCHW batch as a batched MaskedOlmoEarthSample (B, T=1)."""
     torch = _ensure_torch()
     from olmoearth_pretrain_minimal.olmoearth_pretrain_v1.utils.datatypes import (  # type: ignore
@@ -282,15 +339,15 @@ def _build_batch_sample(x_bchw: np.ndarray, *, timestamps: list[tuple[int, int, 
 
     b, _, h, w = x_bchw.shape
     # (B, H, W, T=1, C)
-    s2 = torch.from_numpy(x_bchw).permute(0, 2, 3, 1).unsqueeze(3)
-    mask = torch.zeros(b, h, w, 1, _N_BAND_SETS, dtype=torch.float32)
+    data = torch.from_numpy(x_bchw).permute(0, 2, 3, 1).unsqueeze(3)
+    mask = torch.zeros(b, h, w, 1, _modality_n_band_sets(modality), dtype=torch.float32)
     ts = torch.tensor(
         [[list(t)] for t in timestamps], dtype=torch.long
     )  # [B, 1, 3]; int for month embedding
+    field = _modality_field(modality)
     return MaskedOlmoEarthSample(
-        sentinel2_l2a=s2,
-        sentinel2_l2a_mask=mask,
         timestamps=ts,
+        **{field: data, f"{field}_mask": mask},
     )
 
 
@@ -333,16 +390,23 @@ def _pool_tokens(tokens_and_masks, pooling: str) -> np.ndarray:
     return pooled.detach().float().cpu().numpy().astype(np.float32)
 
 
-def _tokens_to_grid(tokens_and_masks, pooling: str) -> np.ndarray:
+def _grid_tokens(tokens_and_masks, modality: str):
+    """Return the (B, H', W', T, S, D) token tensor for a modality, or raise."""
+    field = _modality_field(modality)
+    tokens = getattr(tokens_and_masks, field, None)
+    if tokens is None:
+        raise ModelError(f"No {field} tokens in OlmoEarth encoder output.")
+    return tokens
+
+
+def _tokens_to_grid(tokens_and_masks, pooling: str, *, modality: str = "s2") -> np.ndarray:
     """Return spatial grid (D, H', W') by averaging over T and band-set dims."""
-    s2 = tokens_and_masks.sentinel2_l2a  # (B, H', W', T, S, D)
-    if s2 is None:
-        raise ModelError("No S2 L2A tokens in OlmoEarth encoder output.")
+    tokens = _grid_tokens(tokens_and_masks, modality)  # (B, H', W', T, S, D)
     # pool over T (dim 3) and band-sets (dim 4)
     if pooling == "mean":
-        spatial = s2.mean(dim=[3, 4])  # (B, H', W', D)
+        spatial = tokens.mean(dim=[3, 4])  # (B, H', W', D)
     else:
-        spatial = s2.max(dim=4).values.max(dim=3).values  # (B, H', W', D)
+        spatial = tokens.max(dim=4).values.max(dim=3).values  # (B, H', W', D)
     # Take first batch item and move dim to (D, H', W')
     grid = spatial[0].permute(2, 0, 1).detach().float().cpu().numpy().astype(np.float32)
     return grid
@@ -355,16 +419,21 @@ def _tokens_to_grid(tokens_and_masks, pooling: str) -> np.ndarray:
 
 @register("olmoearth")
 class OlmoEarthEmbedder(EmbedderBase):
-    """OlmoEarth v1/v1.1 on-the-fly embeddings from Sentinel-2 L2A 12-band patches.
+    """OlmoEarth v1/v1.1 on-the-fly embeddings from S2 L2A 12-band or S1 VV/VH patches.
 
     Inputs:
       - spatial : BBox / PointBuffer (EPSG:4326)
       - temporal: range / year (year → full year composite)
-      - sensor  : controls provider fetch (scale/cloudy/composite)
+      - sensor  : controls provider fetch (scale/cloudy/composite) and
+                  modality routing (``modality="s2"`` default, or ``"s1"``)
 
     Outputs:
       - pooled: global mean/max over spatial, temporal and band-set token dims
       - grid  : spatial token map [D, H', W'] averaged over temporal/band-set dims
+
+    Modalities (via ``modality="s1"`` at the API level, like TerraFM):
+      s2 : 12-band S2 L2A SR DN patches (default)
+      s1 : 2-band S1 GRD VV/VH in dB; ``input_chw`` overrides must be dB
 
     Model variants (via ``model_config={"variant": "..."}``):
       v1  : nano (128-d), tiny (192-d), base (768-d), large (1024-d)
@@ -393,6 +462,23 @@ class OlmoEarthEmbedder(EmbedderBase):
             "type": "onthefly",
             "backend": ["provider"],
             "input_bands": list(_S2_BANDS_GEE),
+            "modalities": {
+                "s2": {
+                    "collection": "COPERNICUS/S2_SR_HARMONIZED",
+                    "bands": list(_S2_BANDS_GEE),
+                },
+                "s1": {
+                    "collection": "COPERNICUS/S1_GRD",
+                    "bands": list(_S1_BANDS_GEE),
+                    "defaults": {
+                        # OlmoEarth S1 normalization stats are in dB → fetch
+                        # the dB collection by default (linear gets converted).
+                        "use_float_linear": False,
+                        "s1_require_iw": True,
+                        "s1_relax_iw_on_empty": True,
+                    },
+                },
+            },
             "output": ["pooled", "grid"],
             "defaults": {
                 "variant": self.DEFAULT_VARIANT,
@@ -400,6 +486,7 @@ class OlmoEarthEmbedder(EmbedderBase):
                 "patch_size": self.DEFAULT_PATCH_SIZE,
                 "scale_m": self.DEFAULT_SCALE_M,
                 "cloudy_pct": self.DEFAULT_CLOUDY_PCT,
+                "modality": "s2",
             },
             "model_config": {
                 "variant": {
@@ -427,12 +514,57 @@ class OlmoEarthEmbedder(EmbedderBase):
                 "Requires olmoearth-pretrain-minimal (pip install olmoearth-pretrain-minimal).",
                 "Weights are downloaded automatically from Hugging Face on first use.",
                 "Normalization: per-band mean±2σ clipping (OlmoEarth COMPUTED strategy).",
+                "S1 modality via modality='s1' (VV/VH dB, COPERNICUS/S1_GRD).",
             ],
         }
 
     def _default_sensor(self) -> SensorSpec:
         assert self.input_spec is not None
         return self.input_spec.to_sensor_spec()
+
+    def fetch_input(
+        self,
+        provider: ProviderBase,
+        *,
+        spatial: SpatialSpec,
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec,
+    ) -> FetchResult | None:
+        """Fetch raw OlmoEarth input, routing by ``sensor.modality`` (s2/s1).
+
+        S1 values are always returned in dB: with ``use_float_linear=True``
+        the linear-power fetch is converted via 10·log10, matching the dB
+        statistics used by the OlmoEarth normalizer.
+        """
+        modality = _normalize_modality(getattr(sensor, "modality", "s2"))
+        t = temporal_to_range(temporal)
+        if modality == "s2":
+            raw = _fetch_collection_patch_chw(
+                provider,
+                spatial=spatial,
+                temporal=t,
+                collection=sensor.collection,
+                bands=_S2_BANDS_GEE,
+                scale_m=int(sensor.scale_m),
+                cloudy_pct=int(sensor.cloudy_pct),
+                composite=str(sensor.composite),
+                fill_value=float(sensor.fill_value),
+            )
+            return FetchResult(data=raw, meta={})
+        raw, fmeta = _fetch_s1_vvvh_raw_chw_with_meta(
+            provider,
+            spatial=spatial,
+            temporal=t,
+            scale_m=int(sensor.scale_m),
+            use_float_linear=bool(sensor.use_float_linear),
+            composite=str(sensor.composite),
+            fill_value=float(sensor.fill_value),
+            require_iw=bool(sensor.s1_require_iw),
+            relax_iw_on_empty=bool(sensor.s1_relax_iw_on_empty),
+        )
+        if bool(sensor.use_float_linear):
+            raw = _s1_linear_to_db(raw)
+        return FetchResult(data=raw, meta=fmeta)
 
     @staticmethod
     def _resolve_fetch_workers(n: int) -> int:
@@ -475,6 +607,7 @@ class OlmoEarthEmbedder(EmbedderBase):
 
         if sensor is None:
             sensor = self._default_sensor()
+        modality = _normalize_modality(getattr(sensor, "modality", "s2"))
         t = temporal_to_range(temporal)
 
         variant = _resolve_variant(model_config)
@@ -484,32 +617,27 @@ class OlmoEarthEmbedder(EmbedderBase):
 
         model, wmeta, dev = _load_olmoearth(variant, device=device)
 
+        fetch_meta: dict[str, Any] = {}
         if input_chw is None:
             provider = self._get_provider(backend)
-            x_chw = _fetch_collection_patch_chw(
-                provider,
-                spatial=spatial,
-                temporal=t,
-                collection=sensor.collection,
-                bands=_S2_BANDS_GEE,
-                scale_m=int(sensor.scale_m),
-                cloudy_pct=int(sensor.cloudy_pct),
-                composite=str(sensor.composite),
-                fill_value=float(sensor.fill_value),
-            )
+            fr = self.fetch_input(provider, spatial=spatial, temporal=t, sensor=sensor)
+            assert fr is not None
+            x_chw = np.asarray(fr.data, dtype=np.float32)
+            fetch_meta = dict(fr.meta or {})
         else:
-            if input_chw.ndim != 3 or input_chw.shape[0] != _N_BANDS:
+            n_bands = _modality_n_bands(modality)
+            if input_chw.ndim != 3 or input_chw.shape[0] != n_bands:
                 raise ModelError(
-                    f"input_chw must be CHW with {_N_BANDS} bands for olmoearth, "
+                    f"input_chw must be CHW with {n_bands} bands for olmoearth ({modality}), "
                     f"got {getattr(input_chw, 'shape', None)}."
                 )
             x_chw = input_chw.astype(np.float32)
 
-        x_chw = _prepare_chw(x_chw, image_size=image_size, patch_size=patch_size)
+        x_chw = _prepare_chw(x_chw, image_size=image_size, patch_size=patch_size, modality=modality)
 
         date_str = temporal_midpoint_str(t)
         timestamp = _date_to_timestamp(date_str)
-        sample = _build_sample(x_chw, timestamp=timestamp)
+        sample = _build_sample(x_chw, timestamp=timestamp, modality=modality)
         tokens_and_masks = _encoder_forward(model, sample, patch_size=patch_size, device=dev)
 
         meta = _build_embedding_meta(
@@ -524,6 +652,8 @@ class OlmoEarthEmbedder(EmbedderBase):
             image_size=int(x_chw.shape[-1]),
             patch_size=patch_size,
             date_str=date_str,
+            modality=modality,
+            extra={"s1_fetch": fetch_meta} if fetch_meta else None,
         )
 
         if output.mode == "pooled":
@@ -532,7 +662,7 @@ class OlmoEarthEmbedder(EmbedderBase):
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
-            return _make_grid_embedding(tokens_and_masks, output, meta)
+            return _make_grid_embedding(tokens_and_masks, output, meta, modality=modality)
 
         raise ModelError(f"Unknown output mode: {output.mode!r}.")
 
@@ -564,18 +694,9 @@ class OlmoEarthEmbedder(EmbedderBase):
         prefetched: list[np.ndarray | None] = [None] * n
 
         def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            raw = _fetch_collection_patch_chw(
-                provider,
-                spatial=sp,
-                temporal=t,
-                collection=sensor.collection,
-                bands=_S2_BANDS_GEE,
-                scale_m=int(sensor.scale_m),
-                cloudy_pct=int(sensor.cloudy_pct),
-                composite=str(sensor.composite),
-                fill_value=float(sensor.fill_value),
-            )
-            return i, raw.astype(np.float32)
+            fr = self.fetch_input(provider, spatial=sp, temporal=t, sensor=sensor)
+            assert fr is not None
+            return i, np.asarray(fr.data, dtype=np.float32)
 
         mw = self._resolve_fetch_workers(n)
         if mw == 1:
@@ -629,6 +750,7 @@ class OlmoEarthEmbedder(EmbedderBase):
 
         if sensor is None:
             sensor = self._default_sensor()
+        modality = _normalize_modality(getattr(sensor, "modality", "s2"))
         t = temporal_to_range(temporal)
 
         variant = _resolve_variant(model_config)
@@ -643,15 +765,21 @@ class OlmoEarthEmbedder(EmbedderBase):
         timestamp = _date_to_timestamp(date_str)
 
         # Prepare all inputs (normalize + resize) and group by shape
+        n_bands = _modality_n_bands(modality)
         prepared: list[np.ndarray] = []
         for i, x_chw in enumerate(input_chws):
-            if x_chw.ndim != 3 or x_chw.shape[0] != _N_BANDS:
+            if x_chw.ndim != 3 or x_chw.shape[0] != n_bands:
                 raise ModelError(
-                    f"input_chw at index {i} must be CHW with {_N_BANDS} bands, "
+                    f"input_chw at index {i} must be CHW with {n_bands} bands ({modality}), "
                     f"got {getattr(x_chw, 'shape', None)}."
                 )
             prepared.append(
-                _prepare_chw(x_chw.astype(np.float32), image_size=image_size, patch_size=patch_size)
+                _prepare_chw(
+                    x_chw.astype(np.float32),
+                    image_size=image_size,
+                    patch_size=patch_size,
+                    modality=modality,
+                )
             )
 
         shape_groups: dict[tuple[int, int, int], list[int]] = {}
@@ -675,7 +803,9 @@ class OlmoEarthEmbedder(EmbedderBase):
             for s0 in range(0, len(idxs), infer_bs):
                 chunk = idxs[s0 : s0 + infer_bs]
                 xb = np.stack([prepared[i] for i in chunk], axis=0)
-                sample = _build_batch_sample(xb, timestamps=[timestamp] * len(chunk))
+                sample = _build_batch_sample(
+                    xb, timestamps=[timestamp] * len(chunk), modality=modality
+                )
                 tokens_and_masks = _encoder_forward(
                     model, sample, patch_size=patch_size, device=dev
                 )
@@ -695,6 +825,7 @@ class OlmoEarthEmbedder(EmbedderBase):
                             image_size=int(prepared[i].shape[-1]),
                             patch_size=patch_size,
                             date_str=date_str,
+                            modality=modality,
                             extra={"batch_infer": True},
                         )
                         meta["pooling"] = f"spatial_temporal_bandset_{output.pooling}"
@@ -702,13 +833,11 @@ class OlmoEarthEmbedder(EmbedderBase):
                     continue
 
                 if output.mode == "grid":
-                    s2 = tokens_and_masks.sentinel2_l2a  # (B, H', W', T, S, D)
-                    if s2 is None:
-                        raise ModelError("No S2 L2A tokens in OlmoEarth encoder output.")
+                    tokens = _grid_tokens(tokens_and_masks, modality)  # (B, H', W', T, S, D)
                     if output.pooling == "mean":
-                        spatial_b = s2.mean(dim=[3, 4])  # (B, H', W', D)
+                        spatial_b = tokens.mean(dim=[3, 4])  # (B, H', W', D)
                     else:
-                        spatial_b = s2.max(dim=4).values.max(dim=3).values
+                        spatial_b = tokens.max(dim=4).values.max(dim=3).values
                     spatial_b = spatial_b.detach().float().cpu()
                     for j, i in enumerate(chunk):
                         grid_np = spatial_b[j].permute(2, 0, 1).numpy().astype(np.float32)
@@ -724,6 +853,7 @@ class OlmoEarthEmbedder(EmbedderBase):
                             image_size=int(prepared[i].shape[-1]),
                             patch_size=patch_size,
                             date_str=date_str,
+                            modality=modality,
                             extra={"batch_infer": True},
                         )
                         d, h, w = grid_np.shape
@@ -764,6 +894,7 @@ def _build_embedding_meta(
     image_size: int,
     patch_size: int,
     date_str: str | None,
+    modality: str = "s2",
     extra: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
     meta = build_meta(
@@ -782,6 +913,7 @@ def _build_embedding_meta(
             "model_size": size,
             "model_version": version,
             "patch_size": patch_size,
+            "modality": modality,
             "temporal_range": (temporal.start, temporal.end),
             "date_str": date_str,
         }
@@ -792,14 +924,18 @@ def _build_embedding_meta(
 
 
 def _make_grid_embedding(
-    tokens_and_masks: Any, output: OutputSpec, meta: dict[str, Any]
+    tokens_and_masks: Any,
+    output: OutputSpec,
+    meta: dict[str, Any],
+    *,
+    modality: str = "s2",
 ) -> Embedding:
     try:
         import xarray as xr  # noqa: PLC0415
     except ImportError as exc:
         raise ModelError("grid output requires xarray. Install: pip install xarray") from exc
 
-    grid = _tokens_to_grid(tokens_and_masks, output.pooling)  # (D, H', W')
+    grid = _tokens_to_grid(tokens_and_masks, output.pooling, modality=modality)  # (D, H', W')
     d, h, w = grid.shape
     meta.update({"grid_hw": (h, w), "grid_kind": "spatial_tokens"})
     da = xr.DataArray(
