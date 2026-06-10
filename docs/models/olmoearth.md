@@ -211,3 +211,52 @@ embeddings = model.get_embeddings_batch([
 - `patch_size` is a **model input** (FlexiViT accepts variable patch sizes), not a preprocessing hyperparameter. Different `patch_size` values may produce embeddings with different spatial characteristics.
 - The `large` variant is only available in v1 (no v1.1 large release at time of writing).
 - Weights are cached by `huggingface_hub` in the default HF cache directory.
+
+---
+
+## License
+
+OlmoEarth — the weights, the training/inference datasets, and the `olmoearth-pretrain-minimal`
+code — is released by Allen AI (Ai2) under the **OlmoEarth Artifact License**. This is a
+*responsible-use* / source-available license, **not** an OSI open-source license like MIT or
+Apache 2.0 (which `rs-embed` itself uses). Anything covered by the license — the model, the
+dataset, the code, or any derivative of them — is collectively called the **"Artifacts."**
+
+- 📄 Full license text: [allenai/olmoearth_pretrain — LICENSE](https://github.com/allenai/olmoearth_pretrain/blob/main/LICENSE)
+- 📦 Source / model code: [github.com/allenai/olmoearth_pretrain](https://github.com/allenai/olmoearth_pretrain)
+
+### What it lets you do
+
+You may, free of charge, **use, reproduce, modify, display, and distribute** the Artifacts, and
+**create and share derivatives** — including transfer-learning/fine-tuning from the weights, using
+the model's outputs to generate synthetic data, and building new models or datasets on top of it.
+
+### What it forbids (Section 2 — use restrictions)
+
+You may **not** use OlmoEarth or any derivative for:
+
+- **Military & defense** — weapons development, military operations, intelligence gathering, or
+  human surveillance / policing.
+- **Extractive activities** — planning or facilitating the extraction of raw materials from the
+  earth: oil, natural gas, and minerals (drilling, mining), as well as **deforestation**.
+
+!!! note "Monitoring ≠ facilitating extraction"
+    The restriction targets *planning or facilitating* extraction/deforestation. Passive
+    **monitoring** use cases — e.g. tracking deforestation, land cover, or land-use change — are
+    generally distinct from facilitating the extraction itself. When in doubt, read the license.
+
+### If you redistribute the Artifacts (Section 3)
+
+- **Cite Ai2** as the source.
+- **Include or link to the license** for everyone you pass the Artifacts to.
+- **Propagate the Section 2 use restrictions** to all downstream recipients (unless Ai2 grants
+  written approval otherwise).
+
+Breaching the use restrictions **automatically terminates** your license (Section 4). The Artifacts
+are provided "as is" with no warranty (Section 6).
+
+!!! info "How this affects `rs-embed`"
+    `rs-embed` does **not** bundle or redistribute the OlmoEarth weights or code — it declares
+    `olmoearth-pretrain-minimal` as an *optional* dependency and downloads the weights from
+    Hugging Face at runtime. The license therefore binds **you, the end user**, directly; the
+    `rs-embed` package stays Apache 2.0. Just make sure your own use complies with Section 2 above.
