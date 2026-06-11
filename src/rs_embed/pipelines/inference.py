@@ -374,6 +374,13 @@ class InferenceEngine:
             stride = int(spec.tile_stride or tile_size)
             if stride <= 0 or stride != tile_size:
                 return out, False
+            tiled_model_config = _augment_model_config_for_tiled_dispatch(
+                embedder, model_config, tile_size=tile_size
+            )
+            if tiled_model_config is not None and not embedder_accepts_model_config(
+                type(embedder), "get_embeddings_batch_from_inputs"
+            ):
+                return out, False
 
             # Step 1: fetch inputs and slice each image into tiles.
             ready: list[tuple[int, SpatialSpec, np.ndarray]] = []
@@ -391,7 +398,6 @@ class InferenceEngine:
             all_tile_spatials: list[SpatialSpec] = []
             # {spatial_idx: (flat_start, tile_count, tile_metas, h, w, tiled_mc)}
             tile_map: dict[int, tuple[int, int, list[dict[str, Any]], int, int, Any]] = {}
-            tiled_model_config: Any = model_config
 
             for i, spatial, inp in ready:
                 h, w = int(inp.shape[-2]), int(inp.shape[-1])
@@ -407,10 +413,6 @@ class InferenceEngine:
                     on_done(i)
                     continue
                 fill_value = float(sensor.fill_value) if sensor is not None else 0.0
-                tiled_mc = _augment_model_config_for_tiled_dispatch(
-                    embedder, model_config, tile_size=tile_size
-                )
-                tiled_model_config = tiled_mc
                 ys, xs = _tile_yx_starts(h=h, w=w, tile_size=tile_size, stride=stride)
                 tiles: list[np.ndarray] = []
                 tile_metas: list[dict[str, Any]] = []
@@ -443,7 +445,7 @@ class InferenceEngine:
                 flat_start = len(all_tiles)
                 all_tiles.extend(tiles)
                 all_tile_spatials.extend(tile_spatials_pt)
-                tile_map[i] = (flat_start, len(tiles), tile_metas, h, w, tiled_mc)
+                tile_map[i] = (flat_start, len(tiles), tile_metas, h, w, tiled_model_config)
 
             if not all_tiles:
                 return out, True
@@ -462,9 +464,7 @@ class InferenceEngine:
                     "backend": backend,
                     "device": self.device,
                 }
-                if tiled_model_config is not None and embedder_accepts_model_config(
-                    type(embedder), "get_embeddings_batch_from_inputs"
-                ):
+                if tiled_model_config is not None:
                     batch_kwargs["model_config"] = tiled_model_config
 
                 def _infer_tiles(_kw: dict[str, Any] = batch_kwargs) -> list[Embedding]:

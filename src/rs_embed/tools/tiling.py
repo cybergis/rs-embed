@@ -559,7 +559,11 @@ def _call_embedder_get_embedding_tiled(
             input_chw=x,
         )
 
-    if _supports_prefetched_batch_api(embedder):
+    can_batch_tiles = _supports_prefetched_batch_api(embedder) and (
+        tiled_model_config is None
+        or _embedder_accepts_model_config(type(embedder), "get_embeddings_batch_from_inputs")
+    )
+    if can_batch_tiles:
         try:
             batch_kwargs: dict[str, Any] = {
                 "spatials": tile_spatials,
@@ -570,10 +574,7 @@ def _call_embedder_get_embedding_tiled(
                 "backend": backend,
                 "device": device,
             }
-            if tiled_model_config is not None and _embedder_accepts_model_config(
-                type(embedder),
-                "get_embeddings_batch_from_inputs",
-            ):
+            if tiled_model_config is not None:
                 batch_kwargs["model_config"] = tiled_model_config
             tile_embs = embedder.get_embeddings_batch_from_inputs(
                 **batch_kwargs,

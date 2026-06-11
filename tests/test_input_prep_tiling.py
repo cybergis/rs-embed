@@ -125,6 +125,71 @@ def test_tiled_pooled_mean_uses_area_weighted_merge():
     assert out.meta["input_prep"]["merged_output"] == "pooled_reduce"
 
 
+def test_tiled_single_path_falls_back_when_batch_lacks_model_config():
+    class _BatchWithoutModelConfig:
+        model_name = "batch_without_model_config"
+
+        def __init__(self):
+            self.batch_calls = 0
+            self.single_model_configs = []
+
+        def describe(self):
+            return {"defaults": {"image_size": 4}}
+
+        def get_embedding(
+            self,
+            *,
+            spatial,
+            temporal=None,
+            sensor=None,
+            model_config=None,
+            output=OutputSpec.pooled(),
+            backend="gee",
+            device="cpu",
+            input_chw=None,
+        ):
+            self.single_model_configs.append(model_config)
+            return Embedding(
+                data=np.asarray([float(model_config["value"])], dtype=np.float32),
+                meta={},
+            )
+
+        def get_embeddings_batch_from_inputs(
+            self,
+            *,
+            spatials,
+            input_chws,
+            temporal=None,
+            sensor=None,
+            output=OutputSpec.pooled(),
+            backend="gee",
+            device="cpu",
+        ):
+            self.batch_calls += 1
+            return [
+                Embedding(data=np.asarray([0.0], dtype=np.float32), meta={}) for _ in input_chws
+            ]
+
+    emb = _BatchWithoutModelConfig()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.pooled("mean"),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 5, 5), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16),
+        model_config={"value": 7.0},
+    )
+
+    assert emb.batch_calls == 0
+    assert emb.single_model_configs == [{"value": 7.0}] * 4
+    np.testing.assert_allclose(np.asarray(out.data), np.asarray([7.0], dtype=np.float32))
+    assert out.meta["input_prep"]["tile_count"] == 4
+
+
 def test_auto_mode_falls_back_to_resize_when_tile_budget_exceeded():
     emb = _FakeTileEmbedder()
     x = np.arange(36, dtype=np.float32).reshape(1, 6, 6)
@@ -294,6 +359,76 @@ def test_run_batch_tiled_honors_max_tiles():
     assert done_indices == [0]
     assert emb.batch_calls == 0
     assert emb.batch_input_shapes == []
+
+
+def test_run_batch_tiled_falls_back_when_batch_lacks_model_config():
+    """_run_batch_tiled should not silently drop model_config for tiled batch calls."""
+    import threading
+
+    class _BatchWithoutModelConfig(_FakeTileEmbedderWithBase):
+        def __init__(self):
+            super().__init__()
+            self.batch_calls = 0
+
+        def get_embedding(
+            self,
+            *,
+            spatial,
+            temporal=None,
+            sensor=None,
+            model_config=None,
+            output=OutputSpec.pooled(),
+            backend="gee",
+            device="cpu",
+            input_chw=None,
+        ):
+            return Embedding(
+                data=np.asarray([float(model_config["value"])], dtype=np.float32),
+                meta={},
+            )
+
+        def get_embeddings_batch_from_inputs(
+            self,
+            *,
+            spatials,
+            input_chws,
+            temporal=None,
+            sensor=None,
+            output=OutputSpec.pooled(),
+            backend="gee",
+            device="cpu",
+        ):
+            self.batch_calls += 1
+            return [
+                Embedding(data=np.asarray([0.0], dtype=np.float32), meta={}) for _ in input_chws
+            ]
+
+    emb = _BatchWithoutModelConfig()
+    lock = threading.RLock()
+    engine = _make_engine(tile_size=4, max_tiles=16)
+    fetched: list[int] = []
+
+    out, succeeded = engine._run_batch_tiled(
+        idxs=[0],
+        spatials=[_bbox()],
+        temporal=None,
+        sensor=None,
+        embedder=emb,
+        lock=lock,
+        backend="gee",
+        get_input_fn=lambda i: fetched.append(i) or np.ones((1, 5, 5), dtype=np.float32),
+        batch_size=16,
+        continue_on_error=False,
+        on_done=lambda i: None,
+        use_lock=False,
+        model_name="fake_tile",
+        model_config={"value": 7.0},
+    )
+
+    assert not succeeded
+    assert out == {}
+    assert fetched == []
+    assert emb.batch_calls == 0
 
 
 def test_infer_chunk_tile_mode_uses_batch_on_gpu(monkeypatch):
