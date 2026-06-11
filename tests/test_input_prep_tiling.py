@@ -206,10 +206,10 @@ class _FakeTileEmbedderWithBase(_FakeTileEmbedder):
         return Embedding(data=np.asarray([float(x.mean())], dtype=np.float32), meta={})
 
 
-def _make_engine(tile_size: int = 4) -> tuple:
+def _make_engine(tile_size: int = 4, max_tiles: int = 16) -> tuple:
     from rs_embed.pipelines.inference import InferenceEngine
 
-    cfg = ExportConfig(input_prep=InputPrepSpec.tile(tile_size=tile_size, max_tiles=16))
+    cfg = ExportConfig(input_prep=InputPrepSpec.tile(tile_size=tile_size, max_tiles=max_tiles))
     engine = InferenceEngine(device="cpu", output=OutputSpec.pooled("mean"), config=cfg)
     return engine
 
@@ -260,6 +260,40 @@ def test_run_batch_tiled_aggregates_multiple_points():
     assert emb.batch_calls >= 1
     total_tiles = sum(len(s) for s in [emb.batch_input_shapes])
     assert total_tiles == n_points * 4
+
+
+def test_run_batch_tiled_honors_max_tiles():
+    """_run_batch_tiled should reject inputs that exceed input_prep.max_tiles."""
+    import threading
+
+    emb = _FakeTileEmbedderWithBase()
+    lock = threading.RLock()
+    engine = _make_engine(tile_size=4, max_tiles=1)
+    image = np.arange(25, dtype=np.float32).reshape(1, 5, 5)
+    done_indices: list[int] = []
+
+    out, succeeded = engine._run_batch_tiled(
+        idxs=[0],
+        spatials=[_bbox()],
+        temporal=None,
+        sensor=None,
+        embedder=emb,
+        lock=lock,
+        backend="gee",
+        get_input_fn=lambda i: image,
+        batch_size=16,
+        continue_on_error=True,
+        on_done=done_indices.append,
+        use_lock=False,
+        model_name="fake_tile",
+    )
+
+    assert succeeded
+    assert out[0].status.value == "failed"
+    assert "would create 4 tiles (> max_tiles=1)" in str(out[0].error)
+    assert done_indices == [0]
+    assert emb.batch_calls == 0
+    assert emb.batch_input_shapes == []
 
 
 def test_infer_chunk_tile_mode_uses_batch_on_gpu(monkeypatch):

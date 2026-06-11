@@ -12,6 +12,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from ..core.embedding import Embedding
+from ..core.errors import ModelError
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ModelConfig, TaskResult
 from ..tools.output import normalize_embedding_output
@@ -30,6 +31,7 @@ from ..tools.tiling import (
     _augment_model_config_for_tiled_dispatch,
     _call_embedder_get_embedding_with_input_prep,
     _embedder_default_image_size,
+    _estimate_tile_count,
     _resolve_input_prep_spec,
     _slice_and_pad_tile,
     _tile_subspatial,
@@ -393,6 +395,17 @@ class InferenceEngine:
 
             for i, spatial, inp in ready:
                 h, w = int(inp.shape[-2]), int(inp.shape[-1])
+                num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
+                if num_tiles > spec.max_tiles:
+                    err = ModelError(
+                        f"input_prep tile would create {num_tiles} tiles "
+                        f"(> max_tiles={spec.max_tiles}); increase max_tiles or use resize/auto."
+                    )
+                    if not continue_on_error:
+                        raise err
+                    out[i] = TaskResult.failed(err)
+                    on_done(i)
+                    continue
                 fill_value = float(sensor.fill_value) if sensor is not None else 0.0
                 tiled_mc = _augment_model_config_for_tiled_dispatch(
                     embedder, model_config, tile_size=tile_size
