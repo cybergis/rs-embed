@@ -56,9 +56,15 @@ three band sets (10 m, 20 m, 60 m) totaling 12 channels. The S1 order matches
 
 ```mermaid
 flowchart LR
-    INPUT["S2 12-band raw DN"] --> NORM["Per-band mean±2σ\nnormalization"]
-    NORM --> RESIZE["Resize to image_size\n(default 256×256)"]
-    RESIZE --> SAMPLE["Build MaskedOlmoEarthSample\n(B=1, H, W, T=1, C=12)"]
+    TEMP["Temporal range"] --> BINS["Build 30-day bins\nanchored at range start\n(max 12)"]
+    BINS --> FETCH["Fetch one S2 composite\nper 30-day bin\nraw DN, C=12"]
+    FETCH --> DROP["Drop empty-bin frames\nkeep aligned timestamps"]
+    DROP --> NORM["Per-frame per-band mean±2σ\nnormalization"]
+    NORM --> RESIZE["Resize each frame to image_size\n(default 256×256)"]
+    RESIZE --> STACK["Stack frames\n(T, C, H, W)"]
+    STACK --> TS["Frame timestamps\n(day, month, year)"]
+    STACK --> SAMPLE["Build MaskedOlmoEarthSample\n(B=1, H, W, T, C=12)"]
+    TS --> SAMPLE
     SAMPLE --> ENC["FlexiViT encoder\npatch_size=4 (default)"]
     ENC --> POOL["Pool over T×BandSets\n→ (B, H', W', D)"]
     POOL --> OUTPUT{Output mode}
@@ -72,8 +78,8 @@ flowchart LR
 
 ```mermaid
 flowchart LR
-    S2["S2 L2A\n12 bands\n3 band sets"] --> PE["FlexiViT\npatch embed\n(patch_size 1–8)"]
-    TS["Timestamps\n(day, month, year)"] --> TE["Temporal + month\nembeddings"]
+    S2["S2 L2A sequence\nT frames × 12 bands\n3 band sets"] --> PE["FlexiViT\npatch embed\n(patch_size 1–8)"]
+    TS["Per-frame timestamps\n(day, month, year)"] --> TE["Temporal + month\nembeddings"]
     PE --> ATTN["Transformer\nencoder\n(depth by variant)"]
     TE --> ATTN
     ATTN --> OUT["tokens:\n(B, H', W', T, S, D)"]
@@ -81,7 +87,7 @@ flowchart LR
     MEAN --> RESULT["Spatial grid\n(D, H', W')"]
 ```
 
-The encoder output is a 6-D tensor `(B, H', W', T=1, S, D)` where `S` is the number of band sets (3 for v1, 1 for v1.1 due to the linear patch embedding change). All pooling is applied after the encoder.
+The encoder output is a 6-D tensor `(B, H', W', T, S, D)` where `T` is the number of retained temporal frames and `S` is the number of band sets (3 for v1, 1 for v1.1 due to the linear patch embedding change). All pooling is applied after the encoder.
 
 ---
 
@@ -166,13 +172,13 @@ print(emb.meta["n_frames"])   # ≤ 12, depending on data availability
 
 ### Pooled (`OutputSpec.pooled()`)
 
-The encoder output `(B, H', W', T=1, S, D)` is pooled over all spatial, temporal, and band-set dimensions via the OlmoEarth built-in `pool_unmasked_tokens()`. This produces a `(D,)` vector.
+The encoder output `(B, H', W', T, S, D)` is pooled over all spatial, temporal, and band-set dimensions via the OlmoEarth built-in `pool_unmasked_tokens()`. This produces a `(D,)` vector.
 
 `pooling="mean"` (default) computes mean; `pooling="max"` computes max over token positions.
 
 ### Grid (`OutputSpec.grid()`)
 
-Returns a `(D, H', W')` spatial token map as an `xarray.DataArray` with dimensions `(d, y, x)`. The temporal (T=1) and band-set (S) dimensions are averaged out; only the spatial token grid is retained.
+Returns a `(D, H', W')` spatial token map as an `xarray.DataArray` with dimensions `(d, y, x)`. The temporal (`T`) and band-set (`S`) dimensions are averaged out; only the spatial token grid is retained.
 
 Grid size depends on `image_size` and `patch_size`:
 ```
@@ -209,59 +215,34 @@ uv pip install olmoearth-pretrain-minimal
 
 ## Usage Examples
 
+### Minimal example
+
 ```python
-import rs_embed as rs
-from rs_embed.core.specs import BBox, TemporalSpec, OutputSpec
+from rs_embed import BBox, OutputSpec, TemporalSpec, get_embedding
 
-# Pooled embedding with default tiny_v1_1 variant
-emb = rs.get_embedding(
-    "olmoearth",
-    spatial=BBox(minlon=-2.0, minlat=6.0, maxlon=-1.9, maxlat=6.1),
-    temporal=TemporalSpec.year(2022),
-    output=OutputSpec.pooled(),
-)
-print(emb.data.shape)   # (128,) for nano
-
-# Use base variant
-emb_base = rs.get_embedding(
-    "olmoearth",
-    spatial=BBox(minlon=-2.0, minlat=6.0, maxlon=-1.9, maxlat=6.1),
-    temporal=TemporalSpec.year(2022),
-    output=OutputSpec.pooled(),
-    model_config={"variant": "base"},
-)
-print(emb_base.data.shape)   # (768,) for base
-
-# Grid embedding (spatial token map)
-emb_grid = rs.get_embedding(
-    "olmoearth",
-    spatial=BBox(minlon=-2.0, minlat=6.0, maxlon=-1.9, maxlat=6.1),
-    temporal=TemporalSpec.year(2022),
-    output=OutputSpec.grid(),
-    model_config={"variant": "nano", "patch_size": 8},
-)
-print(emb_grid.data.shape)   # (128, 32, 32) for nano with patch_size=8
-
-# Sentinel-1 modality (VV/VH dB), same switch as TerraFM
-emb_s1 = rs.get_embedding(
+emb = get_embedding(
     "olmoearth",
     spatial=BBox(minlon=-2.0, minlat=6.0, maxlon=-1.9, maxlat=6.1),
     temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
-    modality="s1",
     output=OutputSpec.pooled(),
+    backend="gee",
 )
-print(emb_s1.data.shape)   # (128,) for nano
-print(emb_s1.meta["modality"])  # "s1"
+```
 
-# Class-based API for repeated calls
-from rs_embed.model import Model
-from rs_embed.core.specs import PointBuffer
+### Choose variant and modality
 
-model = Model("olmoearth", model_config={"variant": "tiny"})
-embeddings = model.get_embeddings_batch([
-    PointBuffer(lon=-1.95, lat=6.05, buffer_m=1000),
-    PointBuffer(lon=-2.10, lat=6.20, buffer_m=1000),
-], temporal=TemporalSpec.year(2022))
+```python
+from rs_embed import BBox, OutputSpec, TemporalSpec, get_embedding
+
+emb = get_embedding(
+    "olmoearth",
+    spatial=BBox(minlon=-2.0, minlat=6.0, maxlon=-1.9, maxlat=6.1),
+    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+    output=OutputSpec.grid(),
+    backend="gee",
+    variant="tiny_v1_1",
+    modality="s1",
+)
 ```
 
 ---
