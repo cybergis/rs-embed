@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../satvision/">
+        <link rel="prev" href="../agrifm/">
       
       
-        <link rel="next" href="../galileo/">
+        <link rel="next" href="../../api/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>AnySat - rs-embed</title>
+        <title>OLMoEarth - rs-embed</title>
       
     
     
@@ -84,7 +84,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#anysat-anysat" class="md-skip">
+        <a href="#olmoearth-olmoearth" class="md-skip">
           Skip to content
         </a>
       
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              AnySat
+              OLMoEarth
             
           </span>
         </div>
@@ -1219,6 +1219,90 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../anysat/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AnySat
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../galileo/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Galileo
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../agrifm/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    AgriFM
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -1238,7 +1322,7 @@
   <span class="md-ellipsis">
     
   
-    AnySat
+    OLMoEarth
   
 
     
@@ -1256,7 +1340,7 @@
   <span class="md-ellipsis">
     
   
-    AnySat
+    OLMoEarth
   
 
     
@@ -1326,13 +1410,63 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#environment-variables-tuning-knobs" class="md-nav__link">
+  <a href="#model-specific-settings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Environment Variables / Tuning Knobs
+        Model-specific Settings
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Model-specific Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#patch_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        patch_size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        image_size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporal_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        temporal_mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1345,18 +1479,68 @@
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
+    <nav class="md-nav" aria-label="Output Semantics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pooled-outputspecpooled" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Examples
+        Pooled (OutputSpec.pooled())
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Examples">
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grid-outputspecgrid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grid (OutputSpec.grid())
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage Examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage Examples">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1371,10 +1555,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-with-temporalframe-tuning-env-controlled" class="md-nav__link">
+  <a href="#choose-variant-and-modality" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example with temporal/frame tuning (env-controlled)
+        Choose variant and modality
       
     </span>
   </a>
@@ -1387,10 +1571,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#paper-links" class="md-nav__link">
+  <a href="#notes-and-caveats" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Paper &amp; Links
+        Notes and Caveats
       
     </span>
   </a>
@@ -1398,13 +1582,52 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reference" class="md-nav__link">
+  <a href="#license" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reference
+        License
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="License">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-lets-you-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it lets you do
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-forbids-section-2-use-restrictions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it forbids (Section 2 — use restrictions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#if-you-redistribute-the-artifacts-section-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        If you redistribute the Artifacts (Section 3)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -1412,90 +1635,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../galileo/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Galileo
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../agrifm/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    AgriFM
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../olmoearth/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    OLMoEarth
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -2076,13 +2215,63 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#environment-variables-tuning-knobs" class="md-nav__link">
+  <a href="#model-specific-settings" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Environment Variables / Tuning Knobs
+        Model-specific Settings
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="Model-specific Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#variant" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        variant
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#patch_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        patch_size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#image_size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        image_size
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#temporal_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        temporal_mode
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2095,18 +2284,68 @@
     </span>
   </a>
   
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#examples" class="md-nav__link">
+    <nav class="md-nav" aria-label="Output Semantics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pooled-outputspecpooled" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Examples
+        Pooled (OutputSpec.pooled())
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Examples">
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#grid-outputspecgrid" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Grid (OutputSpec.grid())
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#environment-variables" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Environment Variables
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#installation" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Installation
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#usage-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Usage Examples
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Usage Examples">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2121,10 +2360,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-with-temporalframe-tuning-env-controlled" class="md-nav__link">
+  <a href="#choose-variant-and-modality" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example with temporal/frame tuning (env-controlled)
+        Choose variant and modality
       
     </span>
   </a>
@@ -2137,10 +2376,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#paper-links" class="md-nav__link">
+  <a href="#notes-and-caveats" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Paper &amp; Links
+        Notes and Caveats
       
     </span>
   </a>
@@ -2148,13 +2387,52 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#reference" class="md-nav__link">
+  <a href="#license" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Reference
+        License
       
     </span>
   </a>
+  
+    <nav class="md-nav" aria-label="License">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#what-it-lets-you-do" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it lets you do
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#what-it-forbids-section-2-use-restrictions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What it forbids (Section 2 — use restrictions)
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#if-you-redistribute-the-artifacts-section-3" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        If you redistribute the Artifacts (Section 3)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
   
 </li>
       
@@ -2178,7 +2456,7 @@
   
 
 
-<h1 id="anysat-anysat">AnySat (<code>anysat</code>)<a class="headerlink" href="#anysat-anysat" title="Permanent link">&para;</a></h1>
+<h1 id="olmoearth-olmoearth">OlmoEarth (<code>olmoearth</code>)<a class="headerlink" href="#olmoearth-olmoearth" title="Permanent link">&para;</a></h1>
 <h2 id="quick-facts">Quick Facts<a class="headerlink" href="#quick-facts" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
@@ -2190,11 +2468,11 @@
 <tbody>
 <tr>
 <td>Model ID</td>
-<td><code>anysat</code></td>
+<td><code>olmoearth</code></td>
 </tr>
 <tr>
 <td>Family / Backbone</td>
-<td>AnySat (vendored local runtime)</td>
+<td>OlmoEarth v1/v1.1 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset</td>
 </tr>
 <tr>
 <td>Adapter type</td>
@@ -2202,23 +2480,25 @@
 </tr>
 <tr>
 <td>Model config keys</td>
-<td><code>variant</code> (default: <code>base</code>; choices: <code>base</code>)</td>
+<td><code>variant</code> (default: <code>tiny_v1_1</code>), <code>patch_size</code> (default: <code>4</code>), <code>image_size</code> (default: <code>256</code>)</td>
 </tr>
 <tr>
 <td>Training alignment</td>
-<td>Medium (depends on frame count, normalization mode, and image size)</td>
+<td>High (S2 L2A 12-band; native 10 m resolution; per-band mean±2σ normalization matches training pipeline)</td>
 </tr>
 </tbody>
 </table>
 <div class="admonition success">
-<p class="admonition-title">AnySat In 30 Seconds</p>
-<p>AnySat is a JEPA-style foundation model designed to absorb <em>any</em> spatial resolution and <em>any</em> sensor modality, and in <code>rs-embed</code> it runs as a Sentinel-2 multi-frame path that builds its own <code>s2_dates</code> day-of-year side input from per-frame midpoints — so you are running real temporal sequence modeling, not a single composite.</p>
-<p>In <code>rs-embed</code>, its most important characteristics are:</p>
-<ul>
-<li><strong>required</strong> <code>s2_dates</code> (per-frame DOY) derived from frame-bin midpoints: see <a href="#input-contract">Input Contract</a></li>
-<li>dense sub-patch grid as the default <code>grid</code> path, denser than the usual ViT patch grid: see <a href="#output-semantics">Output Semantics</a></li>
-<li><code>sensor.scale_m</code> / <code>fetch.scale_m</code> must be a positive multiple of 10 m: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
-</ul>
+<p class="admonition-title">OlmoEarth In 30 Seconds</p>
+<p>OlmoEarth is a <strong>multi-modal geospatial foundation model</strong> from Allen AI, trained on the Major TOM dataset with Sentinel-2 L2A as the primary modality. It uses a FlexiViT encoder that accepts variable patch sizes, enabling flexible spatial resolution trade-offs. In <code>rs-embed</code>, the adapter fetches all <strong>12 S2 L2A bands</strong> and encodes them in a single forward pass.</p>
+<p>Key characteristics:
+- All 12 S2 L2A bands in the OlmoEarth band-set order (10 m → 20 m → 60 m groups)
+- <strong>S1 modality</strong> via <code>modality="s1"</code>: Sentinel-1 GRD <code>VV/VH</code> in dB, like TerraFM
+- Per-band normalization using OlmoEarth's COMPUTED strategy (mean ± 2σ)
+- 4 size variants in v1 (<code>nano</code>/<code>tiny</code>/<code>base</code>/<code>large</code>) and 3 in v1.1 (<code>nano_v1_1</code>/<code>tiny_v1_1</code>/<code>base_v1_1</code>)
+- <code>patch_size</code> controls the spatial token density (1–8); default <code>4</code> matches the official inference example
+- Input image resized to <code>image_size</code> (default 256) before encoding
+- Requires <code>olmoearth-pretrain-minimal</code> (<code>pip install rs-embed[olmoearth]</code>)</p>
 </div>
 <hr />
 <h2 id="input-contract">Input Contract<a class="headerlink" href="#input-contract" title="Permanent link">&para;</a></h2>
@@ -2232,183 +2512,380 @@
 <tbody>
 <tr>
 <td>Backend</td>
-<td>provider (<code>auto</code> recommended in public API)</td>
+<td>provider only (<code>gee</code> / <code>auto</code>)</td>
 </tr>
 <tr>
 <td><code>TemporalSpec</code></td>
-<td><code>range</code> recommended — window split into <code>T</code> sub-windows for temporal modeling</td>
+<td><code>range</code> or <code>year</code> (normalized via shared helper; year → full year composite)</td>
 </tr>
 <tr>
-<td>Default collection</td>
-<td><code>COPERNICUS/S2_SR_HARMONIZED</code></td>
-</tr>
-<tr>
-<td>Default bands (order)</td>
-<td><code>B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12</code> (10-band)</td>
-</tr>
-<tr>
-<td>Default fetch</td>
-<td><code>scale_m=10</code> (must be a positive multiple of 10), <code>cloudy_pct=30</code>, <code>composite="median"</code>, <code>fill_value=0.0</code></td>
-</tr>
-<tr>
-<td><code>input_chw</code></td>
-<td><code>CHW</code> (<code>C=10</code>, repeated to <code>T</code>) <strong>or</strong> <code>TCHW</code> (<code>C=10</code>, padded/truncated to exact <code>T</code>); raw SR <code>0..10000</code></td>
+<td>Modalities</td>
+<td><code>s2</code> (default) or <code>s1</code> via <code>modality="s1"</code></td>
 </tr>
 <tr>
 <td>Side inputs</td>
-<td><strong>required</strong> <code>s2_dates</code> <code>[1,T]</code> — auto-derived from per-frame midpoint DOY</td>
+<td>timestamps (derived from temporal midpoint), none required from user</td>
 </tr>
 </tbody>
 </table>
-<p><code>T</code> is controlled by <code>RS_EMBED_ANYSAT_FRAMES</code> (default <code>8</code>). <code>sensor.scale_m</code> / <code>fetch.scale_m</code> must be a positive multiple of 10 m.</p>
-<hr />
-<h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
-<div class="admonition tip">
-<p class="admonition-title">Resize is the default — tiling is also available</p>
-<p>The pipeline below shows the default <code>input_prep="resize"</code> path. For large ROIs, use <code>input_prep="tile"</code> to split the input into tiles and preserve spatial detail. See <a href="../../choosing_settings/#input-preparation-resize-vs-tile">Choosing Settings</a>.</p>
-</div>
-<pre class="mermaid"><code>flowchart LR
-    INPUT["S2 10-band TCHW"] --&gt; PREP["Resize 24×24 → normalize\n→ build side inputs (s2_dates)"]
-    PREP --&gt; FWD{AnySat forward}
-    FWD -- grid --&gt; DENSE["dense sub-patch\nfeatures (D,H,W)"]
-    FWD -- pooled --&gt; POOL["spatial mean/max"]</code></pre>
-<div class="admonition warning">
-<p class="admonition-title">Important constraint</p>
-<p><code>sensor.scale_m</code> or <code>fetch.scale_m</code> must be a positive multiple of 10 meters.</p>
-</div>
-<hr />
-<h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
-<pre class="mermaid"><code>flowchart LR
-    subgraph "Input (T frames)"
-        F["S2 10-band\n× T frames"] --&gt; DOY["Per-frame DOY\n(day-of-year)"]
-    end
-    subgraph "JEPA Encoder"
-        DOY --&gt; FWD["JEPA forward\nwith s2_dates"]
-    end
-    subgraph "Output Mode"
-        FWD --&gt; D["dense (default for grid)\nsub-patch resolution"]
-        FWD --&gt; P["patch (default for pooled)\none token per patch"]
-        D --&gt; GRID["grid: (D,H,W)\nfiner than patch grid"]
-        P --&gt; POOL["pooled:\nspatial mean/max"]
-    end</code></pre>
-<hr />
-<h2 id="environment-variables-tuning-knobs">Environment Variables / Tuning Knobs<a class="headerlink" href="#environment-variables-tuning-knobs" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th>Env var</th>
+<th>Modality</th>
+<th>Collection</th>
+<th>Bands (order)</th>
+<th><code>input_chw</code> (override)</th>
+<th>Extra sensor fields</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>s2</code> (default)</td>
+<td><code>COPERNICUS/S2_SR_HARMONIZED</code></td>
+<td><code>B2,B3,B4,B8,B5,B6,B7,B8A,B11,B12,B1,B9</code> (12-band)</td>
+<td><code>CHW</code>, <code>C=12</code>, raw SR DN <code>0..10000</code></td>
+<td><code>scale_m=10</code>, <code>cloudy_pct=30</code>, <code>composite</code></td>
+</tr>
+<tr>
+<td><code>s1</code></td>
+<td><code>COPERNICUS/S1_GRD</code></td>
+<td><code>VV, VH</code> (2-band, <strong>dB</strong>)</td>
+<td><code>CHW</code>, <code>C=2</code>, backscatter in dB</td>
+<td><code>scale_m=10</code>, <code>s1_require_iw</code>, <code>composite</code></td>
+</tr>
+</tbody>
+</table>
+<p>The S2 band order matches OlmoEarth's internal <code>Modality.SENTINEL2_L2A</code> definition:
+three band sets (10 m, 20 m, 60 m) totaling 12 channels. The S1 order matches
+<code>Modality.SENTINEL1</code> (<code>vv</code>, <code>vh</code>; single band set).</p>
+<div class="admonition note">
+<p class="admonition-title">S1 values are dB</p>
+<p>OlmoEarth's S1 normalization statistics are computed in <strong>dB</strong> (VV mean ≈ −11.6,
+VH mean ≈ −17.7), so the adapter fetches the dB collection <code>COPERNICUS/S1_GRD</code> by
+default (<code>use_float_linear=False</code>). If you switch the sensor to the linear-power
+collection (<code>use_float_linear=True</code> → <code>COPERNICUS/S1_GRD_FLOAT</code>), the adapter
+converts to dB via <code>10·log10</code> before normalization. <code>input_chw</code> overrides for
+<code>s1</code> must already be in dB.</p>
+</div>
+<hr />
+<h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    TEMP["Temporal range"] --&gt; BINS["Build 30-day bins\nanchored at range start\n(max 12)"]
+    BINS --&gt; FETCH["Fetch one S2 composite\nper 30-day bin\nraw DN, C=12"]
+    FETCH --&gt; DROP["Drop empty-bin frames\nkeep aligned timestamps"]
+    DROP --&gt; NORM["Per-frame per-band mean±2σ\nnormalization"]
+    NORM --&gt; RESIZE["Resize each frame to image_size\n(default 256×256)"]
+    RESIZE --&gt; STACK["Stack frames\n(T, C, H, W)"]
+    STACK --&gt; TS["Frame timestamps\n(day, month, year)"]
+    STACK --&gt; SAMPLE["Build MaskedOlmoEarthSample\n(B=1, H, W, T, C=12)"]
+    TS --&gt; SAMPLE
+    SAMPLE --&gt; ENC["FlexiViT encoder\npatch_size=4 (default)"]
+    ENC --&gt; POOL["Pool over T×BandSets\n→ (B, H', W', D)"]
+    POOL --&gt; OUTPUT{Output mode}
+    OUTPUT -- pooled --&gt; VEC["Global mean/max\n→ (D,) vector"]
+    OUTPUT -- grid --&gt; GRID["Spatial token map\n(D, H', W')"]</code></pre>
+<hr />
+<h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    S2["S2 L2A sequence\nT frames × 12 bands\n3 band sets"] --&gt; PE["FlexiViT\npatch embed\n(patch_size 1–8)"]
+    TS["Per-frame timestamps\n(day, month, year)"] --&gt; TE["Temporal + month\nembeddings"]
+    PE --&gt; ATTN["Transformer\nencoder\n(depth by variant)"]
+    TE --&gt; ATTN
+    ATTN --&gt; OUT["tokens:\n(B, H', W', T, S, D)"]
+    OUT --&gt; MEAN["Mean over T, S"]
+    MEAN --&gt; RESULT["Spatial grid\n(D, H', W')"]</code></pre>
+<p>The encoder output is a 6-D tensor <code>(B, H', W', T, S, D)</code> where <code>T</code> is the number of retained temporal frames and <code>S</code> is the number of band sets (3 for v1, 1 for v1.1 due to the linear patch embedding change). All pooling is applied after the encoder.</p>
+<hr />
+<h2 id="model-specific-settings">Model-specific Settings<a class="headerlink" href="#model-specific-settings" title="Permanent link">&para;</a></h2>
+<h3 id="variant"><code>variant</code><a class="headerlink" href="#variant" title="Permanent link">&para;</a></h3>
+<p>Selects the model size and version. Weights are automatically downloaded from Hugging Face on first use.</p>
+<table>
+<thead>
+<tr>
+<th>Variant</th>
+<th>Version</th>
+<th>Encoder Dim</th>
+<th>Depth</th>
+<th>HuggingFace Repo</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>nano</code></td>
+<td>v1</td>
+<td>128</td>
+<td>4</td>
+<td><code>allenai/OlmoEarth-v1-Nano</code></td>
+</tr>
+<tr>
+<td><code>tiny</code></td>
+<td>v1</td>
+<td>192</td>
+<td>12</td>
+<td><code>allenai/OlmoEarth-v1-Tiny</code></td>
+</tr>
+<tr>
+<td><code>base</code></td>
+<td>v1</td>
+<td>768</td>
+<td>12</td>
+<td><code>allenai/OlmoEarth-v1-Base</code></td>
+</tr>
+<tr>
+<td><code>large</code></td>
+<td>v1</td>
+<td>1024</td>
+<td>24</td>
+<td><code>allenai/OlmoEarth-v1-Large</code></td>
+</tr>
+<tr>
+<td><code>nano_v1_1</code></td>
+<td>v1.1</td>
+<td>128</td>
+<td>4</td>
+<td><code>allenai/OlmoEarth-v1_1-Nano</code></td>
+</tr>
+<tr>
+<td><code>tiny_v1_1</code></td>
+<td>v1.1</td>
+<td>192</td>
+<td>12</td>
+<td><code>allenai/OlmoEarth-v1_1-Tiny</code></td>
+</tr>
+<tr>
+<td><code>base_v1_1</code></td>
+<td>v1.1</td>
+<td>768</td>
+<td>12</td>
+<td><code>allenai/OlmoEarth-v1_1-Base</code></td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">v1 vs v1.1 architecture difference</p>
+<p>v1 uses a Conv2D-based patch embedding, producing 3 separate band-set token groups per spatial location.
+v1.1 uses a linear patch embedding (<code>use_linear_patch_embed=True</code>) that merges band sets into a single token stream. Both versions produce the same output dimensionality after pooling.</p>
+</div>
+<p>Short aliases are accepted: <code>nano_11</code>, <code>tiny_11</code>, <code>base_11</code> for v1.1 variants; <code>nano_v1</code>, <code>tiny_v1</code>, <code>base_v1</code>, <code>large_v1</code> for v1 variants.</p>
+<h3 id="patch_size"><code>patch_size</code><a class="headerlink" href="#patch_size" title="Permanent link">&para;</a></h3>
+<p>Controls the spatial patch size for the FlexiViT encoder. Smaller values produce more spatial tokens (higher resolution) at the cost of longer inference time.</p>
+<table>
+<thead>
+<tr>
+<th><code>patch_size</code></th>
+<th>Tokens (256×256 image)</th>
+<th>Note</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>4</code></td>
+<td>64 × 64 = 4096</td>
+<td>Default; more spatially detailed</td>
+</tr>
+<tr>
+<td><code>8</code></td>
+<td>32 × 32 = 1024</td>
+<td>Faster; coarser spatial grid</td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td>128 × 128 = 16384</td>
+<td>Very detailed; significantly slower</td>
+</tr>
+</tbody>
+</table>
+<h3 id="image_size"><code>image_size</code><a class="headerlink" href="#image_size" title="Permanent link">&para;</a></h3>
+<p>Target pixel size for the resize step. The fetched patch is always resized to <code>(image_size, image_size)</code> before encoding. Must be divisible by <code>patch_size</code>.</p>
+<p>Default: <code>256</code> (matching the OlmoEarth training tile size).</p>
+<h3 id="temporal_mode"><code>temporal_mode</code><a class="headerlink" href="#temporal_mode" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>single</code> (default)</td>
+<td>One composite over the whole temporal range (<code>T=1</code>), timestamp = range midpoint</td>
+</tr>
+<tr>
+<td><code>multi</code></td>
+<td>One composite per <strong>30-day bin</strong> anchored at the range start, up to <strong>12 frames</strong></td>
+</tr>
+</tbody>
+</table>
+<p><code>multi</code> mirrors how OlmoEarth was pretrained: the official pipeline slices each
+sample's year window into fixed 30-day bins (<code>duration=30d</code> strides in the
+rslearn config — <em>not</em> calendar months), and feeds each frame's start date as
+its <code>(day, month, year)</code> timestamp. The adapter reproduces exactly that:</p>
+<ul>
+<li>Bins: <code>[start, start+30d), [start+30d, start+60d), …</code>, last bin truncated at
+  the range end, capped at 12 frames (ranges longer than ~360 days are truncated).</li>
+<li>Per-frame timestamp = bin start date (matching the official pipeline).</li>
+<li>Bins with no imagery are <strong>dropped from the sequence</strong> (the encoder runs with
+  <code>fast_pass=True</code>, which ignores attention masks, so empty frames cannot be
+  masked out — they are excluded instead). At least one bin must have data.</li>
+<li>Works for both <code>s2</code> and <code>s1</code>. S1 reuses the single-frame S1 fetch per bin, so
+  IW filtering and dB handling apply within each bin.</li>
+</ul>
+<div class="highlight"><pre><span></span><code><span class="n">emb</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">get_embedding</span><span class="p">(</span>
+    <span class="s2">&quot;olmoearth&quot;</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=-</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="mf">6.0</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=-</span><span class="mf">1.9</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="mf">6.1</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">year</span><span class="p">(</span><span class="mi">2022</span><span class="p">),</span>       <span class="c1"># → 12 monthly-cadence frames</span>
+    <span class="n">temporal_mode</span><span class="o">=</span><span class="s2">&quot;multi&quot;</span><span class="p">,</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
+<span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="p">[</span><span class="s2">&quot;n_frames&quot;</span><span class="p">])</span>   <span class="c1"># ≤ 12, depending on data availability</span>
+</code></pre></div>
+<div class="admonition note">
+<p class="admonition-title">Multi-frame <code>input_chw</code> contract</p>
+<p>When overriding inputs in <code>multi</code> mode, pass <code>[T, C, H, W]</code> where <code>T</code> equals
+the number of 30-day bins of the temporal range; represent empty bins as
+all-NaN frames. Plain <code>[C, H, W]</code> inputs are always treated as single-frame.</p>
+</div>
+<hr />
+<h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
+<h3 id="pooled-outputspecpooled">Pooled (<code>OutputSpec.pooled()</code>)<a class="headerlink" href="#pooled-outputspecpooled" title="Permanent link">&para;</a></h3>
+<p>The encoder output <code>(B, H', W', T, S, D)</code> is pooled over all spatial, temporal, and band-set dimensions via the OlmoEarth built-in <code>pool_unmasked_tokens()</code>. This produces a <code>(D,)</code> vector.</p>
+<p><code>pooling="mean"</code> (default) computes mean; <code>pooling="max"</code> computes max over token positions.</p>
+<h3 id="grid-outputspecgrid">Grid (<code>OutputSpec.grid()</code>)<a class="headerlink" href="#grid-outputspecgrid" title="Permanent link">&para;</a></h3>
+<p>Returns a <code>(D, H', W')</code> spatial token map as an <code>xarray.DataArray</code> with dimensions <code>(d, y, x)</code>. The temporal (<code>T</code>) and band-set (<code>S</code>) dimensions are averaged out; only the spatial token grid is retained.</p>
+<p>Grid size depends on <code>image_size</code> and <code>patch_size</code>:
+<div class="highlight"><pre><span></span><code>H&#39; = W&#39; = image_size // patch_size
+</code></pre></div>
+For defaults (256, patch_size=4): <code>64 × 64</code> grid.</p>
+<hr />
+<h2 id="environment-variables">Environment Variables<a class="headerlink" href="#environment-variables" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Variable</th>
 <th>Default</th>
 <th>Effect</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>RS_EMBED_ANYSAT_FRAMES</code></td>
+<td><code>RS_EMBED_OLMOEARTH_VARIANT</code></td>
+<td><code>tiny_v1_1</code></td>
+<td>Default model variant when <code>model_config</code> not given</td>
+</tr>
+<tr>
+<td><code>RS_EMBED_OLMOEARTH_PATCH_SIZE</code></td>
+<td><code>4</code></td>
+<td>Default patch size when <code>model_config</code> not given</td>
+</tr>
+<tr>
+<td><code>RS_EMBED_OLMOEARTH_IMAGE_SIZE</code></td>
+<td><code>256</code></td>
+<td>Default image resize target</td>
+</tr>
+<tr>
+<td><code>RS_EMBED_OLMOEARTH_TEMPORAL_MODE</code></td>
+<td><code>single</code></td>
+<td>Default temporal mode (<code>single</code> / <code>multi</code>)</td>
+</tr>
+<tr>
+<td><code>RS_EMBED_OLMOEARTH_FETCH_WORKERS</code></td>
 <td><code>8</code></td>
-<td>Number of temporal frames <code>T</code></td>
+<td>Parallel GEE fetch workers for batch calls</td>
 </tr>
 <tr>
-<td><code>RS_EMBED_ANYSAT_IMG</code></td>
-<td><code>24</code></td>
-<td>Per-frame resize target (square)</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_NORM</code></td>
-<td><code>per_tile_zscore</code></td>
-<td>Series normalization mode</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_MODEL_SIZE</code></td>
-<td><code>base</code></td>
-<td>AnySat model size</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_GRID_MODE</code></td>
-<td><code>dense</code></td>
-<td>Grid path native AnySat spatial output (<code>dense</code> or <code>patch</code>)</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_POOLED_SOURCE</code></td>
-<td><code>patch</code></td>
-<td>Pooled path source (<code>patch</code> compatibility pooling or native <code>tile</code>)</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_FLASH_ATTN</code></td>
-<td><code>0</code></td>
-<td>Enable flash attention path if supported</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_PRETRAINED</code></td>
-<td><code>1</code></td>
-<td>Load pretrained checkpoint weights</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_CKPT</code></td>
-<td>unset</td>
-<td>Local checkpoint override</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_HF_REPO</code></td>
-<td><code>g-astruc/AnySat</code></td>
-<td>Hugging Face repo used for checkpoint download</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_HF_FILE</code></td>
-<td><code>models/AnySat.pth</code></td>
-<td>Checkpoint file inside the Hugging Face repo</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_CACHE_DIR</code></td>
-<td><code>~/.cache/rs_embed/anysat</code></td>
-<td>Checkpoint cache dir</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_CKPT_MIN_BYTES</code></td>
-<td>adapter threshold</td>
-<td>Download size sanity check</td>
-</tr>
-<tr>
-<td><code>RS_EMBED_ANYSAT_FETCH_WORKERS</code></td>
-<td><code>8</code></td>
-<td>Provider prefetch workers for batch APIs</td>
+<td><code>RS_EMBED_OLMOEARTH_BATCH_SIZE</code></td>
+<td><code>4</code> (CPU) / <code>16</code> (CUDA)</td>
+<td>Inference batch size for <code>get_embeddings_batch_from_inputs</code></td>
 </tr>
 </tbody>
 </table>
-<h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
-<p><strong><code>pooled</code></strong>: defaults to spatial pooling over AnySat's <code>patch</code> grid; pass <code>pooled_source="tile"</code> (or <code>RS_EMBED_ANYSAT_POOLED_SOURCE=tile</code>) to use the native AnySat tile embedding instead.</p>
-<p><strong><code>grid</code></strong>: defaults to AnySat <code>dense</code> sub-patch features <code>(D,H,W)</code>; pass <code>grid_feature_mode="patch"</code> (or <code>RS_EMBED_ANYSAT_GRID_MODE=patch</code>) to recover the older patch-grid behavior.</p>
 <hr />
-<h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
+<h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
+<p>OlmoEarth requires an additional package not included in the base <code>rs-embed</code> install:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>rs-embed<span class="o">[</span>olmoearth<span class="o">]</span>
+<span class="c1"># or</span>
+uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>olmoearth-pretrain-minimal
+</code></pre></div>
+<hr />
+<h2 id="usage-examples">Usage Examples<a class="headerlink" href="#usage-examples" title="Permanent link">&para;</a></h2>
 <h3 id="minimal-example">Minimal example<a class="headerlink" href="#minimal-example" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">BBox</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;anysat&quot;</span><span class="p">,</span>
-    <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-01-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2023-01-01&quot;</span><span class="p">),</span>
+    <span class="s2">&quot;olmoearth&quot;</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=-</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="mf">6.0</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=-</span><span class="mf">1.9</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="mf">6.1</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
-<h3 id="example-with-temporalframe-tuning-env-controlled">Example with temporal/frame tuning (env-controlled)<a class="headerlink" href="#example-with-temporalframe-tuning-env-controlled" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># Example (shell):</span>
-<span class="n">export</span> <span class="n">RS_EMBED_ANYSAT_FRAMES</span><span class="o">=</span><span class="mi">8</span>
-<span class="n">export</span> <span class="n">RS_EMBED_ANYSAT_NORM</span><span class="o">=</span><span class="n">per_tile_zscore</span>
-<span class="n">export</span> <span class="n">RS_EMBED_ANYSAT_IMG</span><span class="o">=</span><span class="mi">24</span>
+<h3 id="choose-variant-and-modality">Choose variant and modality<a class="headerlink" href="#choose-variant-and-modality" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">BBox</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
+
+<span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
+    <span class="s2">&quot;olmoearth&quot;</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=-</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="mf">6.0</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=-</span><span class="mf">1.9</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="mf">6.1</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;tiny_v1_1&quot;</span><span class="p">,</span>
+    <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s1&quot;</span><span class="p">,</span>
+<span class="p">)</span>
 </code></pre></div>
 <hr />
-<h2 id="paper-links">Paper &amp; Links<a class="headerlink" href="#paper-links" title="Permanent link">&para;</a></h2>
+<h2 id="notes-and-caveats">Notes and Caveats<a class="headerlink" href="#notes-and-caveats" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Publication</strong>: <a href="https://arxiv.org/abs/2412.14123">CVPR 2025</a></li>
-<li><strong>Code</strong>: <a href="https://github.com/gastruc/AnySat">gastruc/AnySat</a></li>
+<li>The OlmoEarth normalizer linearly maps <code>mean ± 2σ</code> to <code>[0, 1]</code> (<code>(x − min) / (max − min)</code>); values outside that range fall outside <code>[0, 1]</code> rather than being clipped — matching the official <code>Normalizer</code> implementation.</li>
+<li><code>patch_size</code> is a <strong>model input</strong> (FlexiViT accepts variable patch sizes), not a preprocessing hyperparameter. Different <code>patch_size</code> values may produce embeddings with different spatial characteristics.</li>
+<li>The <code>large</code> variant is only available in v1 (no v1.1 large release at time of writing).</li>
+<li>Weights are cached by <code>huggingface_hub</code> in the default HF cache directory.</li>
 </ul>
 <hr />
-<h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
+<h2 id="license">License<a class="headerlink" href="#license" title="Permanent link">&para;</a></h2>
+<p>OlmoEarth — the weights, the training/inference datasets, and the <code>olmoearth-pretrain-minimal</code>
+code — is released by Allen AI (Ai2) under the <strong>OlmoEarth Artifact License</strong>. This is a
+<em>responsible-use</em> / source-available license, <strong>not</strong> an OSI open-source license like MIT or
+Apache 2.0 (which <code>rs-embed</code> itself uses). Anything covered by the license — the model, the
+dataset, the code, or any derivative of them — is collectively called the <strong>"Artifacts."</strong></p>
 <ul>
-<li><code>sensor.scale_m</code> / <code>fetch.scale_m</code> must be a positive multiple of 10 m — non-multiples raise immediately.</li>
-<li>The default grid output uses <code>dense</code> (sub-patch resolution), which differs from most other models' patch-level grids.</li>
-<li>Single-frame <code>CHW</code> input is silently repeated to <code>T</code> frames — this is valid but produces a different temporal signal than actual multi-frame data.</li>
+<li>📄 Full license text: <a href="https://github.com/allenai/olmoearth_pretrain/blob/main/LICENSE">allenai/olmoearth_pretrain — LICENSE</a></li>
+<li>📦 Source / model code: <a href="https://github.com/allenai/olmoearth_pretrain">github.com/allenai/olmoearth_pretrain</a></li>
 </ul>
+<h3 id="what-it-lets-you-do">What it lets you do<a class="headerlink" href="#what-it-lets-you-do" title="Permanent link">&para;</a></h3>
+<p>You may, free of charge, <strong>use, reproduce, modify, display, and distribute</strong> the Artifacts, and
+<strong>create and share derivatives</strong> — including transfer-learning/fine-tuning from the weights, using
+the model's outputs to generate synthetic data, and building new models or datasets on top of it.</p>
+<h3 id="what-it-forbids-section-2-use-restrictions">What it forbids (Section 2 — use restrictions)<a class="headerlink" href="#what-it-forbids-section-2-use-restrictions" title="Permanent link">&para;</a></h3>
+<p>You may <strong>not</strong> use OlmoEarth or any derivative for:</p>
+<ul>
+<li><strong>Military &amp; defense</strong> — weapons development, military operations, intelligence gathering, or
+  human surveillance / policing.</li>
+<li><strong>Extractive activities</strong> — planning or facilitating the extraction of raw materials from the
+  earth: oil, natural gas, and minerals (drilling, mining), as well as <strong>deforestation</strong>.</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Monitoring ≠ facilitating extraction</p>
+<p>The restriction targets <em>planning or facilitating</em> extraction/deforestation. Passive
+<strong>monitoring</strong> use cases — e.g. tracking deforestation, land cover, or land-use change — are
+generally distinct from facilitating the extraction itself. When in doubt, read the license.</p>
+</div>
+<h3 id="if-you-redistribute-the-artifacts-section-3">If you redistribute the Artifacts (Section 3)<a class="headerlink" href="#if-you-redistribute-the-artifacts-section-3" title="Permanent link">&para;</a></h3>
+<ul>
+<li><strong>Cite Ai2</strong> as the source.</li>
+<li><strong>Include or link to the license</strong> for everyone you pass the Artifacts to.</li>
+<li><strong>Propagate the Section 2 use restrictions</strong> to all downstream recipients (unless Ai2 grants
+  written approval otherwise).</li>
+</ul>
+<p>Breaching the use restrictions <strong>automatically terminates</strong> your license (Section 4). The Artifacts
+are provided "as is" with no warranty (Section 6).</p>
+<div class="admonition info">
+<p class="admonition-title">How this affects <code>rs-embed</code></p>
+<p><code>rs-embed</code> does <strong>not</strong> bundle or redistribute the OlmoEarth weights or code — it declares
+<code>olmoearth-pretrain-minimal</code> as an <em>optional</em> dependency and downloads the weights from
+Hugging Face at runtime. The license therefore binds <strong>you, the end user</strong>, directly; the
+<code>rs-embed</code> package stays Apache 2.0. Just make sure your own use complies with Section 2 above.</p>
+</div>
 
 
 
