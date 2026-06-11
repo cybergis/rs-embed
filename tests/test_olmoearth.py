@@ -54,9 +54,9 @@ def test_resolve_variant_from_model_config():
     assert oe._resolve_variant({"variant": "nano_v1_1"}) == "nano_v1_1"
 
 
-def test_resolve_variant_defaults_to_base_v1_1():
-    assert oe._resolve_variant(None) == "base_v1_1"
-    assert oe._resolve_variant({}) == "base_v1_1"
+def test_resolve_variant_defaults_to_tiny_v1_1():
+    assert oe._resolve_variant(None) == "tiny_v1_1"
+    assert oe._resolve_variant({}) == "tiny_v1_1"
 
 
 def test_resolve_variant_env_fallback(monkeypatch):
@@ -71,7 +71,7 @@ def test_resolve_variant_model_config_overrides_env(monkeypatch):
 
 def test_resolve_variant_env_auto_gives_default(monkeypatch):
     monkeypatch.setenv("RS_EMBED_OLMOEARTH_VARIANT", "auto")
-    assert oe._resolve_variant(None) == "base_v1_1"
+    assert oe._resolve_variant(None) == "tiny_v1_1"
 
 
 # ---------------------------------------------------------------------------
@@ -414,7 +414,7 @@ def test_get_embedding_accepts_input_chw(monkeypatch):
     monkeypatch.setattr(
         oe,
         "_load_olmoearth",
-        lambda variant, device: (object(), {"hf_repo": "allenai/OlmoEarth-v1-Nano"}, "cpu"),
+        lambda variant, device: (object(), {"hf_repo": "allenai/OlmoEarth-v1_1-Tiny"}, "cpu"),
     )
 
     x_chw = np.full((12, 64, 64), 2000.0, dtype=np.float32)
@@ -816,8 +816,8 @@ def test_embedding_meta_has_required_fields(monkeypatch):
     assert meta["model"] == "olmoearth"
     assert meta["type"] == "on_the_fly"
     assert meta["backend"] == "gee"
-    assert meta["variant"] == "base_v1_1"
-    assert meta["model_size"] == "base"
+    assert meta["variant"] == "tiny_v1_1"
+    assert meta["model_size"] == "tiny"
     assert meta["model_version"] == "v1.1"
     assert meta["patch_size"] == oe._DEFAULT_PATCH_SIZE
     assert meta["hf_repo"] is not None

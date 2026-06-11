@@ -90,7 +90,7 @@ _VARIANT_ALIASES: dict[str, str] = {
     "base_11": "base_v1_1",
 }
 
-_DEFAULT_VARIANT = "base_v1_1"
+_DEFAULT_VARIANT = "tiny_v1_1"
 _DEFAULT_IMAGE_SIZE = 256  # training tile size; model accepts any size divisible by patch_size
 _DEFAULT_PATCH_SIZE = 4
 _DEFAULT_SCALE_M = 10

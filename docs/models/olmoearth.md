@@ -7,7 +7,7 @@
 | Model ID             | `olmoearth`                                                                                               |
 | Family / Backbone    | OlmoEarth v1/v1.1 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset                       |
 | Adapter type         | `on-the-fly`                                                                                              |
-| Model config keys    | `variant` (default: `nano`), `patch_size` (default: `4`), `image_size` (default: `256`)                  |
+| Model config keys    | `variant` (default: `tiny_v1_1`), `patch_size` (default: `4`), `image_size` (default: `256`)                  |
 | Training alignment   | High (S2 L2A 12-band; native 10 m resolution; per-band mean±2σ normalization matches training pipeline)   |
 
 !!! success "OlmoEarth In 30 Seconds"
@@ -186,7 +186,7 @@ For defaults (256, patch_size=4): `64 × 64` grid.
 
 | Variable                         | Default  | Effect                                              |
 | -------------------------------- | -------- | --------------------------------------------------- |
-| `RS_EMBED_OLMOEARTH_VARIANT`     | `nano`   | Default model variant when `model_config` not given |
+| `RS_EMBED_OLMOEARTH_VARIANT`     | `tiny_v1_1`   | Default model variant when `model_config` not given |
 | `RS_EMBED_OLMOEARTH_PATCH_SIZE`  | `4`      | Default patch size when `model_config` not given    |
 | `RS_EMBED_OLMOEARTH_IMAGE_SIZE`  | `256`    | Default image resize target                         |
 | `RS_EMBED_OLMOEARTH_TEMPORAL_MODE` | `single` | Default temporal mode (`single` / `multi`)        |
@@ -213,7 +213,7 @@ uv pip install olmoearth-pretrain-minimal
 import rs_embed as rs
 from rs_embed.core.specs import BBox, TemporalSpec, OutputSpec
 
-# Pooled embedding with default nano variant
+# Pooled embedding with default tiny_v1_1 variant
 emb = rs.get_embedding(
     "olmoearth",
     spatial=BBox(minlon=-2.0, minlat=6.0, maxlon=-1.9, maxlat=6.1),
