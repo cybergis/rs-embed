@@ -12,6 +12,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from ..core.embedding import Embedding
+from ..core.errors import ModelError
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ModelConfig, TaskResult
 from ..tools.output import normalize_embedding_output
@@ -26,8 +27,15 @@ from ..tools.runtime import (
 )
 from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..tools.tiling import (
+    _aggregate_tiled_embeddings,
+    _augment_model_config_for_tiled_dispatch,
     _call_embedder_get_embedding_with_input_prep,
+    _embedder_default_image_size,
+    _estimate_tile_count,
     _resolve_input_prep_spec,
+    _slice_and_pad_tile,
+    _tile_subspatial,
+    _tile_yx_starts,
 )
 from .runner import run_with_retry
 
@@ -155,8 +163,9 @@ class InferenceEngine:
         skey: str | None,
         prefer_batch: bool,
         allow_nonresize: bool,
-    ) -> tuple[bool, bool]:
-        """Return tier-1/2 batch eligibility booleans for current model context."""
+        input_prep_mode: str = "resize",
+    ) -> tuple[bool, bool, bool]:
+        """Return (can_batch_prefetched, can_batch_no_input, can_batch_tiled)."""
         can_batch_prefetched = (
             prefer_batch
             and allow_nonresize
@@ -168,7 +177,18 @@ class InferenceEngine:
         can_batch_no_input = (
             prefer_batch and supports_batch_api(embedder) and not needs_provider_input
         )
-        return can_batch_prefetched, can_batch_no_input
+        # Tier 1.5: batch across multiple spatial points, each tiled internally.
+        # Only for explicit tile mode — auto mode requires per-image size inspection
+        # which can't be batched without first fetching every image.
+        can_batch_tiled = (
+            prefer_batch
+            and input_prep_mode == "tile"
+            and supports_prefetched_batch_api(embedder)
+            and needs_provider_input
+            and sensor is not None
+            and skey is not None
+        )
+        return can_batch_prefetched, can_batch_no_input, can_batch_tiled
 
     def _run_batch_prefetched(
         self,
@@ -320,6 +340,189 @@ class InferenceEngine:
         except Exception as _e:
             return out, False
 
+    def _run_batch_tiled(
+        self,
+        *,
+        idxs: list[int],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
+        embedder: Any,
+        lock: Any,
+        backend: str,
+        get_input_fn: Callable[[int], np.ndarray],
+        batch_size: int,
+        continue_on_error: bool,
+        on_done: Callable[[int], None],
+        use_lock: bool,
+        model_name: str,
+        model_config: dict[str, Any] | None = None,
+    ) -> tuple[dict[int, TaskResult], bool]:
+        """Run tile-mode batch inference across multiple spatial points.
+
+        Each input image is tiled, all tiles from all spatial points are batched
+        together for model inference, then stitched back into per-point results.
+        """
+        cfg = self.config
+        spec = self.input_prep_resolved
+        out: dict[int, TaskResult] = {}
+        try:
+            model_img = _embedder_default_image_size(embedder)
+            tile_size = int(spec.tile_size or model_img or 0)
+            if tile_size <= 0:
+                return out, False
+            stride = int(spec.tile_stride or tile_size)
+            if stride <= 0 or stride != tile_size:
+                return out, False
+            tiled_model_config = _augment_model_config_for_tiled_dispatch(
+                embedder, model_config, tile_size=tile_size
+            )
+            if tiled_model_config is not None and not embedder_accepts_model_config(
+                type(embedder), "get_embeddings_batch_from_inputs"
+            ):
+                return out, False
+
+            # Step 1: fetch inputs and slice each image into tiles.
+            ready: list[tuple[int, SpatialSpec, np.ndarray]] = []
+            for i in idxs:
+                try:
+                    inp = np.asarray(get_input_fn(i), dtype=np.float32)
+                    ready.append((i, spatials[i], inp))
+                except Exception as e:
+                    if not continue_on_error:
+                        raise
+                    out[i] = TaskResult.failed(e)
+                    on_done(i)
+
+            all_tiles: list[np.ndarray] = []
+            all_tile_spatials: list[SpatialSpec] = []
+            # {spatial_idx: (flat_start, tile_count, tile_metas, h, w)}
+            tile_map: dict[int, tuple[int, int, list[dict[str, Any]], int, int]] = {}
+
+            for i, spatial, inp in ready:
+                h, w = int(inp.shape[-2]), int(inp.shape[-1])
+                num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
+                if num_tiles > spec.max_tiles:
+                    err = ModelError(
+                        f"input_prep tile would create {num_tiles} tiles "
+                        f"(> max_tiles={spec.max_tiles}); increase max_tiles or use resize/auto."
+                    )
+                    if not continue_on_error:
+                        raise err
+                    out[i] = TaskResult.failed(err)
+                    on_done(i)
+                    continue
+                fill_value = float(sensor.fill_value) if sensor is not None else 0.0
+                ys, xs = _tile_yx_starts(h=h, w=w, tile_size=tile_size, stride=stride)
+                tiles: list[np.ndarray] = []
+                tile_metas: list[dict[str, Any]] = []
+                tile_spatials_pt: list[SpatialSpec] = []
+                for r, y0 in enumerate(ys):
+                    for c, x0 in enumerate(xs):
+                        tile, meta = _slice_and_pad_tile(
+                            inp,
+                            y0=int(y0),
+                            x0=int(x0),
+                            tile_size=tile_size,
+                            pad_edges=bool(spec.pad_edges),
+                            fill_value=fill_value,
+                        )
+                        meta["row"] = int(r)
+                        meta["col"] = int(c)
+                        tiles.append(tile)
+                        tile_metas.append(meta)
+                        tile_spatials_pt.append(
+                            _tile_subspatial(
+                                spatial,
+                                full_h=h,
+                                full_w=w,
+                                y0=meta["y0"],
+                                y1=meta["y1"],
+                                x0=meta["x0"],
+                                x1=meta["x1"],
+                            )
+                        )
+                flat_start = len(all_tiles)
+                all_tiles.extend(tiles)
+                all_tile_spatials.extend(tile_spatials_pt)
+                tile_map[i] = (flat_start, len(tiles), tile_metas, h, w)
+
+            if not all_tiles:
+                return out, True
+
+            # Step 2: run batch inference on the flat tile list.
+            all_tile_embs: list[Embedding] = []
+            for start in range(0, len(all_tiles), batch_size):
+                sub_tiles = all_tiles[start : start + batch_size]
+                sub_spatials = all_tile_spatials[start : start + batch_size]
+                batch_kwargs: dict[str, Any] = {
+                    "spatials": sub_spatials,
+                    "input_chws": sub_tiles,
+                    "temporal": temporal,
+                    "sensor": sensor,
+                    "output": self.output,
+                    "backend": backend,
+                    "device": self.device,
+                }
+                if tiled_model_config is not None:
+                    batch_kwargs["model_config"] = tiled_model_config
+
+                def _infer_tiles(_kw: dict[str, Any] = batch_kwargs) -> list[Embedding]:
+                    if use_lock:
+                        with lock:
+                            return embedder.get_embeddings_batch_from_inputs(**_kw)
+                    return embedder.get_embeddings_batch_from_inputs(**_kw)
+
+                sub_embs = run_with_retry(
+                    _infer_tiles,
+                    retries=cfg.max_retries,
+                    backoff_s=cfg.retry_backoff_s,
+                )
+                if len(sub_embs) != len(sub_tiles):
+                    raise RuntimeError(
+                        f"Model {model_name} returned {len(sub_embs)} embeddings "
+                        f"for {len(sub_tiles)} tiles."
+                    )
+                all_tile_embs.extend(sub_embs)
+
+            # Step 3: stitch tiles back into per-point embeddings. Iterate
+            # tile_map (not ready): points that exceeded max_tiles under
+            # continue_on_error were already marked failed and never tiled.
+            for i, (flat_start, tile_count, tile_metas, h, w) in tile_map.items():
+                tile_embs = all_tile_embs[flat_start : flat_start + tile_count]
+                tile_embs_n = [
+                    normalize_embedding_output(emb=e, output=self.output) for e in tile_embs
+                ]
+                if tile_count == 1:
+                    result = self._embedding_to_result(tile_embs_n[0])
+                else:
+                    prep_meta: dict[str, Any] = {
+                        "requested_mode": spec.mode,
+                        "resolved_mode": "tile",
+                        "tile_layout": "cover_shift",
+                        "tile_size": int(tile_size),
+                        "tile_stride": int(stride),
+                        "tile_count": int(tile_count),
+                        "pad_edges": bool(spec.pad_edges),
+                        "max_tiles": int(spec.max_tiles),
+                        "input_hw": (int(h), int(w)),
+                    }
+                    stitched = _aggregate_tiled_embeddings(
+                        embs=tile_embs_n,
+                        tile_meta=tile_metas,
+                        output=self.output,
+                        tile_size=tile_size,
+                        stride=stride,
+                        prep_meta=prep_meta,
+                    )
+                    result = self._embedding_to_result(stitched)
+                out[i] = result
+                on_done(i)
+
+            return out, True
+        except Exception:
+            return out, False
+
     def _run_single_fallback(
         self,
         *,
@@ -415,13 +618,16 @@ class InferenceEngine:
                 except Exception as _e:
                     pass
 
-            can_batch_prefetched, can_batch_no_input = self._evaluate_batch_capability(
-                embedder=ctx.embedder,
-                needs_provider_input=ctx.needs_provider_input,
-                sensor=mc.sensor,
-                skey=ctx.skey,
-                prefer_batch=(self.prefer_batch or mc.is_precomputed),
-                allow_nonresize=not self._explicit_nonresize,
+            can_batch_prefetched, can_batch_no_input, can_batch_tiled = (
+                self._evaluate_batch_capability(
+                    embedder=ctx.embedder,
+                    needs_provider_input=ctx.needs_provider_input,
+                    sensor=mc.sensor,
+                    skey=ctx.skey,
+                    prefer_batch=(self.prefer_batch or mc.is_precomputed),
+                    allow_nonresize=not self._explicit_nonresize,
+                    input_prep_mode=self.input_prep_resolved.mode,
+                )
             )
 
             batch_succeeded = False
@@ -461,6 +667,26 @@ class InferenceEngine:
                     model_config=mc.model_config,
                 )
                 for i, rec in batch_out.items():
+                    out[(i, mc.name)] = rec
+
+            if not batch_succeeded and can_batch_tiled:
+                tiled_out, batch_succeeded = self._run_batch_tiled(
+                    idxs=idxs,
+                    spatials=spatials,
+                    temporal=temporal,
+                    sensor=mc.sensor,
+                    embedder=ctx.embedder,
+                    lock=ctx.lock,
+                    backend=mc.backend,
+                    get_input_fn=_get_input,
+                    batch_size=infer_bs,
+                    continue_on_error=cfg.continue_on_error,
+                    on_done=_mark_done,
+                    use_lock=False,
+                    model_name=mc.name,
+                    model_config=mc.model_config,
+                )
+                for i, rec in tiled_out.items():
                     out[(i, mc.name)] = rec
 
             if not batch_succeeded:
@@ -581,20 +807,21 @@ class InferenceEngine:
                 backoff_s=cfg.retry_backoff_s,
             )
 
-        can_batch_prefetched, can_batch = self._evaluate_batch_capability(
+        can_batch_prefetched, can_batch, can_batch_tiled = self._evaluate_batch_capability(
             embedder=ctx.embedder,
             needs_provider_input=ctx.needs_provider_input,
             sensor=sensor,
             skey=ctx.skey,
             prefer_batch=(allow_batch and prefer_batch),
             allow_nonresize=not self._explicit_nonresize,
+            input_prep_mode=self.input_prep_resolved.mode,
         )
 
         batch_attempted = False
         batch_succeeded = False
         all_idxs = list(range(n))
 
-        # Tier 1: batch with prefetched inputs
+        # Tier 1: batch with prefetched inputs (resize/pass-through mode)
         if can_batch_prefetched:
             batch_attempted = True
             assert ctx.skey is not None and sensor is not None
@@ -634,6 +861,28 @@ class InferenceEngine:
                 model_config=model_config,
             )
             out.update(batch_out)
+
+        # Tier 1.5: tiled batch — tile each image then batch all tiles together
+        if not batch_attempted and can_batch_tiled:
+            batch_attempted = True
+            assert ctx.skey is not None and sensor is not None
+            tiled_out, batch_succeeded = self._run_batch_tiled(
+                idxs=all_idxs,
+                spatials=spatials,
+                temporal=temporal,
+                sensor=sensor,
+                embedder=ctx.embedder,
+                lock=ctx.lock,
+                backend=model_backend,
+                get_input_fn=lambda i: get_input_fn(i, ctx.skey, sensor),
+                batch_size=infer_bs,
+                continue_on_error=cfg.continue_on_error,
+                on_done=_mark_done,
+                use_lock=True,
+                model_name=model_name,
+                model_config=model_config,
+            )
+            out.update(tiled_out)
 
         # Tier 3: single-item fallback
         if not batch_succeeded:

@@ -141,6 +141,11 @@ def _mosaic_and_crop_strict_roi(
       (year, tile_lon, tile_lat, embedding_array, crs, transform)
     Return cropped CHW + meta.
     """
+    # Materialize the factory output once. The two-pass mosaic (bounds scan +
+    # paste) must see identical rows; re-invoking the factory can re-download
+    # or re-read every tile from geotessera, doubling I/O on the hottest path.
+    tile_rows = list(tiles_rows_factory())
+
     # Pass 1: scan tile layout and compute global bounds from metadata only.
     crs0 = None
     crs0_str = None
@@ -149,7 +154,7 @@ def _mosaic_and_crop_strict_roi(
     left = bottom = float("inf")
     right = top = float("-inf")
 
-    for _year, _tlon, _tlat, emb, crs, transform in tiles_rows_factory():
+    for _year, _tlon, _tlat, emb, crs, transform in tile_rows:
         _assert_north_up(transform)
         h, w, d = _infer_hwc_shape(emb)
         t_left, t_bottom, t_right, t_top = _tile_bounds(transform, w, h)
@@ -215,7 +220,7 @@ def _mosaic_and_crop_strict_roi(
     cropped_hwc = np.zeros((crop_h, crop_w, int(d0)), dtype=np.float32)
 
     # Pass 2: paste tiles directly into crop canvas (avoid full mosaic allocation).
-    for _year, _tlon, _tlat, emb, _crs, transform in tiles_rows_factory():
+    for _year, _tlon, _tlat, emb, _crs, transform in tile_rows:
         _assert_north_up(transform)
         hwc = _to_hwc(emb)
         h, w, _ = hwc.shape

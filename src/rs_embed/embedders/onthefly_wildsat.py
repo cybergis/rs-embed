@@ -774,6 +774,132 @@ def _wildsat_forward(
     return vec_np, grid_np, meta
 
 
+def _wildsat_forward_batch(
+    backbone: Any,
+    image_head: Any | None,
+    x_bchw: np.ndarray,
+    *,
+    arch: str,
+    feature_source: str,
+    pooled_from_tokens: bool,
+    pooling: str,
+    make_grid: bool,
+    grid_from_tokens: bool,
+    device: str,
+) -> list[tuple[np.ndarray, np.ndarray | None, dict[str, Any]]]:
+    """Batch version of _wildsat_forward.
+
+    Takes a pre-stacked B×C×H×W array and returns one (vec, grid, meta) tuple
+    per batch element, running a single GPU forward pass for the whole batch.
+    """
+    ensure_torch()
+    import torch
+
+    dev = _resolve_device(device)
+    x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
+    b = int(x.shape[0])
+
+    try:
+        backbone = backbone.to(dev).eval()
+    except Exception:
+        pass
+    if image_head is not None:
+        try:
+            image_head = image_head.to(dev).eval()
+        except Exception:
+            pass
+
+    with torch.no_grad():
+        toks_per_item: list[np.ndarray | None] = [None] * b
+        if (arch == "vitb16") and (make_grid or pooled_from_tokens) and grid_from_tokens:
+            try:
+                toks = _torchvision_vit_tokens(backbone, x)  # B × N_tokens × D
+                for i in range(b):
+                    toks_per_item[i] = toks[i].detach().float().cpu().numpy().astype(np.float32)
+            except Exception:
+                pass
+
+        out = backbone(x)
+        if not hasattr(out, "ndim"):
+            raise ModelError(f"WildSAT backbone returned unsupported output type: {type(out)}")
+        if int(out.ndim) == 2:
+            backbone_vec_t = out  # B×D
+        elif int(out.ndim) == 4:
+            backbone_vec_t = out.mean(dim=(2, 3))  # B×D
+        else:
+            raise ModelError(f"WildSAT backbone output has unsupported shape: {tuple(out.shape)}")
+
+        head_vec_t = None
+        if image_head is not None:
+            try:
+                head_out = image_head(backbone_vec_t)
+                if hasattr(head_out, "ndim") and int(head_out.ndim) == 2:
+                    head_vec_t = head_out
+            except Exception:
+                head_vec_t = None
+
+        fs = str(feature_source).lower().strip()
+        if fs in {"image_head", "img_head", "image"}:
+            final_vec_t = head_vec_t if head_vec_t is not None else backbone_vec_t
+            used_source = "image_head" if head_vec_t is not None else "backbone_fallback"
+        elif fs in {"backbone", "encoder"}:
+            final_vec_t = backbone_vec_t
+            used_source = "backbone"
+        elif fs in {"auto", "default"}:
+            final_vec_t = head_vec_t if head_vec_t is not None else backbone_vec_t
+            used_source = "image_head" if head_vec_t is not None else "backbone"
+        else:
+            raise ModelError("RS_EMBED_WILDSAT_FEATURE must be one of: auto, image_head, backbone")
+
+        final_np = final_vec_t.detach().float().cpu().numpy().astype(np.float32)  # B×D
+
+    results: list[tuple[np.ndarray, np.ndarray | None, dict[str, Any]]] = []
+    for i in range(b):
+        vec_np = final_np[i]
+        tok_np = toks_per_item[i]
+
+        pooled_cls_removed = False
+        if pooled_from_tokens and tok_np is not None:
+            vec_np, pooled_cls_removed = pool_from_tokens(tok_np, pooling)
+
+        grid_np: np.ndarray | None = None
+        grid_meta: dict[str, Any] = {}
+        if make_grid:
+            if tok_np is not None:
+                grid_np, (gh, gw), cls_removed = tokens_to_grid_dhw(tok_np)
+                grid_meta = {
+                    "grid_kind": "vit_patch_tokens",
+                    "grid_hw": (int(gh), int(gw)),
+                    "grid_shape": tuple(grid_np.shape),
+                    "grid_cls_removed": bool(cls_removed),
+                }
+            else:
+                grid_np = vec_np[:, None, None].astype(np.float32)
+                grid_meta = {
+                    "grid_kind": "vector_as_1x1",
+                    "grid_hw": (1, 1),
+                    "grid_shape": tuple(grid_np.shape),
+                    "grid_cls_removed": False,
+                }
+
+        results.append(
+            (
+                vec_np,
+                grid_np,
+                {
+                    "feature_source": used_source,
+                    "feature_dim": int(vec_np.shape[0]),
+                    "pooled_from_tokens": bool(pooled_from_tokens and (tok_np is not None)),
+                    "pooled_cls_removed": bool(pooled_cls_removed),
+                    "tokens_available": bool(tok_np is not None),
+                    **grid_meta,
+                },
+            )
+        )
+
+    return results
+
+
 @register("wildsat")
 class WildSATEmbedder(EmbedderBase):
     input_spec = ModelInputSpec(
@@ -1047,3 +1173,140 @@ class WildSATEmbedder(EmbedderBase):
                 )
             )
         return out
+
+    def get_embeddings_batch_from_inputs(
+        self,
+        *,
+        spatials: list[SpatialSpec],
+        input_chws: list[np.ndarray],
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
+        output: OutputSpec = OutputSpec.pooled(),
+        backend: str = "auto",
+        device: str = "auto",
+    ) -> list[Embedding]:
+        if not input_chws:
+            return []
+
+        backend_l = backend.lower().strip()
+        if not is_provider_backend(backend_l, allow_auto=True):
+            raise ModelError("wildsat expects a provider backend (or 'auto').")
+
+        t = temporal_to_range(temporal)
+        ss = sensor or self._default_sensor()
+
+        variant = _resolve_wildsat_variant(model_config=model_config)
+        ckpt_path = _resolve_wildsat_ckpt_path_for_variant(variant)
+        arch_hint = _WILDSAT_VARIANT_SPECS[variant]["arch"]
+        image_size = int(os.environ.get("RS_EMBED_WILDSAT_IMG", str(self.DEFAULT_IMAGE_SIZE)))
+        norm_mode = os.environ.get("RS_EMBED_WILDSAT_NORM", "minmax").strip()
+        feature_source = os.environ.get("RS_EMBED_WILDSAT_FEATURE", "image_head").strip()
+        prefer_branch = int(os.environ.get("RS_EMBED_WILDSAT_IMAGE_BRANCH", "3"))
+        pooled_from_tokens = os.environ.get("RS_EMBED_WILDSAT_POOLED_FROM_TOKENS", "0").strip() in {
+            "1",
+            "true",
+            "True",
+        }
+        grid_from_tokens = os.environ.get("RS_EMBED_WILDSAT_GRID_FROM_TOKENS", "1").strip() not in {
+            "0",
+            "false",
+            "False",
+        }
+
+        chw_units: list[np.ndarray] = []
+        for inp in input_chws:
+            raw = np.asarray(inp, dtype=np.float32)
+            if raw.ndim != 3 or int(raw.shape[0]) != 3:
+                raise ModelError(
+                    f"input_chw must be CHW with 3 bands for wildsat, got {getattr(raw, 'shape', None)}"
+                )
+            raw = np.clip(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0).astype(
+                np.float32
+            )
+            rgb_u8 = _raw_chw_to_rgb_u8(raw, image_size=image_size, norm_mode=norm_mode)
+            chw_units.append(_rgb_u8_to_bchw_unit(rgb_u8)[0])  # drop batch dim → C×H×W
+
+        x_bchw = np.stack(chw_units, axis=0)  # B×C×H×W
+
+        backbone, image_head, lmeta, dev = _load_wildsat(
+            ckpt_path=ckpt_path,
+            arch_hint=arch_hint,
+            prefer_branch=prefer_branch,
+            device=device,
+        )
+
+        batch_results = _wildsat_forward_batch(
+            backbone,
+            image_head,
+            x_bchw,
+            arch=str(lmeta.get("arch") or _normalize_arch_name(arch_hint) or "vitb16"),
+            feature_source=feature_source,
+            pooled_from_tokens=pooled_from_tokens,
+            pooling=output.pooling,
+            make_grid=(output.mode == "grid"),
+            grid_from_tokens=grid_from_tokens,
+            device=dev,
+        )
+
+        embeddings: list[Embedding] = []
+        for _i, (vec, grid, fmeta) in enumerate(batch_results):
+            meta = build_meta(
+                model=self.model_name,
+                kind="on_the_fly",
+                backend=str(backend).lower(),
+                source=ss.collection,
+                sensor={
+                    "collection": ss.collection,
+                    "bands": ("B4", "B3", "B2"),
+                    "scale_m": int(ss.scale_m),
+                    "cloudy_pct": int(ss.cloudy_pct),
+                    "composite": str(ss.composite),
+                },
+                temporal=t,
+                image_size=image_size,
+                extra={
+                    "start": t.start,
+                    "end": t.end,
+                    "normalization": str(norm_mode),
+                    "device": dev,
+                    **lmeta,
+                    **fmeta,
+                },
+            )
+
+            if output.mode == "pooled":
+                ometa = {
+                    **meta,
+                    "pooling": (
+                        output.pooling if fmeta.get("pooled_from_tokens", False) else "identity"
+                    ),
+                    "pooled_shape": tuple(vec.shape),
+                }
+                embeddings.append(Embedding(data=vec.astype(np.float32), meta=ometa))
+            elif output.mode == "grid":
+                if grid is None:
+                    raise ModelError(
+                        "Internal error: grid output requested but grid tensor is missing."
+                    )
+                gmeta = {
+                    **meta,
+                    "grid_shape": tuple(grid.shape),
+                    "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                }
+                da = xr.DataArray(
+                    grid.astype(np.float32),
+                    dims=("d", "y", "x"),
+                    coords={
+                        "d": np.arange(grid.shape[0]),
+                        "y": np.arange(grid.shape[1]),
+                        "x": np.arange(grid.shape[2]),
+                    },
+                    name="embedding",
+                    attrs=gmeta,
+                )
+                embeddings.append(Embedding(data=da, meta=gmeta))
+            else:
+                raise ModelError(f"Unknown output mode: {output.mode}")
+
+        return embeddings

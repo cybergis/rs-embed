@@ -444,6 +444,44 @@ def _fomo_forward_tokens(
     return tokens, meta
 
 
+def _fomo_forward_tokens_batch(
+    model: Any,
+    x_bchw: np.ndarray,
+    *,
+    spectral_keys: tuple[int, ...],
+    device: str,
+) -> tuple[list[np.ndarray], dict[str, Any]]:
+    """Batch forward: returns one [N,D] tokens array per batch element."""
+    ensure_torch()
+    import torch
+
+    dev = _resolve_device(device)
+    x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
+    keys = [int(k) for k in spectral_keys]
+
+    try:
+        model = model.to(dev).eval()
+    except Exception:
+        pass
+
+    with torch.no_grad():
+        out = model((x, keys), pool=False)
+
+    if not hasattr(out, "ndim") or int(out.ndim) != 3:
+        raise ModelError(f"FoMo forward(pool=False) expected [B,N,D] tensor, got type={type(out)}")
+
+    b = int(x_bchw.shape[0])
+    if int(out.shape[0]) != b:
+        raise ModelError(f"FoMo batch size mismatch: expected {b}, got {int(out.shape[0])}")
+
+    all_tokens = out.detach().float().cpu().numpy().astype(np.float32)  # B×N×D
+    meta = {
+        "token_count": int(all_tokens.shape[1]),
+        "token_dim": int(all_tokens.shape[2]),
+    }
+    return [all_tokens[i] for i in range(b)], meta
+
+
 def _tokens_to_grid(
     tokens_nd: np.ndarray, *, n_modalities: int, patch_size: int, image_size: int
 ) -> tuple[np.ndarray, dict[str, Any]]:
@@ -690,6 +728,152 @@ class FoMoEmbedder(EmbedderBase):
             return Embedding(data=da, meta=gmeta_full)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
+
+    def get_embeddings_batch_from_inputs(
+        self,
+        *,
+        spatials: list[SpatialSpec],
+        input_chws: list[np.ndarray],
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
+        output: OutputSpec = OutputSpec.pooled(),
+        backend: str = "auto",
+        device: str = "auto",
+    ) -> list[Embedding]:
+        if not input_chws:
+            return []
+
+        backend_l = backend.lower().strip()
+        if not is_provider_backend(backend_l, allow_auto=True):
+            raise ModelError("fomo expects a provider backend (or 'auto').")
+
+        ss = sensor or self._default_sensor()
+        t = temporal_to_range(temporal)
+
+        image_size = int(os.environ.get("RS_EMBED_FOMO_IMG", str(self.DEFAULT_IMAGE_SIZE)))
+        patch_size = int(os.environ.get("RS_EMBED_FOMO_PATCH", str(self.DEFAULT_PATCH)))
+        dim = int(os.environ.get("RS_EMBED_FOMO_DIM", str(self.DEFAULT_DIM)))
+        depth = int(os.environ.get("RS_EMBED_FOMO_DEPTH", str(self.DEFAULT_DEPTH)))
+        heads = int(os.environ.get("RS_EMBED_FOMO_HEADS", str(self.DEFAULT_HEADS)))
+        mlp_dim = int(os.environ.get("RS_EMBED_FOMO_MLP_DIM", str(self.DEFAULT_MLP_DIM)))
+        num_classes = int(
+            os.environ.get("RS_EMBED_FOMO_NUM_CLASSES", str(self.DEFAULT_NUM_CLASSES))
+        )
+        norm_mode = os.environ.get("RS_EMBED_FOMO_NORM", "unit_scale").strip()
+
+        ckpt_path = _resolve_fomo_ckpt_path()
+        spectral_keys = _resolve_s2_modality_keys()
+
+        x_list: list[np.ndarray] = []
+        for inp in input_chws:
+            raw = np.asarray(inp, dtype=np.float32)
+            if raw.ndim != 3 or int(raw.shape[0]) != len(_S2_SR_12_BANDS):
+                raise ModelError(f"input_chw must be CHW with 12 bands for fomo, got {raw.shape}")
+            raw = np.clip(np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0), 0.0, 10000.0).astype(
+                np.float32
+            )
+            x = _normalize_s2(raw, mode=norm_mode)
+            if int(x.shape[-2]) != image_size or int(x.shape[-1]) != image_size:
+                x = _resize_chw(x, out_hw=image_size)
+            x_list.append(x)
+
+        x_bchw = np.stack(x_list, axis=0)  # B×C×H×W
+
+        if int(x_bchw.shape[1]) != len(spectral_keys):
+            raise ModelError(
+                f"FoMo spectral key count ({len(spectral_keys)}) does not match "
+                f"input channels ({int(x_bchw.shape[1])})."
+            )
+
+        model, lmeta, dev = _load_fomo(
+            ckpt_path=ckpt_path,
+            image_size=image_size,
+            patch_size=patch_size,
+            dim=dim,
+            depth=depth,
+            heads=heads,
+            mlp_dim=mlp_dim,
+            num_classes=num_classes,
+            device=device,
+        )
+
+        tokens_list, fmeta = _fomo_forward_tokens_batch(
+            model,
+            x_bchw,
+            spectral_keys=spectral_keys,
+            device=dev,
+        )
+
+        embeddings: list[Embedding] = []
+        for tokens in tokens_list:
+            grid, gmeta = _tokens_to_grid(
+                tokens,
+                n_modalities=len(spectral_keys),
+                patch_size=patch_size,
+                image_size=image_size,
+            )
+
+            if output.pooling == "max":
+                vec = np.max(tokens, axis=0).astype(np.float32)
+                pooling = "token_max"
+            else:
+                vec = np.mean(tokens, axis=0).astype(np.float32)
+                pooling = "token_mean"
+
+            meta = build_meta(
+                model=self.model_name,
+                kind="on_the_fly",
+                backend=str(backend).lower(),
+                source=ss.collection,
+                sensor={
+                    "collection": ss.collection,
+                    "bands": tuple(_S2_SR_12_BANDS),
+                    "scale_m": int(ss.scale_m),
+                    "cloudy_pct": int(ss.cloudy_pct),
+                    "composite": str(ss.composite),
+                    "fill_value": float(ss.fill_value),
+                },
+                temporal=t,
+                image_size=image_size,
+                extra={
+                    "start": t.start,
+                    "end": t.end,
+                    "patch_size": int(patch_size),
+                    "normalization": str(norm_mode),
+                    "spectral_keys": tuple(int(k) for k in spectral_keys),
+                    "device": dev,
+                    "pooling": pooling,
+                    "pooled_shape": tuple(vec.shape),
+                    **lmeta,
+                    **fmeta,
+                    **gmeta,
+                },
+            )
+
+            if output.mode == "pooled":
+                embeddings.append(Embedding(data=vec, meta=meta))
+            elif output.mode == "grid":
+                gmeta_full = {
+                    **meta,
+                    "grid_shape": tuple(grid.shape),
+                    "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                }
+                da = xr.DataArray(
+                    grid.astype(np.float32),
+                    dims=("d", "y", "x"),
+                    coords={
+                        "d": np.arange(grid.shape[0]),
+                        "y": np.arange(grid.shape[1]),
+                        "x": np.arange(grid.shape[2]),
+                    },
+                    name="embedding",
+                    attrs=gmeta_full,
+                )
+                embeddings.append(Embedding(data=da, meta=gmeta_full))
+            else:
+                raise ModelError(f"Unknown output mode: {output.mode}")
+
+        return embeddings
 
     def get_embeddings_batch(
         self,
