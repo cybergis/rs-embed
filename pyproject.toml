@@ -68,9 +68,13 @@ terramind = [
   # TerraMind still loads its backbone through the TerraTorch registry.
   "terratorch==1.2.1",
 ]
+olmoearth = [
+  "olmoearth-pretrain-minimal>=0.0.5",
+]
 full = [
   "matplotlib>=3.10",
   "terratorch==1.2.1",
+  "olmoearth-pretrain-minimal>=0.0.5",
 ]
 dev = [
   "pytest>=7.4",

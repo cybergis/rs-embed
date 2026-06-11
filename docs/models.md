@@ -57,6 +57,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 | `anysat`          | S2 10-band time series          | 768  | 10m                | multi-frame      | JEPA; `s2_dates` DOY side input                         | [detail](models/anysat.md)     |
 | `galileo`         | S2 10-band time series          | 128  | 10m                | multi-frame      | nano default; month tokens                              | [detail](models/galileo.md)    |
 | `agrifm`          | S2 10-band time series          | 1024 | 10m                | multi-frame      | Video Swin; fixed `T` frame stack                       | [detail](models/agrifm.md)     |
+| `olmoearth`       | S2 L2A 12-band                  | 128–1024 | 10m            | single composite | FlexiViT; 4 sizes (nano/tiny/base/large); requires `[olmoearth]` extra | [detail](models/olmoearth.md) |
 
 ---
 

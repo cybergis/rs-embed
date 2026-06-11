@@ -95,6 +95,7 @@ nav:
           - AnySat: models/anysat.md
           - Galileo: models/galileo.md
           - AgriFM: models/agrifm.md
+          - OLMoEarth: models/olmoearth.md
   - API:
       - Overview: api.md
       - Specs & Data Structures: api_specs.md

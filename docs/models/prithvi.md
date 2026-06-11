@@ -19,7 +19,7 @@
     In `rs-embed`, its most important characteristics are:
 
     - **required** temporal (`year, day_of_year`) and location (`lat, lon`) side inputs auto-derived by the adapter: see [Input Contract](#input-contract)
-    - 30 m default `sensor.scale_m`, not the more common S2 10 m default — a frequent source of silent drift: see [Reproducibility Notes](#reproducibility-notes)
+    - 30 m default `sensor.scale_m`, not the more common S2 10 m default — a frequent source of silent drift: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
     - `resize` vs `pad` preprocessing changes token geometry and should be treated as part of the experiment, not as a cosmetic knob: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
 
 ---

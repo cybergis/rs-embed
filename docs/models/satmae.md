@@ -17,7 +17,7 @@
     In `rs-embed`, its most important characteristics are:
 
     - RGB-only (`B4,B3,B2`); raw SR is converted to `uint8` before model preprocessing: see [Preprocessing Pipeline](#preprocessing-pipeline)
-    - token path is always used (`mask_ratio=0.0`), and any CLS token is auto-removed before pooling/grid: see [Output Semantics](#output-semantics)
+    - token path is always used (`mask_ratio=0.0`), and any CLS token is auto-removed before pooling/grid: see [Reference](#reference)
     - checkpoint selection via `RS_EMBED_SATMAE_ID` (Hugging Face model ID) — default targets the fMoW large checkpoint: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
 
 ---

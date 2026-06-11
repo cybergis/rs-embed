@@ -125,6 +125,7 @@ This is a convenience index with basic model info only (for quick scanning / lin
 | `terrafm`         | S2 12-band / S1 VV-VH    | 10m                 | [ICLR 2026](https://arxiv.org/abs/2506.06281)                                   | [link](https://github.com/mbzuai-oryx/TerraFM)               |
 | `thor`            | S2 10-band               | 10m                 | [arXiv 2026](https://arxiv.org/abs/2601.16011)                                  | [link](https://github.com/FM4CS/THOR)                        |
 | `agrifm`          | S2 time series (10-band) | 10m                 | [RSE 2026](https://www.sciencedirect.com/science/article/pii/S0034425726000040) | [link](https://github.com/flyakon/AgriFM)                    |
+| `olmoearth`       | S2 L2A 12-band / S1 VV-VH    | 10m                 | [arXiv 2025](https://arxiv.org/abs/2511.13655)                                  | [link](https://huggingface.co/collections/allenai/olmoearth) |
 
 Resolution here means the default provider/source fetch resolution used by the adapter, not the final resized tensor shape seen by the model.
 

@@ -14,7 +14,8 @@ exports/
 examples/**
 demo_export/
 
-!examples/
+.codex/
+.agents/
 
 !examples/playground.ipynb
 !examples/plot_utils.py

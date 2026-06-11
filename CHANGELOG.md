@@ -10,6 +10,8 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ### Added
 
+- **OlmoEarth v1/v1.1 embedder (`olmoearth`).** Adds support for the [OlmoEarth](https://huggingface.co/collections/allenai/olmoearth) foundation model family from Allen AI, trained on the Major TOM dataset. All 7 released variants are supported: `nano`, `tiny`, `base`, `large` (v1) and `nano_v1_1`, `tiny_v1_1`, `base_v1_1` (v1.1), with embedding dimensions 128/192/768/1024. The adapter fetches all 12 Sentinel-2 L2A bands from GEE in OlmoEarth's native band-set order, applies per-band mean±2σ normalization (OlmoEarth COMPUTED strategy), and encodes with the FlexiViT encoder. Both `pooled` and `grid` output modes are supported. `patch_size` (default 4) and `image_size` (default 256) are configurable via `model_config` or environment variables. Requires the `olmoearth-pretrain-minimal` package: `pip install rs-embed[olmoearth]`.
+
 - **GEE fetch statistics reporting in `export_batch`.** When `show_progress=True`, a `[gee_fetch]` summary line is now printed to stderr after each prefetch chunk completes, reporting total planned fetches, completed, failed, cache hits, and the most recently processed point/sensor. This gives users visibility into GEE quota consumption, cache reuse, and whether runtime is dominated by fetching vs. inference. No output is emitted when `show_progress=False` or when no GEE provider is involved (e.g. precomputed models). The underlying `FetchStats` class in `tools/progress.py` is thread-safe and accumulates counts cumulatively across chunks.
 
 ### Fixed
