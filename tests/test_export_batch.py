@@ -671,7 +671,9 @@ def test_export_batch_combined_preserves_fetch_meta_for_single_fallback(tmp_path
         temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
         models=["dummy_fetch_meta_combined"],
         target=ExportTarget.combined(str(out_path)),
-        config=ExportConfig(save_inputs=True, save_embeddings=True, show_progress=False),
+        config=ExportConfig(
+            save_inputs=True, save_embeddings=True, show_progress=False, input_prep="resize"
+        ),
         backend="gee",
         device="cpu",
         output=OutputSpec.pooled(),
@@ -765,7 +767,9 @@ def test_export_batch_combined_falls_back_to_single_when_batch_api_fails(tmp_pat
         temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
         models=["dummy_batch_fail"],
         target=ExportTarget.combined(str(out_path)),
-        config=ExportConfig(save_inputs=True, save_embeddings=True, show_progress=False),
+        config=ExportConfig(
+            save_inputs=True, save_embeddings=True, show_progress=False, input_prep="resize"
+        ),
         backend="gee",
         device="cpu",
         output=OutputSpec.pooled(),
@@ -851,7 +855,9 @@ def test_export_batch_per_item_gpu_fallback_preserves_fetch_meta(tmp_path, monke
         temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
         models=["dummy_fetch_meta_per_item"],
         target=ExportTarget.per_item(str(out_dir)),
-        config=ExportConfig(save_inputs=True, save_embeddings=True, show_progress=False),
+        config=ExportConfig(
+            save_inputs=True, save_embeddings=True, show_progress=False, input_prep="resize"
+        ),
         backend="gee",
         device="cuda",
         output=OutputSpec.pooled(),
@@ -2722,6 +2728,7 @@ def test_export_batch_per_item_prefetch_pipeline_isolates_next_chunk_cache(tmp_p
             chunk_size=2,
             num_workers=1,
             continue_on_error=False,
+            input_prep="resize",
         ),
         backend="gee",
         device="cuda",

@@ -238,7 +238,8 @@ def test_input_prep_spec_resize_defaults():
     assert s.mode == "resize"
     assert s.tile_size is None
     assert s.tile_stride is None
-    assert s.max_tiles == 9
+    assert s.max_tiles == 64
+    assert s.max_tiles_hard == 1024
     assert s.pad_edges is True
 
 
@@ -247,15 +248,19 @@ def test_input_prep_spec_tile_defaults():
     assert s.mode == "tile"
     assert s.tile_size == 224
     assert s.tile_stride is None
-    assert s.max_tiles == 9
+    assert s.max_tiles == 64
+    assert s.max_tiles_hard == 1024
     assert s.pad_edges is True
 
 
 def test_input_prep_spec_tile_custom():
-    s = InputPrepSpec.tile(tile_size=128, tile_stride=64, max_tiles=4, pad_edges=False)
+    s = InputPrepSpec.tile(
+        tile_size=128, tile_stride=64, max_tiles=4, max_tiles_hard=16, pad_edges=False
+    )
     assert s.tile_size == 128
     assert s.tile_stride == 64
     assert s.max_tiles == 4
+    assert s.max_tiles_hard == 16
     assert s.pad_edges is False
 
 
@@ -264,7 +269,8 @@ def test_input_prep_spec_auto_defaults():
     assert s.mode == "auto"
     assert s.tile_size is None
     assert s.tile_stride is None
-    assert s.max_tiles == 9
+    assert s.max_tiles == 64
+    assert s.max_tiles_hard == 1024
     assert s.pad_edges is True
 
 

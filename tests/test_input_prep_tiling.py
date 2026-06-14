@@ -4,6 +4,7 @@ from rs_embed.core.embedding import Embedding
 from rs_embed.core.specs import BBox, InputPrepSpec, OutputSpec
 from rs_embed.core.types import ExportConfig
 from rs_embed.tools.tiling import (
+    INPUT_PREP_VERSION,
     _call_embedder_get_embedding_with_input_prep,
     _tile_yx_starts,
 )
@@ -209,7 +210,13 @@ def test_auto_mode_falls_back_to_resize_when_tile_budget_exceeded():
     arr = np.asarray(out.data, dtype=np.float32)
     assert arr.shape == (1, 6, 6)
     np.testing.assert_allclose(arr, x)
-    assert "input_prep" not in (out.meta or {})
+    # Auto fell back to a plain resize, but the embedding is still stamped with a
+    # versioned input_prep block for reproducibility provenance.
+    prep = out.meta["input_prep"]
+    assert prep["requested_mode"] == "auto"
+    assert prep["resolved_mode"] == "resize"
+    assert prep["prep_version"] == INPUT_PREP_VERSION
+    assert "tile_count" not in prep
 
 
 def test_cover_shift_tile_positions_avoid_padding_for_300_with_224():
@@ -271,10 +278,14 @@ class _FakeTileEmbedderWithBase(_FakeTileEmbedder):
         return Embedding(data=np.asarray([float(x.mean())], dtype=np.float32), meta={})
 
 
-def _make_engine(tile_size: int = 4, max_tiles: int = 16) -> tuple:
+def _make_engine(tile_size: int = 4, max_tiles: int = 16, max_tiles_hard: int = 1024) -> tuple:
     from rs_embed.pipelines.inference import InferenceEngine
 
-    cfg = ExportConfig(input_prep=InputPrepSpec.tile(tile_size=tile_size, max_tiles=max_tiles))
+    cfg = ExportConfig(
+        input_prep=InputPrepSpec.tile(
+            tile_size=tile_size, max_tiles=max_tiles, max_tiles_hard=max_tiles_hard
+        )
+    )
     engine = InferenceEngine(device="cpu", output=OutputSpec.pooled("mean"), config=cfg)
     return engine
 
@@ -328,12 +339,12 @@ def test_run_batch_tiled_aggregates_multiple_points():
 
 
 def test_run_batch_tiled_honors_max_tiles():
-    """_run_batch_tiled should reject inputs that exceed input_prep.max_tiles."""
+    """_run_batch_tiled should reject inputs that exceed input_prep.max_tiles_hard."""
     import threading
 
     emb = _FakeTileEmbedderWithBase()
     lock = threading.RLock()
-    engine = _make_engine(tile_size=4, max_tiles=1)
+    engine = _make_engine(tile_size=4, max_tiles=1, max_tiles_hard=1)
     image = np.arange(25, dtype=np.float32).reshape(1, 5, 5)
     done_indices: list[int] = []
 
@@ -355,7 +366,7 @@ def test_run_batch_tiled_honors_max_tiles():
 
     assert succeeded
     assert out[0].status.value == "failed"
-    assert "would create 4 tiles (> max_tiles=1)" in str(out[0].error)
+    assert "would create 4 tiles (> max_tiles_hard=1)" in str(out[0].error)
     assert done_indices == [0]
     assert emb.batch_calls == 0
     assert emb.batch_input_shapes == []
@@ -367,9 +378,9 @@ def test_run_batch_tiled_continue_on_error_skips_oversized_point():
 
     emb = _FakeTileEmbedderWithBase()
     lock = threading.RLock()
-    engine = _make_engine(tile_size=4, max_tiles=1)
+    engine = _make_engine(tile_size=4, max_tiles=1, max_tiles_hard=1)
 
-    # Index 1 (5x5 → 4 tiles) exceeds max_tiles=1; indices 0 and 2 (4x4 → 1 tile) are valid.
+    # Index 1 (5x5 → 4 tiles) exceeds max_tiles_hard=1; indices 0 and 2 (4x4 → 1 tile) are valid.
     images = {
         0: np.arange(16, dtype=np.float32).reshape(1, 4, 4),
         1: np.arange(25, dtype=np.float32).reshape(1, 5, 5),
@@ -401,7 +412,7 @@ def test_run_batch_tiled_continue_on_error_skips_oversized_point():
     assert out[0].status.value == "ok", f"point 0 failed: {out[0].error}"
     assert out[2].status.value == "ok", f"point 2 failed: {out[2].error}"
     assert out[1].status.value == "failed"
-    assert "would create 4 tiles (> max_tiles=1)" in str(out[1].error)
+    assert "would create 4 tiles (> max_tiles_hard=1)" in str(out[1].error)
     assert sorted(done_indices) == [0, 1, 2]
 
 

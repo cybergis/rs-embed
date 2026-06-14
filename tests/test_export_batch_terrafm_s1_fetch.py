@@ -116,7 +116,9 @@ def test_export_batch_prefetch_preserves_terrafm_s1_sensor_fields(tmp_path, monk
         temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
         models=[ExportModelRequest(name="dummy_terrafm_s1", sensor=sensor)],
         target=ExportTarget.per_item(str(out_dir)),
-        config=ExportConfig(save_inputs=True, save_embeddings=True, show_progress=False),
+        config=ExportConfig(
+            save_inputs=True, save_embeddings=True, show_progress=False, input_prep="resize"
+        ),
         backend="gee",
         device="cpu",
         output=OutputSpec.pooled(),

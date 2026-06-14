@@ -389,24 +389,18 @@ def fetch_api_side_inputs(
     if getattr(type(embedder), "_is_precomputed", False):
         return None
 
+    # API-side tiling needs a provider backend, a sensor, and an embedder that
+    # accepts prefetched CHW input. When any prerequisite is missing we degrade
+    # gracefully (let the embedder fetch internally and resize) rather than
+    # raising — ``tile`` is the package default, so it must never hard-fail basic
+    # usage. The embedding's meta["input_prep"] records the resolved mode so the
+    # fallback stays auditable. This applies to both ``tile`` and ``auto``.
     factory = provider_factory_for_backend(backend_n)
     if factory is None:
-        if mode == "tile":
-            raise ModelError(
-                "input_prep.mode='tile' currently requires a provider backend (e.g. gee)."
-            )
         return None
     if sensor_eff is None:
-        if mode == "tile":
-            raise ModelError(
-                "input_prep.mode='tile' requires a sensor for provider-backed on-the-fly models."
-            )
         return None
     if not embedder_accepts_input_chw(type(embedder)):
-        if mode == "tile":
-            raise ModelError(
-                f"Model {model_n} does not accept input_chw; cannot apply input_prep.mode='tile'."
-            )
         return None
 
     provider = factory()

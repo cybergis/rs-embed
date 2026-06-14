@@ -70,7 +70,11 @@ class Model:
     output : OutputSpec
         Embedding output spec (default: pooled).
     input_prep : str or InputPrepSpec or None
-        Input preparation mode.
+        Input preparation mode. ``None`` (the default) uses the package default,
+        which is ``"tile"``: large on-the-fly inputs are tiled and stitched so
+        native resolution is preserved. Pass ``"resize"`` to downsample the whole
+        input to the model's image size instead, or ``"auto"`` to tile only when
+        beneficial.
     **model_kwargs
         Model-specific settings (e.g. ``variant="large"``).  The accepted
         keys depend on the model; see :func:`rs_embed.describe_model`.
@@ -91,7 +95,7 @@ class Model:
         fetch: FetchSpec | None = None,
         modality: str | None = None,
         output: OutputSpec = OutputSpec.pooled(),
-        input_prep: InputPrepSpec | str | None = "resize",
+        input_prep: InputPrepSpec | str | None = None,
         **model_kwargs: Any,
     ) -> None:
         model_config = model_kwargs or None

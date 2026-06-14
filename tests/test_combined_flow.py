@@ -123,9 +123,11 @@ def _base_kwargs(
     save_embeddings: bool = True,
     continue_on_error: bool = False,
     inference_strategy: str = "auto",
+    input_prep: Any = None,
 ) -> dict:
     manifest: dict[str, Any] = {"models": []}
     return dict(
+        input_prep=input_prep,
         pending_models=models,
         arrays={},
         manifest=manifest,
@@ -309,7 +311,9 @@ def test_prefetched_batch_succeeds(monkeypatch):
     spatials = _make_spatials(3)
     _patch_deps(monkeypatch, embedder, supports_prefetched_batch=True)
 
-    kw = _base_kwargs(models=["m1"], spatials=spatials, provider_enabled=True)
+    # This test targets the resize prefetched-batch path; tile would route to the
+    # tiled-batch path instead, so pin resize explicitly.
+    kw = _base_kwargs(models=["m1"], spatials=spatials, provider_enabled=True, input_prep="resize")
     kw["resolved_sensor"] = {"m1": sensor}
     manifest = run_pending_models(**kw)
 
@@ -350,7 +354,8 @@ def test_prefetched_batch_fails_falls_back_to_single(monkeypatch):
     spatials = _make_spatials(2)
     _patch_deps(monkeypatch, embedder, supports_prefetched_batch=True)
 
-    kw = _base_kwargs(models=["m1"], spatials=spatials, provider_enabled=True)
+    # Targets the resize prefetched-batch path (and its per-item fallback).
+    kw = _base_kwargs(models=["m1"], spatials=spatials, provider_enabled=True, input_prep="resize")
     kw["resolved_sensor"] = {"m1": sensor}
     manifest = run_pending_models(**kw)
 
