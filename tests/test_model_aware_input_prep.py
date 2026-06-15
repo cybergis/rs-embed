@@ -49,7 +49,15 @@ def _restore_registered_model(model_id, previous):
     "model_id",
     ["remoteclip", "satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
 )
-def test_image_level_vit_grid_default_input_prep_resolves_to_resize_with_metadata(model_id):
+@pytest.mark.parametrize(
+    ("input_prep", "requested_mode"),
+    [(None, "default"), (InputPrepSpec.auto(), "auto")],
+)
+def test_image_level_vit_grid_default_input_prep_resolves_to_resize_with_metadata(
+    model_id,
+    input_prep,
+    requested_mode,
+):
     previous = _with_registered_fake_model(model_id)
     try:
         with pytest.warns(UserWarning, match="resolves to resize"):
@@ -59,12 +67,13 @@ def test_image_level_vit_grid_default_input_prep_resolves_to_resize_with_metadat
                 temporal=_TEMPORAL,
                 output=OutputSpec.grid(),
                 backend="local",
+                input_prep=input_prep,
             )
     finally:
-        _restore_registered_model("scalemae", previous)
+        _restore_registered_model(model_id, previous)
 
     prep = emb.meta["input_prep"]
-    assert prep["requested_mode"] == "default"
+    assert prep["requested_mode"] == requested_mode
     assert prep["resolved_mode"] == "resize"
     assert prep["model_policy"] == "resize_default_for_image_level_vit_patch_grid"
     assert prep["resolved_by_model_policy"] is True
@@ -92,7 +101,7 @@ def test_image_level_vit_grid_explicit_tile_is_allowed_but_marked_experimental(m
                 input_prep=InputPrepSpec.tile(tile_size=224),
             )
     finally:
-        _restore_registered_model("remoteclip", previous)
+        _restore_registered_model(model_id, previous)
 
     prep = emb.meta["input_prep"]
     assert prep["requested_mode"] == "tile"
