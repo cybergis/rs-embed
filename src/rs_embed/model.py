@@ -35,11 +35,9 @@ from .tools.runtime import (
     _EmbeddingRequestContext,
     get_embedder_bundle_cached,
     require_model_config_support,
+    resolve_model_aware_input_prep,
     run_embedding_request,
     sensor_key,
-)
-from .tools.tiling import (
-    _resolve_input_prep_spec,
 )
 
 
@@ -106,8 +104,16 @@ class Model:
         self._device = normalize_device_name(device)
         self._output = output
         self._model_config = model_config
-        self._input_prep = input_prep
-        self._input_prep_resolved = _resolve_input_prep_spec(input_prep)
+        (
+            self._input_prep,
+            self._input_prep_resolved,
+            self._input_prep_requested_mode,
+            self._input_prep_model_policy,
+        ) = resolve_model_aware_input_prep(
+            model_n=self._model_n,
+            input_prep=input_prep,
+            output=output,
+        )
 
         self._sensor = resolve_sensor_for_model(
             self._model_n,
@@ -142,6 +148,8 @@ class Model:
             model_config=self._model_config,
             input_prep=self._input_prep,
             input_prep_resolved=self._input_prep_resolved,
+            input_prep_requested_mode=self._input_prep_requested_mode,
+            input_prep_model_policy=self._input_prep_model_policy,
             embedder=self._embedder,
             lock=self._lock,
         )

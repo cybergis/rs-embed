@@ -17,7 +17,7 @@
 
     - `sensor.scale_m` is a **model input**, not just a fetch resolution — a wrong value silently drifts embeddings across runs: see [Input Contract](#input-contract)
     - `grid` requires a token sequence and raises a clear error when the wrapper only exposes pooled output: see [Output Semantics](#output-semantics)
-    - ImageNet-style eval preprocessing (`Resize(short side) -> CenterCrop -> Normalize`) applied to raw SR converted to RGB `uint8`: see [Preprocessing Pipeline](#preprocessing-pipeline)
+    - Default provider fetches use ImageNet-style eval preprocessing (`Resize(short side) -> CenterCrop -> Normalize`), while prefetched/tiled inputs use direct resize + normalization to preserve tile coverage: see [Preprocessing Pipeline](#preprocessing-pipeline)
 
 ---
 
@@ -34,18 +34,18 @@
 | Side inputs           | **required** effective scale `input_res_m` — **auto-derived** from `sensor.scale_m`    |
 
 !!! warning "`sensor.scale_m` is a model input"
-    ScaleMAE uses `sensor.scale_m` (combined with the post-preprocess tensor geometry — `Resize(short side) + CenterCrop`) to derive the effective `input_res_m` passed into the model's scale-aware positional encoding. A wrong `sensor.scale_m` silently drifts embeddings across runs — see [Preprocessing Pipeline](#preprocessing-pipeline).
+    ScaleMAE uses `sensor.scale_m` combined with the active preprocessing geometry to derive the effective `input_res_m` passed into the model's scale-aware positional encoding. A wrong `sensor.scale_m` silently drifts embeddings across runs — see [Preprocessing Pipeline](#preprocessing-pipeline).
 
 ---
 
 ## Preprocessing Pipeline
 
-!!! tip "Resize is the default — tiling is also available"
-    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
+!!! warning "Resize is the default for `grid`"
+    ScaleMAE `grid` output is an image-level ViT patch-token grid, not a seamless dense geospatial field. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics.
 
 ```mermaid
 flowchart LR
-    INPUT["S2 RGB → uint8"] --> PREP["ImageNet eval preprocess\n→ derive input_res_m"]
+    INPUT["S2 RGB → uint8"] --> PREP["Preprocess\nprovider: ImageNet eval\ntile/input_chw: direct resize + normalize\n→ derive input_res_m"]
     PREP --> FWD["ScaleMAE forward\n(image + input_res)"]
     FWD --> POOL["pooled: vector"]
     FWD --> GRID["grid: token grid (D,H,W)"]
@@ -98,7 +98,7 @@ Even though it is not an environment variable, `sensor.scale_m` is a critical ru
 
 **`pooled`**: if `[N,D]` token sequence → pools with `mean`/`max`; if already `[D]` → returned as `model_pooled`; metadata records `tokens_kind`, `used_patch_size`, and `used_scale_m`.
 
-**`grid`**: requires a token sequence; raises a clear error when the wrapper only exposes pooled output.
+**`grid`**: requires a token sequence; raises a clear error when the wrapper only exposes pooled output. Default/auto input preparation resolves to resize, and metadata records `input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
 
 ---
 
@@ -140,5 +140,6 @@ export RS_EMBED_SCALEMAE_IMG=224
 ## Reference
 
 - `sensor.scale_m` directly affects the positional encoding via `input_res_m` — a wrong value silently drifts embeddings.
+- Default/auto `grid` requests resolve to resize because tiled ScaleMAE patch-token grids can show stitching seams.
 - Grid output requires a token sequence; if the `rshf` wrapper returns only a pooled vector, `OutputSpec.grid()` raises an error.
 - Older `rshf` versions may wrap ScaleMAE in a way that hides `forward_features()` — the adapter tries common nested attributes (`.model`) but may fail.

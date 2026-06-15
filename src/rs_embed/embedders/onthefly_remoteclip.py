@@ -271,6 +271,44 @@ def _tokens_to_grid_dhw(tokens_nd: np.ndarray) -> tuple[np.ndarray, dict[str, An
     return grid_dhw.astype(np.float32), meta
 
 
+def _first_nchw_grid(out: Any):
+    """Pull the final patch-grid feature map out of an open_clip
+    ``forward_intermediates()`` return value as a ``[B, D, h, w]`` tensor.
+
+    open_clip returns the per-block visual features as ``image_intermediates``:
+    a list of NCHW tensors (e.g. ``[1, 768, 7, 7]`` for ViT-B/32 @ 224). We take
+    the last block's output (the deepest dense features). Returns ``None`` when no
+    NCHW grid is present so callers can fall back to other extraction paths.
+    """
+    import torch
+
+    def _last_nchw(seq: Any):
+        if isinstance(seq, (list, tuple)) and seq:
+            last = seq[-1]
+            if torch.is_tensor(last) and last.ndim == 4:
+                return last
+        return None
+
+    if isinstance(out, dict):
+        g = _last_nchw(out.get("image_intermediates"))
+        if g is not None:
+            return g
+        for v in out.values():
+            g = _last_nchw(v)
+            if g is not None:
+                return g
+            if torch.is_tensor(v) and v.ndim == 4:
+                return v
+    elif isinstance(out, (list, tuple)):
+        for v in out:
+            g = _last_nchw(v)
+            if g is not None:
+                return g
+            if torch.is_tensor(v) and v.ndim == 4:
+                return v
+    return None
+
+
 # -----------------------------
 # RemoteCLIP inference adapter
 # -----------------------------
@@ -350,67 +388,31 @@ def _remoteclip_encode_tokens(
                 }
             raise ModelError(f"Unexpected forward_encoder output shape: {tuple(toks.shape)}")
 
-        # 2) open_clip: forward_intermediates (best if it returns tokens cleanly)
+        # 2) open_clip: forward_intermediates -> image_intermediates as NCHW patch
+        #    grids ([B, D, h, w]). This is the canonical dense-feature path; we take
+        #    the deepest block and flatten it to row-major tokens [N, D].
         if hasattr(core, "forward_intermediates"):
             try:
                 out = core.forward_intermediates(x)
-                # open_clip versions differ: out may be dict-like or tuple-like.
-                # We'll search for the first tensor shaped [B,N,D] as tokens.
-                tokens_t = None
-
-                if isinstance(out, dict):
-                    # common keys (varies by version)
-                    candidates = []
-                    for k in (
-                        "image_intermediates",
-                        "intermediates",
-                        "image_tokens",
-                        "tokens",
-                    ):
-                        if k in out:
-                            candidates.append(out[k])
-                    # also scan values
-                    candidates += list(out.values())
-                    for v in candidates:
-                        if torch.is_tensor(v) and v.ndim == 3:
-                            tokens_t = v
-                            break
-                        if isinstance(v, (list, tuple)):
-                            for vv in v:
-                                if torch.is_tensor(vv) and vv.ndim == 3:
-                                    tokens_t = vv
-                                    break
-                            if tokens_t is not None:
-                                break
-
-                elif isinstance(out, (tuple, list)):
-                    # scan elements
-                    for v in out:
-                        if torch.is_tensor(v) and v.ndim == 3:
-                            tokens_t = v
-                            break
-                        if isinstance(v, (list, tuple)):
-                            for vv in v:
-                                if torch.is_tensor(vv) and vv.ndim == 3:
-                                    tokens_t = vv
-                                    break
-                            if tokens_t is not None:
-                                break
-
-                if tokens_t is not None:
-                    return tokens_t[0].detach().float().cpu().numpy().astype(np.float32), {
+                grid_t = _first_nchw_grid(out)
+                if grid_t is not None:
+                    g = grid_t[0]  # [D, h, w]
+                    d, gh, gw = int(g.shape[0]), int(g.shape[1]), int(g.shape[2])
+                    # row-major (row*gw + col) order so _tokens_to_grid_dhw round-trips.
+                    toks = g.reshape(d, gh * gw).permute(1, 0).contiguous()  # [N, D]
+                    return toks.detach().float().cpu().numpy().astype(np.float32), {
                         "tokens_kind": "tokens_intermediates"
                     }
             except Exception as _e:
                 # If forward_intermediates exists but signature/return differs, fall back to hook
                 pass
 
-        # 3) hook vision transformer transformer output to get tokens
+        # 3) hook vision transformer output to get tokens (fallback for open_clip
+        #    builds without forward_intermediates).
         if hasattr(core, "visual") and hasattr(core.visual, "transformer"):
             captured = {}
 
             def _hook(_module, _inp, outp):
-                # outp is typically [B, N, D]
                 captured["tokens"] = outp
 
             handle = core.visual.transformer.register_forward_hook(_hook)
@@ -420,13 +422,19 @@ def _remoteclip_encode_tokens(
             finally:
                 handle.remove()
 
-            if (
-                "tokens" in captured
-                and torch.is_tensor(captured["tokens"])
-                and captured["tokens"].ndim == 3
-            ):
-                toks = captured["tokens"]
-                return toks[0].detach().float().cpu().numpy().astype(np.float32), {
+            t = captured.get("tokens")
+            if torch.is_tensor(t) and t.ndim == 3:
+                # We always run a single image (B=1). open_clip transformers may be
+                # batch-first ([B, N, D]) or sequence-first ([N, B, D]); the axis of
+                # size 1 is the batch dim, so collapse it to recover [N, D] either way.
+                if t.shape[0] == 1 and t.shape[1] != 1:
+                    toks = t[0]
+                elif t.shape[1] == 1 and t.shape[0] != 1:
+                    toks = t[:, 0, :]
+                else:
+                    bf = bool(getattr(core.visual.transformer, "batch_first", True))
+                    toks = t[0] if bf else t[:, 0, :]
+                return toks.detach().float().cpu().numpy().astype(np.float32), {
                     "tokens_kind": "tokens_hook"
                 }
 
@@ -718,10 +726,6 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         # load model once per (ckpt, cache_dir, device)
         model, wmeta, dev = self._get_model(ckpt=ckpt, cache_dir=cache_dir, device=device)
 
-        tokens_or_vec, tmeta = _remoteclip_encode_tokens(
-            model, rgb_u8, image_size=image_size, device=dev
-        )
-
         sensor_meta = {
             "collection": "COPERNICUS/S2_SR_HARMONIZED",
             "bands": ("B4", "B3", "B2"),
@@ -730,47 +734,51 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             "composite": composite,
         }
 
-        extra = {
-            "bands": sensor_meta["bands"],
-            "scale_m": scale_m,
-            "cloudy_pct": cloudy_pct,
-            "composite": composite,
-            "start": t.start,
-            "end": t.end,
-            "ckpt": ckpt,
-            "device": dev,
-            "pretrained_required": True,
-            "auto_download": True,
-            "hf_cache_dir": cache_dir,
-            **wmeta,
-            **tmeta,
-            **extra_checks,
-        }
-
-        base_meta = build_meta(
-            model=self.model_name,
-            kind="on_the_fly",
-            backend=str(backend).lower(),
-            source="COPERNICUS/S2_SR_HARMONIZED",
-            sensor=sensor_meta,
-            temporal=t,
-            image_size=image_size,
-            extra=extra,
-        )
+        def _build_base_meta(tmeta: dict[str, Any]) -> dict[str, Any]:
+            extra = {
+                "bands": sensor_meta["bands"],
+                "scale_m": scale_m,
+                "cloudy_pct": cloudy_pct,
+                "composite": composite,
+                "start": t.start,
+                "end": t.end,
+                "ckpt": ckpt,
+                "device": dev,
+                "pretrained_required": True,
+                "auto_download": True,
+                "hf_cache_dir": cache_dir,
+                **wmeta,
+                **tmeta,
+                **extra_checks,
+            }
+            return build_meta(
+                model=self.model_name,
+                kind="on_the_fly",
+                backend=str(backend).lower(),
+                source="COPERNICUS/S2_SR_HARMONIZED",
+                sensor=sensor_meta,
+                temporal=t,
+                image_size=image_size,
+                extra=extra,
+            )
 
         # ---- pooled output ----
         if output.mode == "pooled":
-            if tokens_or_vec.ndim == 1:
-                vec = tokens_or_vec.astype(np.float32)
-            elif tokens_or_vec.ndim == 2:
-                vec = tokens_or_vec.mean(axis=0).astype(np.float32)  # tokens mean
-                base_meta["pooling"] = "token_mean"
-            else:
-                raise ModelError(f"Unexpected tokens/vec shape for pooled: {tokens_or_vec.shape}")
+            # Use the projected CLIP image embedding (encode_image), identical to the
+            # batch path, so pooled output is the canonical RemoteCLIP representation
+            # with a consistent dimensionality regardless of the single/batch/tiled path.
+            vec = _remoteclip_encode_pooled_batch(
+                model, [rgb_u8], image_size=image_size, device=dev
+            )[0].astype(np.float32)
+            base_meta = _build_base_meta({"tokens_kind": "pooled"})
             return Embedding(data=vec, meta=base_meta)
 
         # ---- grid output ----
         if output.mode == "grid":
+            tokens_or_vec, tmeta = _remoteclip_encode_tokens(
+                model, rgb_u8, image_size=image_size, device=dev
+            )
+            base_meta = _build_base_meta(tmeta)
             if tokens_or_vec.ndim != 2:
                 raise ModelError(
                     "grid output requires token sequence [N,D]. "

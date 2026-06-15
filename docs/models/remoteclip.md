@@ -40,8 +40,8 @@
 
 ## Preprocessing Pipeline
 
-!!! tip "Resize is the default — tiling is also available"
-    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
+!!! warning "Resize is the default for `grid`"
+    RemoteCLIP `grid` output is an image-level CLIP ViT patch-token grid, not a seamless dense geospatial field. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics.
 
 ```mermaid
 flowchart LR
@@ -86,6 +86,14 @@ flowchart LR
 
 !!! info "Checkpoint override"
     Set `sensor.collection="hf:<repo_or_local_path>"` (not env-based in this adapter).
+
+---
+
+## Output Semantics
+
+**`pooled`**: returns the image-level RemoteCLIP visual embedding, suitable for similarity search and retrieval.
+
+**`grid`**: exposes ViT patch-token layout when the wrapper provides tokens. Default/auto input preparation resolves to resize, and metadata records `input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
 
 ---
 
@@ -139,4 +147,5 @@ emb = get_embedding(
 
 - Provider-only — `backend="tensor"` is not supported.
 - The adapter prefers `model.transform` when available; otherwise falls back to CLIP-style preprocessing — the two paths may produce slightly different embeddings.
+- Default/auto `grid` requests resolve to resize because tiled RemoteCLIP patch-token grids can show stitching seams.
 - Grid output depends on the wrapper exposing a token sequence; some RemoteCLIP wrappers only return pooled vectors.
