@@ -237,3 +237,49 @@ def test_get_embedding_default_mode_stays_single(monkeypatch):
     )
     assert out.meta["num_frames"] == 1
     assert out.meta.get("temporal_mode") != "multi"
+
+
+# ---------------------------------------------------------------------------
+# Frame-spacing bounds: 28-day min stride, 184-day max-gap flag/warning
+# ---------------------------------------------------------------------------
+
+
+def test_default_stride_is_28_days():
+    assert pr._DEFAULT_FRAME_STRIDE_DAYS == 28
+    assert pr._DEFAULT_MAX_FRAME_STRIDE_DAYS == 184
+
+
+def test_max_consecutive_gap_days():
+    assert pr._max_consecutive_gap_days([]) == 0
+    assert pr._max_consecutive_gap_days(["2022-02-15"]) == 0
+    # Mar->Aug is the largest of [Feb->Mar=28, Mar->Aug=153]
+    assert pr._max_consecutive_gap_days(["2022-02-15", "2022-03-15", "2022-08-15"]) == 153
+
+
+def test_temporal_spacing_meta_in_range_no_warning(recwarn):
+    meta = pr._temporal_spacing_meta(
+        ["2022-02-15", "2022-05-15", "2022-08-15"], max_stride_days=184
+    )
+    assert meta["max_frame_gap_days"] == 92  # max(Feb15->May15=89, May15->Aug15=92)
+    assert "temporal_spacing_out_of_range" not in meta
+    assert len(recwarn) == 0
+
+
+def test_temporal_spacing_meta_out_of_range_warns():
+    import warnings
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        meta = pr._temporal_spacing_meta(
+            ["2020-01-01", "2020-10-01", "2021-07-01"], max_stride_days=184
+        )
+    assert meta["temporal_spacing_out_of_range"] is True
+    assert meta["max_frame_gap_days"] > 184
+    assert len(w) == 1 and issubclass(w[0].category, UserWarning)
+
+
+def test_resolve_max_frame_stride_days_env(monkeypatch):
+    monkeypatch.delenv("RS_EMBED_PRITHVI_MAX_STRIDE_DAYS", raising=False)
+    assert pr._resolve_max_frame_stride_days() == 184
+    monkeypatch.setenv("RS_EMBED_PRITHVI_MAX_STRIDE_DAYS", "120")
+    assert pr._resolve_max_frame_stride_days() == 120

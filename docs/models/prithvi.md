@@ -85,7 +85,8 @@ flowchart LR
 | `RS_EMBED_PRITHVI_PATCH_MULT`    | `16`                   | Pad multiple for `pad` mode                                     |
 | `RS_EMBED_PRITHVI_TEMPORAL_MODE` | `single`               | Default temporal mode when `temporal_mode` is not in `model_config`: `single` or `multi` |
 | `RS_EMBED_PRITHVI_MAX_FRAMES`    | `4`                    | Frame cap in `multi` mode (matches Prithvi-EO-2.0's 4-timestep pretraining) |
-| `RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS` | `30`               | Minimum spacing between frames in `multi` mode; `T = clamp(window_days // stride, 1, max_frames)` |
+| `RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS` | `28`               | **Minimum** spacing between frames in `multi` mode (low end of the 1–6 month training interval); `T = clamp(window_days // stride, 1, max_frames)` |
+| `RS_EMBED_PRITHVI_MAX_STRIDE_DAYS`    | `184`              | **Maximum** in-distribution gap (~6 months). Larger effective gaps (very long windows, T capped at 4) are flagged via `temporal_spacing_out_of_range` in metadata + a warning, not silently fixed |
 | `RS_EMBED_PRITHVI_FETCH_WORKERS` | `8`                    | Provider prefetch workers for batch APIs                        |
 | `RS_EMBED_PRITHVI_BATCH_SIZE`    | CPU:`4`, CUDA:`16`     | Inference batch size for batch APIs                             |
 
@@ -119,10 +120,12 @@ Prithvi-EO 2.0 was pretrained on **4-timestep** HLS series with **1–6 month ga
 - **`multi`**: a true `[B,6,T,H,W]` series with per-frame dates. The frame count is derived from the requested window rather than forced to a fixed `T`:
 
     ```
-    T = clamp(window_days // 30, 1, max_frames)   # max_frames default = 4
+    T = clamp(window_days // 28, 1, max_frames)   # max_frames default = 4
     ```
 
-    A ~30-day minimum spacing (the low end of the training interval) means short windows collapse to `T=1` instead of being padded with duplicate frames. Frames that the provider back-fills for empty sub-windows (identical copies of the whole-window composite) are **dropped**, so a window with no real temporal diversity also degrades to `T=1`. Frame dates align with the provider's binning (shared `split_date_range`).
+    A ~28-day **minimum** spacing (the low end of Prithvi-EO 2.0's 1–6 month training interval) means short windows collapse to `T=1` instead of being padded with duplicate frames; the window is then split into `T` equal bins (so the whole period is represented, not just its first months). Frames that the provider back-fills for empty sub-windows (identical copies of the whole-window composite) are **dropped**, so a window with no real temporal diversity also degrades to `T=1`. Frame dates align with the provider's binning (shared `split_date_range`).
+
+    Because `T` is capped at 4, very long windows (beyond ~2 years) produce an effective frame gap larger than the ~6 month **maximum** seen in pretraining. The adapter does not silently truncate the window; instead it records `max_frame_gap_days` in metadata and, when the gap exceeds `RS_EMBED_PRITHVI_MAX_STRIDE_DAYS` (default 184), sets `temporal_spacing_out_of_range=True` and emits a `UserWarning` so the extrapolation is visible.
 
 !!! note "Output dimensionality is unchanged"
     Multi-frame tokens are pooled over time (and space), so `pooled` is still `(D,)` and `grid` is still `(D, H', W')` — switching modes never changes the embedding shape, only the values and the `num_frames` / `frame_dates` metadata. To stay near the training regime, give `multi` a window of a few months up to ~a year.
@@ -138,7 +141,7 @@ emb = get_embedding(
 )
 ```
 
-Tuning knobs: `max_frames` (or env `RS_EMBED_PRITHVI_MAX_FRAMES`) caps the count; `RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS` sets the minimum spacing; `RS_EMBED_PRITHVI_TEMPORAL_MODE` sets the default mode.
+Tuning knobs: `max_frames` (or env `RS_EMBED_PRITHVI_MAX_FRAMES`) caps the count; `RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS` sets the minimum spacing (default 28); `RS_EMBED_PRITHVI_MAX_STRIDE_DAYS` sets the maximum in-distribution gap before the out-of-range flag/warning fires (default 184); `RS_EMBED_PRITHVI_TEMPORAL_MODE` sets the default mode.
 
 Example:
 
@@ -210,6 +213,7 @@ emb = get_embedding(
 ## Reference
 
 - Default `scale_m` is `30`, not `10` — this is intentional and differs from most other S2 models.
-- `temporal_mode="single"` (default) sends one composite (`T=1`); `temporal_mode="multi"` sends a window-derived `T`-frame series (capped at `max_frames=4`, ~30-day min spacing, duplicate frames dropped). Output shape is identical in both modes.
+- `temporal_mode="single"` (default) sends one composite (`T=1`); `temporal_mode="multi"` sends a window-derived `T`-frame series (capped at `max_frames=4`, ~28-day min spacing, duplicate frames dropped). Output shape is identical in both modes.
+- Frame spacing is bounded by Prithvi-EO 2.0's 1–6 month training interval: gaps below ~28 days reduce `T`; gaps above ~184 days (very long windows) are flagged via `temporal_spacing_out_of_range` metadata + a warning rather than silently truncated.
 - `resize` vs `pad` preprocessing changes token geometry; treat it as part of experiment design.
 - Variant `600_tl` uses patch size 14 (not 16), producing a different grid shape than `100_tl`/`300_tl`.

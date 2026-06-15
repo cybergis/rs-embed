@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
@@ -180,18 +181,21 @@ _PRITHVI_HF_SPECS = {
 # -------------------------
 # Temporal (multi-frame) configuration
 # -------------------------
-# Prithvi-EO-2.0 was pretrained on 4-timestep HLS series with 1–6 month gaps
-# between consecutive frames (arXiv:2412.02732). We therefore:
+# Prithvi-EO-2.0 was pretrained on 4-timestep HLS series with consecutive-frame
+# gaps of ~1–6 months (≈28–184 days; arXiv:2412.02732). We therefore:
 #   - default to single-frame (median composite) for backward compatibility;
-#   - in multi mode, derive T from the requested window with a ~30-day minimum
-#     spacing (the low end of the training interval), capped at 4 frames;
+#   - in multi mode, derive T from the requested window with a ~28-day minimum
+#     spacing (low end of the training interval), capped at 4 frames;
 #   - never duplicate frames to reach a target T — identical frames returned by
 #     the provider (empty sub-windows are back-filled with the whole-window
 #     composite) are collapsed, so windows lacking temporal diversity degrade
-#     gracefully to T=1.
+#     gracefully to T=1;
+#   - flag (not silently fix) frame gaps beyond the ~184-day training maximum,
+#     which can only occur for very long windows once T is capped at 4.
 _DEFAULT_TEMPORAL_MODE = "single"
 _DEFAULT_MAX_FRAMES = 4  # matches Prithvi-EO-2.0 pretraining (4 timesteps)
-_DEFAULT_FRAME_STRIDE_DAYS = 30  # min spacing ≈ low end of training's 1–6 month gap
+_DEFAULT_FRAME_STRIDE_DAYS = 28  # min spacing = low end of training's 1–6 month gap
+_DEFAULT_MAX_FRAME_STRIDE_DAYS = 184  # max gap (~6 months) seen in pretraining
 
 
 def _normalize_temporal_mode(mode: Any) -> str:
@@ -255,6 +259,54 @@ def _auto_num_frames(temporal: TemporalSpec, *, max_frames: int, stride_days: in
     window_days = max(1, (_date.fromisoformat(str(end)) - _date.fromisoformat(str(start))).days)
     n = window_days // max(1, int(stride_days))
     return int(max(1, min(int(max_frames), n)))
+
+
+def _resolve_max_frame_stride_days() -> int:
+    env = os.environ.get("RS_EMBED_PRITHVI_MAX_STRIDE_DAYS", "").strip()
+    if not env:
+        return _DEFAULT_MAX_FRAME_STRIDE_DAYS
+    try:
+        n = int(env)
+    except ValueError as exc:
+        raise ModelError(
+            f"RS_EMBED_PRITHVI_MAX_STRIDE_DAYS must be an integer, got {env!r}."
+        ) from exc
+    return max(1, n)
+
+
+def _max_consecutive_gap_days(dates: list[str]) -> int:
+    """Largest gap (in days) between consecutive frame dates; 0 for < 2 frames."""
+    from datetime import date as _date
+
+    if len(dates) < 2:
+        return 0
+    ds = sorted(_date.fromisoformat(str(d)) for d in dates)
+    return max((ds[i + 1] - ds[i]).days for i in range(len(ds) - 1))
+
+
+def _temporal_spacing_meta(
+    dates: list[str], *, max_stride_days: int, label: str = ""
+) -> dict[str, Any]:
+    """Report the largest frame gap and flag/warn when it exceeds the training max.
+
+    Prithvi-EO-2.0 saw ~1–6 month gaps in pretraining; gaps beyond ``max_stride_days``
+    (~184 d ≈ 6 months) are out of distribution. This only *reports* it (meta flag +
+    warning) and never truncates the window, so the embedding still represents the
+    full requested period.
+    """
+    gap = _max_consecutive_gap_days(dates)
+    meta: dict[str, Any] = {"max_frame_gap_days": int(gap)}
+    if gap > int(max_stride_days):
+        meta["temporal_spacing_out_of_range"] = True
+        warnings.warn(
+            f"Prithvi multi-frame spacing {gap}d exceeds the ~{int(max_stride_days)}d "
+            f"(~6 month) maximum interval seen in pretraining"
+            f"{(' for ' + label) if label else ''}; embeddings may be extrapolated. "
+            "Shorten the temporal window to bring frame spacing back into range.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return meta
 
 
 def _normalize_prithvi_variant(variant: Any) -> str:
@@ -1214,6 +1266,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         coords_encoding = ("time", "location")
         max_frames = _resolve_max_frames(model_config)
         stride_days = _resolve_frame_stride_days()
+        max_stride_days = _resolve_max_frame_stride_days()
         requested = _auto_num_frames(t, max_frames=max_frames, stride_days=stride_days)
 
         # Obtain a raw [T,6,H,W] series (provider fetch, or shape-driven override).
@@ -1262,6 +1315,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         tokens = _prithvi_forward_tokens_multiframe(
             model, x_tchw, lon=lon, lat=lat, date_strs=dates, device=dev
         )
+        spacing_meta = _temporal_spacing_meta(dates, max_stride_days=max_stride_days)
 
         meta = base_meta(
             model_name=self.model_name,
@@ -1278,6 +1332,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 "requested_frames": int(requested),
                 "frame_dates": tuple(dates),
                 "frame_stride_days_min": int(stride_days),
+                "frame_stride_days_max": int(max_stride_days),
                 "coords_lonlat": (float(lon), float(lat)),
                 "tokens_shape": tuple(tokens.shape),
                 "model_key": model_key,
@@ -1285,6 +1340,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 "pretrained": bool(pretrained),
                 "coords_encoding": coords_encoding,
                 "input_hw": (int(x_tchw.shape[-2]), int(x_tchw.shape[-1])),
+                **spacing_meta,
                 **prep_meta,
             },
         )
@@ -1632,6 +1688,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         )
         coords_encoding = ("time", "location")
         stride_days = _resolve_frame_stride_days()
+        max_stride_days = _resolve_max_frame_stride_days()
 
         # Prepare each item to (T_eff, 6, H, W) + per-frame dates.
         prepared: list[np.ndarray] = []
@@ -1701,6 +1758,11 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                     tokens = toks_list[j]
                     lon, lat = lon_lat[i]
                     x_item = prepared[i]
+                    spacing_meta = _temporal_spacing_meta(
+                        item_dates[i],
+                        max_stride_days=max_stride_days,
+                        label=f"spatial index {i}",
+                    )
                     meta = base_meta(
                         model_name=self.model_name,
                         hf_id=str(wmeta.get("repo_id") or model_key),
@@ -1715,6 +1777,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                             "num_frames": n_frames,
                             "frame_dates": tuple(item_dates[i]),
                             "frame_stride_days_min": int(stride_days),
+                            "frame_stride_days_max": int(max_stride_days),
                             "coords_lonlat": (float(lon), float(lat)),
                             "tokens_shape": tuple(tokens.shape),
                             "model_key": model_key,
@@ -1723,6 +1786,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                             "coords_encoding": coords_encoding,
                             "input_hw": (int(x_item.shape[-2]), int(x_item.shape[-1])),
                             "batch_infer": True,
+                            **spacing_meta,
                         },
                     )
 
