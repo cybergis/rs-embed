@@ -270,7 +270,9 @@ def test_reset_runtime_clears_runtime_and_embedder_module_caches(monkeypatch):
 def test_get_embedding_modality_resolves_default_sensor():
     registry.register("mock_multi")(_MockMultimodalEmbedder)
 
-    emb = get_embedding("mock_multi", spatial=_SPATIAL, modality="s1", backend="gee")
+    emb = get_embedding(
+        "mock_multi", spatial=_SPATIAL, modality="s1", backend="gee", input_prep="resize"
+    )
     sensor = emb.meta["sensor"]
     assert sensor is not None
     assert sensor.modality == "s1"
@@ -286,6 +288,7 @@ def test_get_embedding_fetch_resolves_default_sensor():
         spatial=_SPATIAL,
         fetch=FetchSpec(scale_m=30, cloudy_pct=5),
         backend="gee",
+        input_prep="resize",
     )
     sensor = emb.meta["sensor"]
     assert sensor is not None
@@ -359,6 +362,7 @@ def test_get_embeddings_batch_with_sensor():
         spatials=spatials,
         temporal=_TEMPORAL,
         sensor=sensor,
+        input_prep="resize",
     )
     assert len(results) == 1
 
@@ -373,6 +377,7 @@ def test_get_embeddings_batch_modality_merges_into_sensor():
         sensor=sensor,
         modality="s1",
         backend="gee",
+        input_prep="resize",
     )
     out_sensor = results[0].meta["sensor"]
     assert out_sensor.modality == "s1"

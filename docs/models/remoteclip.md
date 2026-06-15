@@ -8,7 +8,7 @@
 | Aliases              | `remoteclip_s2rgb`                                                                                               |
 | Family / Backbone    | RemoteCLIP (CLIP-style ViT via `rshf.remoteclip.RemoteCLIP`)                                                     |
 | Adapter type         | `on-the-fly`                                                                                                     |
-| Training alignment   | Medium (higher if wrapper `model.transform(...)` matches training pipeline; fallback is generic CLIP preprocess) |
+| Training alignment   | High — uses open_clip's official CLIP preprocess (Resize 224 bicubic + CenterCrop + CLIP normalize), matching how RemoteCLIP was trained |
 
 !!! success "RemoteCLIP In 30 Seconds"
     RemoteCLIP is a CLIP-style vision-language ViT continually fine-tuned on remote-sensing image-text pairs, so its embeddings live in a *shared* image/text space that supports caption-based retrieval — in `rs-embed` you are getting the visual side of that shared space from a 3-band RGB Sentinel-2 input.
@@ -17,7 +17,7 @@
 
     - RGB-only (`B4,B3,B2`) with a fixed `224×224` preprocessing path: see [Input Contract](#input-contract)
     - checkpoint override goes through `sensor.collection="hf:<repo>"` rather than an environment variable: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
-    - preprocessing prefers the wrapper `model.transform(...)` but falls back to a generic CLIP pipeline — these paths are **not** identical and should be logged: see [Preprocessing Pipeline](#preprocessing-pipeline)
+    - `pooled` is the **projected CLIP image embedding** (`encode_image`, e.g. 512-d for the default ViT-B/32), identical across single / batch / tiled calls — not a token mean: see [Output Semantics](#output-semantics)
 
 ---
 
@@ -40,19 +40,24 @@
 
 ## Preprocessing Pipeline
 
-!!! tip "Resize is the default — tiling is also available"
-    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
+!!! warning "Resize is the default for `grid`"
+    RemoteCLIP `grid` output is an image-level CLIP ViT patch-token grid, not a seamless dense geospatial field. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit `input_prep="resize"` is the recommended no-warning path.
 
 ```mermaid
 flowchart LR
-    INPUT["S2 RGB"] --> PREP["Normalize → uint8\n→ model.transform or CLIP fallback"]
+    INPUT["S2 RGB"] --> PREP["Normalize → uint8\n→ CLIP preprocess (Resize 224 + CenterCrop + normalize)"]
     PREP --> FWD["CLIP ViT forward"]
-    FWD --> POOL["pooled: token mean/max"]
-    FWD --> GRID["grid: patch-token (D,H,W)"]
+    FWD --> POOL["pooled: encode_image (projected CLIP embedding)"]
+    FWD --> GRID["grid: patch-token (D,H,W) from forward_intermediates"]
 ```
 
 !!! note "Current adapter image size"
     The image size is fixed at `224` in this adapter path.
+
+!!! note "Preprocessing path"
+    `rshf.remoteclip.RemoteCLIP` exposes no `model.transform`, so the adapter always
+    uses the open_clip-equivalent CLIP preprocess (it never silently diverges from a
+    wrapper transform).
 
 ---
 
@@ -64,12 +69,12 @@ flowchart LR
         RGB["S2 RGB\n(B4,B3,B2)"]
     end
     subgraph "CLIP ViT"
-        RGB --> PRE["Preprocess\n(model.transform\nor CLIP fallback)"]
+        RGB --> PRE["Preprocess\n(CLIP: Resize 224\n+ CenterCrop + normalize)"]
         PRE --> FWD["CLIP ViT\nforward"]
     end
     subgraph "Shared Image ↔ Text Space"
         FWD --> EMB["Embeddings support\ncaption-based\nsimilarity & retrieval"]
-        EMB --> POOL["pooled:\ntoken mean/max"]
+        EMB --> POOL["pooled:\nencode_image\n(projected embedding)"]
         EMB --> GRID["grid:\npatch-token (D,H,W)"]
     end
 ```
@@ -86,6 +91,14 @@ flowchart LR
 
 !!! info "Checkpoint override"
     Set `sensor.collection="hf:<repo_or_local_path>"` (not env-based in this adapter).
+
+---
+
+## Output Semantics
+
+**`pooled`**: returns the projected CLIP image embedding from `encode_image` (e.g. 512-d for the default ViT-B/32 checkpoint) — the canonical RemoteCLIP visual representation that lives in the shared image/text space, suitable for similarity search and retrieval. This is computed identically across the single (`get_embedding`), batch, and tiled paths, so the output dimensionality and values do not depend on ROI size or which API you call.
+
+**`grid`**: exposes the ViT patch-token layout, extracted from open_clip's `forward_intermediates` as the deepest dense feature map (`[D, Ht, Wt]`, e.g. `768×7×7` for ViT-B/32 @ 224; `tokens_kind="tokens_intermediates"`). The single and batch paths produce identical grids. Default/auto input preparation resolves to resize, and metadata records `input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
 
 ---
 
@@ -138,5 +151,7 @@ emb = get_embedding(
 ## Reference
 
 - Provider-only — `backend="tensor"` is not supported.
-- The adapter prefers `model.transform` when available; otherwise falls back to CLIP-style preprocessing — the two paths may produce slightly different embeddings.
-- Grid output depends on the wrapper exposing a token sequence; some RemoteCLIP wrappers only return pooled vectors.
+- The `rshf` wrapper exposes no `model.transform`, so the adapter always applies the open_clip-equivalent CLIP preprocess — there is no second, divergent preprocessing path.
+- `pooled` uses `encode_image` (projected CLIP embedding) on every path (single / batch / tiled); it is not a token-mean and its dimensionality does not change with ROI size.
+- `grid` tokens come from open_clip's `forward_intermediates` patch grid; if a wrapper exposes no dense features the adapter falls back to a vision-transformer forward hook (batch-first / sequence-first safe).
+- Default/auto `grid` requests resolve to resize because tiled RemoteCLIP patch-token grids can show stitching seams.

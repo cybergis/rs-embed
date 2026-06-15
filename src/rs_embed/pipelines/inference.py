@@ -6,6 +6,7 @@ single-point or batch mode, with consistent retry/error shaping.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from typing import Any, NamedTuple
 
@@ -27,6 +28,7 @@ from ..tools.runtime import (
 )
 from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..tools.tiling import (
+    INPUT_PREP_VERSION,
     _aggregate_tiled_embeddings,
     _augment_model_config_for_tiled_dispatch,
     _call_embedder_get_embedding_with_input_prep,
@@ -34,6 +36,7 @@ from ..tools.tiling import (
     _estimate_tile_count,
     _resolve_input_prep_spec,
     _slice_and_pad_tile,
+    _stamp_input_prep_meta,
     _tile_subspatial,
     _tile_yx_starts,
 )
@@ -81,9 +84,10 @@ class InferenceEngine:
         self.config = config
         self.input_prep_resolved = _resolve_input_prep_spec(config.input_prep)
         self.prefer_batch = _device_has_gpu(device)
-        self._explicit_nonresize = (config.input_prep is not None) and (
-            self.input_prep_resolved.mode in {"tile", "auto"}
-        )
+        # Gate on the *resolved* mode, not on whether input_prep was explicitly
+        # set: ``None`` now resolves to the package default ("tile"), so an unset
+        # config must still take the tiled batch path.
+        self._explicit_nonresize = self.input_prep_resolved.mode in {"tile", "auto"}
 
     # ── single-point inference ─────────────────────────────────────
 
@@ -402,16 +406,24 @@ class InferenceEngine:
             for i, spatial, inp in ready:
                 h, w = int(inp.shape[-2]), int(inp.shape[-1])
                 num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
-                if num_tiles > spec.max_tiles:
+                if num_tiles > spec.max_tiles_hard:
                     err = ModelError(
                         f"input_prep tile would create {num_tiles} tiles "
-                        f"(> max_tiles={spec.max_tiles}); increase max_tiles or use resize/auto."
+                        f"(> max_tiles_hard={spec.max_tiles_hard}); reduce the requested area "
+                        "or raise max_tiles_hard."
                     )
                     if not continue_on_error:
                         raise err
                     out[i] = TaskResult.failed(err)
                     on_done(i)
                     continue
+                if num_tiles > spec.max_tiles:
+                    warnings.warn(
+                        f"input_prep tile is producing {num_tiles} tiles for point {i} "
+                        f"(> max_tiles={spec.max_tiles}); this request may be slow or "
+                        "memory-heavy. Tiling proceeds; raise max_tiles to silence this warning.",
+                        stacklevel=2,
+                    )
                 fill_value = float(sensor.fill_value) if sensor is not None else 0.0
                 ys, xs = _tile_yx_starts(h=h, w=w, tile_size=tile_size, stride=stride)
                 tiles: list[np.ndarray] = []
@@ -494,9 +506,16 @@ class InferenceEngine:
                     normalize_embedding_output(emb=e, output=self.output) for e in tile_embs
                 ]
                 if tile_count == 1:
-                    result = self._embedding_to_result(tile_embs_n[0])
+                    result = self._embedding_to_result(
+                        _stamp_input_prep_meta(
+                            tile_embs_n[0],
+                            requested_mode=spec.mode,
+                            resolved_mode="resize",
+                        )
+                    )
                 else:
                     prep_meta: dict[str, Any] = {
+                        "prep_version": INPUT_PREP_VERSION,
                         "requested_mode": spec.mode,
                         "resolved_mode": "tile",
                         "tile_layout": "cover_shift",
@@ -505,6 +524,7 @@ class InferenceEngine:
                         "tile_count": int(tile_count),
                         "pad_edges": bool(spec.pad_edges),
                         "max_tiles": int(spec.max_tiles),
+                        "max_tiles_hard": int(spec.max_tiles_hard),
                         "input_hw": (int(h), int(w)),
                     }
                     stitched = _aggregate_tiled_embeddings(

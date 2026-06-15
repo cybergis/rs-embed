@@ -8,6 +8,7 @@ backward-compatibility with test imports is needed.
 from __future__ import annotations
 
 import math
+import warnings
 from dataclasses import dataclass
 from typing import Any
 
@@ -39,6 +40,16 @@ from .runtime import (
 from .serialization import embedding_to_numpy as _embedding_to_numpy
 
 # ---------------------------------------------------------------------------
+# Preprocessing contract version
+# ---------------------------------------------------------------------------
+
+# Bump whenever tiling/stitching/aggregation behavior changes in a way that
+# alters produced embeddings. Stamped into every embedding's meta["input_prep"]
+# so downstream consumers can detect a contract change and pin reproducibility.
+INPUT_PREP_VERSION = 1
+
+
+# ---------------------------------------------------------------------------
 # Resolved input-prep spec
 # ---------------------------------------------------------------------------
 
@@ -49,6 +60,7 @@ class _ResolvedInputPrepSpec:
     tile_size: int | None
     tile_stride: int | None
     max_tiles: int
+    max_tiles_hard: int
     pad_edges: bool
 
 
@@ -56,7 +68,10 @@ def _resolve_input_prep_spec(
     input_prep: InputPrepSpec | str | None,
 ) -> _ResolvedInputPrepSpec:
     if input_prep is None:
-        spec: InputPrepSpec = InputPrepSpec.resize()
+        # ``None`` is the "unset / use package default" sentinel. The package
+        # default is tiling so large on-the-fly inputs preserve native
+        # resolution instead of being downsampled by a resize.
+        spec: InputPrepSpec = InputPrepSpec.tile()
     elif isinstance(input_prep, str):
         mode_s = str(input_prep).strip().lower()
         if mode_s == "auto":
@@ -76,7 +91,8 @@ def _resolve_input_prep_spec(
         raise ModelError(f"input_prep.mode must be one of auto/resize/tile, got {mode!r}")
     tile_size = getattr(spec, "tile_size", None)
     tile_stride = getattr(spec, "tile_stride", None)
-    max_tiles = int(getattr(spec, "max_tiles", 9))
+    max_tiles = int(getattr(spec, "max_tiles", 64))
+    max_tiles_hard = int(getattr(spec, "max_tiles_hard", 1024))
     pad_edges = bool(getattr(spec, "pad_edges", True))
     if tile_size is not None:
         tile_size = int(tile_size)
@@ -86,11 +102,16 @@ def _resolve_input_prep_spec(
         tile_stride = int(tile_stride)
         if tile_stride <= 0:
             raise ModelError(f"input_prep.tile_stride must be > 0, got {tile_stride}")
+    max_tiles = max(1, max_tiles)
+    # The hard ceiling can never be below the soft threshold; clamp so an
+    # explicit max_tiles override above max_tiles_hard stays consistent.
+    max_tiles_hard = max(max_tiles, max_tiles_hard)
     return _ResolvedInputPrepSpec(
         mode=mode,
         tile_size=tile_size,
         tile_stride=tile_stride,
-        max_tiles=max(1, max_tiles),
+        max_tiles=max_tiles,
+        max_tiles_hard=max_tiles_hard,
         pad_edges=pad_edges,
     )
 
@@ -472,8 +493,20 @@ def _call_embedder_get_embedding_tiled(
     model_img = _embedder_default_image_size(embedder)
     tile_size = int(input_prep.tile_size or model_img or 0)
     if tile_size <= 0:
-        raise ModelError(
-            "Tiled input preprocessing requires tile_size or a model describe().defaults.image_size."
+        # No tile size could be determined (no explicit tile_size and the model
+        # exposes no describe().defaults.image_size). Tiling is the package
+        # default, so degrade gracefully to a plain (resize) call rather than
+        # hard-failing; the dispatch backfills resolved_mode="resize" in meta.
+        return _call_embedder_get_embedding(
+            embedder=embedder,
+            spatial=spatial,
+            temporal=temporal,
+            sensor=sensor,
+            model_config=model_config,
+            output=output,
+            backend=backend,
+            device=device,
+            input_chw=x,
         )
     stride = int(input_prep.tile_stride or tile_size)
     if stride <= 0:
@@ -504,10 +537,18 @@ def _call_embedder_get_embedding_tiled(
                 input_chw=x,
             )
     elif input_prep.mode == "tile":
-        if num_tiles > input_prep.max_tiles:
+        if num_tiles > input_prep.max_tiles_hard:
             raise ModelError(
-                f"input_prep tile would create {num_tiles} tiles (> max_tiles={input_prep.max_tiles}); "
-                "increase max_tiles or use resize/auto."
+                f"input_prep tile would create {num_tiles} tiles "
+                f"(> max_tiles_hard={input_prep.max_tiles_hard}); reduce the requested area "
+                "or raise max_tiles_hard."
+            )
+        if num_tiles > input_prep.max_tiles:
+            warnings.warn(
+                f"input_prep tile is producing {num_tiles} tiles "
+                f"(> max_tiles={input_prep.max_tiles}); this request may be slow or "
+                "memory-heavy. Tiling proceeds; raise max_tiles to silence this warning.",
+                stacklevel=2,
             )
     if stride != tile_size:
         raise ModelError(
@@ -616,6 +657,7 @@ def _call_embedder_get_embedding_tiled(
         ]
 
     prep_meta: dict[str, Any] = {
+        "prep_version": INPUT_PREP_VERSION,
         "requested_mode": input_prep.mode,
         "resolved_mode": "tile",
         "tile_layout": "cover_shift",
@@ -624,6 +666,7 @@ def _call_embedder_get_embedding_tiled(
         "tile_count": int(len(tiles)),
         "pad_edges": bool(input_prep.pad_edges),
         "max_tiles": int(input_prep.max_tiles),
+        "max_tiles_hard": int(input_prep.max_tiles_hard),
         "input_hw": (int(h), int(w)),
     }
     return _aggregate_tiled_embeddings(
@@ -634,6 +677,32 @@ def _call_embedder_get_embedding_tiled(
         stride=stride,
         prep_meta=prep_meta,
     )
+
+
+def _stamp_input_prep_meta(
+    emb: Embedding,
+    *,
+    requested_mode: str,
+    resolved_mode: str,
+) -> Embedding:
+    """Ensure an embedding carries a self-describing ``input_prep`` meta block.
+
+    Tiled embeddings already get a rich block from ``_aggregate_tiled_embeddings``;
+    this only fills a minimal versioned block when none is present (resize /
+    single-tile / auto-fell-back-to-plain paths) so every embedding is
+    reproducibility-tagged regardless of which path produced it.
+    """
+    meta = getattr(emb, "meta", None)
+    if isinstance(meta, dict):
+        meta.setdefault(
+            "input_prep",
+            {
+                "prep_version": INPUT_PREP_VERSION,
+                "requested_mode": str(requested_mode),
+                "resolved_mode": str(resolved_mode),
+            },
+        )
+    return emb
 
 
 def _call_embedder_get_embedding_with_input_prep(
@@ -660,7 +729,7 @@ def _call_embedder_get_embedding_with_input_prep(
     """
     spec = _resolve_input_prep_spec(input_prep)
     if spec.mode == "resize" or input_chw is None:
-        return _call_embedder_get_embedding(
+        emb = _call_embedder_get_embedding(
             embedder=embedder,
             spatial=spatial,
             temporal=temporal,
@@ -672,13 +741,14 @@ def _call_embedder_get_embedding_with_input_prep(
             input_chw=input_chw,
             fetch_meta=fetch_meta,
         )
+        return _stamp_input_prep_meta(emb, requested_mode=spec.mode, resolved_mode="resize")
     if not _embedder_accepts_input_chw(type(embedder)):
         if spec.mode == "tile":
             raise ModelError(
                 f"Model {getattr(embedder, 'model_name', type(embedder).__name__)} does not accept input_chw; "
                 "cannot apply input_prep.mode='tile'."
             )
-        return _call_embedder_get_embedding(
+        emb = _call_embedder_get_embedding(
             embedder=embedder,
             spatial=spatial,
             temporal=temporal,
@@ -690,7 +760,8 @@ def _call_embedder_get_embedding_with_input_prep(
             input_chw=input_chw,
             fetch_meta=fetch_meta,
         )
-    return _call_embedder_get_embedding_tiled(
+        return _stamp_input_prep_meta(emb, requested_mode=spec.mode, resolved_mode="resize")
+    emb = _call_embedder_get_embedding_tiled(
         embedder=embedder,
         spatial=spatial,
         temporal=temporal,
@@ -702,3 +773,6 @@ def _call_embedder_get_embedding_with_input_prep(
         input_chw=np.asarray(input_chw, dtype=np.float32),
         input_prep=spec,
     )
+    # Tiled path stamps a rich block when it actually tiles; this only backfills
+    # the single-tile / sub-threshold fall-through where it returned plain.
+    return _stamp_input_prep_meta(emb, requested_mode=spec.mode, resolved_mode="resize")

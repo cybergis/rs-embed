@@ -419,7 +419,14 @@ class InputPrepSpec:
     tile_stride : int or None
         Tile stride for tile-based modes.
     max_tiles : int
-        Maximum number of tiles to process.
+        Soft tile-count threshold. In ``tile`` mode, requests above this still
+        run but emit a warning (the request may be slow / memory-heavy). In
+        ``auto`` mode this is the switch above which tiling is skipped in favor
+        of a plain resize. Defaults to 64 (an 8x8 grid).
+    max_tiles_hard : int
+        Hard safety ceiling for ``tile`` mode. Requests producing more than this
+        many tiles raise instead of running, guarding against runaway-area
+        mistakes. Clamped to be ``>= max_tiles``. Defaults to 1024.
     pad_edges : bool
         If ``True``, pad boundary tiles to preserve shape.
     """
@@ -427,7 +434,8 @@ class InputPrepSpec:
     mode: Literal["auto", "resize", "tile"] = "resize"
     tile_size: int | None = None
     tile_stride: int | None = None
-    max_tiles: int = 9
+    max_tiles: int = 64
+    max_tiles_hard: int = 1024
     pad_edges: bool = True
 
     @staticmethod
@@ -435,7 +443,8 @@ class InputPrepSpec:
         *,
         tile_size: int | None = None,
         tile_stride: int | None = None,
-        max_tiles: int = 9,
+        max_tiles: int = 64,
+        max_tiles_hard: int = 1024,
         pad_edges: bool = True,
     ) -> InputPrepSpec:
         """Build an adaptive preprocessing policy.
@@ -447,7 +456,9 @@ class InputPrepSpec:
         tile_stride : int or None
             Optional tile stride.
         max_tiles : int
-            Maximum number of tiles to process.
+            Soft tile-count threshold above which auto skips tiling.
+        max_tiles_hard : int
+            Hard ceiling carried through to ``tile`` mode.
         pad_edges : bool
             If ``True``, pad edge tiles.
 
@@ -461,6 +472,7 @@ class InputPrepSpec:
             tile_size=tile_size,
             tile_stride=tile_stride,
             max_tiles=max_tiles,
+            max_tiles_hard=max_tiles_hard,
             pad_edges=pad_edges,
         )
 
@@ -480,7 +492,8 @@ class InputPrepSpec:
         *,
         tile_size: int | None = None,
         tile_stride: int | None = None,
-        max_tiles: int = 9,
+        max_tiles: int = 64,
+        max_tiles_hard: int = 1024,
         pad_edges: bool = True,
     ) -> InputPrepSpec:
         """Build a tile-based preprocessing policy.
@@ -492,7 +505,9 @@ class InputPrepSpec:
         tile_stride : int or None
             Optional tile stride.
         max_tiles : int
-            Maximum number of tiles to process.
+            Soft tile-count threshold; requests above it still run but warn.
+        max_tiles_hard : int
+            Hard ceiling; requests above it raise instead of running.
         pad_edges : bool
             If ``True``, pad edge tiles.
 
@@ -506,5 +521,6 @@ class InputPrepSpec:
             tile_size=tile_size,
             tile_stride=tile_stride,
             max_tiles=max_tiles,
+            max_tiles_hard=max_tiles_hard,
             pad_edges=pad_edges,
         )
