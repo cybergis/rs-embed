@@ -272,6 +272,8 @@ input_prep="auto"
 
 Tile size defaults to `embedder.describe()["defaults"]["image_size"]` when available, unless you override it. Boundary tiles use a cover-shift layout such as `300 -> [0,224]` and `[76,300]` to avoid edge padding when possible, and grid stitching uses midpoint-cut ownership in overlap regions rather than hard overwrite. `tile_stride` currently must equal `tile_size`, so explicit overlap or gap control is not enabled yet, although boundary shifting can still create overlap on the last tile. `auto` is conservative and currently prefers tiling mainly for `OutputSpec.grid()` when tile count is small enough.
 
+For image-level ViT patch-token grid models (`remoteclip`, `scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`), tiled `grid` output is marked experimental because each tile is an independent image-level token grid. `input_prep=None` or `"auto"` with `OutputSpec.grid()` resolves to `"resize"` and emits a warning; explicit `"tile"` is allowed but also warns. Metadata records `input_prep.model_policy`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
+
 ![tiles](assets/tiles.png)
 
 <!-- <img src="./docs/assets/tiles.png" width="500" alt="icon" /> -->

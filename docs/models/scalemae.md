@@ -41,7 +41,7 @@
 ## Preprocessing Pipeline
 
 !!! warning "Resize is the default for `grid`"
-    ScaleMAE `grid` output is an image-level ViT patch-token grid, not a seamless dense geospatial field. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics.
+    ScaleMAE `grid` output is an image-level ViT patch-token grid, not a seamless dense geospatial field. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit `input_prep="resize"` is the recommended no-warning path.
 
 ```mermaid
 flowchart LR

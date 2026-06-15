@@ -28,7 +28,7 @@
 **`grid`**: `satmaepp` returns a standard ViT patch-token grid `(D,H,W)`; `satmaepp_s2_10b` reduces grouped tokens across channel groups then reshapes to `(D,H,W)`. Default/auto input preparation resolves to resize, and metadata records `input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
 
 !!! warning "Resize is the default for `grid`"
-    SatMAE++ grid outputs are image-level ViT token grids, not seamless dense geospatial fields. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics.
+    SatMAE++ grid outputs are image-level ViT token grids, not seamless dense geospatial fields. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit `input_prep="resize"` is the recommended no-warning path.
 
 ---
 
@@ -123,7 +123,7 @@ flowchart LR
 ### Preprocessing + Runtime Loading
 
 !!! warning "Resize is the default for `grid`"
-    The 10-band grouped-channel path has the same grid caveat: grouped tokens are reduced and reshaped after an image-level forward pass. Explicit `input_prep="tile"` is allowed, but tiled grid mosaics are not recommended for seamless spatial outputs.
+    The 10-band grouped-channel path has the same grid caveat: grouped tokens are reduced and reshaped after an image-level forward pass. Explicit `input_prep="tile"` is allowed, but tiled grid mosaics are not recommended for seamless spatial outputs. Explicit `input_prep="resize"` is the recommended no-warning path.
 
 ```mermaid
 flowchart LR
