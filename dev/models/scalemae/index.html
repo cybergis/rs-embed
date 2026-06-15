@@ -2217,7 +2217,7 @@
 <ul>
 <li><code>sensor.scale_m</code> is a <strong>model input</strong>, not just a fetch resolution — a wrong value silently drifts embeddings across runs: see <a href="#input-contract">Input Contract</a></li>
 <li><code>grid</code> requires a token sequence and raises a clear error when the wrapper only exposes pooled output: see <a href="#output-semantics">Output Semantics</a></li>
-<li>ImageNet-style eval preprocessing (<code>Resize(short side) -&gt; CenterCrop -&gt; Normalize</code>) applied to raw SR converted to RGB <code>uint8</code>: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
+<li>Default provider fetches use ImageNet-style eval preprocessing (<code>Resize(short side) -&gt; CenterCrop -&gt; Normalize</code>), while prefetched/tiled inputs use direct resize + normalization to preserve tile coverage: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
 </ul>
 </div>
 <hr />
@@ -2262,16 +2262,16 @@
 </table>
 <div class="admonition warning">
 <p class="admonition-title"><code>sensor.scale_m</code> is a model input</p>
-<p>ScaleMAE uses <code>sensor.scale_m</code> (combined with the post-preprocess tensor geometry — <code>Resize(short side) + CenterCrop</code>) to derive the effective <code>input_res_m</code> passed into the model's scale-aware positional encoding. A wrong <code>sensor.scale_m</code> silently drifts embeddings across runs — see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a>.</p>
+<p>ScaleMAE uses <code>sensor.scale_m</code> combined with the active preprocessing geometry to derive the effective <code>input_res_m</code> passed into the model's scale-aware positional encoding. A wrong <code>sensor.scale_m</code> silently drifts embeddings across runs — see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a>.</p>
 </div>
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
-<div class="admonition tip">
-<p class="admonition-title">Resize is the default — tiling is also available</p>
-<p>The pipeline below shows the default <code>input_prep="resize"</code> path. For large ROIs, use <code>input_prep="tile"</code> to split the input into tiles and preserve spatial detail. See <a href="../../choosing_settings/#input-preparation-resize-vs-tile">Choosing Settings</a>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Resize is the default for <code>grid</code></p>
+<p>ScaleMAE <code>grid</code> output is an image-level ViT patch-token grid, not a seamless dense geospatial field. For <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> by default and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
-    INPUT["S2 RGB → uint8"] --&gt; PREP["ImageNet eval preprocess\n→ derive input_res_m"]
+    INPUT["S2 RGB → uint8"] --&gt; PREP["Preprocess\nprovider: ImageNet eval\ntile/input_chw: direct resize + normalize\n→ derive input_res_m"]
     PREP --&gt; FWD["ScaleMAE forward\n(image + input_res)"]
     FWD --&gt; POOL["pooled: vector"]
     FWD --&gt; GRID["grid: token grid (D,H,W)"]</code></pre>
@@ -2335,7 +2335,7 @@
 <hr />
 <h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
 <p><strong><code>pooled</code></strong>: if <code>[N,D]</code> token sequence → pools with <code>mean</code>/<code>max</code>; if already <code>[D]</code> → returned as <code>model_pooled</code>; metadata records <code>tokens_kind</code>, <code>used_patch_size</code>, and <code>used_scale_m</code>.</p>
-<p><strong><code>grid</code></strong>: requires a token sequence; raises a clear error when the wrapper only exposes pooled output.</p>
+<p><strong><code>grid</code></strong>: requires a token sequence; raises a clear error when the wrapper only exposes pooled output. Default/auto input preparation resolves to resize, and metadata records <code>input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"</code>, <code>grid_semantics="vit_patch_tokens"</code>, and <code>grid_tile_recommended=false</code>.</p>
 <hr />
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <h3 id="minimal-provider-backed-example">Minimal provider-backed example<a class="headerlink" href="#minimal-provider-backed-example" title="Permanent link">&para;</a></h3>
@@ -2366,6 +2366,7 @@
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>sensor.scale_m</code> directly affects the positional encoding via <code>input_res_m</code> — a wrong value silently drifts embeddings.</li>
+<li>Default/auto <code>grid</code> requests resolve to resize because tiled ScaleMAE patch-token grids can show stitching seams.</li>
 <li>Grid output requires a token sequence; if the <code>rshf</code> wrapper returns only a pooled vector, <code>OutputSpec.grid()</code> raises an error.</li>
 <li>Older <code>rshf</code> versions may wrap ScaleMAE in a way that hides <code>forward_features()</code> — the adapter tries common nested attributes (<code>.model</code>) but may fail.</li>
 </ul>

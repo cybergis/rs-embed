@@ -2314,7 +2314,7 @@
     <span class="n">output</span><span class="p">:</span> <span class="n">OutputSpec</span> <span class="o">=</span> <span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
     <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
     <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">input_prep</span><span class="p">:</span> <span class="n">InputPrepSpec</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;resize&quot;</span><span class="p">,</span>
+    <span class="n">input_prep</span><span class="p">:</span> <span class="n">InputPrepSpec</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="o">**</span><span class="n">model_kwargs</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Embedding</span>
 </code></pre></div>
@@ -2378,7 +2378,7 @@
 </tr>
 <tr>
 <td><code>input_prep</code></td>
-<td><code>"resize"</code> (default), <code>"tile"</code>, <code>"auto"</code>, <code>InputPrepSpec(...)</code>, or <code>None</code>. <code>None</code> is treated like the default resize path.</td>
+<td><code>"resize"</code>, <code>"tile"</code>, <code>"auto"</code>, <code>InputPrepSpec(...)</code>, or <code>None</code> (default). For image-level ViT patch-token grid models (<code>remoteclip</code>, <code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>, <code>satmaepp_s2_10b</code>), <code>None</code>/<code>"auto"</code> with <code>OutputSpec.grid()</code> resolves to <code>"resize"</code> and warns; explicit <code>"tile"</code> also warns. Explicit <code>"resize"</code> does not warn.</td>
 </tr>
 </tbody>
 </table>
@@ -2443,7 +2443,7 @@
     <span class="n">output</span><span class="p">:</span> <span class="n">OutputSpec</span> <span class="o">=</span> <span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
     <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
     <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">input_prep</span><span class="p">:</span> <span class="n">InputPrepSpec</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="s2">&quot;resize&quot;</span><span class="p">,</span>
+    <span class="n">input_prep</span><span class="p">:</span> <span class="n">InputPrepSpec</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="o">**</span><span class="n">model_kwargs</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Embedding</span><span class="p">]</span>
 </code></pre></div>
@@ -2507,7 +2507,7 @@
 </tr>
 <tr>
 <td><code>input_prep</code></td>
-<td><code>"resize"</code> (default), <code>"tile"</code>, <code>"auto"</code>, <code>InputPrepSpec(...)</code>, or <code>None</code>. <code>None</code> is treated like the default resize path.</td>
+<td><code>"resize"</code>, <code>"tile"</code>, <code>"auto"</code>, <code>InputPrepSpec(...)</code>, or <code>None</code> (default). For image-level ViT patch-token grid models (<code>remoteclip</code>, <code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>, <code>satmaepp_s2_10b</code>), <code>None</code>/<code>"auto"</code> with <code>OutputSpec.grid()</code> resolves to <code>"resize"</code> and warns; explicit <code>"tile"</code> also warns. Explicit <code>"resize"</code> does not warn.</td>
 </tr>
 </tbody>
 </table>

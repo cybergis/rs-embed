@@ -2451,7 +2451,11 @@
 <hr />
 <h2 id="shared-output-semantics">Shared Output Semantics<a class="headerlink" href="#shared-output-semantics" title="Permanent link">&para;</a></h2>
 <p><strong><code>pooled</code></strong>: RGB path records <code>patch_mean</code>/<code>patch_max</code>; S2-10B path records <code>group_tokens_mean</code>/<code>group_tokens_max</code> reflecting its grouped-token runtime.</p>
-<p><strong><code>grid</code></strong>: <code>satmaepp</code> returns a standard ViT patch-token grid <code>(D,H,W)</code>; <code>satmaepp_s2_10b</code> reduces grouped tokens across channel groups then reshapes to <code>(D,H,W)</code>.</p>
+<p><strong><code>grid</code></strong>: <code>satmaepp</code> returns a standard ViT patch-token grid <code>(D,H,W)</code>; <code>satmaepp_s2_10b</code> reduces grouped tokens across channel groups then reshapes to <code>(D,H,W)</code>. Default/auto input preparation resolves to resize, and metadata records <code>input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"</code>, <code>grid_semantics="vit_patch_tokens"</code>, and <code>grid_tile_recommended=false</code>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Resize is the default for <code>grid</code></p>
+<p>SatMAE++ grid outputs are image-level ViT token grids, not seamless dense geospatial fields. For <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> by default and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
+</div>
 <hr />
 <h2 id="variant-a-satmaepp-rgb">Variant A: <code>satmaepp</code> (RGB)<a class="headerlink" href="#variant-a-satmaepp-rgb" title="Permanent link">&para;</a></h2>
 <h3 id="input-contract">Input Contract<a class="headerlink" href="#input-contract" title="Permanent link">&para;</a></h3>
@@ -2501,9 +2505,9 @@
     A4 --&gt; A5P["pooled:\npatch_mean / patch_max"]
     A4 --&gt; A5G["grid:\nViT patch-token grid (D,H,W)"]</code></pre>
 <h3 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h3>
-<div class="admonition tip">
-<p class="admonition-title">Resize is the default — tiling is also available</p>
-<p>The pipeline below shows the default <code>input_prep="resize"</code> path. For large ROIs, use <code>input_prep="tile"</code> to split the input into tiles and preserve spatial detail. See <a href="../../choosing_settings/#input-preparation-resize-vs-tile">Choosing Settings</a>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Resize is the default for <code>grid</code></p>
+<p>The pipeline below shows the default <code>input_prep="resize"</code> path. Explicit <code>input_prep="tile"</code> can split large ROIs into independent image-level token grids, but those grids can show stitching seams and are marked as experimental in metadata.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
     INPUT["Provider fetch / input_chw"] --&gt; RGB["RGB uint8 patch"]
@@ -2553,6 +2557,7 @@
 <li>checkpoint preprocessing mismatch because <code>CHANNEL_ORDER</code> changed</li>
 <li>missing <code>rshf</code> / SatMAE++ wrapper dependencies</li>
 <li>unexpected token shape causing grid reshape failures</li>
+<li>tiled <code>grid</code> output can show seams because each tile is an independent image-level token grid</li>
 </ul>
 <hr />
 <h2 id="variant-b-satmaepp_s2_10b-sentinel-2-10-band">Variant B: <code>satmaepp_s2_10b</code> (Sentinel-2 10-band)<a class="headerlink" href="#variant-b-satmaepp_s2_10b-sentinel-2-10-band" title="Permanent link">&para;</a></h2>
@@ -2605,6 +2610,10 @@
     B5 --&gt; B6P["pooled:\ngroup_tokens_mean / max"]
     B5 --&gt; B6G["grid:\nreduced → (D,H,W)"]</code></pre>
 <h3 id="preprocessing-runtime-loading">Preprocessing + Runtime Loading<a class="headerlink" href="#preprocessing-runtime-loading" title="Permanent link">&para;</a></h3>
+<div class="admonition warning">
+<p class="admonition-title">Resize is the default for <code>grid</code></p>
+<p>The 10-band grouped-channel path has the same grid caveat: grouped tokens are reduced and reshaped after an image-level forward pass. Explicit <code>input_prep="tile"</code> is allowed, but tiled grid mosaics are not recommended for seamless spatial outputs. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
+</div>
 <pre class="mermaid"><code>flowchart LR
     INPUT["10-band CHW"] --&gt; PREP["Sentinel stats → uint8\n→ eval transforms"]
     PREP --&gt; GRP["Grouped-channel model\nG0=(0,1,2,6) G1=(3,4,5,7) G2=(8,9)"]
@@ -2664,6 +2673,7 @@
 <li>vendored runtime import fails or checkpoint download is unavailable</li>
 <li>grouped-token reshape assumptions do not match the loaded checkpoint/config</li>
 <li><code>GRID_REDUCE</code> changes representation semantics across experiments</li>
+<li>tiled <code>grid</code> output can show seams because grouped tokens are reduced per independent tile</li>
 </ul>
 <hr />
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
@@ -2726,6 +2736,7 @@
 <ul>
 <li>RGB variant is sensitive to <code>CHANNEL_ORDER</code> (<code>rgb</code>/<code>bgr</code>) — the original eval preprocessing was BGR-based.</li>
 <li>S2-10B variant's <code>GRID_REDUCE</code> changes the output semantics; <code>mean</code> and <code>max</code> are not interchangeable.</li>
+<li>Default/auto <code>grid</code> requests resolve to resize because tiled SatMAE++ patch-token grids can show stitching seams.</li>
 <li>The two variants (<code>satmaepp</code> and <code>satmaepp_s2_10b</code>) are separate model IDs with different preprocessing, not a config switch on the same model.</li>
 </ul>
 

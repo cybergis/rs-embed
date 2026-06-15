@@ -1001,6 +1001,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#output-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2076,6 +2087,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#output-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Output Semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#examples" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2184,7 +2206,7 @@
 </tr>
 <tr>
 <td>Training alignment</td>
-<td>Medium (higher if wrapper <code>model.transform(...)</code> matches training pipeline; fallback is generic CLIP preprocess)</td>
+<td>High — uses open_clip's official CLIP preprocess (Resize 224 bicubic + CenterCrop + CLIP normalize), matching how RemoteCLIP was trained</td>
 </tr>
 </tbody>
 </table>
@@ -2195,7 +2217,7 @@
 <ul>
 <li>RGB-only (<code>B4,B3,B2</code>) with a fixed <code>224×224</code> preprocessing path: see <a href="#input-contract">Input Contract</a></li>
 <li>checkpoint override goes through <code>sensor.collection="hf:&lt;repo&gt;"</code> rather than an environment variable: see <a href="#environment-variables-tuning-knobs">Environment Variables / Tuning Knobs</a></li>
-<li>preprocessing prefers the wrapper <code>model.transform(...)</code> but falls back to a generic CLIP pipeline — these paths are <strong>not</strong> identical and should be logged: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
+<li><code>pooled</code> is the <strong>projected CLIP image embedding</strong> (<code>encode_image</code>, e.g. 512-d for the default ViT-B/32), identical across single / batch / tiled calls — not a token mean: see <a href="#output-semantics">Output Semantics</a></li>
 </ul>
 </div>
 <hr />
@@ -2244,18 +2266,24 @@
 </div>
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
-<div class="admonition tip">
-<p class="admonition-title">Resize is the default — tiling is also available</p>
-<p>The pipeline below shows the default <code>input_prep="resize"</code> path. For large ROIs, use <code>input_prep="tile"</code> to split the input into tiles and preserve spatial detail. See <a href="../../choosing_settings/#input-preparation-resize-vs-tile">Choosing Settings</a>.</p>
+<div class="admonition warning">
+<p class="admonition-title">Resize is the default for <code>grid</code></p>
+<p>RemoteCLIP <code>grid</code> output is an image-level CLIP ViT patch-token grid, not a seamless dense geospatial field. For <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> by default and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
-    INPUT["S2 RGB"] --&gt; PREP["Normalize → uint8\n→ model.transform or CLIP fallback"]
+    INPUT["S2 RGB"] --&gt; PREP["Normalize → uint8\n→ CLIP preprocess (Resize 224 + CenterCrop + normalize)"]
     PREP --&gt; FWD["CLIP ViT forward"]
-    FWD --&gt; POOL["pooled: token mean/max"]
-    FWD --&gt; GRID["grid: patch-token (D,H,W)"]</code></pre>
+    FWD --&gt; POOL["pooled: encode_image (projected CLIP embedding)"]
+    FWD --&gt; GRID["grid: patch-token (D,H,W) from forward_intermediates"]</code></pre>
 <div class="admonition note">
 <p class="admonition-title">Current adapter image size</p>
 <p>The image size is fixed at <code>224</code> in this adapter path.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">Preprocessing path</p>
+<p><code>rshf.remoteclip.RemoteCLIP</code> exposes no <code>model.transform</code>, so the adapter always
+uses the open_clip-equivalent CLIP preprocess (it never silently diverges from a
+wrapper transform).</p>
 </div>
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
@@ -2264,12 +2292,12 @@
         RGB["S2 RGB\n(B4,B3,B2)"]
     end
     subgraph "CLIP ViT"
-        RGB --&gt; PRE["Preprocess\n(model.transform\nor CLIP fallback)"]
+        RGB --&gt; PRE["Preprocess\n(CLIP: Resize 224\n+ CenterCrop + normalize)"]
         PRE --&gt; FWD["CLIP ViT\nforward"]
     end
     subgraph "Shared Image ↔ Text Space"
         FWD --&gt; EMB["Embeddings support\ncaption-based\nsimilarity &amp; retrieval"]
-        EMB --&gt; POOL["pooled:\ntoken mean/max"]
+        EMB --&gt; POOL["pooled:\nencode_image\n(projected embedding)"]
         EMB --&gt; GRID["grid:\npatch-token (D,H,W)"]
     end</code></pre>
 <hr />
@@ -2304,6 +2332,10 @@
 <p class="admonition-title">Checkpoint override</p>
 <p>Set <code>sensor.collection="hf:&lt;repo_or_local_path&gt;"</code> (not env-based in this adapter).</p>
 </div>
+<hr />
+<h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
+<p><strong><code>pooled</code></strong>: returns the projected CLIP image embedding from <code>encode_image</code> (e.g. 512-d for the default ViT-B/32 checkpoint) — the canonical RemoteCLIP visual representation that lives in the shared image/text space, suitable for similarity search and retrieval. This is computed identically across the single (<code>get_embedding</code>), batch, and tiled paths, so the output dimensionality and values do not depend on ROI size or which API you call.</p>
+<p><strong><code>grid</code></strong>: exposes the ViT patch-token layout, extracted from open_clip's <code>forward_intermediates</code> as the deepest dense feature map (<code>[D, Ht, Wt]</code>, e.g. <code>768×7×7</code> for ViT-B/32 @ 224; <code>tokens_kind="tokens_intermediates"</code>). The single and batch paths produce identical grids. Default/auto input preparation resolves to resize, and metadata records <code>input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"</code>, <code>grid_semantics="vit_patch_tokens"</code>, and <code>grid_tile_recommended=false</code>.</p>
 <hr />
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <h3 id="minimal-example">Minimal example<a class="headerlink" href="#minimal-example" title="Permanent link">&para;</a></h3>
@@ -2345,8 +2377,10 @@
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Provider-only — <code>backend="tensor"</code> is not supported.</li>
-<li>The adapter prefers <code>model.transform</code> when available; otherwise falls back to CLIP-style preprocessing — the two paths may produce slightly different embeddings.</li>
-<li>Grid output depends on the wrapper exposing a token sequence; some RemoteCLIP wrappers only return pooled vectors.</li>
+<li>The <code>rshf</code> wrapper exposes no <code>model.transform</code>, so the adapter always applies the open_clip-equivalent CLIP preprocess — there is no second, divergent preprocessing path.</li>
+<li><code>pooled</code> uses <code>encode_image</code> (projected CLIP embedding) on every path (single / batch / tiled); it is not a token-mean and its dimensionality does not change with ROI size.</li>
+<li><code>grid</code> tokens come from open_clip's <code>forward_intermediates</code> patch grid; if a wrapper exposes no dense features the adapter falls back to a vision-transformer forward hook (batch-first / sequence-first safe).</li>
+<li>Default/auto <code>grid</code> requests resolve to resize because tiled RemoteCLIP patch-token grids can show stitching seams.</li>
 </ul>
 
 
