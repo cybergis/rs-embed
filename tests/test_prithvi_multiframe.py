@@ -220,7 +220,9 @@ def _single_path_only(monkeypatch, emb):
         "_prepare_prithvi_chw",
         lambda x_chw, *, fill_value: (x_chw.astype(np.float32, copy=False), {"prep_mode": "t"}),
     )
-    monkeypatch.setattr(pr, "_load_prithvi", lambda model_key, **k: (object(), {"repo_id": "r"}, "cpu"))
+    monkeypatch.setattr(
+        pr, "_load_prithvi", lambda model_key, **k: (object(), {"repo_id": "r"}, "cpu")
+    )
     monkeypatch.setattr(
         pr, "_prithvi_forward_tokens", lambda *a, **k: np.arange(8, dtype=np.float32).reshape(2, 4)
     )

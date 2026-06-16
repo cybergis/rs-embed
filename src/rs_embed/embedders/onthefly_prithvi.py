@@ -220,9 +220,7 @@ def _resolve_temporal_mode(model_config: dict[str, Any] | None) -> str:
     return _DEFAULT_TEMPORAL_MODE
 
 
-def _effective_temporal_mode(
-    model_config: dict[str, Any] | None, temporal: TemporalSpec
-) -> str:
+def _effective_temporal_mode(model_config: dict[str, Any] | None, temporal: TemporalSpec) -> str:
     """Resolve single/multi, expanding ``"auto"`` from the window.
 
     ``auto`` → ``"multi"`` when the window yields ≥2 frames
