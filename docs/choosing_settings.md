@@ -87,10 +87,11 @@ These control how much spatial detail survives preprocessing and how dense the t
 
 ### Temporal window and frame count
 
-Relevant for sequence models such as `anysat`, `galileo`, and `agrifm`.
+Relevant for sequence models such as `prithvi`, `olmoearth`, `galileo`, `anysat`, and `agrifm`. For exactly how each model turns a `TemporalSpec.range` into frames (and the cost of multi-frame fetches), see [Temporal Sampling](temporal_sampling.md).
 
 - Keep the temporal window meaningful for the real task.
-- Increase frame count only if you actually want a finer temporal summary.
+- For window-adaptive models (`prithvi`, `olmoearth`, `galileo`), the frame count follows the window — widen the window for more frames, or pass `temporal_mode="single"` for one cheap composite.
+- Increase the fixed frame count (`anysat`, `agrifm`) only if you actually want a finer temporal summary.
 - A model with 8 frames is not simply a slower version of the same 4-frame experiment — it is a different temporal design choice.
 
 ---

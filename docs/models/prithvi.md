@@ -19,7 +19,7 @@
     In `rs-embed`, its most important characteristics are:
 
     - **required** temporal (`year, day_of_year`) and location (`lat, lon`) side inputs auto-derived by the adapter: see [Input Contract](#input-contract)
-    - **multi-temporal at heart**: defaults to a single composite (`temporal_mode="single"`), but `temporal_mode="multi"` feeds a real time series matching its 4-timestep pretraining: see [Temporal mode](#temporal-mode-temporal_mode)
+    - **multi-temporal at heart**: `temporal_mode` defaults to `"auto"` (single composite for sub-2-month windows, else a real multi-frame series matching its 4-timestep pretraining); see [Temporal mode](#temporal-mode-temporal_mode) and [Temporal Sampling](../temporal_sampling.md)
     - 30 m default `sensor.scale_m`, not the more common S2 10 m default — a frequent source of silent drift: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
     - `resize` vs `pad` preprocessing changes token geometry and should be treated as part of the experiment, not as a cosmetic knob: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
 

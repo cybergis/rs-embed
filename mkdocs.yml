@@ -75,27 +75,32 @@ nav:
   - Models:
       - Overview: models.md
       - Advanced Reference: models_reference.md
+      - Temporal Sampling: temporal_sampling.md
       - Precomputed:
           - Tessera: models/tessera.md
           - GSE: models/gse.md
           - Copernicus: models/copernicus.md
       - On-the-fly:
+          # Most-used recent foundation models first
+          - Prithvi: models/prithvi.md
+          - OLMoEarth: models/olmoearth.md
+          - DOFA: models/dofa.md
+          - TerraMind: models/terramind.md
+          - TerraFM: models/terrafm.md
+          - THOR: models/thor.md
+          # Multi-frame temporal models
+          - Galileo: models/galileo.md
+          - AnySat: models/anysat.md
+          - AgriFM: models/agrifm.md
+          # Other recent models
+          - FoMo: models/fomo.md
+          - WildSAT: models/wildsat.md
+          - SatVision: models/satvision.md
+          # Older image-level models (resize-default preprocessing)
           - RemoteCLIP: models/remoteclip.md
+          - ScaleMAE: models/scalemae.md
           - SatMAE: models/satmae.md
           - SatMAE++: models/satmaepp.md
-          - ScaleMAE: models/scalemae.md
-          - WildSAT: models/wildsat.md
-          - Prithvi: models/prithvi.md
-          - TerraFM: models/terrafm.md
-          - TerraMind: models/terramind.md
-          - DOFA: models/dofa.md
-          - FoMo: models/fomo.md
-          - THOR: models/thor.md
-          - SatVision: models/satvision.md
-          - AnySat: models/anysat.md
-          - Galileo: models/galileo.md
-          - AgriFM: models/agrifm.md
-          - OLMoEarth: models/olmoearth.md
   - API:
       - Overview: api.md
       - Specs & Data Structures: api_specs.md

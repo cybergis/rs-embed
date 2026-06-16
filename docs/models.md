@@ -23,7 +23,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 | ----------------------------------------- | ----------------------------------------------------------- | -------------------------------------------------- |
 | Fast baseline / simple pipeline           | `tessera`, `gse`, `copernicus`                              | Precomputed embeddings, fewer runtime dependencies |
 | Simple S2 RGB on-the-fly experiments      | `remoteclip`, `satmae`, `satmaepp`, `scalemae`              | Straightforward RGB input paths                    |
-| Time-series temporal modeling             | `agrifm`, `anysat`, `galileo`                               | Native multi-frame temporal packaging              |
+| Time-series temporal modeling             | `prithvi`, `olmoearth`, `galileo`, `anysat`, `agrifm`       | Native multi-frame temporal packaging — see [Temporal Sampling](temporal_sampling.md) |
 | Multispectral / strict spectral semantics | `satmaepp_s2_10b`, `dofa`, `terramind`, `thor`, `satvision` | Strong channel/schema assumptions                  |
 | Mixed-modality experiments (S1/S2)        | `terrafm`, `thor`                                           | Supports S2 or S1 path (per call)                  |
 
@@ -39,25 +39,25 @@ Some detail-page filenames still use older names for compatibility, but the cano
 
 ### On-the-fly Foundation Models
 
-| Model ID          | Primary Input                    | Dim  | Default Resolution | Temporal style   | Notable requirements                                    | Detail                         |
-| ----------------- | -------------------------------- | ---- | ------------------ | ---------------- | ------------------------------------------------------- | ------------------------------ |
-| `remoteclip`      | S2 RGB (`B4,B3,B2`)             | 512  | 10m                | single composite | CLIP projection; RGB preprocessing                      | [detail](models/remoteclip.md) |
-| `satmae`          | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | single composite | ViT-L; MAE token/grid                                   | [detail](models/satmae.md)     |
-| `satmaepp`        | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | single composite | ViT-L; fMoW eval preprocessing                          | [detail](models/satmaepp.md)   |
-| `satmaepp_s2_10b` | S2 10-band                      | 1024 | 10m                | single composite | strict band order; grouped-channel tokens               | [detail](models/satmaepp.md)   |
-| `scalemae`        | S2 RGB + scale                  | 1024 | 10m                | single composite | `sensor.scale_m` is a model input                       | [detail](models/scalemae.md)   |
-| `wildsat`         | S2 RGB                          | 256  | 10m                | single composite | biodiversity training; image_head default               | [detail](models/wildsat.md)    |
-| `prithvi`         | S2 6-band                       | 768  | 30m                | single composite | required temporal + location side inputs                 | [detail](models/prithvi.md)    |
-| `terrafm`         | S2 12-band or S1 VV/VH          | 768  | 10m                | single composite | dual-modality by channel count                          | [detail](models/terrafm.md)    |
-| `terramind`       | S2 12-band                      | 384  | 10m                | single composite | ViT-S class; strict z-score normalization               | [detail](models/terramind.md)  |
-| `dofa`            | Multispectral + wavelengths     | 768  | 10m                | single composite | wavelength vector required                              | [detail](models/dofa.md)       |
-| `fomo`            | S2 12-band                      | 768  | 10m                | single composite | per-channel spectral modality keys                      | [detail](models/fomo.md)       |
-| `thor`            | S2 10-band or S1 VV/VH          | 768  | 10m                | single composite | dual-modality; grouped tokens; native-snap              | [detail](models/thor.md)       |
-| `satvision`       | TOA 14-channel (MODIS)          | 4096 | 1000m              | single composite | SwinV2 Giant; strict channel calibration                | [detail](models/satvision.md)  |
-| `anysat`          | S2 10-band time series          | 768  | 10m                | multi-frame      | JEPA; `s2_dates` DOY side input                         | [detail](models/anysat.md)     |
-| `galileo`         | S2 10-band time series          | 128  | 10m                | multi-frame      | nano default; month tokens                              | [detail](models/galileo.md)    |
-| `agrifm`          | S2 10-band time series          | 1024 | 10m                | multi-frame      | Video Swin; fixed `T` frame stack                       | [detail](models/agrifm.md)     |
-| `olmoearth`       | S2 L2A 12-band                  | 128–1024 | 10m            | single composite | FlexiViT; 4 sizes (nano/tiny/base/large); requires `[olmoearth]` extra | [detail](models/olmoearth.md) |
+| Model ID          | Primary Input                    | Dim  | Default Resolution | Temporal style          | Notable requirements                                    | Detail                         |
+| ----------------- | -------------------------------- | ---- | ------------------ | ----------------------- | ------------------------------------------------------- | ------------------------------ |
+| `prithvi`         | S2 6-band                       | 768  | 30m                | multi-frame (auto, ≤4)  | required temporal + location side inputs                 | [detail](models/prithvi.md)    |
+| `olmoearth`       | S2 L2A 12-band / S1 VV/VH       | 128–1024 | 10m            | multi-frame (auto, ≤12) | FlexiViT; 4 sizes (nano/tiny/base/large); requires `[olmoearth]` extra | [detail](models/olmoearth.md) |
+| `dofa`            | Multispectral + wavelengths     | 768  | 10m                | single composite        | wavelength vector required                              | [detail](models/dofa.md)       |
+| `terramind`       | S2 12-band                      | 384  | 10m                | single composite        | ViT-S class; strict z-score normalization               | [detail](models/terramind.md)  |
+| `terrafm`         | S2 12-band or S1 VV/VH          | 768  | 10m                | single composite        | dual-modality by channel count                          | [detail](models/terrafm.md)    |
+| `thor`            | S2 10-band or S1 VV/VH          | 768  | 10m                | single composite        | dual-modality; grouped tokens; native-snap              | [detail](models/thor.md)       |
+| `galileo`         | S2 10-band time series          | 128  | 10m                | multi-frame (auto, ≤12) | nano default; month tokens                              | [detail](models/galileo.md)    |
+| `anysat`          | S2 10-band time series          | 768  | 10m                | multi-frame (fixed `T`) | JEPA; `s2_dates` DOY side input                         | [detail](models/anysat.md)     |
+| `agrifm`          | S2 10-band time series          | 1024 | 10m                | multi-frame (fixed `T`) | Video Swin; fixed `T` frame stack                       | [detail](models/agrifm.md)     |
+| `fomo`            | S2 12-band                      | 768  | 10m                | single composite        | per-channel spectral modality keys                      | [detail](models/fomo.md)       |
+| `wildsat`         | S2 RGB                          | 256  | 10m                | single composite        | biodiversity training; image_head default               | [detail](models/wildsat.md)    |
+| `satvision`       | TOA 14-channel (MODIS)          | 4096 | 1000m              | single composite        | SwinV2 Giant; strict channel calibration                | [detail](models/satvision.md)  |
+| `remoteclip`      | S2 RGB (`B4,B3,B2`)             | 512  | 10m                | single composite        | CLIP projection; RGB preprocessing                      | [detail](models/remoteclip.md) |
+| `scalemae`        | S2 RGB + scale                  | 1024 | 10m                | single composite        | `sensor.scale_m` is a model input                       | [detail](models/scalemae.md)   |
+| `satmae`          | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | single composite        | ViT-L; MAE token/grid                                   | [detail](models/satmae.md)     |
+| `satmaepp`        | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | single composite        | ViT-L; fMoW eval preprocessing                          | [detail](models/satmaepp.md)   |
+| `satmaepp_s2_10b` | S2 10-band                      | 1024 | 10m                | single composite        | strict band order; grouped-channel tokens               | [detail](models/satmaepp.md)   |
 
 ---
 
@@ -67,7 +67,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 
 Precomputed products can also keep their own product-native projection instead of the common provider-backed EPSG:3857 sampling grid. Today that matters especially for `tessera` and `copernicus`, so check each detail page before comparing grid outputs directly against on-the-fly models.
 
-On this page, "Default Resolution" means the default source-side fetch resolution, not the final resized tensor shape sent into the backbone. Multi-frame models such as `agrifm`, `anysat`, and `galileo` also need extra attention to frame count and temporal side inputs.
+On this page, "Default Resolution" means the default source-side fetch resolution, not the final resized tensor shape sent into the backbone. Multi-frame models such as `prithvi`, `olmoearth`, `galileo`, `anysat`, and `agrifm` also need extra attention to frame count and temporal side inputs — how each one turns a `TemporalSpec.range` into frames is summarized in [Temporal Sampling](temporal_sampling.md).
 
 Read the details in [Supported Models (Advanced Reference)](models_reference.md).
 
