@@ -42,7 +42,7 @@ def test_prithvi_get_embedding_uses_model_config_variant(monkeypatch):
         output=OutputSpec.pooled(),
         backend="gee",
         input_chw=np.full((6, 8, 8), 1000.0, dtype=np.float32),
-        model_config={"variant": "prithvi_eo_v2_300_tl"},
+        model_config={"variant": "prithvi_eo_v2_300_tl", "temporal_mode": "single"},
     )
 
     assert seen["model_key"] == "prithvi_eo_v2_300_tl"
@@ -76,13 +76,16 @@ def test_prithvi_get_embeddings_batch_forwards_model_config(monkeypatch):
         spatials=[PointBuffer(lon=0.0, lat=0.0, buffer_m=256)],
         temporal=temporal,
         sensor=None,
-        model_config={"variant": "prithvi_eo_v2_600_tl"},
+        model_config={"variant": "prithvi_eo_v2_600_tl", "temporal_mode": "single"},
         output=OutputSpec.pooled(),
         backend="gee",
     )
 
     assert len(out) == 1
-    assert seen["model_config"] == {"variant": "prithvi_eo_v2_600_tl"}
+    assert seen["model_config"] == {
+        "variant": "prithvi_eo_v2_600_tl",
+        "temporal_mode": "single",
+    }
 
 
 def test_prithvi_get_embeddings_batch_from_inputs_uses_model_config_variant(monkeypatch):
@@ -111,7 +114,7 @@ def test_prithvi_get_embeddings_batch_from_inputs_uses_model_config_variant(monk
         input_chws=[np.full((6, 8, 8), 1000.0, dtype=np.float32)],
         temporal=temporal,
         sensor=None,
-        model_config={"variant": "300_tl"},
+        model_config={"variant": "300_tl", "temporal_mode": "single"},
         output=OutputSpec.pooled(),
         backend="gee",
     )
