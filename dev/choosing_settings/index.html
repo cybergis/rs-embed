@@ -2376,7 +2376,7 @@ Treat every setting change as part of experiment design, not just performance tu
 </tr>
 <tr>
 <td>Capture finer temporal detail</td>
-<td><code>RS_EMBED_ANYSAT_FRAMES</code>, <code>RS_EMBED_GALILEO_FRAMES</code></td>
+<td><code>RS_EMBED_ANYSAT_FRAMES</code>; for <code>galileo</code>, widen the temporal window (frames auto-scale, ≤12) or pin <code>RS_EMBED_GALILEO_FRAMES</code></td>
 <td>More frames = more runtime</td>
 </tr>
 <tr>
@@ -2500,7 +2500,8 @@ For example, THOR and DOFA expose explicit size choices, while some models only 
 <h3 id="anysat-and-galileo">AnySat and Galileo<a class="headerlink" href="#anysat-and-galileo" title="Permanent link">&para;</a></h3>
 <p>For multi-frame models, frame count is part of the model design.</p>
 <ul>
-<li>Increasing <code>RS_EMBED_ANYSAT_FRAMES</code> or <code>RS_EMBED_GALILEO_FRAMES</code> gives a finer temporal summary.</li>
+<li><code>anysat</code> uses a fixed frame count: increase <code>RS_EMBED_ANYSAT_FRAMES</code> for a finer temporal summary.</li>
+<li><code>galileo</code> derives its frame count from the window (<code>temporal_mode="auto"</code>, ~30-day frames, ≤12) to match its monthly cadence — widen the temporal window for more frames, or pin <code>RS_EMBED_GALILEO_FRAMES</code> / <code>n_frames=</code> for a manual count. Windows beyond ~1 year are equal-divided with an out-of-distribution warning. See <a href="../models/galileo/#temporal-sampling">Galileo › Temporal Sampling</a>.</li>
 <li>Increasing <code>..._IMG</code> preserves more per-frame detail.</li>
 <li>Changing <code>..._PATCH</code> alters grid density and often has divisibility constraints.</li>
 </ul>

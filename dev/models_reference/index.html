@@ -2194,9 +2194,9 @@
 </tr>
 <tr>
 <td><code>galileo</code></td>
-<td><code>RS_EMBED_GALILEO_FRAMES</code> (<code>8</code>)</td>
+<td>window-adaptive (<code>temporal_mode="auto"</code>); <code>RS_EMBED_GALILEO_FRAMES</code> pins a manual count</td>
 <td><code>months</code> (per-frame month, <code>1..12</code>)</td>
-<td>By default from frame bin midpoints; <code>RS_EMBED_GALILEO_MONTH</code> can force a constant month for all frames.</td>
+<td>Frame count is derived from the window (~30-day frames, ≤12) to match Galileo's monthly cadence; longer windows are equal-divided with a warning. Months from frame-bin midpoints; <code>RS_EMBED_GALILEO_MONTH</code> can force a constant month. See <a href="../models/galileo/#temporal-sampling">galileo</a>.</td>
 </tr>
 </tbody>
 </table>
@@ -2375,7 +2375,7 @@
 </tr>
 <tr>
 <td><code>galileo</code></td>
-<td><code>RS_EMBED_GALILEO_IMG</code>, <code>RS_EMBED_GALILEO_PATCH</code>, <code>RS_EMBED_GALILEO_NORM</code>, <code>RS_EMBED_GALILEO_FRAMES</code>, <code>RS_EMBED_GALILEO_MONTH</code></td>
+<td><code>RS_EMBED_GALILEO_IMG</code>, <code>RS_EMBED_GALILEO_PATCH</code>, <code>RS_EMBED_GALILEO_NORM</code>, <code>RS_EMBED_GALILEO_TEMPORAL_MODE</code>, <code>RS_EMBED_GALILEO_FRAMES</code>, <code>RS_EMBED_GALILEO_MONTH</code></td>
 </tr>
 <tr>
 <td><code>wildsat</code></td>

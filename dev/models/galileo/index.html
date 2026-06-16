@@ -1332,6 +1332,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#temporal-sampling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporal Sampling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#preprocessing-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2054,6 +2065,17 @@
 </li>
       
         <li class="md-nav__item">
+  <a href="#temporal-sampling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporal Sampling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
   <a href="#preprocessing-pipeline" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2202,7 +2224,7 @@
 </tr>
 <tr>
 <td>Training alignment</td>
-<td>Medium (depends on <code>FRAMES</code>, <code>IMG</code>, <code>PATCH</code>, normalization)</td>
+<td>Medium (depends on <code>temporal_mode</code>, <code>IMG</code>, <code>PATCH</code>, normalization)</td>
 </tr>
 </tbody>
 </table>
@@ -2211,6 +2233,7 @@
 <p>Galileo is NASA Harvest's masked-modeling multi-modal encoder with structured token groups (space-time / space / time / static), and in <code>rs-embed</code> it runs as a Sentinel-2 multi-frame path that derives per-frame <code>months</code> tokens from frame-bin midpoints and does both pooled and grid output from visible (unmasked) tokens at Galileo's own patch level.</p>
 <p>In <code>rs-embed</code>, its most important characteristics are:</p>
 <ul>
+<li><strong>window-adaptive</strong> temporal sampling (<code>temporal_mode="auto"</code>): ~30-day frames, ≤12, matching Galileo's monthly pretraining cadence — see <a href="#temporal-sampling">Temporal Sampling</a></li>
 <li><strong>required</strong> per-frame <code>months</code> side input, optionally forced to a constant via <code>RS_EMBED_GALILEO_MONTH</code>: see <a href="#input-contract">Input Contract</a></li>
 <li>hard constraint: <code>image_size % patch_size == 0</code>: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
 <li>pooled/grid use Galileo's own visible-token averaging at the patch level rather than a generic token reshape: see <a href="#output-semantics">Output Semantics</a></li>
@@ -2232,7 +2255,7 @@
 </tr>
 <tr>
 <td><code>TemporalSpec</code></td>
-<td><code>range</code> recommended — split into <code>T</code> sub-windows by the shared helper</td>
+<td><code>range</code> recommended — <code>T</code> is derived from the window (see <a href="#temporal-sampling">Temporal Sampling</a>)</td>
 </tr>
 <tr>
 <td>Default collection</td>
@@ -2256,7 +2279,49 @@
 </tr>
 </tbody>
 </table>
-<p><code>T</code> is controlled by <code>RS_EMBED_GALILEO_FRAMES</code> (default <code>8</code>). <code>image_size % patch_size == 0</code> is a hard constraint — see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a>.</p>
+<p><code>T</code> is window-adaptive by default (see <a href="#temporal-sampling">Temporal Sampling</a>); pin it manually with <code>RS_EMBED_GALILEO_FRAMES</code> or <code>n_frames=</code>. <code>image_size % patch_size == 0</code> is a hard constraint — see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a>.</p>
+<hr />
+<h2 id="temporal-sampling">Temporal Sampling<a class="headerlink" href="#temporal-sampling" title="Permanent link">&para;</a></h2>
+<p>Galileo encodes <strong>month-of-year</strong> (0–11) per frame and pretrains on ~monthly composites capped at 12 frames. <code>rs-embed</code> matches that cadence by deriving the frame count from the requested window instead of using a fixed number — the same <code>fixed_or_equal_bins</code> policy used by <a href="../olmoearth/#temporal-modes"><code>olmoearth</code></a>:</p>
+<table>
+<thead>
+<tr>
+<th><code>temporal_mode</code></th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auto</code> (default)</td>
+<td><code>single</code> (T=1) when the window spans one monthly frame (≤ ~1 month); <code>multi</code> otherwise.</td>
+</tr>
+<tr>
+<td><code>single</code></td>
+<td>One composite over the whole range (T=1).</td>
+</tr>
+<tr>
+<td><code>multi</code></td>
+<td><code>~30-day</code> frames anchored at the range start, at most <strong>12</strong>.</td>
+</tr>
+</tbody>
+</table>
+<p>For windows longer than the 12-month capacity (beyond ~390 days), the range is <strong>equal-divided into 12 frames</strong> so the whole period is covered (instead of dropping the trailing time). Because those frames are then spaced wider than the monthly training cadence, the case is surfaced: <code>meta["temporal_sampling"]="equal_divided"</code>, <code>meta["temporal_spacing_stretched"]=True</code>, <code>meta["effective_stride_days"]</code>, and a <code>UserWarning</code>. Embeddings from such windows are extrapolated — narrow the window to stay in-distribution.</p>
+<div class="admonition warning">
+<p class="admonition-title">Cost</p>
+<p>Any range longer than ~1 month resolves to <code>multi</code>, fetching <strong>one composite per frame</strong> (up to 12) — up to ~12× the GEE fetches of a single composite. Sub-month windows are <em>cheaper</em> than before (1 frame instead of a fixed 8). Pass <code>temporal_mode="single"</code> (or <code>RS_EMBED_GALILEO_TEMPORAL_MODE=single</code>) to force the cheap path, or <code>n_frames=</code>/<code>RS_EMBED_GALILEO_FRAMES</code> to pin a manual count.</p>
+</div>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
+
+<span class="c1"># Force a single composite (cheapest) regardless of window length:</span>
+<span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
+    <span class="s2">&quot;galileo&quot;</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-01-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2025-01-01&quot;</span><span class="p">),</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">temporal_mode</span><span class="o">=</span><span class="s2">&quot;single&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
 <div class="admonition tip">
@@ -2328,9 +2393,14 @@
 <td>Encoder patch size</td>
 </tr>
 <tr>
+<td><code>RS_EMBED_GALILEO_TEMPORAL_MODE</code></td>
+<td><code>auto</code></td>
+<td><code>auto</code> / <code>single</code> / <code>multi</code> (see <a href="#temporal-sampling">Temporal Sampling</a>)</td>
+</tr>
+<tr>
 <td><code>RS_EMBED_GALILEO_FRAMES</code></td>
-<td><code>8</code></td>
-<td>Number of temporal frames <code>T</code></td>
+<td>unset</td>
+<td>Manual frame-count override <code>T</code> (bypasses the adaptive monthly policy)</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_GALILEO_NORM</code></td>
@@ -2373,7 +2443,8 @@
 </code></pre></div>
 <h3 id="example-tuning-temporal-packaging-env-controlled">Example tuning temporal packaging (env-controlled)<a class="headerlink" href="#example-tuning-temporal-packaging-env-controlled" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="c1"># Example (shell):</span>
-<span class="n">export</span> <span class="n">RS_EMBED_GALILEO_FRAMES</span><span class="o">=</span><span class="mi">8</span>
+<span class="n">export</span> <span class="n">RS_EMBED_GALILEO_TEMPORAL_MODE</span><span class="o">=</span><span class="n">multi</span>   <span class="c1"># auto (default) | single | multi</span>
+<span class="n">export</span> <span class="n">RS_EMBED_GALILEO_FRAMES</span><span class="o">=</span><span class="mi">8</span>              <span class="c1"># optional: pin a manual frame count</span>
 <span class="n">export</span> <span class="n">RS_EMBED_GALILEO_IMG</span><span class="o">=</span><span class="mi">64</span>
 <span class="n">export</span> <span class="n">RS_EMBED_GALILEO_PATCH</span><span class="o">=</span><span class="mi">8</span>
 <span class="n">export</span> <span class="n">RS_EMBED_GALILEO_NORM</span><span class="o">=</span><span class="n">official_stats</span>
@@ -2388,6 +2459,8 @@
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>image_size % patch_size == 0</code> is a hard constraint — violations raise immediately.</li>
+<li>Frame count is window-adaptive (<code>temporal_mode="auto"</code>): ~30-day frames, ≤12, matching Galileo's monthly cadence. Windows beyond ~390 days are equal-divided into 12 frames with an out-of-distribution <code>UserWarning</code>. See <a href="#temporal-sampling">Temporal Sampling</a>.</li>
+<li><code>RS_EMBED_GALILEO_FRAMES</code> / <code>n_frames=</code> pins a manual frame count and bypasses the adaptive policy (the caller owns the spacing).</li>
 <li>Forcing a constant month via <code>RS_EMBED_GALILEO_MONTH</code> overrides the auto-derived temporal signal and changes embedding semantics.</li>
 <li>The <code>months</code> side input is derived from frame-bin midpoints; an unusual temporal window may produce unexpected month values.</li>
 </ul>
