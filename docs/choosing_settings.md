@@ -21,7 +21,7 @@ This page helps you decide **which knobs to turn and when**.
 | Use a larger backbone | `variant="large"` (if available) | More GPU memory and latency |
 | Increase image resolution | Model-specific `..._IMG` env vars | Compute grows quickly with image size |
 | Get denser spatial tokens | Model-specific `..._PATCH` env vars (smaller value) | Higher token count and memory |
-| Capture finer temporal detail | `RS_EMBED_ANYSAT_FRAMES`, `RS_EMBED_GALILEO_FRAMES` | More frames = more runtime |
+| Capture finer temporal detail | `RS_EMBED_ANYSAT_FRAMES`; for `galileo`, widen the temporal window (frames auto-scale, ≤12) or pin `RS_EMBED_GALILEO_FRAMES` | More frames = more runtime |
 | Keep spatial structure in output | `OutputSpec.grid()` instead of `.pooled()` | Larger outputs, heavier downstream processing |
 
 ---
@@ -112,7 +112,8 @@ For exact constraints, see [THOR](models/thor.md).
 
 For multi-frame models, frame count is part of the model design.
 
-- Increasing `RS_EMBED_ANYSAT_FRAMES` or `RS_EMBED_GALILEO_FRAMES` gives a finer temporal summary.
+- `anysat` uses a fixed frame count: increase `RS_EMBED_ANYSAT_FRAMES` for a finer temporal summary.
+- `galileo` derives its frame count from the window (`temporal_mode="auto"`, ~30-day frames, ≤12) to match its monthly cadence — widen the temporal window for more frames, or pin `RS_EMBED_GALILEO_FRAMES` / `n_frames=` for a manual count. Windows beyond ~1 year are equal-divided with an out-of-distribution warning. See [Galileo › Temporal Sampling](models/galileo.md#temporal-sampling).
 - Increasing `..._IMG` preserves more per-frame detail.
 - Changing `..._PATCH` alters grid density and often has divisibility constraints.
 
