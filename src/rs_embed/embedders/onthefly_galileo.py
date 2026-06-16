@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from functools import lru_cache
@@ -21,6 +22,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import FetchResult
 from ..providers import ProviderBase
 from ..providers.fetch import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
@@ -39,6 +41,7 @@ from ..tools.runtime import (
 )
 from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
+from .config import model_config_value
 from .meta import build_meta, temporal_to_range
 
 
@@ -375,6 +378,146 @@ def _month_override_sequence(month_value: int, *, n_frames: int) -> np.ndarray:
     return np.full((max(1, int(n_frames)),), month_value - 1, dtype=np.int64)
 
 
+# ---------------------------------------------------------------------------
+# Temporal sampling (frame count is window-adaptive, mirroring OlmoEarth)
+#
+# Galileo pretrains on ~monthly composites and encodes month-of-year (0–11),
+# capped at 12 frames per sample. Instead of always splitting the window into a
+# fixed 8 frames, the frame count is derived from the window: ~30-day frames,
+# at most 12. Windows longer than that capacity are equal-divided into 12 frames
+# (so the whole window is covered, not just its first year) with a warning,
+# since the wider spacing falls outside Galileo's monthly training cadence.
+# ---------------------------------------------------------------------------
+
+# "auto" (default) picks single/multi from the window: multi when the range spans
+# ≥2 monthly frames, single otherwise. Use "single"/"multi" to force a mode.
+_DEFAULT_TEMPORAL_MODE = "auto"
+_FRAME_STRIDE_DAYS = 30
+_MAX_FRAMES = 12
+
+
+def _normalize_temporal_mode(mode: Any) -> str:
+    m = str(mode or _DEFAULT_TEMPORAL_MODE).strip().lower()
+    if m not in ("single", "multi", "auto"):
+        raise ModelError(
+            f"galileo temporal_mode must be 'single', 'multi', or 'auto', got {mode!r}."
+        )
+    return m
+
+
+def _resolve_temporal_mode(model_config: dict[str, Any] | None) -> str:
+    """Resolve the *configured* temporal mode (may be ``"auto"``)."""
+    v = model_config_value(model_config, "temporal_mode")
+    if v is not None:
+        return _normalize_temporal_mode(v)
+    env = os.environ.get("RS_EMBED_GALILEO_TEMPORAL_MODE", "").strip()
+    if env:
+        return _normalize_temporal_mode(env)
+    return _DEFAULT_TEMPORAL_MODE
+
+
+def _temporal_bins(t: TemporalSpec) -> tuple[tuple[tuple[str, str], ...], bool]:
+    """Monthly frames for the window, returned as ``(bins, stretched)``.
+
+    Up to ``_MAX_FRAMES`` (12) fixed ``_FRAME_STRIDE_DAYS`` (30-day) frames,
+    mirroring Galileo's monthly pretraining cadence. Windows longer than that
+    capacity are **equal-divided into 12 frames** instead of dropping the
+    trailing time, so the whole window is covered (``stretched=True``); see
+    :func:`rs_embed.tools.temporal.fixed_or_equal_bins`.
+    """
+    from ..tools.temporal import fixed_or_equal_bins  # noqa: PLC0415
+
+    return fixed_or_equal_bins(
+        str(t.start), str(t.end), stride_days=_FRAME_STRIDE_DAYS, max_bins=_MAX_FRAMES
+    )
+
+
+def _expand_auto_mode(mode: str, t: TemporalSpec) -> str:
+    """Expand ``"auto"`` to ``"single"``/``"multi"`` from the window.
+
+    Resolves to ``"multi"`` when the range spans ≥2 monthly frames (it genuinely
+    covers multiple time steps), else ``"single"`` — a single frame where multi
+    would add nothing but extra GEE fetches. ``"single"``/``"multi"`` pass through.
+    """
+    if mode != "auto":
+        return mode
+    bins, _ = _temporal_bins(t)
+    return "multi" if len(bins) >= 2 else "single"
+
+
+def _explicit_n_frames(model_config: dict[str, Any] | None) -> int | None:
+    """Manual frame-count override (escape hatch): model_config > env > None.
+
+    When set, the fixed count is used as-is and the adaptive monthly policy is
+    bypassed — the caller takes responsibility for the spacing.
+    """
+    v = model_config_value(model_config, "n_frames")
+    if v is not None:
+        return max(1, int(v))
+    env = os.environ.get("RS_EMBED_GALILEO_FRAMES", "").strip()
+    if env:
+        return max(1, int(env))
+    return None
+
+
+def _temporal_sampling_meta(bins: tuple[tuple[str, str], ...], stretched: bool) -> dict[str, Any]:
+    """Pure metadata describing the temporal binning mode (no side effects)."""
+    meta: dict[str, Any] = {
+        "temporal_sampling": "equal_divided" if stretched else "fixed_stride",
+        "temporal_spacing_stretched": bool(stretched),
+    }
+    if stretched and bins:
+        span = (date.fromisoformat(bins[-1][1]) - date.fromisoformat(bins[0][0])).days
+        meta["effective_stride_days"] = int(round(span / max(1, len(bins))))
+    return meta
+
+
+def _resolve_frame_plan(
+    model_config: dict[str, Any] | None, t: TemporalSpec
+) -> tuple[int, dict[str, Any]]:
+    """Resolve ``(n_frames, sampling_meta)`` for the requested window.
+
+    - ``temporal_mode`` ``single`` (or ``auto`` → single for a sub-month window)
+      → ``T=1``.
+    - explicit ``RS_EMBED_GALILEO_FRAMES`` / ``model_config['n_frames']`` → that
+      fixed count (manual escape hatch; bypasses the adaptive monthly policy).
+    - otherwise → window-adaptive count from :func:`_temporal_bins` (≤12), with a
+      ``stretched`` flag for windows beyond the 12-month capacity.
+    """
+    mode = _expand_auto_mode(_resolve_temporal_mode(model_config), t)
+    if mode == "single":
+        return 1, {
+            "temporal_mode": "single",
+            "temporal_sampling": "single",
+            "temporal_spacing_stretched": False,
+        }
+    explicit = _explicit_n_frames(model_config)
+    if explicit is not None:
+        return explicit, {
+            "temporal_mode": "multi",
+            "temporal_sampling": "manual",
+            "temporal_spacing_stretched": False,
+        }
+    bins, stretched = _temporal_bins(t)
+    meta = {"temporal_mode": "multi", **_temporal_sampling_meta(bins, stretched)}
+    return len(bins), meta
+
+
+def _warn_stretched_sampling(sampling_meta: dict[str, Any]) -> None:
+    """Emit a single warning when equal-division (stretched) sampling was used."""
+    if not sampling_meta.get("temporal_spacing_stretched"):
+        return
+    warnings.warn(
+        f"Galileo window exceeds {_MAX_FRAMES} × {_FRAME_STRIDE_DAYS}-day frames; "
+        f"switched to equal division (~{sampling_meta.get('effective_stride_days')}d apart) "
+        "to cover the whole window instead of dropping the trailing time. Frame spacing is "
+        "outside Galileo's monthly training cadence, so embeddings are extrapolated — "
+        "narrow the temporal window to stay in-distribution.",
+        UserWarning,
+        stacklevel=2,
+    )
+
+
 @lru_cache(maxsize=6)
 def _load_galileo_cached(
     *,
@@ -697,16 +840,40 @@ class GalileoEmbedder(EmbedderBase):
                 "model_size": self.DEFAULT_MODEL_SIZE,
                 "patch_size": self.DEFAULT_PATCH,
                 "image_size": self.DEFAULT_IMAGE_SIZE,
-                "n_frames": self.DEFAULT_FRAMES,
+                "temporal_mode": _DEFAULT_TEMPORAL_MODE,
                 "scale_m": self.input_spec.scale_m,
                 "cloudy_pct": self.input_spec.cloudy_pct,
                 "composite": self.input_spec.composite,
                 "normalization": "none",
             },
+            "model_config": {
+                "temporal_mode": {
+                    "type": "string",
+                    "default": _DEFAULT_TEMPORAL_MODE,
+                    "choices": ["auto", "single", "multi"],
+                    "description": (
+                        "auto (default): single when the range spans one monthly frame, "
+                        "else multi (≥2 frames). single: one composite over the whole range "
+                        f"(T=1). multi: ~{_FRAME_STRIDE_DAYS}-day frames (max {_MAX_FRAMES}, "
+                        "mirroring Galileo's monthly cadence; longer windows are equal-divided "
+                        f"into {_MAX_FRAMES} frames with a warning)."
+                    ),
+                },
+                "n_frames": {
+                    "type": "int",
+                    "default": None,
+                    "description": (
+                        "Manual frame-count override (escape hatch). When set, this fixed "
+                        "count is used as-is and the adaptive monthly policy is bypassed. "
+                        "Also settable via RS_EMBED_GALILEO_FRAMES."
+                    ),
+                },
+            },
             "notes": [
                 "Loads Galileo Encoder from a vendored local runtime.",
                 "Defaults to Hugging Face model snapshots under nasaharvest/galileo/models/<size>/.",
-                "Builds T-frame S2 series by splitting TemporalSpec.range into equal sub-windows.",
+                "Frame count is window-adaptive (~30-day frames, max 12) mirroring Galileo's "
+                "monthly pretraining cadence; sub-month windows collapse to a single frame.",
                 "Uses Sentinel-2 10 bands; pooled output averages visible Galileo tokens.",
             ],
         }
@@ -725,6 +892,44 @@ class GalileoEmbedder(EmbedderBase):
         )
         return max(1, min(int(n_items), v))
 
+    def fetch_input(
+        self,
+        provider: ProviderBase,
+        *,
+        spatial: SpatialSpec,
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec,
+        temporal_mode: str | None = None,
+    ) -> FetchResult | None:
+        """Fetch a window-adaptive S2 time series as ``[T,C,H,W]``.
+
+        Overrides the generic base prefetch (which would fetch a fixed frame
+        count) so the API/export prefetch path uses the same monthly-adaptive
+        frame count as :meth:`get_embedding`. ``model_config`` is not available
+        here, so the mode falls back to ``RS_EMBED_GALILEO_TEMPORAL_MODE`` /
+        ``"auto"`` and ``RS_EMBED_GALILEO_FRAMES`` for a manual override.
+        """
+        ss = sensor or self._default_sensor()
+        t = temporal_to_range(temporal)
+        if temporal_mode is not None:
+            # Honor an explicit mode by routing it through the same resolver.
+            cfg: dict[str, Any] | None = {"temporal_mode": _normalize_temporal_mode(temporal_mode)}
+        else:
+            cfg = None
+        n_frames, sampling_meta = _resolve_frame_plan(cfg, t)
+        _warn_stretched_sampling(sampling_meta)
+        raw_tchw = _fetch_s2_10_raw_tchw(
+            provider,
+            spatial,
+            t,
+            n_frames=n_frames,
+            scale_m=int(ss.scale_m),
+            cloudy_pct=int(ss.cloudy_pct),
+            composite=str(ss.composite),
+            fill_value=float(ss.fill_value),
+        )
+        return FetchResult(data=raw_tchw, meta=dict(sampling_meta))
+
     def get_embedding(
         self,
         *,
@@ -735,6 +940,7 @@ class GalileoEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        model_config: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("galileo expects a provider backend (or 'auto').")
@@ -757,7 +963,6 @@ class GalileoEmbedder(EmbedderBase):
 
         image_size = int(os.environ.get("RS_EMBED_GALILEO_IMG", str(self.DEFAULT_IMAGE_SIZE)))
         patch_size = int(os.environ.get("RS_EMBED_GALILEO_PATCH", str(self.DEFAULT_PATCH)))
-        n_frames = max(1, int(os.environ.get("RS_EMBED_GALILEO_FRAMES", str(self.DEFAULT_FRAMES))))
         norm_mode = os.environ.get("RS_EMBED_GALILEO_NORM", "none").strip()
         add_layernorm = os.environ.get("RS_EMBED_GALILEO_ADD_LN", "1").strip() not in {
             "0",
@@ -766,8 +971,13 @@ class GalileoEmbedder(EmbedderBase):
         }
         month_override = os.environ.get("RS_EMBED_GALILEO_MONTH")
 
+        # Window-adaptive frame count (~30-day frames, max 12), mirroring Galileo's
+        # monthly pretraining cadence. See _resolve_frame_plan / _temporal_bins.
+        n_frames, sampling_meta = _resolve_frame_plan(model_config, t)
+
         if input_chw is None:
             provider = self._get_provider(backend)
+            _warn_stretched_sampling(sampling_meta)  # warn only when we actually fetch
             raw_tchw = _fetch_s2_10_raw_tchw(
                 provider,
                 spatial,
@@ -779,10 +989,13 @@ class GalileoEmbedder(EmbedderBase):
                 fill_value=float(ss.fill_value),
             )
         else:
+            # Preserve a provided time series' own T; repeat a single CHW to the plan.
+            raw = np.asarray(input_chw)
+            coerce_frames = int(raw.shape[0]) if raw.ndim == 4 else n_frames
             raw_tchw = _coerce_input_to_tchw(
                 input_chw,
                 expected_channels=10,
-                n_frames=n_frames,
+                n_frames=coerce_frames,
                 model_name="galileo",
             )
 
@@ -845,6 +1058,7 @@ class GalileoEmbedder(EmbedderBase):
                 "normalization": str(norm_mode),
                 "include_ndvi": False,
                 "device": dev,
+                **sampling_meta,
                 **lmeta,
                 **pmeta,
                 **fmeta,
@@ -890,6 +1104,7 @@ class GalileoEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -903,7 +1118,9 @@ class GalileoEmbedder(EmbedderBase):
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
         provider = self._get_provider(backend)
-        n_frames = max(1, int(os.environ.get("RS_EMBED_GALILEO_FRAMES", str(self.DEFAULT_FRAMES))))
+        # Window-adaptive frame count shared by all points (same window); warn once.
+        n_frames, sampling_meta = _resolve_frame_plan(model_config, t)
+        _warn_stretched_sampling(sampling_meta)
 
         n = len(spatials)
         prefetched_raw: list[np.ndarray | None] = [None] * n
@@ -947,6 +1164,7 @@ class GalileoEmbedder(EmbedderBase):
                     backend=backend,
                     device=device,
                     input_chw=raw,
+                    model_config=model_config,
                 )
             )
         return out
