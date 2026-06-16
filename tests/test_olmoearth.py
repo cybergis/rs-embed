@@ -363,6 +363,7 @@ def test_get_embedding_pooled_returns_embedding(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out, Embedding)
@@ -401,6 +402,7 @@ def test_get_embedding_grid_returns_dataarray(monkeypatch):
         sensor=None,
         output=OutputSpec.grid(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out, Embedding)
@@ -436,7 +438,7 @@ def test_get_embedding_uses_model_config_variant(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="gee",
-        model_config={"variant": "base"},
+        model_config={"variant": "base", "temporal_mode": "single"},
     )
 
     assert seen["variant"] == "base"
@@ -466,6 +468,7 @@ def test_get_embedding_accepts_input_chw(monkeypatch):
         output=OutputSpec.pooled(),
         backend="gee",
         input_chw=x_chw,
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out, Embedding)
@@ -487,8 +490,8 @@ def test_get_embedding_input_tchw_meta_reports_effective_mode(monkeypatch):
         lambda variant, device: (object(), {"hf_repo": "allenai/OlmoEarth-v1_1-Tiny"}, "cpu"),
     )
 
-    # TCHW override while temporal_mode resolves to the default "single":
-    # meta must report the layout actually used, plus the requested mode.
+    # TCHW override while temporal_mode is forced to "single":
+    # meta must report the layout actually used (multi), plus the requested mode.
     x_tchw = np.full((2, 12, 64, 64), 2000.0, dtype=np.float32)
     out = emb.get_embedding(
         spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
@@ -497,6 +500,7 @@ def test_get_embedding_input_tchw_meta_reports_effective_mode(monkeypatch):
         output=OutputSpec.pooled(),
         backend="gee",
         input_chw=x_tchw,
+        model_config={"temporal_mode": "single"},
     )
 
     assert out.meta["temporal_mode"] == "multi"
@@ -547,6 +551,7 @@ def test_fetch_input_s1_routes_to_s1_helper_and_keeps_db(monkeypatch):
         spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
         temporal=TemporalSpec.year(2022),
         sensor=sensor,
+        temporal_mode="single",
     )
     assert fr is not None
     # dB collection by default → values pass through unconverted
@@ -573,6 +578,7 @@ def test_fetch_input_s1_converts_linear_to_db(monkeypatch):
         spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
         temporal=TemporalSpec.year(2022),
         sensor=sensor,
+        temporal_mode="single",
     )
     assert fr is not None
     np.testing.assert_allclose(fr.data, -10.0, atol=1e-4)  # 10·log10(0.1)
@@ -610,6 +616,7 @@ def test_get_embedding_s1_pooled(monkeypatch):
         sensor=_s1_sensor(),
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out, Embedding)
@@ -648,6 +655,7 @@ def test_get_embedding_s1_grid(monkeypatch):
         sensor=_s1_sensor(),
         output=OutputSpec.grid(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out.data, xr.DataArray)
@@ -754,6 +762,7 @@ def test_get_embeddings_batch_prefetch_and_dispatch(monkeypatch):
         temporal=TemporalSpec.year(2022),
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert len(out) == 3
@@ -883,6 +892,7 @@ def test_embedding_meta_has_required_fields(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     meta = out.meta
@@ -917,7 +927,7 @@ def test_split_date_range_fixed_days_strides_and_truncates():
 
 
 def test_resolve_temporal_mode_sources(monkeypatch):
-    assert oe._resolve_temporal_mode(None) == "single"
+    assert oe._resolve_temporal_mode(None) == "auto"  # new default
     assert oe._resolve_temporal_mode({"temporal_mode": "multi"}) == "multi"
     monkeypatch.setenv("RS_EMBED_OLMOEARTH_TEMPORAL_MODE", "multi")
     assert oe._resolve_temporal_mode(None) == "multi"
@@ -926,10 +936,66 @@ def test_resolve_temporal_mode_sources(monkeypatch):
         oe._resolve_temporal_mode({"temporal_mode": "monthly"})
 
 
-def test_temporal_bins_caps_at_12():
-    bins = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2024-01-01"))
+def test_expand_auto_mode_picks_by_window():
+    def eff(start, end, cfg=None):
+        t = TemporalSpec.range(start, end)
+        return oe._expand_auto_mode(oe._resolve_temporal_mode(cfg), t)
+
+    assert eff("2022-06-01", "2022-06-15") == "single"  # 1 bin -> single
+    assert eff("2022-06-01", "2022-09-01") == "multi"  # >=2 bins -> multi
+    assert eff("2022-06-01", "2025-06-01") == "multi"  # long window -> multi (stretched)
+    # explicit modes always pass through, regardless of window
+    assert eff("2022-06-01", "2025-06-01", {"temporal_mode": "single"}) == "single"
+    assert eff("2022-06-01", "2022-06-10", {"temporal_mode": "multi"}) == "multi"
+
+
+def test_temporal_bins_one_year_stays_fixed_monthly():
+    bins, stretched = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2023-01-01"))
     assert len(bins) == 12
-    assert bins[0] == ("2022-01-01", "2022-01-31")
+    assert stretched is False
+    assert bins[0] == ("2022-01-01", "2022-01-31")  # in-distribution 30-day cadence
+
+
+def test_temporal_bins_long_window_equal_divides_to_cover_whole_range():
+    # Windows beyond ~12 months no longer drop the trailing time: they are
+    # equal-divided into 12 frames that span the whole window (stretched).
+    bins, stretched = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2024-01-01"))
+    assert len(bins) == 12
+    assert stretched is True
+    assert bins[0][0] == "2022-01-01"
+    assert bins[-1][1] == "2024-01-01"  # full 2-year window covered, not just year 1
+
+
+def test_fixed_or_equal_bins_thresholds():
+    from rs_embed.tools.temporal import fixed_or_equal_bins
+
+    # short / exactly-fitting windows keep the fixed cadence
+    _, s_3mo = fixed_or_equal_bins("2022-01-01", "2022-04-01", stride_days=30, max_bins=12)
+    _, s_1yr = fixed_or_equal_bins("2022-01-01", "2023-01-01", stride_days=30, max_bins=12)
+    assert s_3mo is False and s_1yr is False  # 5-day remainder is negligible
+    # > one full bin of trailing time would be dropped -> equal-divide instead
+    bins_2yr, s_2yr = fixed_or_equal_bins("2022-01-01", "2024-01-01", stride_days=30, max_bins=12)
+    assert s_2yr is True and bins_2yr[-1][1] == "2024-01-01"
+
+
+def test_temporal_sampling_meta_and_warning():
+    bins, stretched = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2024-01-01"))
+    meta = oe._temporal_sampling_meta(bins, stretched)
+    assert meta["temporal_sampling"] == "equal_divided"
+    assert meta["temporal_spacing_stretched"] is True
+    assert meta["effective_stride_days"] > 30
+    with pytest.warns(UserWarning, match="equal division"):
+        oe._warn_stretched_sampling(meta)
+
+    # fixed-stride (in-distribution) -> no flag, no warning
+    fbins, fstretched = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2023-01-01"))
+    fmeta = oe._temporal_sampling_meta(fbins, fstretched)
+    assert fmeta["temporal_sampling"] == "fixed_stride"
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # would raise if any warning fired
+        oe._warn_stretched_sampling(fmeta)
 
 
 def test_prepare_frames_drops_nan_frames_and_aligns_timestamps():

@@ -86,6 +86,37 @@ def split_date_range_fixed_days(
     return tuple(out)
 
 
+def fixed_or_equal_bins(
+    start: str,
+    end: str,
+    *,
+    stride_days: int,
+    max_bins: int,
+) -> tuple[tuple[tuple[str, str], ...], bool]:
+    """Fixed-stride bins, falling back to equal division when the window is too long.
+
+    For windows that fit within ``max_bins`` fixed ``stride_days``-long bins, returns
+    those bins unchanged (:func:`split_date_range_fixed_days`). For longer windows —
+    which would otherwise drop the trailing time — the window is instead split into
+    ``max_bins`` *equal* bins (:func:`split_date_range`) so the **whole** period stays
+    covered, at the cost of a wider-than-``stride_days`` cadence.
+
+    Returns ``(bins, stretched)`` where ``stretched`` is True iff equal division was
+    used (i.e. the cadence left the fixed-stride regime); callers should surface that
+    to the user. Combines the two existing splitters so the policy lives in one place.
+
+    The switch fires only when capping the fixed-stride bins would drop **at least one
+    full ``stride_days``** of trailing time. A window that merely overshoots by a
+    partial bin (e.g. 365 days vs. 12×30) keeps the fixed monthly cadence — the ~5-day
+    remainder is negligible and not worth leaving the in-distribution regime.
+    """
+    fixed = split_date_range_fixed_days(start, end, stride_days=stride_days, max_bins=int(max_bins))
+    dropped_days = (date.fromisoformat(str(end)) - date.fromisoformat(fixed[-1][1])).days
+    if dropped_days < int(stride_days):
+        return fixed, False
+    return split_date_range(start, end, int(max_bins)), True
+
+
 def midpoint_date(start: str, end: str) -> str:
     start_dt = datetime.fromisoformat(str(start))
     end_dt = datetime.fromisoformat(str(end))
