@@ -2570,8 +2570,8 @@ converts to dB via <code>10·log10</code> before normalization. <code>input_chw<
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
-    TEMP["Temporal range"] --&gt; BINS["Build 30-day bins\nanchored at range start\n(max 12)"]
-    BINS --&gt; FETCH["Fetch one S2 composite\nper 30-day bin\nraw DN, C=12"]
+    TEMP["Temporal range"] --&gt; BINS["Build bins:\n30-day fixed (≤12 mo)\nor equal-divide into 12\n(longer windows, flagged)"]
+    BINS --&gt; FETCH["Fetch one S2 composite\nper bin\nraw DN, C=12"]
     FETCH --&gt; DROP["Drop empty-bin frames\nkeep aligned timestamps"]
     DROP --&gt; NORM["Per-frame per-band mean±2σ\nnormalization"]
     NORM --&gt; RESIZE["Resize each frame to image_size\n(default 256×256)"]
@@ -2708,22 +2708,44 @@ v1.1 uses a linear patch embedding (<code>use_linear_patch_embed=True</code>) th
 </thead>
 <tbody>
 <tr>
-<td><code>single</code> (default)</td>
+<td><code>auto</code> (default)</td>
+<td>Picks from the window: <code>single</code> when the range spans one temporal bin (≤ ~1 month), else <code>multi</code> (≥2 bins).</td>
+</tr>
+<tr>
+<td><code>single</code></td>
 <td>One composite over the whole temporal range (<code>T=1</code>), timestamp = range midpoint</td>
 </tr>
 <tr>
 <td><code>multi</code></td>
-<td>One composite per <strong>30-day bin</strong> anchored at the range start, up to <strong>12 frames</strong></td>
+<td>One composite per <strong>30-day bin</strong> anchored at the range start, up to <strong>12 frames</strong> (longer windows are equal-divided into 12 — see below)</td>
 </tr>
 </tbody>
 </table>
+<div class="admonition warning">
+<p class="admonition-title"><code>auto</code> default ⇒ multi-month ranges fetch up to 12 composites</p>
+<p>With the default <code>auto</code>, any range longer than ~1 month resolves to <code>multi</code>,
+which fetches <strong>one S2/S1 composite per bin (up to 12)</strong> instead of one. For
+large <code>export_batch</code> runs this is up to ~12× the GEE fetches and time. Pass
+<code>temporal_mode="single"</code> to force a single composite when that cost matters.</p>
+</div>
 <p><code>multi</code> mirrors how OlmoEarth was pretrained: the official pipeline slices each
 sample's year window into fixed 30-day bins (<code>duration=30d</code> strides in the
 rslearn config — <em>not</em> calendar months), and feeds each frame's start date as
 its <code>(day, month, year)</code> timestamp. The adapter reproduces exactly that:</p>
 <ul>
 <li>Bins: <code>[start, start+30d), [start+30d, start+60d), …</code>, last bin truncated at
-  the range end, capped at 12 frames (ranges longer than ~360 days are truncated).</li>
+  the range end, up to 12 frames.</li>
+<li><strong>Windows longer than ~12 months are not truncated.</strong> Earlier behavior kept
+  only the first 12 monthly bins and silently dropped the rest; the adapter now
+  detects this (when capping would drop ≥ one full 30-day bin) and instead
+  <strong>equal-divides the whole window into 12 frames</strong> so the entire period is
+  represented. Because the frames are then wider apart than OlmoEarth's monthly
+  training cadence, this is flagged: <code>meta["temporal_sampling"] == "equal_divided"</code>,
+  <code>meta["temporal_spacing_stretched"] == True</code>, <code>meta["effective_stride_days"]</code>
+  records the cadence, and a <code>UserWarning</code> is emitted. Embeddings from such
+  windows are extrapolated — narrow the window to stay in-distribution. The
+  fixed-stride vs. equal-division decision lives in
+  <code>rs_embed.tools.temporal.fixed_or_equal_bins</code>.</li>
 <li>Per-frame timestamp = bin start date (matching the official pipeline).</li>
 <li>Bins with no imagery are <strong>dropped from the sequence</strong> (the encoder runs with
   <code>fast_pass=True</code>, which ignores attention masks, so empty frames cannot be
@@ -2785,8 +2807,8 @@ For defaults (256, patch_size=4): <code>64 × 64</code> grid.</p>
 </tr>
 <tr>
 <td><code>RS_EMBED_OLMOEARTH_TEMPORAL_MODE</code></td>
-<td><code>single</code></td>
-<td>Default temporal mode (<code>single</code> / <code>multi</code>)</td>
+<td><code>auto</code></td>
+<td>Default temporal mode (<code>auto</code> / <code>single</code> / <code>multi</code>)</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_OLMOEARTH_FETCH_WORKERS</code></td>
