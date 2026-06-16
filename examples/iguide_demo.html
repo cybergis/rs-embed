@@ -1,0 +1,318 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rs-embed — Any Model, Any Place, Any Time · SIGSPATIAL '26 Demo</title>
+<!--
+  Standalone, self-contained landing page for the rs-embed interactive demo.
+  No external CSS/JS/CDN — safe to host anywhere (incl. the I-GUIDE Platform).
+  Companion to examples/iguide_demo.ipynb and the SIGSPATIAL '26 demo paper.
+
+  TODO before the booth:
+   - Replace IGUIDE_NOTEBOOK_URL below with the deployed I-GUIDE notebook link.
+   - Drop screenshots/GIFs of each scenario into the .scenario figures
+     (search "screenshot placeholder").
+-->
+<style>
+  :root{
+    --citrus:#f5a623; --leaf:#2e7d32; --ink:#1a2027; --muted:#5b6770;
+    --sky:#1565c0; --bg:#fbfaf7; --card:#ffffff; --line:#e7e2d8;
+  }
+  *{box-sizing:border-box}
+  html{scroll-behavior:smooth}
+  body{margin:0;font-family:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,Helvetica,Arial,sans-serif;
+       color:var(--ink);background:var(--bg);line-height:1.55}
+  a{color:var(--sky);text-decoration:none}
+  a:hover{text-decoration:underline}
+  .wrap{max-width:1080px;margin:0 auto;padding:0 22px}
+  code,pre{font-family:"IBM Plex Mono",ui-monospace,SFMono-Regular,Menlo,monospace}
+
+  /* hero */
+  header.hero{background:
+      radial-gradient(900px 420px at 82% -8%, rgba(245,166,35,.20), transparent 60%),
+      linear-gradient(180deg,#ffffff, var(--bg));
+      border-bottom:1px solid var(--line);padding:54px 0 40px}
+  .badge{display:inline-block;font-size:13px;font-weight:600;letter-spacing:.04em;
+      color:var(--leaf);background:rgba(46,125,50,.10);border:1px solid rgba(46,125,50,.25);
+      padding:5px 12px;border-radius:999px;margin-bottom:18px}
+  h1{font-size:clamp(30px,5vw,48px);line-height:1.08;margin:.1em 0 .25em}
+  h1 .sat{font-size:.8em}
+  .tag{font-size:clamp(17px,2.4vw,22px);color:var(--muted);font-weight:500;margin:0 0 8px}
+  .oneliner{margin:22px 0 26px;background:#0f1720;border-radius:12px;padding:16px 18px;overflow:auto}
+  .oneliner pre{margin:0;color:#e8eef6;font-size:15px}
+  .oneliner .k{color:#7ee0c0}.oneliner .s{color:#f5a623}.oneliner .c{color:#7f8c99}
+  .cta{display:flex;flex-wrap:wrap;gap:12px;margin-top:8px}
+  .btn{display:inline-flex;align-items:center;gap:8px;font-weight:600;font-size:15px;
+      padding:11px 18px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+  .btn.primary{background:var(--leaf);border-color:var(--leaf);color:#fff}
+  .btn.citrus{background:var(--citrus);border-color:var(--citrus);color:#3a2a00}
+  .btn:hover{text-decoration:none;filter:brightness(.97)}
+
+  section{padding:46px 0}
+  section h2{font-size:clamp(22px,3vw,30px);margin:0 0 6px}
+  section .lead{color:var(--muted);max-width:62ch;margin:0 0 26px}
+
+  /* before / after */
+  .ba{display:grid;grid-template-columns:1fr 1fr;gap:18px}
+  .ba .col{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .ba .col.before{border-left:5px solid #c62828}
+  .ba .col.after{border-left:5px solid var(--leaf)}
+  .ba h3{margin:.1em 0 .5em;font-size:18px}
+  .ba ul{margin:.2em 0;padding-left:18px;color:var(--muted)}
+  .ba .stat{font-size:13px;font-weight:700;letter-spacing:.03em;margin-top:12px;
+      display:inline-block;padding:4px 10px;border-radius:8px}
+  .before .stat{background:rgba(198,40,40,.10);color:#b3261e}
+  .after .stat{background:rgba(46,125,50,.12);color:var(--leaf)}
+
+  /* scenario cards */
+  .grid{display:grid;grid-template-columns:repeat(2,1fr);gap:20px}
+  .scenario{background:var(--card);border:1px solid var(--line);border-radius:16px;overflow:hidden;
+      display:flex;flex-direction:column}
+  .scenario .fig{background:#f3efe6;border-bottom:1px solid var(--line);aspect-ratio:16/9;
+      display:flex;align-items:center;justify-content:center}
+  .scenario .body{padding:18px 20px 22px}
+  .scenario .pillar{font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--citrus)}
+  .scenario h3{margin:4px 0 8px;font-size:20px}
+  .scenario p{margin:0;color:var(--muted);font-size:15px}
+  .scenario .do{margin-top:12px;font-size:14px;color:var(--ink)}
+  .scenario .do b{color:var(--leaf)}
+
+  /* personas */
+  .personas{display:grid;grid-template-columns:repeat(2,1fr);gap:18px}
+  .persona{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:20px}
+  .persona .who{font-weight:700;font-size:16px}
+  .persona p{color:var(--muted);margin:.4em 0 0}
+
+  footer{border-top:1px solid var(--line);padding:34px 0;color:var(--muted);font-size:14px;background:#fff}
+  .cite{background:#0f1720;color:#cfe;border-radius:10px;padding:14px 16px;overflow:auto;font-size:12.5px}
+  @media(max-width:760px){.ba,.grid,.personas{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+
+<header class="hero">
+  <div class="wrap">
+    <span class="badge">🍊 SIGSPATIAL '26 · UC Riverside · Demo</span>
+    <h1><span class="sat">🛰️</span> rs-embed</h1>
+    <p class="tag"><b>Any&nbsp;Model · Any&nbsp;Place · Any&nbsp;Time.</b> Remote-sensing
+       foundation-model embeddings, on demand.</p>
+    <p style="max-width:64ch;color:var(--muted);margin:.2em 0 0">
+      Eighteen state-of-the-art satellite foundation models, one interface. Give it
+      <em>where</em>, <em>when</em>, and <em>which model</em> — get an embedding back.
+      This demo tells the story through <b>Riverside citrus</b>, the crop that built this region.
+    </p>
+
+    <div class="oneliner"><pre><span class="c"># one ROI · one date window · one model → one embedding</span>
+emb = <span class="k">get_embedding</span>(<span class="s">"prithvi"</span>, spatial=…, temporal=…, output=…)</pre></div>
+
+    <div class="cta">
+      <a class="btn citrus" href="IGUIDE_NOTEBOOK_URL">▶ Run it live on I-GUIDE</a>
+      <a class="btn primary" href="https://github.com/cybergis/rs-embed/blob/main/examples/iguide_demo.ipynb">Open the notebook</a>
+      <a class="btn" href="https://cybergis.github.io/rs-embed/">Docs</a>
+      <a class="btn" href="https://arxiv.org/abs/2602.23678">Paper</a>
+      <a class="btn" href="https://github.com/cybergis/rs-embed">GitHub</a>
+    </div>
+  </div>
+</header>
+
+<!-- BEFORE / AFTER -->
+<section id="why">
+  <div class="wrap">
+    <h2>Why it matters</h2>
+    <p class="lead">Every satellite foundation model ships its own incompatible pipeline.
+       Just <em>comparing</em> a few of them turns into weeks of brittle glue code — and the
+       bugs are <strong>silent</strong>.</p>
+    <div class="ba">
+      <div class="col before">
+        <h3>😖 The old way — per model</h3>
+        <ul>
+          <li>Authenticate &amp; query Google Earth Engine</li>
+          <li>Pick the right bands, <em>in the right order</em></li>
+          <li>Apply the model's exact normalization</li>
+          <li>Download checkpoints, write the forward pass</li>
+          <li>Repeat for every model · hope nothing is mis-wired</li>
+        </ul>
+        <span class="stat">≈ weeks per model · silent correctness bugs</span>
+      </div>
+      <div class="col after">
+        <h3>✅ With rs-embed</h3>
+        <ul>
+          <li>One unified <code>ROI → embedding</code> call</li>
+          <li>Swap models by changing a single string</li>
+          <li>Band order &amp; normalization encoded once, correctly</li>
+          <li>Fair benchmarking is the default, not extra work</li>
+          <li>Reproducible exports with an audited manifest</li>
+        </ul>
+        <span class="stat">1 line per model · fair, reproducible</span>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- SCENARIOS -->
+<section id="scenarios" style="background:#fff;border-top:1px solid var(--line);border-bottom:1px solid var(--line)">
+  <div class="wrap">
+    <h2>The demonstration — four interactive scenarios</h2>
+    <p class="lead">A Riverside agronomist (no ML background) drives the whole thing from a
+       browser. Each scenario is one interactive module in the live notebook.</p>
+    <div class="grid">
+
+      <article class="scenario">
+        <div class="fig">
+          <!-- screenshot placeholder: Earth's Twins world map -->
+          <svg width="92%" height="82%" viewBox="0 0 320 170" role="img" aria-label="Earth's Twins">
+            <rect width="320" height="170" fill="#eaf1f7"/>
+            <ellipse cx="160" cy="90" rx="150" ry="64" fill="#dbe7f0"/>
+            <circle cx="70" cy="78" r="6" fill="#d62728"/><text x="70" y="68" font-size="9" text-anchor="middle" fill="#444">Riverside</text>
+            <circle cx="170" cy="64" r="5" fill="#1f77b4"/><circle cx="196" cy="98" r="5" fill="#1f77b4"/>
+            <circle cx="232" cy="116" r="5" fill="#1f77b4"/><circle cx="120" cy="120" r="5" fill="#1f77b4"/>
+            <line x1="70" y1="78" x2="170" y2="64" stroke="#1f77b4" stroke-dasharray="3 3"/>
+            <line x1="70" y1="78" x2="196" y2="98" stroke="#1f77b4" stroke-dasharray="3 3"/>
+          </svg>
+        </div>
+        <div class="body">
+          <div class="pillar">🌍 any place</div>
+          <h3>Earth's Twins</h3>
+          <p>Click anywhere on Earth and rs-embed finds its look-alikes worldwide by embedding
+             similarity. A Riverside grove's twins? The world's other citrus belts.</p>
+          <div class="do">You do: <b>click a point</b> → see its 5 global twins light up.</div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="fig">
+          <!-- screenshot placeholder: Time Machine change curve -->
+          <svg width="92%" height="82%" viewBox="0 0 320 170" role="img" aria-label="Time Machine">
+            <rect width="320" height="170" fill="#f3efe6"/>
+            <polyline points="20,130 60,128 100,126 140,124 180,70 220,58 260,60 300,55"
+                      fill="none" stroke="#d62728" stroke-width="3"/>
+            <circle cx="180" cy="70" r="5" fill="#d62728"/>
+            <text x="180" y="58" font-size="9" text-anchor="middle" fill="#b3261e">change!</text>
+            <line x1="20" y1="145" x2="300" y2="145" stroke="#bbb"/>
+            <text x="20" y="158" font-size="9" fill="#777">2017</text>
+            <text x="285" y="158" font-size="9" fill="#777">2024</text>
+          </svg>
+        </div>
+        <div class="body">
+          <div class="pillar">⏳ any time</div>
+          <h3>Satellite Time Machine</h3>
+          <p>Slide through 2017→2024. The embedding "change curve" spikes exactly when the
+             ground changed — no labels, no change-detection model. Local pick: the shrinking Salton Sea.</p>
+          <div class="do">You do: <b>drag the year slider</b> → watch the place transform.</div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="fig">
+          <!-- screenshot placeholder: KMeans land-cover -->
+          <svg width="92%" height="82%" viewBox="0 0 320 170" role="img" aria-label="Instant Land-Cover">
+            <rect width="320" height="170" fill="#fff"/>
+            <g>
+              <rect x="24" y="20" width="130" height="130" fill="#cde3cf"/>
+              <rect x="24" y="20" width="60" height="70" fill="#9ec6a3"/>
+              <rect x="100" y="90" width="54" height="60" fill="#d9c08a"/>
+              <text x="89" y="166" font-size="9" text-anchor="middle" fill="#777">satellite</text>
+              <rect x="172" y="20" width="130" height="130" fill="#2e7d32"/>
+              <rect x="172" y="20" width="60" height="70" fill="#1565c0"/>
+              <rect x="248" y="90" width="54" height="60" fill="#f5a623"/>
+              <text x="237" y="166" font-size="9" text-anchor="middle" fill="#777">embeddings → KMeans</text>
+            </g>
+          </svg>
+        </div>
+        <div class="body">
+          <div class="pillar">🎨 any model</div>
+          <h3>Instant Land-Cover</h3>
+          <p>Embeddings are features. Cluster a region's grid and citrus, urban, and desert fall
+             out with <em>no labels</em>. Swap the model and watch the map sharpen.</p>
+          <div class="do">You do: <b>draw a box, pick a model</b> → instant segmentation.</div>
+        </div>
+      </article>
+
+      <article class="scenario">
+        <div class="fig">
+          <!-- screenshot placeholder: Model Showdown leaderboard -->
+          <svg width="92%" height="82%" viewBox="0 0 320 170" role="img" aria-label="Model Showdown">
+            <rect width="320" height="170" fill="#f3efe6"/>
+            <g font-size="10" fill="#333">
+              <text x="14" y="34">terrafm</text><rect x="86" y="25" width="200" height="14" fill="#2e7d32"/>
+              <text x="14" y="62">dofa</text><rect x="86" y="53" width="168" height="14" fill="#3a9d3f"/>
+              <text x="14" y="90">satmae</text><rect x="86" y="81" width="150" height="14" fill="#5cb85c"/>
+              <text x="14" y="118">remoteclip</text><rect x="86" y="109" width="120" height="14" fill="#86c98a"/>
+            </g>
+            <text x="160" y="150" font-size="10" text-anchor="middle" fill="#777">macro-F1 · citrus mapping</text>
+          </svg>
+        </div>
+        <div class="body">
+          <div class="pillar">🏆 fair comparison</div>
+          <h3>Model Showdown</h3>
+          <p>The payoff: which model maps citrus best? Imagery is fetched <em>once and shared</em>
+             across models, every model scored on the <em>same</em> split — so only the model differs.</p>
+          <div class="do">You do: <b>pick models</b> → a fair, ranked leaderboard.</div>
+        </div>
+      </article>
+
+    </div>
+  </div>
+</section>
+
+<!-- PERSONAS -->
+<section id="who">
+  <div class="wrap">
+    <h2>Who it's for</h2>
+    <p class="lead">rs-embed turns the hard 90% — imagery + per-model preprocessing — into a
+       function call, so two very different people both get unblocked.</p>
+    <div class="personas">
+      <div class="persona">
+        <div class="who">🌾 The domain scientist</div>
+        <p>An agronomist, ecologist, or economist who isn't a deep-learning engineer. They get
+           state-of-the-art satellite features without touching Earth Engine quirks, band orders,
+           or checkpoints — and spend their time on <em>their</em> question.</p>
+      </div>
+      <div class="persona">
+        <div class="who">🔬 The ML researcher</div>
+        <p>Wants to know which foundation model wins on a task. The shared-input
+           <code>export_batch</code> harness makes that comparison fair and reproducible by
+           default, not by careful manual discipline.</p>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- RUN IT -->
+<section id="run" style="background:#0f1720;color:#e8eef6">
+  <div class="wrap">
+    <h2 style="color:#fff">Try it in your browser</h2>
+    <p class="lead" style="color:#aab6c2">
+      The notebook runs <b>cached &amp; offline by default</b> (booth-safe — no Earth Engine
+      auth, no GPU). Flip <code style="color:#7ee0c0">RUN_LIVE = True</code> to compute against
+      live imagery.</p>
+    <div class="cta">
+      <a class="btn citrus" href="IGUIDE_NOTEBOOK_URL">▶ Launch on I-GUIDE</a>
+      <a class="btn" style="background:#1b2530;color:#e8eef6;border-color:#2b3a47"
+         href="https://github.com/cybergis/rs-embed/blob/main/examples/iguide_demo.ipynb">View notebook source</a>
+    </div>
+  </div>
+</section>
+
+<footer>
+  <div class="wrap">
+    <p><strong>rs-embed</strong> — a unified <code>ROI → embedding</code> interface for remote-sensing
+       foundation models. Apache-2.0. Built by the CyberGIS group.</p>
+    <details>
+      <summary style="cursor:pointer;font-weight:600;color:var(--ink)">Citation</summary>
+      <pre class="cite">@article{ye2026modelplacetimeremote,
+  title  = {Any Model, Any Place, Any Time: Get Remote Sensing Foundation Model Embeddings On Demand},
+  author = {Dingqi Ye and Daniel Kiv and Wei Hu and Jimeng Shi and Shaowen Wang},
+  year   = {2026}, eprint = {2602.23678}, archivePrefix = {arXiv}, primaryClass = {cs.CV},
+  url    = {https://arxiv.org/abs/2602.23678}
+}</pre>
+    </details>
+    <p style="margin-top:14px;font-size:13px;color:#9aa6af">
+      Demo companion to <code>examples/iguide_demo.ipynb</code>. Prepared for the SIGSPATIAL '26
+      demonstration track, UC Riverside.</p>
+  </div>
+</footer>
+
+</body>
+</html>

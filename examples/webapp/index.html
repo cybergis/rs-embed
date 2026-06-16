@@ -1,0 +1,451 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>rs-embed — interactive embeddings</title>
+<link rel="icon" type="image/png" href="assets/logo.png" />
+<link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css" />
+<style>
+  :root{--leaf:#2e7d32;--citrus:#f5a623;--ink:#1a2027;--muted:#5b6770;--line:#e3e0d8;--panel:#fbfaf7;}
+  *{box-sizing:border-box}
+  html,body{margin:0;height:100%;font-family:"IBM Plex Sans",-apple-system,Segoe UI,Roboto,Arial,sans-serif;color:var(--ink)}
+  #app{display:flex;height:100vh;width:100vw}
+  #map{flex:1 1 auto;height:100%;position:relative}
+  #queryOverlay{position:absolute;z-index:1000;left:0;right:0;bottom:0;
+         background:rgba(255,255,255,.96);border-top:1px solid var(--line);
+         box-shadow:0 -2px 8px rgba(0,0,0,.12);padding:8px 14px 10px;backdrop-filter:blur(2px)}
+  #queryOverlay h2{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 6px;padding-right:34px}
+  #queryToggle{position:absolute;top:6px;right:10px;width:30px;height:24px;border:1px solid var(--line);
+         background:#fff;border-radius:6px;cursor:pointer;font-size:14px;line-height:1;padding:0;color:var(--ink)}
+  #queryToggle:hover{background:#f3efe6}
+  #queryOverlay #query{max-height:160px;overflow:auto}
+  #queryOverlay.collapsed{padding-bottom:6px}
+  #queryOverlay.collapsed #query{display:none}
+  #panelToggle{position:fixed;top:10px;right:10px;z-index:1100;width:30px;height:28px;
+         border:1px solid var(--line);background:#fff;border-radius:7px;cursor:pointer;font-size:13px;
+         line-height:1;padding:0;color:var(--ink);box-shadow:0 1px 5px rgba(0,0,0,.2)}
+  #panelToggle:hover{background:#f3efe6}
+  #panel{width:360px;flex:0 0 360px;height:100%;overflow-y:auto;background:var(--panel);
+         border-left:1px solid var(--line);padding:16px 16px 22px;display:flex;flex-direction:column;gap:16px}
+  h1{font-size:18px;margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  h1 .logo{height:34px;width:34px;object-fit:contain}
+  h1 small{flex-basis:100%;display:block;font-weight:500;color:var(--muted);font-size:12px;margin-top:2px}
+  .sec{border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px 14px}
+  .sec h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
+  .hint{font-size:12px;color:var(--muted);line-height:1.45}
+  .row{display:flex;align-items:center;gap:8px;justify-content:space-between}
+  .models{max-height:230px;overflow-y:auto;display:flex;flex-direction:column;gap:3px;margin-top:6px}
+  .models label{display:flex;align-items:center;gap:7px;font-size:13px;padding:2px 4px;border-radius:6px;cursor:pointer}
+  .models label:hover{background:#f3efe6}
+  .badge{font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;margin-left:auto}
+  .badge.pc{background:rgba(46,125,50,.12);color:var(--leaf)}
+  .badge.otf{background:rgba(21,101,192,.10);color:#1565c0}
+  .grp{font-size:11px;font-weight:700;color:var(--muted);margin:8px 0 2px}
+  button{font:inherit;font-weight:600;border:1px solid var(--line);background:#fff;border-radius:9px;padding:7px 12px;cursor:pointer}
+  button.primary{background:var(--leaf);color:#fff;border-color:var(--leaf)}
+  button.citrus{background:var(--citrus);color:#3a2a00;border-color:var(--citrus)}
+  button:disabled{opacity:.5;cursor:not-allowed}
+  #slider{margin:38px 14px 50px}
+  #slider .noUi-tooltip{font-size:11px;font-weight:700;padding:1px 5px}
+  #slider .noUi-value{font-size:10px;color:var(--muted)}
+  #slider .noUi-pips{pointer-events:none}            /* labels must not steal clicks */
+  #slider .noUi-pips-horizontal{height:34px;padding:8px 0}
+  .yrlabel{font-variant-numeric:tabular-nums;font-weight:700}
+  .tpick-btn{margin-top:8px;width:100%;text-align:left}
+  #tpick{display:none;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
+  .tpick-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .tpick-head button{padding:2px 9px}
+  .tpick-head span{font-weight:700;font-variant-numeric:tabular-nums}
+  .tgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
+  .mcell{padding:6px 0;text-align:center;font-size:12px;border-radius:6px;cursor:pointer;border:1px solid transparent}
+  .mcell:hover{background:#f3efe6}
+  .mcell.inrange{background:rgba(245,166,35,.18)}
+  .mcell.endpoint{background:var(--citrus);color:#3a2a00;font-weight:700}
+  .tpick-hint{font-size:11px;color:var(--muted);margin-top:7px}
+  pre#query{white-space:pre-wrap;word-break:break-word;background:#0f1720;color:#e8eef6;border-radius:10px;
+            padding:11px 12px;font-size:11.5px;line-height:1.5;font-family:"IBM Plex Mono",ui-monospace,monospace;margin:0}
+  pre#query .k{color:#7ee0c0}.k2{color:#f5a623}
+  #results{display:flex;flex-direction:column;gap:10px}
+  .spin{display:inline-block;width:13px;height:13px;border:2px solid #ccc;border-top-color:var(--citrus);
+        border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:5px}
+  @keyframes s{to{transform:rotate(360deg)}}
+  .bubble-results{width:312px;max-height:62vh;overflow:auto}
+  .bubble-results .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:7px}
+  .gcard{border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;background:#fff;transition:box-shadow .12s}
+  .gcard:hover{box-shadow:0 2px 8px rgba(0,0,0,.18)}
+  .gcard img{width:100%;display:block;image-rendering:pixelated}
+  .gcard .gcap{font-size:11px;font-weight:600;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gcard.err{cursor:default;padding:6px}
+  .gcard.err .e{color:#b3261e;font-size:10px;margin-top:3px;word-break:break-word}
+  #lightbox{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.62);display:none;
+            align-items:center;justify-content:center;padding:24px}
+  #lightbox .lb-inner{background:#fff;border-radius:12px;padding:14px;max-width:min(92vw,560px);
+            max-height:90vh;overflow:auto;text-align:center}
+  #lightbox img{max-width:100%;max-height:68vh;image-rendering:pixelated;border-radius:8px}
+  #lightbox .lb-title{font-weight:700;font-size:16px;margin-bottom:8px;display:flex;gap:8px;justify-content:center;align-items:center}
+  #lightbox .lb-meta{font-size:13px;color:var(--muted);margin-top:8px}
+  #lightbox .lb-hint{font-size:11px;color:#999;margin-top:6px}
+  a.dl{display:inline-block;margin-top:8px;font-size:12px;font-weight:600;color:#1565c0;text-decoration:none;
+       border:1px solid var(--line);border-radius:8px;padding:6px 9px;background:#fff}
+  a.dl:hover{background:#f3efe6}
+  code{background:#eef1f4;padding:1px 4px;border-radius:4px;font-size:11px;word-break:break-all}
+  .card{border:1px solid var(--line);border-radius:10px;padding:9px 10px;background:#fff}
+  .card .top{display:flex;align-items:center;gap:8px;font-weight:700;font-size:13px}
+  .card img{width:100%;image-rendering:pixelated;border-radius:6px;margin-top:7px;background:#eee}
+  .card .meta{font-size:11px;color:var(--muted);margin-top:5px;font-variant-numeric:tabular-nums}
+  .card .err{font-size:11px;color:#b3261e;margin-top:6px;word-break:break-word}
+  .spark{margin-top:5px}
+  .pop{font-size:13px;min-width:200px}
+  .pop img{width:200px;height:auto;border-radius:6px;image-rendering:pixelated;background:#eee}
+  .pop .pbtns{display:flex;gap:6px;margin-top:8px}
+  .selbar{display:flex;gap:6px;margin-bottom:2px}
+  .selbar button{padding:3px 8px;font-size:11px;font-weight:600}
+  .status{font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div id="app">
+  <button id="panelToggle" title="Hide panel">▶</button>
+  <div id="map">
+    <div id="queryOverlay">
+      <button id="queryToggle" title="Hide code">▼</button>
+      <h2>Example query (reference)</h2>
+      <pre id="query">Select an ROI to see the rs-embed call…</pre>
+    </div>
+  </div>
+  <aside id="panel">
+    <h1><img class="logo" src="assets/logo.png" alt="rs-embed" onerror="this.replaceWith(Object.assign(document.createTextNode('🛰️')))"> rs-embed <small>any model · any place · any time</small></h1>
+
+    <div class="sec">
+      <h2>1 · Select on the map</h2>
+      <div class="hint">
+        <b>Right-click</b> a spot → a <b>2 km box</b>.<br>
+        <b>Right-click &amp; drag</b> a diagonal → a freeform box.<br>
+        A Sentinel-2 preview pops up; confirm it to embed.
+      </div>
+      <div id="selinfo" class="status" style="margin-top:8px">No ROI selected.</div>
+    </div>
+
+    <div class="sec">
+      <h2>2 · Models</h2>
+      <div class="selbar">
+        <button id="selAll">all</button>
+        <button id="selNone">none</button>
+        <button id="selPc">precomputed</button>
+      </div>
+      <div id="models" class="models">loading…</div>
+    </div>
+
+    <div class="sec">
+      <h2>3 · Time range
+        <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
+          <span class="yrlabel" id="trange">2021-06 – 2023-09</span>
+        </span>
+      </h2>
+      <div id="slider"></div>
+      <button id="tpickBtn" class="tpick-btn">📅 Pick year / month ▾</button>
+      <div id="tpick">
+        <div class="tpick-head"><button id="tprev">◀</button><span id="tpickYear">2021</span><button id="tnext">▶</button></div>
+        <div id="tgrid" class="tgrid"></div>
+        <div class="tpick-hint">Click a month to set <b>start</b>, click again to set <b>end</b>.</div>
+      </div>
+      <div class="hint" style="margin-top:8px">Annual models (gse/tessera/copernicus) use the latest year; on-the-fly models use the selected month window.</div>
+    </div>
+
+  </aside>
+</div>
+
+<div id="lightbox"><div class="lb-inner"></div></div>
+
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+<script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"></script>
+<script>
+// ---------------------------------------------------------------- map
+const map = L.map('map', {zoomControl:false, attributionControl:false}).setView([40.1020, -88.2272], 13);  // UIUC
+L.control.zoom({position:'topleft'}).addTo(map);
+L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+  {maxZoom:19}).addTo(map);
+
+let geometry = null;     // {type:'point',lon,lat} | {type:'bbox',minlon,...}
+let roiLayer = null;     // the box drawn on the map
+let drawing = false, startLL = null, dragRect = null;
+const KM = 1/111.0;      // ~degrees latitude per km
+
+map.getContainer().addEventListener('contextmenu', e => e.preventDefault());
+
+map.on('mousedown', e => {
+  if (e.originalEvent.button !== 2) return;       // right button only
+  drawing = true; startLL = e.latlng;
+  if (dragRect) { map.removeLayer(dragRect); dragRect = null; }
+});
+map.on('mousemove', e => {
+  if (!drawing) return;
+  const b = L.latLngBounds(startLL, e.latlng);
+  if (!dragRect) dragRect = L.rectangle(b, {color:'#ffcc00', weight:2, fillOpacity:.08}).addTo(map);
+  else dragRect.setBounds(b);
+});
+map.on('mouseup', e => {
+  if (!drawing) return; drawing = false;
+  const movedPx = map.latLngToContainerPoint(startLL).distanceTo(map.latLngToContainerPoint(e.latlng));
+  if (dragRect) { map.removeLayer(dragRect); dragRect = null; }
+  if (movedPx < 8) setPointBox(e.latlng);         // a click → 2 km box
+  else setBBox(L.latLngBounds(startLL, e.latlng));// a drag → freeform box
+});
+
+function clearRoi(){ if (roiLayer){ map.removeLayer(roiLayer); roiLayer = null; } }
+
+function setPointBox(ll){
+  clearRoi();
+  const d = KM, dx = d / Math.max(0.2, Math.cos(ll.lat*Math.PI/180));  // ~1 km half-side
+  const b = L.latLngBounds([ll.lat-d, ll.lng-dx], [ll.lat+d, ll.lng+dx]);
+  roiLayer = L.rectangle(b, {color:'#f5a623', weight:2, fillOpacity:.08}).addTo(map);
+  geometry = {type:'point', lon:+ll.lng.toFixed(5), lat:+ll.lat.toFixed(5)};
+  document.getElementById('selinfo').textContent =
+    `Point ${geometry.lat}, ${geometry.lon}  → 2 km box`;
+  onRoiChanged(b.getCenter());
+}
+function setBBox(b){
+  clearRoi();
+  roiLayer = L.rectangle(b, {color:'#f5a623', weight:2, fillOpacity:.08}).addTo(map);
+  const sw=b.getSouthWest(), ne=b.getNorthEast();
+  geometry = {type:'bbox', minlon:+sw.lng.toFixed(5), minlat:+sw.lat.toFixed(5),
+              maxlon:+ne.lng.toFixed(5), maxlat:+ne.lat.toFixed(5)};
+  document.getElementById('selinfo').textContent =
+    `BBox ${geometry.minlat},${geometry.minlon} → ${geometry.maxlat},${geometry.maxlon}`;
+  onRoiChanged(b.getCenter());
+}
+function roiCenter(){
+  if (!geometry) return null;
+  if (geometry.type==='point') return L.latLng(geometry.lat, geometry.lon);
+  return L.latLng((geometry.minlat+geometry.maxlat)/2, (geometry.minlon+geometry.maxlon)/2);
+}
+
+// ---------------------------------------------------------------- panel state
+let MODELS = [];                 // [{id,type}]
+const checked = new Set(['gse']);
+function selectedModels(){ return MODELS.filter(m => checked.has(m.id)).map(m=>m.id); }
+
+// ── month-range state (shared by the slider and the year/month picker) ──
+const MIN_Y = 2017, MAX_Y = 2025, MAXIDX = (MAX_Y-MIN_Y)*12 + 11;
+const MONTHS = ['Jan','Feb','Mar','Apr','May','Jun','Jul','Aug','Sep','Oct','Nov','Dec'];
+const midx = (y,m) => (y-MIN_Y)*12 + (m-1);
+const mY = i => MIN_Y + Math.floor(i/12);
+const mM = i => (i%12) + 1;
+const ymLabel = i => `${mY(i)}-${String(mM(i)).padStart(2,'0')}`;
+let tStart = midx(2021,6), tEnd = midx(2023,9);
+let pickYear = 2021, pickPhase = 'start';
+const startStr = () => ymLabel(Math.min(tStart,tEnd));
+const endStr   = () => ymLabel(Math.max(tStart,tEnd));
+function endExclusive(){ let i=Math.max(tStart,tEnd), y=mY(i), m=mM(i)+1; if(m>12){m=1;y++;} return `${y}-${String(m).padStart(2,'0')}-01`; }
+
+// month double-slider (handles are month indices 0..MAXIDX; pips label years)
+const ymTip = {to: v => ymLabel(Math.round(v))};
+const slider = document.getElementById('slider');
+noUiSlider.create(slider, {
+  start:[tStart, tEnd], connect:true, step:1, margin:0, range:{min:0, max:MAXIDX},
+  tooltips:[ymTip, ymTip],
+  pips:{mode:'values', values:[0,12,24,36,48,60,72,84,96,MAXIDX], density:3, stepped:true,
+        format:{to:v=>String(mY(Math.round(v)))}},
+});
+slider.noUiSlider.on('update', vals => {
+  tStart = Math.round(+vals[0]); tEnd = Math.round(+vals[1]);
+  refreshTimeUI();
+});
+function refreshTimeUI(){
+  const t = document.getElementById('trange');
+  if (t) t.textContent = startStr()+' – '+endStr();
+  renderPicker();
+  updateQuery();
+}
+function renderPicker(){
+  const grid = document.getElementById('tgrid'); if(!grid) return;
+  document.getElementById('tpickYear').textContent = pickYear;
+  const lo = Math.min(tStart,tEnd), hi = Math.max(tStart,tEnd);
+  grid.innerHTML = '';
+  for(let m=1;m<=12;m++){
+    const ci = midx(pickYear,m);
+    const cell = document.createElement('div');
+    cell.className = 'mcell' + (ci>=lo&&ci<=hi?' inrange':'') + (ci===tStart||ci===tEnd?' endpoint':'');
+    cell.textContent = MONTHS[m-1];
+    cell.onclick = () => pickMonth(ci);
+    grid.appendChild(cell);
+  }
+}
+function pickMonth(ci){
+  if(pickPhase==='start'){ tStart=ci; tEnd=ci; pickPhase='end'; }
+  else { if(ci>=tStart){ tEnd=ci; } else { tEnd=tStart; tStart=ci; } pickPhase='start'; }
+  slider.noUiSlider.set([Math.min(tStart,tEnd), Math.max(tStart,tEnd)]);  // → fires update → refreshTimeUI
+}
+(function initPicker(){
+  const btn=document.getElementById('tpickBtn'), panel=document.getElementById('tpick');
+  btn.onclick = () => { const open = panel.style.display==='block';
+    panel.style.display = open ? 'none' : 'block';
+    if(!open){ pickYear = mY(Math.min(tStart,tEnd)); pickPhase='start'; renderPicker(); } };
+  document.getElementById('tprev').onclick = () => { if(pickYear>MIN_Y){ pickYear--; renderPicker(); } };
+  document.getElementById('tnext').onclick = () => { if(pickYear<MAX_Y){ pickYear++; renderPicker(); } };
+})();
+
+// model list
+async function loadModels(){
+  const box = document.getElementById('models');
+  try{
+    const r = await fetch('/api/models'); const j = await r.json();
+    if (j.error){ box.textContent = 'error: '+j.error; return; }
+    MODELS = j.models;
+    const pc = MODELS.filter(m=>m.type==='precomputed');
+    const otf = MODELS.filter(m=>m.type==='onthefly');
+    box.innerHTML = '';
+    const group = (title, arr) => {
+      const h = document.createElement('div'); h.className='grp'; h.textContent=title; box.appendChild(h);
+      arr.forEach(m => {
+        const lab = document.createElement('label');
+        const cb = document.createElement('input'); cb.type='checkbox'; cb.value=m.id; cb.checked=checked.has(m.id);
+        cb.onchange = () => { cb.checked ? checked.add(m.id) : checked.delete(m.id); updateQuery(); };
+        const span = document.createElement('span'); span.textContent = m.id;
+        const bdg = document.createElement('span'); bdg.className='badge '+(m.type==='precomputed'?'pc':'otf');
+        bdg.textContent = m.type==='precomputed'?'precomp':'on-the-fly';
+        lab.append(cb, span, bdg); box.appendChild(lab);
+      });
+    };
+    group('Precomputed (fast)', pc);
+    group('On-the-fly', otf);
+    updateQuery();
+  }catch(e){ box.textContent = 'failed to load models: '+e; }
+}
+function refreshChecks(){ document.querySelectorAll('#models input').forEach(cb=>cb.checked=checked.has(cb.value)); updateQuery(); }
+document.getElementById('selAll').onclick  = () => { MODELS.forEach(m=>checked.add(m.id)); refreshChecks(); };
+document.getElementById('selNone').onclick = () => { checked.clear(); refreshChecks(); };
+document.getElementById('selPc').onclick   = () => { checked.clear(); MODELS.filter(m=>m.type==='precomputed').forEach(m=>checked.add(m.id)); refreshChecks(); };
+
+// ---------------------------------------------------------------- example query
+function updateQuery(){
+  const q = document.getElementById('query');
+  if (!geometry){ q.textContent = 'Select an ROI to see the rs-embed call…'; return; }
+  const sel = selectedModels();
+  const spatial = geometry.type==='point'
+    ? `PointBuffer(lon=${geometry.lon}, lat=${geometry.lat}, buffer_m=1000)`
+    : `BBox(${geometry.minlon}, ${geometry.minlat}, ${geometry.maxlon}, ${geometry.maxlat})`;
+  const rangeT = `TemporalSpec.range("${startStr()}-01", "${endExclusive()}")`;
+  if (sel.length > 1){
+    // multiple models → export_batch (matches the backend)
+    const models = sel.map(s=>`<span class="k2">"${s}"</span>`).join(', ');
+    q.innerHTML =
+`<span class="k">export_batch</span>(
+    spatials=[${spatial}],
+    temporal=${rangeT},
+    models=[${models}],
+    output=OutputSpec.grid(),
+    target=ExportTarget.combined(<span class="k2">"embeddings.npz"</span>),
+)`;
+  } else {
+    // single model → get_embedding
+    const m = sel[0] || '<model>';
+    const isPc = (MODELS.find(x=>x.id===m)||{}).type === 'precomputed';
+    const temporal = isPc ? `TemporalSpec.year(${mY(Math.max(tStart,tEnd))})` : rangeT;
+    q.innerHTML =
+`<span class="k">get_embedding</span>(
+    <span class="k2">"${m}"</span>,
+    spatial=${spatial},
+    temporal=${temporal},
+    output=OutputSpec.grid(),
+)`;
+  }
+}
+
+// ---------------------------------------------------------------- preview + embed
+async function onRoiChanged(center){
+  updateQuery();
+  const pop = L.popup({minWidth:240, maxWidth:360, closeOnClick:false, autoClose:false})
+    .setLatLng(center).setContent('<div class="pop">Fetching Sentinel-2 preview…</div>').openOn(map);
+  try{
+    const r = await fetch('/api/preview', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({geometry, start:startStr(), end:endStr()})});
+    const j = await r.json();
+    if (j.error){ pop.setContent('<div class="pop">⚠️ '+j.error+'</div>'); return; }
+    pop.setContent(
+      `<div class="pop"><b>Sentinel-2 RGB</b><br><img src="${j.image}"><br>`+
+      `<span class="status">${selectedModels().length} model(s) selected</span>`+
+      `<div class="pbtns"><button class="citrus" id="confirmBtn">Confirm → embed</button></div></div>`);
+    setTimeout(()=>{ const b=document.getElementById('confirmBtn'); if(b) b.onclick=()=>runEmbed(pop); }, 0);
+  }catch(e){ pop.setContent('<div class="pop">⚠️ preview failed: '+e+'</div>'); }
+}
+
+function sparkline(vals){
+  if(!vals||!vals.length) return '';
+  const w=180,h=26, mn=Math.min(...vals), mx=Math.max(...vals), rng=(mx-mn)||1;
+  const pts = vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(h-(v-mn)/rng*h).toFixed(1)}`).join(' ');
+  return `<svg class="spark" width="${w}" height="${h}"><polyline fill="none" stroke="#1565c0" stroke-width="1.3" points="${pts}"/></svg>`;
+}
+
+function modelCardHTML(x, i){
+  const badge = `<span class="badge ${x.type==='precomputed'?'pc':'otf'}">${x.type==='precomputed'?'precomp':'on-the-fly'}</span>`;
+  if (x.ok){
+    return `<div class="gcard" onclick="openLightbox(${i})" title="click to enlarge">`+
+      `<img src="${x.image}" alt="PCA-RGB"><div class="gcap">${x.model}</div></div>`;
+  }
+  return `<div class="gcard err"><div class="gcap">${x.model}${badge}</div><div class="e">${x.error}</div></div>`;
+}
+function openLightbox(i){
+  const x = (window.lastResults || [])[i];
+  if (!x || !x.ok) return;
+  const lb = document.getElementById('lightbox');
+  lb.querySelector('.lb-inner').innerHTML =
+    `<div class="lb-title">${x.model} <span class="badge ${x.type==='precomputed'?'pc':'otf'}">${x.type==='precomputed'?'precomp':'on-the-fly'}</span></div>`+
+    `<img src="${x.image}" alt="${x.model} PCA-RGB">`+
+    `<div class="lb-meta">grid ${x.grid_hw[0]}×${x.grid_hw[1]} · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}</div>`+
+    sparkline(x.vector_preview)+
+    `<div class="lb-hint">click anywhere / Esc to close</div>`;
+  lb.style.display = 'flex';
+}
+(function initLightbox(){
+  const lb = document.getElementById('lightbox');
+  lb.addEventListener('click', () => { lb.style.display = 'none'; });
+  lb.querySelector('.lb-inner').addEventListener('click', e => e.stopPropagation());
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') lb.style.display = 'none'; });
+})();
+function resultsBubbleHTML(j){
+  const cards = j.results.map(modelCardHTML).join('');
+  const dl = j.download_url ? `<a class="dl" href="${j.download_url}" download>💾 Save embedding package (.npz)</a>` : '';
+  const note = j.package
+    ? `<div class="status" style="margin-top:6px">Use in the notebook:<br><code>H.load_embedding_package("…/${j.package.filename}")</code></div>` : '';
+  return `<div class="pop bubble-results"><b>Embeddings</b> <span class="status">· ${j.results.length} model(s)</span>`+
+         `${dl}<div class="cards">${cards}</div>${note}</div>`;
+}
+async function runEmbed(pop){
+  const models = selectedModels();
+  if (!models.length){ if(pop) pop.setContent('<div class="pop">Select at least one model.</div>'); return; }
+  if (pop) pop.setContent('<div class="pop"><span class="spin"></span>Embedding '+models.length+' model(s)…<br><span class="status">on-the-fly models may download checkpoints on first use.</span></div>');
+  try{
+    const r = await fetch('/api/embed', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({geometry, start:startStr(), end:endStr(), models})});
+    const j = await r.json();
+    if (j.error){ if(pop) pop.setContent('<div class="pop">⚠️ '+j.error+'</div>'); return; }
+    window.lastResults = j.results;
+    if (pop){ pop.setContent(resultsBubbleHTML(j)); pop.update(); }
+  }catch(e){ if(pop) pop.setContent('<div class="pop">⚠️ embed failed: '+e+'</div>'); }
+}
+
+(function initQueryToggle(){
+  const ov=document.getElementById('queryOverlay'), tg=document.getElementById('queryToggle');
+  if(tg) tg.onclick = () => { const c = ov.classList.toggle('collapsed');
+    tg.textContent = c ? '▲' : '▼'; tg.title = c ? 'Show code' : 'Hide code'; };
+})();
+(function initPanelToggle(){
+  const tg=document.getElementById('panelToggle'), panel=document.getElementById('panel');
+  if(!tg) return;
+  let hidden=false;
+  tg.onclick = () => {
+    hidden = !hidden;
+    panel.style.display = hidden ? 'none' : '';   // collapse the flex item entirely
+    tg.textContent = hidden ? '◀' : '▶';
+    tg.title = hidden ? 'Show panel' : 'Hide panel';
+    setTimeout(() => { try{ map.invalidateSize(); }catch(e){} }, 60);
+  };
+})();
+
+loadModels();
+</script>
+</body>
+</html>

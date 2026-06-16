@@ -21,3 +21,23 @@ demo_export/
 !examples/quickstart.py
 !examples/demo.ipynb
 !examples/utils_demo.py
+!examples/iguide_demo.ipynb
+!examples/iguide_demo_helpers.py
+!examples/build_demo_cache.py
+!examples/iguide_demo.html
+!examples/iguide_demo_maize.ipynb
+# rs-embed demo cache (built by examples/build_demo_cache.py; can be large)
+examples/iguide_demo_cache/
+
+# local virtualenv for the demo
+/rsembed/
+!examples/webapp/
+!examples/webapp/server.py
+!examples/webapp/index.html
+!examples/webapp/prototype.html
+examples/webapp/downloads/
+!examples/webapp/assets/
+!examples/webapp/assets/logo.png
+.DS_Store
+/global_0.1_degree_representation/
+/global_0.1_degree_tiff_all/

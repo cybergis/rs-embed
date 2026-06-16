@@ -69,8 +69,11 @@ def run_pending_models(
     ------------------
     ``get_or_fetch_input_fn`` must return a CHW ndarray for
     ``(point_index, sensor_key, sensor_spec)``.
-    ``write_checkpoint_fn`` must accept ``stage=...`` and return an updated
-    combined manifest dict.
+    ``write_checkpoint_fn`` must accept ``manifest=...`` and ``stage=...`` and
+    return the updated combined manifest dict. The current accumulated manifest
+    is passed in explicitly so the checkpoint persists every model appended this
+    run (the callback's return is a fresh dict, so an outer-scope reference to
+    the original manifest would otherwise go stale after the first write).
     """
     if inference_engine is None:
         from .inference import InferenceEngine
@@ -191,7 +194,9 @@ def run_pending_models(
             progress.update(1)
 
         manifest["models"].append(m_entry)
-        manifest = write_checkpoint_fn(stage=f"model:{sanitize_key(m)}", final=False)
+        manifest = write_checkpoint_fn(
+            manifest=manifest, stage=f"model:{sanitize_key(m)}", final=False
+        )
 
     return manifest
 
