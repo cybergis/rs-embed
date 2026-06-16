@@ -110,9 +110,7 @@ def fixed_or_equal_bins(
     partial bin (e.g. 365 days vs. 12×30) keeps the fixed monthly cadence — the ~5-day
     remainder is negligible and not worth leaving the in-distribution regime.
     """
-    fixed = split_date_range_fixed_days(
-        start, end, stride_days=stride_days, max_bins=int(max_bins)
-    )
+    fixed = split_date_range_fixed_days(start, end, stride_days=stride_days, max_bins=int(max_bins))
     dropped_days = (date.fromisoformat(str(end)) - date.fromisoformat(fixed[-1][1])).days
     if dropped_days < int(stride_days):
         return fixed, False

@@ -246,9 +246,7 @@ def _temporal_bins(t: TemporalSpec) -> tuple[tuple[tuple[str, str], ...], bool]:
     )
 
 
-def _temporal_sampling_meta(
-    bins: tuple[tuple[str, str], ...], stretched: bool
-) -> dict[str, Any]:
+def _temporal_sampling_meta(bins: tuple[tuple[str, str], ...], stretched: bool) -> dict[str, Any]:
     """Pure metadata describing the temporal binning mode (no side effects)."""
     meta: dict[str, Any] = {
         "temporal_sampling": "equal_divided" if stretched else "fixed_stride",
