@@ -56,8 +56,8 @@ three band sets (10 m, 20 m, 60 m) totaling 12 channels. The S1 order matches
 
 ```mermaid
 flowchart LR
-    TEMP["Temporal range"] --> BINS["Build 30-day bins\nanchored at range start\n(max 12)"]
-    BINS --> FETCH["Fetch one S2 composite\nper 30-day bin\nraw DN, C=12"]
+    TEMP["Temporal range"] --> BINS["Build bins:\n30-day fixed (≤12 mo)\nor equal-divide into 12\n(longer windows, flagged)"]
+    BINS --> FETCH["Fetch one S2 composite\nper bin\nraw DN, C=12"]
     FETCH --> DROP["Drop empty-bin frames\nkeep aligned timestamps"]
     DROP --> NORM["Per-frame per-band mean±2σ\nnormalization"]
     NORM --> RESIZE["Resize each frame to image_size\n(default 256×256)"]
@@ -134,7 +134,7 @@ Default: `256` (matching the OlmoEarth training tile size).
 | Value             | Behavior                                                                                       |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
 | `single` (default) | One composite over the whole temporal range (`T=1`), timestamp = range midpoint               |
-| `multi`           | One composite per **30-day bin** anchored at the range start, up to **12 frames**             |
+| `multi`           | One composite per **30-day bin** anchored at the range start, up to **12 frames** (longer windows are equal-divided into 12 — see below) |
 
 `multi` mirrors how OlmoEarth was pretrained: the official pipeline slices each
 sample's year window into fixed 30-day bins (`duration=30d` strides in the
@@ -142,7 +142,18 @@ rslearn config — *not* calendar months), and feeds each frame's start date as
 its `(day, month, year)` timestamp. The adapter reproduces exactly that:
 
 - Bins: `[start, start+30d), [start+30d, start+60d), …`, last bin truncated at
-  the range end, capped at 12 frames (ranges longer than ~360 days are truncated).
+  the range end, up to 12 frames.
+- **Windows longer than ~12 months are not truncated.** Earlier behavior kept
+  only the first 12 monthly bins and silently dropped the rest; the adapter now
+  detects this (when capping would drop ≥ one full 30-day bin) and instead
+  **equal-divides the whole window into 12 frames** so the entire period is
+  represented. Because the frames are then wider apart than OlmoEarth's monthly
+  training cadence, this is flagged: `meta["temporal_sampling"] == "equal_divided"`,
+  `meta["temporal_spacing_stretched"] == True`, `meta["effective_stride_days"]`
+  records the cadence, and a `UserWarning` is emitted. Embeddings from such
+  windows are extrapolated — narrow the window to stay in-distribution. The
+  fixed-stride vs. equal-division decision lives in
+  `rs_embed.tools.temporal.fixed_or_equal_bins`.
 - Per-frame timestamp = bin start date (matching the official pipeline).
 - Bins with no imagery are **dropped from the sequence** (the encoder runs with
   `fast_pass=True`, which ignores attention masks, so empty frames cannot be

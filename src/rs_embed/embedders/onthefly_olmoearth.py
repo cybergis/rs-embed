@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
@@ -229,12 +230,50 @@ def _resolve_temporal_mode(model_config: dict[str, Any] | None) -> str:
     return _DEFAULT_TEMPORAL_MODE
 
 
-def _temporal_bins(t: TemporalSpec) -> tuple[tuple[str, str], ...]:
-    """30-day bins anchored at the range start, capped at 12 frames."""
-    from ..tools.temporal import split_date_range_fixed_days  # noqa: PLC0415
+def _temporal_bins(t: TemporalSpec) -> tuple[tuple[tuple[str, str], ...], bool]:
+    """Temporal bins for the requested window, returned as ``(bins, stretched)``.
 
-    return split_date_range_fixed_days(
+    Up to ``_MAX_FRAMES`` (12) fixed ``_FRAME_STRIDE_DAYS`` (30-day) bins, mirroring
+    OlmoEarth's YEAR pretraining regime. Windows longer than that capacity are
+    **equal-divided into 12 frames** instead of dropping the trailing time, so the
+    whole window is covered (``stretched=True``); see
+    :func:`rs_embed.tools.temporal.fixed_or_equal_bins`.
+    """
+    from ..tools.temporal import fixed_or_equal_bins  # noqa: PLC0415
+
+    return fixed_or_equal_bins(
         str(t.start), str(t.end), stride_days=_FRAME_STRIDE_DAYS, max_bins=_MAX_FRAMES
+    )
+
+
+def _temporal_sampling_meta(
+    bins: tuple[tuple[str, str], ...], stretched: bool
+) -> dict[str, Any]:
+    """Pure metadata describing the temporal binning mode (no side effects)."""
+    meta: dict[str, Any] = {
+        "temporal_sampling": "equal_divided" if stretched else "fixed_stride",
+        "temporal_spacing_stretched": bool(stretched),
+    }
+    if stretched and bins:
+        from datetime import date as _date  # noqa: PLC0415
+
+        span = (_date.fromisoformat(bins[-1][1]) - _date.fromisoformat(bins[0][0])).days
+        meta["effective_stride_days"] = int(round(span / max(1, len(bins))))
+    return meta
+
+
+def _warn_stretched_sampling(sampling_meta: dict[str, Any]) -> None:
+    """Emit a single warning when equal-division (stretched) sampling was used."""
+    if not sampling_meta.get("temporal_spacing_stretched"):
+        return
+    warnings.warn(
+        f"OlmoEarth window exceeds {_MAX_FRAMES} × {_FRAME_STRIDE_DAYS}-day frames; "
+        f"switched to equal division (~{sampling_meta.get('effective_stride_days')}d apart) "
+        "to cover the whole window instead of dropping the trailing time. Frame spacing is "
+        "outside OlmoEarth's monthly training cadence, so embeddings are extrapolated — "
+        "narrow the temporal window to stay in-distribution.",
+        UserWarning,
+        stacklevel=2,
     )
 
 
@@ -699,7 +738,7 @@ class OlmoEarthEmbedder(EmbedderBase):
         t = temporal_to_range(temporal)
 
         if mode == "multi":
-            bins = _temporal_bins(t)
+            bins, _stretched = _temporal_bins(t)
             if modality == "s2":
                 raw_t, meta = _fetch_collection_binned_raw_tchw(
                     provider,
@@ -835,8 +874,10 @@ class OlmoEarthEmbedder(EmbedderBase):
         # Frame layout is decided by the array shape so that arrays survive
         # array-only transport (prefetch pipelines, user-provided input_chw).
         date_str = temporal_midpoint_str(t)
+        sampling_meta: dict[str, Any] = {}
         if x_raw.ndim == 4:
-            bins = _temporal_bins(t)
+            bins, stretched = _temporal_bins(t)
+            sampling_meta = _temporal_sampling_meta(bins, stretched)
             x_t, timestamps = _prepare_frames(
                 x_raw, bins=bins, modality=modality, image_size=image_size, patch_size=patch_size
             )
@@ -855,6 +896,9 @@ class OlmoEarthEmbedder(EmbedderBase):
         extra: dict[str, Any] = {"temporal_mode": effective_mode, "n_frames": len(timestamps)}
         if effective_mode != temporal_mode:
             extra["requested_temporal_mode"] = temporal_mode
+        if effective_mode == "multi":
+            extra.update(sampling_meta)
+            _warn_stretched_sampling(sampling_meta)
         if fetch_meta:
             extra["s1_fetch" if modality == "s1" else "fetch"] = fetch_meta
         meta = _build_embedding_meta(
@@ -988,6 +1032,7 @@ class OlmoEarthEmbedder(EmbedderBase):
         # and are dropped, so prepared T may vary per item).
         n_bands = _modality_n_bands(modality)
         bins: tuple[tuple[str, str], ...] | None = None
+        sampling_meta: dict[str, Any] = {}  # shared by all multi items (same window)
         prepared: list[np.ndarray] = []  # each (T_i, C, H, W)
         item_timestamps: list[list[tuple[int, int, int]]] = []
         item_modes: list[str] = []  # effective temporal mode per item (by array shape)
@@ -1005,7 +1050,9 @@ class OlmoEarthEmbedder(EmbedderBase):
                 item_modes.append("single")
             elif x_raw.ndim == 4 and x_raw.shape[1] == n_bands:
                 if bins is None:
-                    bins = _temporal_bins(t)
+                    bins, stretched = _temporal_bins(t)
+                    sampling_meta = _temporal_sampling_meta(bins, stretched)
+                    _warn_stretched_sampling(sampling_meta)  # once per batch
                 x_t, ts = _prepare_frames(
                     x_raw.astype(np.float32),
                     bins=bins,
@@ -1070,6 +1117,7 @@ class OlmoEarthEmbedder(EmbedderBase):
                                 "batch_infer": True,
                                 "temporal_mode": item_modes[i],
                                 "n_frames": len(item_timestamps[i]),
+                                **(sampling_meta if item_modes[i] == "multi" else {}),
                             },
                         )
                         meta["pooling"] = f"spatial_temporal_bandset_{output.pooling}"
@@ -1102,6 +1150,7 @@ class OlmoEarthEmbedder(EmbedderBase):
                                 "batch_infer": True,
                                 "temporal_mode": item_modes[i],
                                 "n_frames": len(item_timestamps[i]),
+                                **(sampling_meta if item_modes[i] == "multi" else {}),
                             },
                         )
                         d, h, w = grid_np.shape

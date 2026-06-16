@@ -926,10 +926,53 @@ def test_resolve_temporal_mode_sources(monkeypatch):
         oe._resolve_temporal_mode({"temporal_mode": "monthly"})
 
 
-def test_temporal_bins_caps_at_12():
-    bins = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2024-01-01"))
+def test_temporal_bins_one_year_stays_fixed_monthly():
+    bins, stretched = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2023-01-01"))
     assert len(bins) == 12
-    assert bins[0] == ("2022-01-01", "2022-01-31")
+    assert stretched is False
+    assert bins[0] == ("2022-01-01", "2022-01-31")  # in-distribution 30-day cadence
+
+
+def test_temporal_bins_long_window_equal_divides_to_cover_whole_range():
+    # Windows beyond ~12 months no longer drop the trailing time: they are
+    # equal-divided into 12 frames that span the whole window (stretched).
+    bins, stretched = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2024-01-01"))
+    assert len(bins) == 12
+    assert stretched is True
+    assert bins[0][0] == "2022-01-01"
+    assert bins[-1][1] == "2024-01-01"  # full 2-year window covered, not just year 1
+
+
+def test_fixed_or_equal_bins_thresholds():
+    from rs_embed.tools.temporal import fixed_or_equal_bins
+
+    # short / exactly-fitting windows keep the fixed cadence
+    _, s_3mo = fixed_or_equal_bins("2022-01-01", "2022-04-01", stride_days=30, max_bins=12)
+    _, s_1yr = fixed_or_equal_bins("2022-01-01", "2023-01-01", stride_days=30, max_bins=12)
+    assert s_3mo is False and s_1yr is False  # 5-day remainder is negligible
+    # > one full bin of trailing time would be dropped -> equal-divide instead
+    bins_2yr, s_2yr = fixed_or_equal_bins("2022-01-01", "2024-01-01", stride_days=30, max_bins=12)
+    assert s_2yr is True and bins_2yr[-1][1] == "2024-01-01"
+
+
+def test_temporal_sampling_meta_and_warning():
+    bins, stretched = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2024-01-01"))
+    meta = oe._temporal_sampling_meta(bins, stretched)
+    assert meta["temporal_sampling"] == "equal_divided"
+    assert meta["temporal_spacing_stretched"] is True
+    assert meta["effective_stride_days"] > 30
+    with pytest.warns(UserWarning, match="equal division"):
+        oe._warn_stretched_sampling(meta)
+
+    # fixed-stride (in-distribution) -> no flag, no warning
+    fbins, fstretched = oe._temporal_bins(TemporalSpec.range("2022-01-01", "2023-01-01"))
+    fmeta = oe._temporal_sampling_meta(fbins, fstretched)
+    assert fmeta["temporal_sampling"] == "fixed_stride"
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # would raise if any warning fired
+        oe._warn_stretched_sampling(fmeta)
 
 
 def test_prepare_frames_drops_nan_frames_and_aligns_timestamps():
