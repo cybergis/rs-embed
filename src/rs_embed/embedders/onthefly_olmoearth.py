@@ -96,7 +96,9 @@ _DEFAULT_IMAGE_SIZE = 256  # training tile size; model accepts any size divisibl
 _DEFAULT_PATCH_SIZE = 4
 _DEFAULT_SCALE_M = 10
 _DEFAULT_CLOUDY_PCT = 30
-_DEFAULT_TEMPORAL_MODE = "single"
+# "auto" (default) picks single/multi from the window: multi when the range spans
+# ≥2 temporal bins, single otherwise. Use "single"/"multi" to force a mode.
+_DEFAULT_TEMPORAL_MODE = "auto"
 
 # Multi-frame mode mirrors OlmoEarth pretraining: fixed 30-day bins anchored at
 # the range start (offsets in the official rslearn config are 30d strides, not
@@ -215,12 +217,15 @@ def _resolve_geometry(model_config: dict[str, Any] | None) -> tuple[int, int]:
 
 def _normalize_temporal_mode(mode: Any) -> str:
     m = str(mode or _DEFAULT_TEMPORAL_MODE).strip().lower()
-    if m not in ("single", "multi"):
-        raise ModelError(f"olmoearth temporal_mode must be 'single' or 'multi', got {mode!r}.")
+    if m not in ("single", "multi", "auto"):
+        raise ModelError(
+            f"olmoearth temporal_mode must be 'single', 'multi', or 'auto', got {mode!r}."
+        )
     return m
 
 
 def _resolve_temporal_mode(model_config: dict[str, Any] | None) -> str:
+    """Resolve the *configured* temporal mode (may be ``"auto"``)."""
     v = model_config_value(model_config, "temporal_mode")
     if v is not None:
         return _normalize_temporal_mode(v)
@@ -228,6 +233,19 @@ def _resolve_temporal_mode(model_config: dict[str, Any] | None) -> str:
     if env:
         return _normalize_temporal_mode(env)
     return _DEFAULT_TEMPORAL_MODE
+
+
+def _expand_auto_mode(mode: str, t: TemporalSpec) -> str:
+    """Expand ``"auto"`` to ``"single"``/``"multi"`` from the window.
+
+    Resolves to ``"multi"`` when the range spans ≥2 temporal bins (it genuinely
+    covers multiple time steps), else ``"single"`` — a single bin where multi
+    would add nothing but extra GEE fetches. ``"single"``/``"multi"`` pass through.
+    """
+    if mode != "auto":
+        return mode
+    bins, _ = _temporal_bins(t)
+    return "multi" if len(bins) >= 2 else "single"
 
 
 def _temporal_bins(t: TemporalSpec) -> tuple[tuple[tuple[str, str], ...], bool]:
@@ -684,11 +702,13 @@ class OlmoEarthEmbedder(EmbedderBase):
                 "temporal_mode": {
                     "type": "string",
                     "default": _DEFAULT_TEMPORAL_MODE,
-                    "choices": ["single", "multi"],
+                    "choices": ["auto", "single", "multi"],
                     "description": (
-                        "single: one composite over the whole range (T=1). "
-                        "multi: 30-day bins anchored at range start (max 12 frames, "
-                        "mirroring OlmoEarth pretraining); empty bins are dropped."
+                        "auto (default): single when the range spans one temporal bin, "
+                        "else multi (≥2 bins). single: one composite over the whole range "
+                        "(T=1). multi: 30-day bins anchored at range start (max 12 frames, "
+                        "mirroring OlmoEarth pretraining; longer windows are equal-divided "
+                        "into 12 frames with a warning); empty bins are dropped."
                     ),
                 },
             },
@@ -728,12 +748,13 @@ class OlmoEarthEmbedder(EmbedderBase):
         pipeline callers keep working unchanged.
         """
         modality = _normalize_modality(getattr(sensor, "modality", "s2"))
+        t = temporal_to_range(temporal)
         mode = (
             _normalize_temporal_mode(temporal_mode)
             if temporal_mode is not None
             else _resolve_temporal_mode(None)
         )
-        t = temporal_to_range(temporal)
+        mode = _expand_auto_mode(mode, t)
 
         if mode == "multi":
             bins, _stretched = _temporal_bins(t)
@@ -836,8 +857,8 @@ class OlmoEarthEmbedder(EmbedderBase):
         if sensor is None:
             sensor = self._default_sensor()
         modality = _normalize_modality(getattr(sensor, "modality", "s2"))
-        temporal_mode = _resolve_temporal_mode(model_config)
         t = temporal_to_range(temporal)
+        temporal_mode = _expand_auto_mode(_resolve_temporal_mode(model_config), t)
 
         variant = _resolve_variant(model_config)
         image_size, patch_size = _resolve_geometry(model_config)
@@ -948,7 +969,7 @@ class OlmoEarthEmbedder(EmbedderBase):
         if sensor is None:
             sensor = self._default_sensor()
         t = temporal_to_range(temporal)
-        temporal_mode = _resolve_temporal_mode(model_config)
+        temporal_mode = _expand_auto_mode(_resolve_temporal_mode(model_config), t)
         provider = self._get_provider(backend)
         n = len(spatials)
         prefetched: list[np.ndarray | None] = [None] * n

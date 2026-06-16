@@ -30,6 +30,8 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ### Changed
 
+- **`olmoearth` `temporal_mode` now defaults to `"auto"` (was `"single"`).** `auto` picks the mode from the requested window: `single` when the range spans a single temporal bin (≤ ~1 month, where multi adds nothing), otherwise `multi`. This makes multi-month/-year ranges sample temporally by default instead of silently collapsing into one composite. **Cost note:** any range longer than ~1 month now resolves to `multi`, which fetches one composite per bin (up to 12) — roughly up to 12× the GEE fetches/time of single mode, which matters for large `export_batch` runs. Pass `temporal_mode="single"` (or env `RS_EMBED_OLMOEARTH_TEMPORAL_MODE=single`) to force the cheaper single composite. `auto`/`single`/`multi` are all accepted.
+
 - **Image-level ViT patch-token grid models now use safer `input_prep` defaults.** For `remoteclip`, `scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`, `OutputSpec.grid()` with `input_prep=None` or `"auto"` resolves to `"resize"` and emits a warning because tiled patch-token grids can show stitching seams. Explicit `"tile"` remains available but warns and records seam-risk metadata; explicit `"resize"` is the recommended no-warning path.
 
 - **`ProviderBase.fetch_array_chw` contract tightened to north-up.** The method is now required to return north-up CHW float32. Custom provider implementations must either return north-up data directly or apply `_flip_sample_tile_y` internally. Test fake providers in `test_api_helpers.py` have been updated accordingly (north-up row generation, renamed test functions).

@@ -363,6 +363,7 @@ def test_get_embedding_pooled_returns_embedding(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out, Embedding)
@@ -401,6 +402,7 @@ def test_get_embedding_grid_returns_dataarray(monkeypatch):
         sensor=None,
         output=OutputSpec.grid(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out, Embedding)
@@ -436,7 +438,7 @@ def test_get_embedding_uses_model_config_variant(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="gee",
-        model_config={"variant": "base"},
+        model_config={"variant": "base", "temporal_mode": "single"},
     )
 
     assert seen["variant"] == "base"
@@ -466,6 +468,7 @@ def test_get_embedding_accepts_input_chw(monkeypatch):
         output=OutputSpec.pooled(),
         backend="gee",
         input_chw=x_chw,
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out, Embedding)
@@ -487,8 +490,8 @@ def test_get_embedding_input_tchw_meta_reports_effective_mode(monkeypatch):
         lambda variant, device: (object(), {"hf_repo": "allenai/OlmoEarth-v1_1-Tiny"}, "cpu"),
     )
 
-    # TCHW override while temporal_mode resolves to the default "single":
-    # meta must report the layout actually used, plus the requested mode.
+    # TCHW override while temporal_mode is forced to "single":
+    # meta must report the layout actually used (multi), plus the requested mode.
     x_tchw = np.full((2, 12, 64, 64), 2000.0, dtype=np.float32)
     out = emb.get_embedding(
         spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
@@ -497,6 +500,7 @@ def test_get_embedding_input_tchw_meta_reports_effective_mode(monkeypatch):
         output=OutputSpec.pooled(),
         backend="gee",
         input_chw=x_tchw,
+        model_config={"temporal_mode": "single"},
     )
 
     assert out.meta["temporal_mode"] == "multi"
@@ -547,6 +551,7 @@ def test_fetch_input_s1_routes_to_s1_helper_and_keeps_db(monkeypatch):
         spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
         temporal=TemporalSpec.year(2022),
         sensor=sensor,
+        temporal_mode="single",
     )
     assert fr is not None
     # dB collection by default → values pass through unconverted
@@ -573,6 +578,7 @@ def test_fetch_input_s1_converts_linear_to_db(monkeypatch):
         spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
         temporal=TemporalSpec.year(2022),
         sensor=sensor,
+        temporal_mode="single",
     )
     assert fr is not None
     np.testing.assert_allclose(fr.data, -10.0, atol=1e-4)  # 10·log10(0.1)
@@ -610,6 +616,7 @@ def test_get_embedding_s1_pooled(monkeypatch):
         sensor=_s1_sensor(),
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out, Embedding)
@@ -648,6 +655,7 @@ def test_get_embedding_s1_grid(monkeypatch):
         sensor=_s1_sensor(),
         output=OutputSpec.grid(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert isinstance(out.data, xr.DataArray)
@@ -754,6 +762,7 @@ def test_get_embeddings_batch_prefetch_and_dispatch(monkeypatch):
         temporal=TemporalSpec.year(2022),
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert len(out) == 3
@@ -883,6 +892,7 @@ def test_embedding_meta_has_required_fields(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     meta = out.meta
@@ -917,13 +927,26 @@ def test_split_date_range_fixed_days_strides_and_truncates():
 
 
 def test_resolve_temporal_mode_sources(monkeypatch):
-    assert oe._resolve_temporal_mode(None) == "single"
+    assert oe._resolve_temporal_mode(None) == "auto"  # new default
     assert oe._resolve_temporal_mode({"temporal_mode": "multi"}) == "multi"
     monkeypatch.setenv("RS_EMBED_OLMOEARTH_TEMPORAL_MODE", "multi")
     assert oe._resolve_temporal_mode(None) == "multi"
     assert oe._resolve_temporal_mode({"temporal_mode": "single"}) == "single"
     with pytest.raises(ModelError, match="temporal_mode must be"):
         oe._resolve_temporal_mode({"temporal_mode": "monthly"})
+
+
+def test_expand_auto_mode_picks_by_window():
+    def eff(start, end, cfg=None):
+        t = TemporalSpec.range(start, end)
+        return oe._expand_auto_mode(oe._resolve_temporal_mode(cfg), t)
+
+    assert eff("2022-06-01", "2022-06-15") == "single"  # 1 bin -> single
+    assert eff("2022-06-01", "2022-09-01") == "multi"  # >=2 bins -> multi
+    assert eff("2022-06-01", "2025-06-01") == "multi"  # long window -> multi (stretched)
+    # explicit modes always pass through, regardless of window
+    assert eff("2022-06-01", "2025-06-01", {"temporal_mode": "single"}) == "single"
+    assert eff("2022-06-01", "2022-06-10", {"temporal_mode": "multi"}) == "multi"
 
 
 def test_temporal_bins_one_year_stays_fixed_monthly():

@@ -133,8 +133,15 @@ Default: `256` (matching the OlmoEarth training tile size).
 
 | Value             | Behavior                                                                                       |
 | ----------------- | ---------------------------------------------------------------------------------------------- |
-| `single` (default) | One composite over the whole temporal range (`T=1`), timestamp = range midpoint               |
+| `auto` (default)  | Picks from the window: `single` when the range spans one temporal bin (≤ ~1 month), else `multi` (≥2 bins). |
+| `single`          | One composite over the whole temporal range (`T=1`), timestamp = range midpoint               |
 | `multi`           | One composite per **30-day bin** anchored at the range start, up to **12 frames** (longer windows are equal-divided into 12 — see below) |
+
+!!! warning "`auto` default ⇒ multi-month ranges fetch up to 12 composites"
+    With the default `auto`, any range longer than ~1 month resolves to `multi`,
+    which fetches **one S2/S1 composite per bin (up to 12)** instead of one. For
+    large `export_batch` runs this is up to ~12× the GEE fetches and time. Pass
+    `temporal_mode="single"` to force a single composite when that cost matters.
 
 `multi` mirrors how OlmoEarth was pretrained: the official pipeline slices each
 sample's year window into fixed 30-day bins (`duration=30d` strides in the
@@ -206,7 +213,7 @@ For defaults (256, patch_size=4): `64 × 64` grid.
 | `RS_EMBED_OLMOEARTH_VARIANT`     | `tiny_v1_1`   | Default model variant when `model_config` not given |
 | `RS_EMBED_OLMOEARTH_PATCH_SIZE`  | `4`      | Default patch size when `model_config` not given    |
 | `RS_EMBED_OLMOEARTH_IMAGE_SIZE`  | `256`    | Default image resize target                         |
-| `RS_EMBED_OLMOEARTH_TEMPORAL_MODE` | `single` | Default temporal mode (`single` / `multi`)        |
+| `RS_EMBED_OLMOEARTH_TEMPORAL_MODE` | `auto` | Default temporal mode (`auto` / `single` / `multi`) |
 | `RS_EMBED_OLMOEARTH_FETCH_WORKERS` | `8`    | Parallel GEE fetch workers for batch calls          |
 | `RS_EMBED_OLMOEARTH_BATCH_SIZE`  | `4` (CPU) / `16` (CUDA) | Inference batch size for `get_embeddings_batch_from_inputs` |
 
