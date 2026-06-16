@@ -1149,6 +1149,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Model-specific Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#temporal-mode-temporal_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporal mode (temporal_mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2106,6 +2123,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Model-specific Settings">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#temporal-mode-temporal_mode" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Temporal mode (temporal_mode)
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2228,11 +2262,11 @@
 </tr>
 <tr>
 <td>Model config keys</td>
-<td><code>variant</code> (default: <code>prithvi_eo_v2_100_tl</code>)</td>
+<td><code>variant</code> (default: <code>prithvi_eo_v2_100_tl</code>), <code>temporal_mode</code> (<code>auto</code>/<code>single</code>/<code>multi</code>, default <code>auto</code>), <code>max_frames</code> (default <code>4</code>)</td>
 </tr>
 <tr>
 <td>Training alignment</td>
-<td>Medium (depends on preprocessing mode and resize/pad choices)</td>
+<td>Medium in <code>single</code> mode; higher in <code>multi</code> mode, which feeds a real multi-frame series like Prithvi's pretraining (also depends on resize/pad choices)</td>
 </tr>
 </tbody>
 </table>
@@ -2242,6 +2276,7 @@
 <p>In <code>rs-embed</code>, its most important characteristics are:</p>
 <ul>
 <li><strong>required</strong> temporal (<code>year, day_of_year</code>) and location (<code>lat, lon</code>) side inputs auto-derived by the adapter: see <a href="#input-contract">Input Contract</a></li>
+<li><strong>multi-temporal at heart</strong>: defaults to a single composite (<code>temporal_mode="single"</code>), but <code>temporal_mode="multi"</code> feeds a real time series matching its 4-timestep pretraining: see <a href="#temporal-mode-temporal_mode">Temporal mode</a></li>
 <li>30 m default <code>sensor.scale_m</code>, not the more common S2 10 m default — a frequent source of silent drift: see <a href="#environment-variables-tuning-knobs">Environment Variables / Tuning Knobs</a></li>
 <li><code>resize</code> vs <code>pad</code> preprocessing changes token geometry and should be treated as part of the experiment, not as a cosmetic knob: see <a href="#environment-variables-tuning-knobs">Environment Variables / Tuning Knobs</a></li>
 </ul>
@@ -2293,11 +2328,15 @@
 <p>The pipeline below shows the default <code>input_prep="resize"</code> path. For large ROIs, use <code>input_prep="tile"</code> to split the input into tiles and preserve spatial detail. See <a href="../../choosing_settings/#input-preparation-resize-vs-tile">Choosing Settings</a>.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
-    INPUT["S2 6-band"] --&gt; PREP["Normalize → [0,1]\n→ resize or pad"]
-    PREP --&gt; SIDE["Auto-derive side inputs:\ntemporal (year+DOY)\nlocation (lat+lon)"]
-    SIDE --&gt; FWD["Prithvi encoder"]
-    FWD --&gt; POOL["pooled: vector"]
-    FWD --&gt; GRID["grid: patch-token grid"]</code></pre>
+    INPUT["S2 fetch"] --&gt; MODE{temporal_mode}
+    MODE -- "single (default)" --&gt; S1["1 median composite\n[6,H,W]"]
+    MODE -- "multi" --&gt; SN["T-frame series\n[T,6,H,W]\n(dup frames dropped)"]
+    S1 --&gt; PREP["Normalize → [0,1]\n→ per-frame resize or pad"]
+    SN --&gt; PREP
+    PREP --&gt; SIDE["Auto-derive side inputs:\ntemporal per frame (year+DOY)\nlocation (lat+lon)"]
+    SIDE --&gt; FWD["Prithvi encoder\n[B,6,T,H,W]"]
+    FWD --&gt; POOL["pooled: vector (D,)\n(pooled over time+space)"]
+    FWD --&gt; GRID["grid: patch-token grid (D,H',W')\n(pooled over time)"]</code></pre>
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
@@ -2340,7 +2379,7 @@
 <tr>
 <td><code>RS_EMBED_PRITHVI_PREP</code></td>
 <td><code>resize</code></td>
-<td>Input prep mode: <code>resize</code> or <code>pad</code></td>
+<td>Per-frame fit mode inside the adapter: <code>resize</code> or <code>pad</code> (independent of API <code>input_prep</code>)</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_PRITHVI_IMG</code></td>
@@ -2351,6 +2390,26 @@
 <td><code>RS_EMBED_PRITHVI_PATCH_MULT</code></td>
 <td><code>16</code></td>
 <td>Pad multiple for <code>pad</code> mode</td>
+</tr>
+<tr>
+<td><code>RS_EMBED_PRITHVI_TEMPORAL_MODE</code></td>
+<td><code>auto</code></td>
+<td>Default temporal mode when <code>temporal_mode</code> is not in <code>model_config</code>: <code>auto</code> / <code>single</code> / <code>multi</code></td>
+</tr>
+<tr>
+<td><code>RS_EMBED_PRITHVI_MAX_FRAMES</code></td>
+<td><code>4</code></td>
+<td>Frame cap in <code>multi</code> mode (matches Prithvi-EO-2.0's 4-timestep pretraining)</td>
+</tr>
+<tr>
+<td><code>RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS</code></td>
+<td><code>28</code></td>
+<td><strong>Minimum</strong> spacing between frames in <code>multi</code> mode (low end of the 1–6 month training interval); <code>T = clamp(window_days // stride, 1, max_frames)</code></td>
+</tr>
+<tr>
+<td><code>RS_EMBED_PRITHVI_MAX_STRIDE_DAYS</code></td>
+<td><code>184</code></td>
+<td><strong>Maximum</strong> in-distribution gap (~6 months). Larger effective gaps (very long windows, T capped at 4) are flagged via <code>temporal_spacing_out_of_range</code> in metadata + a warning, not silently fixed</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_PRITHVI_FETCH_WORKERS</code></td>
@@ -2425,8 +2484,35 @@
 <p class="admonition-title">Patch Size Differs For <code>600_tl</code></p>
 <p><code>100_tl</code> and <code>300_tl</code> use a <code>(1,16,16)</code> patch, while <code>600_tl</code> uses <code>(1,14,14)</code>. At the default <code>RS_EMBED_PRITHVI_IMG=224</code>, that means <code>14×14</code> patch tokens for the smaller variants but <code>16×16</code> patch tokens for <code>600_tl</code>. If you compare grids across variants, either keep variant fixed or use <code>RS_EMBED_PRITHVI_PREP=pad</code> with an <code>IMG</code> that divides cleanly by both <code>14</code> and <code>16</code> (for example <code>224</code>, which does).</p>
 </div>
-<p>All three variants share the same fixed Sentinel-2 6-band input (<code>BLUE,GREEN,RED,NIR_NARROW,SWIR_1,SWIR_2</code>), the same <code>num_frames=4</code> runtime default, and the same required temporal+location side inputs derived by the adapter.</p>
+<p>All three variants share the same fixed Sentinel-2 6-band input (<code>BLUE,GREEN,RED,NIR_NARROW,SWIR_1,SWIR_2</code>) and the same required temporal+location side inputs derived by the adapter. The checkpoints ship a <code>num_frames=4</code> config, but the adapter loads the runtime with the frame count it actually feeds — <code>1</code> in <code>single</code> mode, or the window-derived <code>T</code> in <code>multi</code> mode (see <a href="#temporal-mode-temporal_mode">Temporal mode</a>).</p>
 <p><code>variant</code> overrides <code>RS_EMBED_PRITHVI_KEY</code>. For export jobs, use <code>ExportModelRequest.configure("prithvi", variant="prithvi_eo_v2_300_tl")</code>.</p>
+<h3 id="temporal-mode-temporal_mode">Temporal mode (<code>temporal_mode</code>)<a class="headerlink" href="#temporal-mode-temporal_mode" title="Permanent link">&para;</a></h3>
+<p>Prithvi-EO 2.0 was pretrained on <strong>4-timestep</strong> HLS series with <strong>1–6 month gaps</strong> between consecutive frames (<a href="https://arxiv.org/abs/2412.02732">arXiv:2412.02732</a>), and each frame's real <code>(year, day_of_year)</code> is fed through the temporal embedding. <code>rs-embed</code> exposes this via <code>temporal_mode</code>:</p>
+<ul>
+<li><strong><code>auto</code></strong> (default): picks from the window — <code>single</code> when it yields one frame (sub-month range), else <code>multi</code>. So a multi-month/-year request samples temporally instead of collapsing into one composite.</li>
+<li><strong><code>single</code></strong>: one median composite over the whole window (<code>T=1</code>).</li>
+<li>
+<p><strong><code>multi</code></strong>: a true <code>[B,6,T,H,W]</code> series with per-frame dates. The frame count is derived from the requested window rather than forced to a fixed <code>T</code>:</p>
+<div class="highlight"><pre><span></span><code>T = clamp(window_days // 28, 1, max_frames)   # max_frames default = 4
+</code></pre></div>
+<p>A ~28-day <strong>minimum</strong> spacing (the low end of Prithvi-EO 2.0's 1–6 month training interval) means short windows collapse to <code>T=1</code> instead of being padded with duplicate frames; the window is then split into <code>T</code> equal bins (so the whole period is represented, not just its first months). Frames that the provider back-fills for empty sub-windows (identical copies of the whole-window composite) are <strong>dropped</strong>, so a window with no real temporal diversity also degrades to <code>T=1</code>. Frame dates align with the provider's binning (shared <code>split_date_range</code>).</p>
+<p>Because <code>T</code> is capped at 4, very long windows (beyond ~2 years) produce an effective frame gap larger than the ~6 month <strong>maximum</strong> seen in pretraining. The adapter does not silently truncate the window; instead it records <code>max_frame_gap_days</code> in metadata and, when the gap exceeds <code>RS_EMBED_PRITHVI_MAX_STRIDE_DAYS</code> (default 184), sets <code>temporal_spacing_out_of_range=True</code> and emits a <code>UserWarning</code> so the extrapolation is visible.</p>
+</li>
+</ul>
+<div class="admonition note">
+<p class="admonition-title">Output dimensionality is unchanged</p>
+<p>Multi-frame tokens are pooled over time (and space), so <code>pooled</code> is still <code>(D,)</code> and <code>grid</code> is still <code>(D, H', W')</code> — switching modes never changes the embedding shape, only the values and the <code>num_frames</code> / <code>frame_dates</code> metadata. To stay near the training regime, give <code>multi</code> a window of a few months up to ~a year.</p>
+</div>
+<div class="highlight"><pre><span></span><code><span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
+    <span class="s2">&quot;prithvi&quot;</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-01-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2023-01-01&quot;</span><span class="p">),</span>  <span class="c1"># ~1 yr -&gt; 4 frames</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">temporal_mode</span><span class="o">=</span><span class="s2">&quot;multi&quot;</span><span class="p">,</span>
+<span class="p">)</span>
+</code></pre></div>
+<p>Tuning knobs: <code>max_frames</code> (or env <code>RS_EMBED_PRITHVI_MAX_FRAMES</code>) caps the count; <code>RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS</code> sets the minimum spacing (default 28); <code>RS_EMBED_PRITHVI_MAX_STRIDE_DAYS</code> sets the maximum in-distribution gap before the out-of-range flag/warning fires (default 184); <code>RS_EMBED_PRITHVI_TEMPORAL_MODE</code> sets the default mode.</p>
 <p>Example:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
@@ -2473,13 +2559,16 @@
 <hr />
 <h2 id="paper-links">Paper &amp; Links<a class="headerlink" href="#paper-links" title="Permanent link">&para;</a></h2>
 <ul>
-<li><strong>Publication</strong>: <a href="https://arxiv.org/abs/2310.18660">arXiv 2023</a></li>
+<li><strong>Prithvi-EO 2.0</strong> (the <code>*_tl</code> variants here): <a href="https://arxiv.org/abs/2412.02732">arXiv:2412.02732</a> — pretrained on 4-timestep HLS series with 1–6 month gaps; informs <code>temporal_mode="multi"</code>.</li>
+<li><strong>Prithvi-EO 1.0</strong>: <a href="https://arxiv.org/abs/2310.18660">arXiv:2310.18660</a></li>
 <li><strong>Model</strong>: <a href="https://huggingface.co/ibm-nasa-geospatial">ibm-nasa-geospatial</a></li>
 </ul>
 <hr />
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Default <code>scale_m</code> is <code>30</code>, not <code>10</code> — this is intentional and differs from most other S2 models.</li>
+<li><code>temporal_mode="auto"</code> (default) picks single/multi from the window (multi when it yields ≥2 frames); <code>temporal_mode="single"</code> forces one composite (<code>T=1</code>); <code>temporal_mode="multi"</code> forces a window-derived <code>T</code>-frame series (capped at <code>max_frames=4</code>, ~28-day min spacing, duplicate frames dropped). Output shape is identical in all modes.</li>
+<li>Frame spacing is bounded by Prithvi-EO 2.0's 1–6 month training interval: gaps below ~28 days reduce <code>T</code>; gaps above ~184 days (very long windows) are flagged via <code>temporal_spacing_out_of_range</code> metadata + a warning rather than silently truncated.</li>
 <li><code>resize</code> vs <code>pad</code> preprocessing changes token geometry; treat it as part of experiment design.</li>
 <li>Variant <code>600_tl</code> uses patch size 14 (not 16), producing a different grid shape than <code>100_tl</code>/<code>300_tl</code>.</li>
 </ul>
