@@ -199,41 +199,66 @@ def test_get_embedding_multi_collapses_duplicate_frames_to_one(monkeypatch):
     assert seen["num_frames"] == 1
 
 
-def test_get_embedding_default_mode_stays_single(monkeypatch):
-    """No temporal_mode -> single path (no multi helpers touched)."""
-    emb = pr.PrithviEOV2S2_6B_Embedder()
-    spatial = PointBuffer(lon=10.0, lat=20.0, buffer_m=256)
-    temporal = TemporalSpec.range("2022-01-01", "2023-01-01")
+def test_effective_temporal_mode_auto_picks_by_window():
+    def eff(start, end, cfg=None):
+        return pr._effective_temporal_mode(cfg, TemporalSpec.range(start, end))
 
+    assert pr._resolve_temporal_mode(None) == "auto"  # new default
+    assert eff("2022-06-01", "2022-06-15") == "single"  # 14d -> 1 frame -> single
+    assert eff("2022-06-01", "2022-09-01") == "multi"  # 92d -> >=2 frames -> multi
+    assert eff("2022-01-01", "2023-01-01") == "multi"  # long -> multi (capped at 4)
+    # explicit modes pass through regardless of window
+    assert eff("2022-01-01", "2023-01-01", {"temporal_mode": "single"}) == "single"
+    assert eff("2022-06-01", "2022-06-10", {"temporal_mode": "multi"}) == "multi"
+
+
+def _single_path_only(monkeypatch, emb):
+    """Wire mocks so the single path works and the multi path explodes if hit."""
     monkeypatch.setattr(emb, "_get_provider", lambda _backend: object())
     monkeypatch.setattr(
         pr,
         "_prepare_prithvi_chw",
         lambda x_chw, *, fill_value: (x_chw.astype(np.float32, copy=False), {"prep_mode": "t"}),
     )
+    monkeypatch.setattr(pr, "_load_prithvi", lambda model_key, **k: (object(), {"repo_id": "r"}, "cpu"))
     monkeypatch.setattr(
-        pr,
-        "_load_prithvi",
-        lambda model_key, **k: (object(), {"repo_id": "r"}, "cpu"),
-    )
-    monkeypatch.setattr(
-        pr,
-        "_prithvi_forward_tokens",
-        lambda *a, **k: np.arange(8, dtype=np.float32).reshape(2, 4),
+        pr, "_prithvi_forward_tokens", lambda *a, **k: np.arange(8, dtype=np.float32).reshape(2, 4)
     )
 
     def _boom(*a, **k):
-        raise AssertionError("multi path must not run in default (single) mode")
+        raise AssertionError("multi path must not run for a single-frame window")
 
     monkeypatch.setattr(pr, "_prithvi_forward_tokens_multiframe", _boom)
 
+
+def test_get_embedding_auto_short_window_uses_single(monkeypatch):
+    """auto default + a sub-month window -> single path (T=1), no multi helpers."""
+    emb = pr.PrithviEOV2S2_6B_Embedder()
+    _single_path_only(monkeypatch, emb)
     out = emb.get_embedding(
-        spatial=spatial,
-        temporal=temporal,
+        spatial=PointBuffer(lon=10.0, lat=20.0, buffer_m=256),
+        temporal=TemporalSpec.range("2022-06-01", "2022-06-15"),  # 14d -> single
         sensor=None,
         output=OutputSpec.pooled(),
         backend="gee",
         input_chw=np.full((6, 8, 8), 1000.0, dtype=np.float32),
+    )
+    assert out.meta["num_frames"] == 1
+    assert out.meta.get("temporal_mode") != "multi"
+
+
+def test_get_embedding_explicit_single_forces_single(monkeypatch):
+    """temporal_mode='single' forces the single path even for a long window."""
+    emb = pr.PrithviEOV2S2_6B_Embedder()
+    _single_path_only(monkeypatch, emb)
+    out = emb.get_embedding(
+        spatial=PointBuffer(lon=10.0, lat=20.0, buffer_m=256),
+        temporal=TemporalSpec.range("2022-01-01", "2023-01-01"),  # would be multi under auto
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="gee",
+        input_chw=np.full((6, 8, 8), 1000.0, dtype=np.float32),
+        model_config={"temporal_mode": "single"},
     )
     assert out.meta["num_frames"] == 1
     assert out.meta.get("temporal_mode") != "multi"

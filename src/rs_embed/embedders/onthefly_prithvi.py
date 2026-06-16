@@ -192,7 +192,9 @@ _PRITHVI_HF_SPECS = {
 #     gracefully to T=1;
 #   - flag (not silently fix) frame gaps beyond the ~184-day training maximum,
 #     which can only occur for very long windows once T is capped at 4.
-_DEFAULT_TEMPORAL_MODE = "single"
+# "auto" (default) picks single/multi from the window: multi when the window
+# yields ≥2 frames, single otherwise. Use "single"/"multi" to force a mode.
+_DEFAULT_TEMPORAL_MODE = "auto"
 _DEFAULT_MAX_FRAMES = 4  # matches Prithvi-EO-2.0 pretraining (4 timesteps)
 _DEFAULT_FRAME_STRIDE_DAYS = 28  # min spacing = low end of training's 1–6 month gap
 _DEFAULT_MAX_FRAME_STRIDE_DAYS = 184  # max gap (~6 months) seen in pretraining
@@ -200,12 +202,15 @@ _DEFAULT_MAX_FRAME_STRIDE_DAYS = 184  # max gap (~6 months) seen in pretraining
 
 def _normalize_temporal_mode(mode: Any) -> str:
     m = str(mode if mode is not None else _DEFAULT_TEMPORAL_MODE).strip().lower()
-    if m not in ("single", "multi"):
-        raise ModelError(f"prithvi temporal_mode must be 'single' or 'multi', got {mode!r}.")
+    if m not in ("single", "multi", "auto"):
+        raise ModelError(
+            f"prithvi temporal_mode must be 'single', 'multi', or 'auto', got {mode!r}."
+        )
     return m
 
 
 def _resolve_temporal_mode(model_config: dict[str, Any] | None) -> str:
+    """Resolve the *configured* temporal mode (may be ``"auto"``)."""
     v = model_config_value(model_config, "temporal_mode")
     if v is not None:
         return _normalize_temporal_mode(v)
@@ -213,6 +218,26 @@ def _resolve_temporal_mode(model_config: dict[str, Any] | None) -> str:
     if env:
         return _normalize_temporal_mode(env)
     return _DEFAULT_TEMPORAL_MODE
+
+
+def _effective_temporal_mode(
+    model_config: dict[str, Any] | None, temporal: TemporalSpec
+) -> str:
+    """Resolve single/multi, expanding ``"auto"`` from the window.
+
+    ``auto`` → ``"multi"`` when the window yields ≥2 frames
+    (``T = clamp(window_days // stride, 1, max_frames) >= 2``), else ``"single"``
+    (a 1-frame window where multi adds nothing but fetch cost).
+    """
+    mode = _resolve_temporal_mode(model_config)
+    if mode != "auto":
+        return mode
+    n = _auto_num_frames(
+        temporal,
+        max_frames=_resolve_max_frames(model_config),
+        stride_days=_resolve_frame_stride_days(),
+    )
+    return "multi" if n >= 2 else "single"
 
 
 def _resolve_max_frames(model_config: dict[str, Any] | None) -> int:
@@ -989,13 +1014,14 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 "temporal_mode": {
                     "type": "string",
                     "default": _DEFAULT_TEMPORAL_MODE,
-                    "choices": ["single", "multi"],
+                    "choices": ["auto", "single", "multi"],
                     "description": (
-                        "single: one median composite over the whole window (T=1). "
-                        "multi: a true time series — T derived from the window length "
-                        "(~30-day min spacing, capped at max_frames), matching Prithvi's "
-                        "multi-temporal pretraining; provider-duplicated frames are dropped "
-                        "so diversity-free windows degrade to T=1."
+                        "auto (default): single when the window yields one frame, "
+                        "else multi (≥2 frames). single: one median composite over the "
+                        "whole window (T=1). multi: a true time series — T derived from "
+                        "the window length (~28-day min spacing, capped at max_frames), "
+                        "matching Prithvi's multi-temporal pretraining; provider-duplicated "
+                        "frames are dropped so diversity-free windows degrade to T=1."
                     ),
                 },
                 "max_frames": {
@@ -1059,7 +1085,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         t = temporal_to_range(temporal)  # normalize to range
 
-        if _resolve_temporal_mode(model_config) == "multi":
+        if _effective_temporal_mode(model_config, t) == "multi":
             return self._get_embedding_multiframe(
                 spatial=spatial,
                 temporal=t,
@@ -1406,7 +1432,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             sensor = self._default_sensor()
 
         t = temporal_to_range(temporal)
-        multi = _resolve_temporal_mode(model_config) == "multi"
+        multi = _effective_temporal_mode(model_config, t) == "multi"
         n_frames_req = (
             _auto_num_frames(
                 t,
@@ -1501,7 +1527,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
 
-        if _resolve_temporal_mode(model_config) == "multi" or any(
+        if _effective_temporal_mode(model_config, t) == "multi" or any(
             np.asarray(x).ndim == 4 for x in input_chws
         ):
             return self._batch_from_inputs_multiframe(

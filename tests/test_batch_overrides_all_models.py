@@ -129,6 +129,7 @@ def test_prithvi_batch_prefetch_passes_raw_input(monkeypatch):
         temporal=TemporalSpec.year(2020),
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert len(out) == 3

@@ -10,7 +10,7 @@
 | Aliases              | `prithvi_eo_v2_s2_6b`                                         |
 | Family / Backbone    | Prithvi-EO v2 via vendored `PrithviMAE` runtime               |
 | Adapter type         | `on-the-fly`                                                  |
-| Model config keys    | `variant` (default: `prithvi_eo_v2_100_tl`), `temporal_mode` (`single`/`multi`, default `single`), `max_frames` (default `4`) |
+| Model config keys    | `variant` (default: `prithvi_eo_v2_100_tl`), `temporal_mode` (`auto`/`single`/`multi`, default `auto`), `max_frames` (default `4`) |
 | Training alignment   | Medium in `single` mode; higher in `multi` mode, which feeds a real multi-frame series like Prithvi's pretraining (also depends on resize/pad choices) |
 
 !!! success "Prithvi In 30 Seconds"
@@ -83,7 +83,7 @@ flowchart LR
 | `RS_EMBED_PRITHVI_PREP`          | `resize`               | Per-frame fit mode inside the adapter: `resize` or `pad` (independent of API `input_prep`) |
 | `RS_EMBED_PRITHVI_IMG`           | `224`                  | Target square size for `resize` mode                            |
 | `RS_EMBED_PRITHVI_PATCH_MULT`    | `16`                   | Pad multiple for `pad` mode                                     |
-| `RS_EMBED_PRITHVI_TEMPORAL_MODE` | `single`               | Default temporal mode when `temporal_mode` is not in `model_config`: `single` or `multi` |
+| `RS_EMBED_PRITHVI_TEMPORAL_MODE` | `auto`                 | Default temporal mode when `temporal_mode` is not in `model_config`: `auto` / `single` / `multi` |
 | `RS_EMBED_PRITHVI_MAX_FRAMES`    | `4`                    | Frame cap in `multi` mode (matches Prithvi-EO-2.0's 4-timestep pretraining) |
 | `RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS` | `28`               | **Minimum** spacing between frames in `multi` mode (low end of the 1–6 month training interval); `T = clamp(window_days // stride, 1, max_frames)` |
 | `RS_EMBED_PRITHVI_MAX_STRIDE_DAYS`    | `184`              | **Maximum** in-distribution gap (~6 months). Larger effective gaps (very long windows, T capped at 4) are flagged via `temporal_spacing_out_of_range` in metadata + a warning, not silently fixed |
@@ -116,7 +116,8 @@ All three variants share the same fixed Sentinel-2 6-band input (`BLUE,GREEN,RED
 
 Prithvi-EO 2.0 was pretrained on **4-timestep** HLS series with **1–6 month gaps** between consecutive frames ([arXiv:2412.02732](https://arxiv.org/abs/2412.02732)), and each frame's real `(year, day_of_year)` is fed through the temporal embedding. `rs-embed` exposes this via `temporal_mode`:
 
-- **`single`** (default): one median composite over the whole window (`T=1`). Backward-compatible; nothing changes for existing callers.
+- **`auto`** (default): picks from the window — `single` when it yields one frame (sub-month range), else `multi`. So a multi-month/-year request samples temporally instead of collapsing into one composite.
+- **`single`**: one median composite over the whole window (`T=1`).
 - **`multi`**: a true `[B,6,T,H,W]` series with per-frame dates. The frame count is derived from the requested window rather than forced to a fixed `T`:
 
     ```
@@ -213,7 +214,7 @@ emb = get_embedding(
 ## Reference
 
 - Default `scale_m` is `30`, not `10` — this is intentional and differs from most other S2 models.
-- `temporal_mode="single"` (default) sends one composite (`T=1`); `temporal_mode="multi"` sends a window-derived `T`-frame series (capped at `max_frames=4`, ~28-day min spacing, duplicate frames dropped). Output shape is identical in both modes.
+- `temporal_mode="auto"` (default) picks single/multi from the window (multi when it yields ≥2 frames); `temporal_mode="single"` forces one composite (`T=1`); `temporal_mode="multi"` forces a window-derived `T`-frame series (capped at `max_frames=4`, ~28-day min spacing, duplicate frames dropped). Output shape is identical in all modes.
 - Frame spacing is bounded by Prithvi-EO 2.0's 1–6 month training interval: gaps below ~28 days reduce `T`; gaps above ~184 days (very long windows) are flagged via `temporal_spacing_out_of_range` metadata + a warning rather than silently truncated.
 - `resize` vs `pad` preprocessing changes token geometry; treat it as part of experiment design.
 - Variant `600_tl` uses patch size 14 (not 16), producing a different grid shape than `100_tl`/`300_tl`.
