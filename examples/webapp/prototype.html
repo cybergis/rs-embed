@@ -62,6 +62,18 @@
   .mcell.inrange{background:rgba(245,166,35,.18)}
   .mcell.endpoint{background:var(--citrus);color:#3a2a00;font-weight:700}
   .tpick-hint{font-size:11px;color:var(--muted);margin-top:7px}
+  .tabs{display:flex;gap:6px;margin:2px 0 4px}
+  .tab{flex:1;padding:8px 0;font-weight:700;border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer;color:var(--muted);font-size:13px}
+  .tab.active{background:var(--leaf);color:#fff;border-color:var(--leaf)}
+  .uploadbtn{display:inline-block;margin-top:8px;font-size:12px;font-weight:600;border:1px solid var(--line);border-radius:8px;padding:7px 10px;background:#fff;cursor:pointer}
+  .uploadbtn:hover{background:#f3efe6}
+  .pred{border:1px solid var(--line);border-radius:9px;padding:8px 10px;margin-top:8px;background:#fff}
+  .pred .top{font-weight:700;font-size:12px}
+  .pred .v{font-size:22px;font-weight:800;color:var(--leaf)}
+  .pred .u{font-size:12px;color:var(--muted)}
+  .pred .r2{font-size:11px;color:var(--muted);margin-top:2px}
+  .pred.ood{border-color:#f0c36d;background:#fff8e6}
+  .pred .ood-tag{font-size:10px;font-weight:700;color:#7a5b00;background:rgba(245,166,35,.25);padding:1px 6px;border-radius:999px;margin-left:6px}
   pre#query{white-space:pre-wrap;word-break:break-word;background:#0f1720;color:#e8eef6;border-radius:10px;
             padding:11px 12px;font-size:11.5px;line-height:1.5;font-family:"IBM Plex Mono",ui-monospace,monospace;margin:0}
   pre#query .k{color:#7ee0c0}.k2{color:#f5a623}
@@ -116,40 +128,63 @@
   <aside id="panel">
     <h1><img class="logo" src="assets/logo.png" alt="rs-embed" onerror="this.replaceWith(Object.assign(document.createTextNode('🛰️')))"> rs-embed <small>any model · any place · any time</small></h1>
 
-    <div class="sec">
-      <h2>1 · Select on the map</h2>
-      <div class="hint">
-        <b>Right-click</b> a spot → a <b>2 km box</b>.<br>
-        <b>Right-click &amp; drag</b> a diagonal → a freeform box.<br>
-        A Sentinel-2 preview pops up; confirm it to embed.
-      </div>
-      <div id="selinfo" class="status" style="margin-top:8px">No ROI selected.</div>
+    <div class="tabs">
+      <button id="tabExtract" class="tab active">① Extract</button>
+      <button id="tabUse" class="tab">② Use</button>
     </div>
 
-    <div class="sec">
-      <h2>2 · Models</h2>
-      <div class="selbar">
-        <button id="selAll">all</button>
-        <button id="selNone">none</button>
-        <button id="selPc">precomputed</button>
+    <div id="extractPanel">
+      <div class="sec">
+        <h2>1 · Select on the map</h2>
+        <div class="hint">
+          <b>Right-click</b> a spot → a <b>2 km box</b>.<br>
+          <b>Right-click &amp; drag</b> a diagonal → a freeform box.<br>
+          A Sentinel-2 preview pops up; confirm it to embed.
+        </div>
+        <div id="selinfo" class="status" style="margin-top:8px">No ROI selected.</div>
       </div>
-      <div id="models" class="models"></div>
+
+      <div class="sec">
+        <h2>2 · Models</h2>
+        <div class="selbar">
+          <button id="selAll">all</button>
+          <button id="selNone">none</button>
+          <button id="selPc">precomputed</button>
+        </div>
+        <div id="models" class="models"></div>
+      </div>
+
+      <div class="sec">
+        <h2>3 · Time range
+          <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
+            <span class="yrlabel" id="trange">2021-06 – 2023-09</span>
+          </span>
+        </h2>
+        <div id="slider"></div>
+        <button id="tpickBtn" class="tpick-btn">📅 Pick year / month ▾</button>
+        <div id="tpick">
+          <div class="tpick-head"><button id="tprev">◀</button><span id="tpickYear">2021</span><button id="tnext">▶</button></div>
+          <div id="tgrid" class="tgrid"></div>
+          <div class="tpick-hint">Click a month to set <b>start</b>, click again to set <b>end</b>.</div>
+        </div>
+        <div class="hint" style="margin-top:8px">Annual models (gse/tessera/copernicus) use the latest year; on-the-fly models use the selected month window.</div>
+      </div>
     </div>
 
-    <div class="sec">
-      <h2>3 · Time range
-        <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
-          <span class="yrlabel" id="trange">2021-06 – 2023-09</span>
-        </span>
-      </h2>
-      <div id="slider"></div>
-      <button id="tpickBtn" class="tpick-btn">📅 Pick year / month ▾</button>
-      <div id="tpick">
-        <div class="tpick-head"><button id="tprev">◀</button><span id="tpickYear">2021</span><button id="tnext">▶</button></div>
-        <div id="tgrid" class="tgrid"></div>
-        <div class="tpick-hint">Click a month to set <b>start</b>, click again to set <b>end</b>.</div>
+    <div id="usePanel" style="display:none">
+      <div class="sec">
+        <h2>Predict with a pretrained head</h2>
+        <div id="useInfo" class="hint">loading…</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+          <label style="font-size:13px;font-weight:600">Model</label>
+          <select id="useModel" style="flex:1;padding:6px;border:1px solid var(--line);border-radius:7px;font:inherit"></select>
+        </div>
+        <button id="predictBtn" class="citrus" style="width:100%;margin-top:10px;padding:9px;font-weight:700">🌽 Predict here</button>
+        <div class="hint" style="margin-top:10px">Right-click the map to pick a location, then <b>Predict here</b> (or use the bubble). Or run a saved embedding package:</div>
+        <label class="uploadbtn">⬆ Upload package (.npz)<input id="pkgFile" type="file" accept=".npz" style="display:none"></label>
+        <div id="useStatus" class="status" style="margin-top:8px">No ROI selected.</div>
+        <div id="usePred"></div>
       </div>
-      <div class="hint" style="margin-top:8px">Annual models (gse/tessera/copernicus) use the latest year; on-the-fly models use the selected month window.</div>
     </div>
 
   </aside>
@@ -223,20 +258,21 @@ map.on('mouseup', e=>{ if(!drawing) return; drawing=false;
   if(moved<8) setPointBox(e.latlng); else setBBox(L.latLngBounds(startLL,e.latlng)); });
 
 function clearRoi(){ if(roiLayer){map.removeLayer(roiLayer);roiLayer=null;} }
+function roiStatus(t){ ['selinfo','useStatus'].forEach(id=>{const e=document.getElementById(id); if(e) e.textContent=t;}); }
 function setPointBox(ll){ clearRoi(); const d=KM, dx=d/Math.max(0.2,Math.cos(ll.lat*Math.PI/180));
   const b=L.latLngBounds([ll.lat-d,ll.lng-dx],[ll.lat+d,ll.lng+dx]);
   roiLayer=L.rectangle(b,{color:'#f5a623',weight:2,fillOpacity:.08}).addTo(map);
   geometry={type:'point',lon:+ll.lng.toFixed(5),lat:+ll.lat.toFixed(5)};
-  document.getElementById('selinfo').textContent=`Point ${geometry.lat}, ${geometry.lon} → 2 km box`;
+  roiStatus(`Point ${geometry.lat}, ${geometry.lon} → 2 km box`);
   onRoiChanged(b.getCenter()); }
 function setBBox(b){ clearRoi(); roiLayer=L.rectangle(b,{color:'#f5a623',weight:2,fillOpacity:.08}).addTo(map);
   const sw=b.getSouthWest(),ne=b.getNorthEast();
   geometry={type:'bbox',minlon:+sw.lng.toFixed(5),minlat:+sw.lat.toFixed(5),maxlon:+ne.lng.toFixed(5),maxlat:+ne.lat.toFixed(5)};
-  document.getElementById('selinfo').textContent=`BBox ${geometry.minlat},${geometry.minlon} → ${geometry.maxlat},${geometry.maxlon}`;
+  roiStatus(`BBox ${geometry.minlat},${geometry.minlon} → ${geometry.maxlat},${geometry.maxlon}`);
   onRoiChanged(b.getCenter()); }
 
 // ---------------------------------------------------------------- panel
-let MODELS=[]; const checked=new Set(['gse']);
+let MODELS=[], currentTab='extract', HEADS=null; const checked=new Set(['gse']);
 const selectedModels=()=>MODELS.filter(m=>checked.has(m.id)).map(m=>m.id);
 
 // ── month-range state (shared by slider + year/month picker) ──
@@ -288,12 +324,19 @@ document.getElementById('selPc').onclick=()=>{checked.clear();MODELS.filter(m=>m
 
 function updateQuery(){
   const q=document.getElementById('query');
-  if(!geometry){q.textContent='Select an ROI to see the rs-embed call…';return;}
   const sel=selectedModels();
-  const spatial=geometry.type==='point'
-    ?`PointBuffer(lon=${geometry.lon}, lat=${geometry.lat}, buffer_m=1000)`
-    :`BBox(${geometry.minlon}, ${geometry.minlat}, ${geometry.maxlon}, ${geometry.maxlat})`;
+  const m0=sel[0]||'<model>';
+  const spatial=!geometry?'PointBuffer(lon, lat, buffer_m=1000)'
+    :geometry.type==='point'
+      ?`PointBuffer(lon=${geometry.lon}, lat=${geometry.lat}, buffer_m=1000)`
+      :`BBox(${geometry.minlon}, ${geometry.minlat}, ${geometry.maxlon}, ${geometry.maxlat})`;
   const rangeT=`TemporalSpec.range("${startStr()}-01", "${endExclusive()}")`;
+  if(currentTab==='use'){
+    const task=(HEADS&&HEADS.task)||'corn_presence', lbl=(HEADS&&HEADS.label)||'prediction';
+    q.innerHTML=`<span class="k">from joblib import load</span>\nreg = load(<span class="k2">"${task}__${m0}.pkl"</span>)        <span style="color:#7f8c99"># pretrained head</span>\nemb = <span class="k">get_embedding</span>(<span class="k2">"${m0}"</span>, spatial=${spatial},\n                    temporal=${rangeT}, output=OutputSpec.pooled())\nyhat = reg.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># ${lbl}</span>`;
+    return;
+  }
+  if(!geometry){q.textContent='Select an ROI to see the rs-embed call…';return;}
   if(sel.length>1){
     const models=sel.map(s=>`<span class="k2">"${s}"</span>`).join(', ');
     q.innerHTML=`<span class="k">export_batch</span>(\n    spatials=[${spatial}],\n    temporal=${rangeT},\n    models=[${models}],\n    output=OutputSpec.grid(),\n    target=ExportTarget.combined(<span class="k2">"embeddings.npz"</span>),\n)`;
@@ -313,9 +356,9 @@ async function onRoiChanged(center){
     .setLatLng(center).setContent('<div class="pop"><span class="spin"></span>Fetching Sentinel-2 preview…</div>').openOn(map);
   const j=await mockPreview(geometry,seed);
   pop.setContent(`<div class="pop"><b>Sentinel-2 RGB</b> <span class="status">(mock)</span><br><img src="${j.image}"><br>`+
-    `<span class="status">${selectedModels().length} model(s) selected</span>`+
-    `<div class="pbtns"><button class="citrus" id="confirmBtn">Confirm → embed</button></div></div>`);
-  setTimeout(()=>{const b=document.getElementById('confirmBtn'); if(b) b.onclick=()=>runEmbed(pop,seed);},0);
+    `<span class="status">${currentTab==='use' ? ('head: '+useModelId()) : (selectedModels().length+' model(s) selected')}</span>`+
+    `<div class="pbtns"><button class="citrus" id="confirmBtn">${currentTab==='use'?'Predict':'Confirm → embed'}</button></div></div>`);
+  setTimeout(()=>{const b=document.getElementById('confirmBtn'); if(b) b.onclick=()=>currentTab==='use'?runPredict(pop,seed):runEmbed(pop,seed);},0);
 }
 function sparkline(vals){ if(!vals||!vals.length) return '';
   const w=180,h=26,mn=Math.min(...vals),mx=Math.max(...vals),rng=(mx-mn)||1;
@@ -378,7 +421,73 @@ async function runEmbed(pop,seed){
   };
 })();
 
+// ── Tabs (Extract | Use) + MOCK downstream prediction ──
+function setTab(t){
+  currentTab=t;
+  document.getElementById('tabExtract').classList.toggle('active', t==='extract');
+  document.getElementById('tabUse').classList.toggle('active', t==='use');
+  document.getElementById('extractPanel').style.display = t==='extract' ? '' : 'none';
+  document.getElementById('usePanel').style.display = t==='use' ? '' : 'none';
+  updateQuery();
+}
+document.getElementById('tabExtract').onclick=()=>setTab('extract');
+document.getElementById('tabUse').onclick=()=>setTab('use');
+
+const USE_START='2022-06', USE_END='2022-08';
+const useModelId=()=>{const s=document.getElementById('useModel'); return (s&&s.value)||'gse';};
+function loadHeads(){  // mock: pretend a corn-presence classifier head exists per model
+  HEADS={task:'corn_presence', kind:'classification', label:'corn presence', units:'P(corn)',
+         region:'Illinois (CDL 2022)', classes:['not corn','corn'],
+         models:MOCK_MODELS.map((m,i)=>({model:m.id, score:+(0.55+0.04*(i%5)).toFixed(2), score_name:'accuracy'}))};
+  document.getElementById('useInfo').innerHTML=`<b>${HEADS.label} (${HEADS.units})</b> — pretrained on ${HEADS.region}. <span class="status">(mock)</span>`;
+  const sel=document.getElementById('useModel'); sel.innerHTML='';
+  HEADS.models.forEach(m=>{const o=document.createElement('option'); o.value=m.model; o.textContent=`${m.model} · acc=${m.score}`; sel.appendChild(o);});
+  sel.onchange=updateQuery; updateQuery();
+}
+function predCardHTML(x,units){
+  if(!x.ok) return `<div class="pred"><div class="top">${x.model}</div><div class="r2" style="color:#b3261e">${x.error}</div></div>`;
+  const cls=x.kind==='classification';
+  const val=cls
+    ? `<span class="v">${x.label_pred}</span> <span class="u">${Math.round(x.prediction*100)}% ${units||''}</span>`
+    : `<span class="v">${x.prediction}</span> <span class="u">${units||''}</span>`;
+  const score=(x.score!=null)?x.score:x.train_r2;
+  return `<div class="pred"><div class="top">${x.model}</div>${val}<div class="r2">head ${x.score_name||'R²'}=${score}</div></div>`;
+}
+function mockPredict(models,seed){
+  const r=rng(seed||1);
+  return models.map(m=>{const head=(HEADS.models||[]).find(h=>h.model===m); const p=+(r()).toFixed(3);
+    return {model:m, ok:true, kind:'classification', prediction:p, label_pred:p>=0.5?'corn':'not corn',
+            score:head?head.score:0.6, score_name:'accuracy'};});
+}
+async function runPredict(pop,seed){
+  const models=[useModelId()];
+  if(pop) pop.setContent('<div class="pop"><span class="spin"></span>Predicting… <span class="status">(mock)</span></div>');
+  await sleep(500);
+  const results=mockPredict(models,seed);
+  if(pop){ pop.setContent(`<div class="pop bubble-results"><b>${HEADS.label}</b> <span class="status">· ${HEADS.region}</span>`+results.map(x=>predCardHTML(x,HEADS.units)).join('')+`</div>`); pop.update(); }
+}
+(function initPredictBtn(){
+  const b=document.getElementById('predictBtn'); if(!b) return;
+  b.onclick=async()=>{
+    const out=document.getElementById('usePred');
+    if(!geometry){ out.innerHTML='<div class="status">Right-click the map to pick a location first.</div>'; return; }
+    out.innerHTML='<div class="status"><span class="spin"></span>predicting… (mock)</div>';
+    await sleep(400);
+    const results=mockPredict([useModelId()], 7);
+    out.innerHTML=results.map(x=>predCardHTML(x,HEADS.units)).join('');
+  };
+})();
+(function initUpload(){
+  const f=document.getElementById('pkgFile'); if(!f) return;
+  f.onchange=async()=>{ if(!f.files.length) return;
+    const out=document.getElementById('usePred'); out.innerHTML='<div class="status"><span class="spin"></span>predicting from package… (mock)</div>';
+    await sleep(500);
+    const results=mockPredict(selectedModels().length?selectedModels():['gse'], 999);
+    out.innerHTML=results.map(x=>predCardHTML(x,HEADS.units)).join(''); f.value=''; };
+})();
+
 loadModels();
+loadHeads();
 </script>
 </body>
 </html>

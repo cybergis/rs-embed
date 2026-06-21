@@ -475,6 +475,139 @@ def build_maize(quick: bool) -> None:
 
 
 # ---------------------------------------------------------------------------
+# 🧠 Downstream heads — pretrained maize-yield regressor per embedding model
+# ---------------------------------------------------------------------------
+def build_heads(quick: bool) -> None:
+    """Fit a frozen RandomForest yield head per embedding model on the maize
+    cache and pickle it (joblib). Powers the web app's "Use" tab: at runtime an
+    ROI's embedding is fed straight into the matching head for a prediction."""
+    import joblib
+    from sklearn.ensemble import RandomForestRegressor
+    from sklearn.metrics import r2_score
+    from sklearn.model_selection import train_test_split
+
+    mdir = CACHE / "maize"
+    bundle, labels_p = mdir / "maize_export.npz", mdir / "labels.npz"
+    if not (bundle.exists() and labels_p.exists()):
+        raise RuntimeError("maize cache missing — run `--only maize` first.")
+
+    feats, _manifest = H.load_export_features(bundle)
+    with np.load(labels_p, allow_pickle=True) as z:
+        y = np.asarray(z["y"], dtype=np.float32).ravel()
+
+    out_dir = CACHE / "heads"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    n_est = 80 if quick else 200
+    meta: dict[str, Any] = {
+        "task": "maize_yield", "label": "maize yield", "units": "t/ha",
+        "region": "Illinois (SPAM)", "embedding_year_note": "trained on the maize bundle's window",
+        "models": {},
+    }
+    for m, X in feats.items():
+        X = np.nan_to_num(np.asarray(X, dtype=np.float32))
+        if X.ndim != 2 or X.shape[0] != y.shape[0]:
+            continue
+        # held-out R² as a quality indicator
+        itr, ite = train_test_split(np.arange(len(y)), test_size=0.3, random_state=42)
+        r2 = float(r2_score(
+            y[ite],
+            RandomForestRegressor(n_estimators=n_est, random_state=42, n_jobs=-1)
+            .fit(X[itr], y[itr]).predict(X[ite]),
+        ))
+        # deployable head: fit on ALL labeled points
+        reg = RandomForestRegressor(n_estimators=n_est, random_state=42, n_jobs=-1).fit(X, y)
+        joblib.dump(reg, out_dir / f"maize_yield__{m}.pkl")
+        meta["models"][m] = {"dim": int(X.shape[1]), "r2": round(r2, 3), "n": int(len(y)),
+                             "y_min": float(np.min(y)), "y_max": float(np.max(y))}
+        print(f"[heads] {m}: held-out R²={r2:.3f} dim={X.shape[1]}")
+    if not meta["models"]:
+        raise RuntimeError("no heads trained — check the maize bundle / labels alignment.")
+    (out_dir / "heads_meta.json").write_text(json.dumps(meta, indent=2))
+    print(f"[heads] wrote {len(meta['models'])} head(s) to {out_dir}")
+
+
+# ---------------------------------------------------------------------------
+# 🌽 GEE-native head — corn-presence classifier from USDA CDL (no SPAM needed)
+# ---------------------------------------------------------------------------
+ILLINOIS_BBOX = (-91.6, 37.0, -87.5, 42.5)
+CDL_CORN_CLASS = 1  # USDA CDL "Corn"
+
+
+def build_corn_heads(quick: bool) -> None:
+    """Train a corn-vs-other classifier head per embedding model, labeled from
+    USDA CDL over Illinois — fully GEE-native, no external label files."""
+    import ee
+    import joblib
+    from sklearn.ensemble import RandomForestClassifier
+    from sklearn.metrics import accuracy_score
+    from sklearn.model_selection import train_test_split
+
+    api = _rs_embed()
+    region = ee.Geometry.Rectangle(list(ILLINOIS_BBOX))
+    cdl = ee.Image(f"USDA/NASS/CDL/{CDL_YEAR}").select("cropland")
+    is_corn = cdl.eq(CDL_CORN_CLASS).rename("is_corn")
+    per_class = 15 if quick else 60
+    fc = is_corn.stratifiedSample(numPoints=per_class, classBand="is_corn",
+                                  region=region, scale=30, geometries=True, seed=42)
+    feats = fc.getInfo()["features"]
+    pts, labels = [], []
+    for f in feats:
+        lon, lat = f["geometry"]["coordinates"]
+        pts.append((float(lon), float(lat)))
+        labels.append(int(f["properties"]["is_corn"]))
+    if not pts or len(set(labels)) < 2:
+        raise RuntimeError("CDL corn sampling failed (need both classes).")
+    print(f"[corn_heads] CDL sampled {sum(labels)} corn / {len(labels)-sum(labels)} other")
+
+    spatials = [api["PointBuffer"](lon=lo, lat=la, buffer_m=BUFFER_M) for lo, la in pts]
+    models = ["gse", "satmae", "dofa"] if quick else MODEL_LIST
+    tmp = CACHE / "_corn_export.npz"
+    api["export_batch"](
+        spatials=spatials, temporal=api["TemporalSpec"].range(f"{CDL_YEAR}-06-01", f"{CDL_YEAR}-09-01"),
+        models=models, output=api["OutputSpec"].grid(),
+        target=api["ExportTarget"].combined(str(tmp)),
+        config=api["ExportConfig"](save_inputs=False, save_embeddings=True,
+                                   continue_on_error=True, show_progress=False),
+        backend="auto")
+    feats_by, _ = H.load_export_features(tmp)
+    y = np.asarray(labels, dtype=int)
+
+    out_dir = CACHE / "heads"
+    out_dir.mkdir(parents=True, exist_ok=True)
+    for old in out_dir.glob("*.pkl"):  # clear any stale/synthetic heads
+        old.unlink()
+    n_est = 80 if quick else 200
+    meta: dict[str, Any] = {
+        "task": "corn_presence", "kind": "classification", "label": "corn presence",
+        "units": "P(corn)", "region": f"Illinois (CDL {CDL_YEAR})",
+        "classes": ["not corn", "corn"], "models": {},
+    }
+    for m, X in feats_by.items():
+        X = np.nan_to_num(np.asarray(X, dtype=np.float32))
+        if X.ndim != 2 or X.shape[0] != y.shape[0]:
+            continue
+        itr, ite = train_test_split(np.arange(len(y)), test_size=0.3, random_state=42, stratify=y)
+        acc = float(accuracy_score(
+            y[ite],
+            RandomForestClassifier(n_estimators=n_est, random_state=42, n_jobs=-1)
+            .fit(X[itr], y[itr]).predict(X[ite])))
+        clf = RandomForestClassifier(n_estimators=n_est, random_state=42, n_jobs=-1).fit(X, y)
+        joblib.dump(clf, out_dir / f"corn_presence__{m}.pkl")
+        meta["models"][m] = {"dim": int(X.shape[1]), "score": round(acc, 3),
+                             "score_name": "accuracy", "n": int(len(y))}
+        print(f"[corn_heads] {m}: held-out acc={acc:.3f} dim={X.shape[1]}")
+    for p in (tmp, tmp.with_suffix(".json")):
+        try:
+            p.unlink()
+        except OSError:
+            pass
+    if not meta["models"]:
+        raise RuntimeError("no corn heads trained.")
+    (out_dir / "heads_meta.json").write_text(json.dumps(meta, indent=2))
+    print(f"[corn_heads] wrote {len(meta['models'])} head(s) to {out_dir}")
+
+
+# ---------------------------------------------------------------------------
 # Orchestration
 # ---------------------------------------------------------------------------
 BUILDERS = {
@@ -483,6 +616,8 @@ BUILDERS = {
     "landcover": build_landcover,
     "showdown": build_showdown,
     "maize": build_maize,
+    "heads": build_heads,
+    "corn_heads": build_corn_heads,
 }
 
 

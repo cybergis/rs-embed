@@ -36,7 +36,7 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-from fastapi import FastAPI
+from fastapi import FastAPI, File, UploadFile
 from fastapi.responses import FileResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel
@@ -55,6 +55,52 @@ DOWNLOADS = HERE / "downloads"
 DOWNLOADS.mkdir(exist_ok=True)
 ASSETS = HERE / "assets"
 ASSETS.mkdir(exist_ok=True)  # holds logo.png etc., served at /assets
+
+# Pretrained downstream heads (built by build_demo_cache.py --only heads).
+_HEADS: dict[str, Any] = {}  # model -> loaded regressor (lazy)
+
+
+def _heads_dir() -> Path:
+    import iguide_demo_helpers as _H
+    return _H.DemoCache.find(HERE).root / "heads"
+
+
+def _heads_meta() -> dict[str, Any] | None:
+    p = _heads_dir() / "heads_meta.json"
+    return json.loads(p.read_text()) if p.exists() else None
+
+
+def _load_head(model: str):
+    if model in _HEADS:
+        return _HEADS[model]
+    meta = _heads_meta()
+    task = (meta or {}).get("task", "maize_yield")
+    import joblib
+    p = _heads_dir() / f"{task}__{model}.pkl"
+    if not p.exists():
+        return None
+    reg = joblib.load(p)
+    _HEADS[model] = reg
+    return reg
+
+
+def _predict_one(reg, vec: np.ndarray, meta: dict, info: dict, model: str) -> dict:
+    """Run one head; works for both regression and classification heads."""
+    v = np.nan_to_num(np.asarray(vec, dtype=np.float32)).reshape(1, -1)
+    if hasattr(reg, "predict_proba"):  # classification head
+        proba = reg.predict_proba(v)[0]
+        classes = list(getattr(reg, "classes_", [0, 1]))
+        pidx = classes.index(1) if 1 in classes else len(classes) - 1
+        p = float(proba[pidx])
+        names = meta.get("classes", ["negative", "positive"])
+        return {"model": model, "ok": True, "kind": "classification",
+                "prediction": round(p, 3), "label_pred": names[1] if p >= 0.5 else names[0],
+                "score": info.get("score"), "score_name": info.get("score_name", "accuracy")}
+    pred = float(reg.predict(v)[0])  # regression head
+    lo, hi = info.get("y_min"), info.get("y_max")
+    return {"model": model, "ok": True, "kind": "regression", "prediction": round(pred, 3),
+            "in_range": bool(lo is None or (lo <= pred <= hi)),
+            "score": info.get("score", info.get("r2")), "score_name": info.get("score_name", "R²")}
 GRID_SAVE_MAX_CELLS = 300 * 300  # cap grids saved into the package (keeps it small)
 
 _ee_ready = False
@@ -109,6 +155,11 @@ class PreviewReq(BaseModel):
 
 class EmbedReq(PreviewReq):
     models: list[str] = []
+    buffer_m: int = 1000
+
+
+class PredictReq(PreviewReq):
+    models: list[str] = []     # embedding models to run through their heads
     buffer_m: int = 1000
 
 
@@ -189,7 +240,8 @@ app.mount("/assets", StaticFiles(directory=str(ASSETS)), name="assets")
 
 @app.get("/")
 def index() -> FileResponse:
-    return FileResponse(str(HERE / "index.html"))
+    # no-store so iterative edits always show on a plain refresh
+    return FileResponse(str(HERE / "index.html"), headers={"Cache-Control": "no-store"})
 
 
 @app.get("/api/models")
@@ -338,6 +390,82 @@ def api_embed(req: EmbedReq) -> Any:
                        "models": [mm["model"] for mm in pkg_models],
                        "grids_saved": [mm["model"] for mm in pkg_models if mm["grid_saved"]]}
         return {"results": results, "download_url": download, "package": package, "compute": compute}
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return JSONResponse({"error": repr(e)}, status_code=500)
+
+
+@app.get("/api/heads")
+def api_heads() -> Any:
+    """List available pretrained downstream heads (for the 'Use' tab)."""
+    meta = _heads_meta()
+    if not meta:
+        return {"task": None, "models": [],
+                "note": "No pretrained heads. Run: python build_demo_cache.py --only heads"}
+    root, task = _heads_dir(), meta.get("task", "maize_yield")
+    models = [{"model": m, **info} for m, info in meta.get("models", {}).items()
+              if (root / f"{task}__{m}.pkl").exists()]
+    return {"task": task, "kind": meta.get("kind", "regression"), "label": meta.get("label"),
+            "units": meta.get("units"), "region": meta.get("region"),
+            "classes": meta.get("classes"), "models": models}
+
+
+@app.post("/api/predict")
+def api_predict(req: PredictReq) -> Any:
+    """ROI → embedding → pretrained head → predicted value, per selected model."""
+    try:
+        meta = _heads_meta()
+        if not meta:
+            return JSONResponse({"error": "no pretrained heads available"}, status_code=404)
+        _ensure_ee()
+        rs = _rs()
+        spatial = _spatial(rs, req.geometry, req.buffer_m)
+        results = []
+        for m in (req.models or []):
+            reg = _load_head(m)
+            info = meta.get("models", {}).get(m, {})
+            if reg is None:
+                results.append({"model": m, "ok": False, "error": "no pretrained head for this model"})
+                continue
+            try:
+                emb = rs["get_embedding"](
+                    m, spatial=spatial, temporal=_temporal(rs, m, req.start, req.end),
+                    output=rs["OutputSpec"].pooled(), backend="auto")
+                results.append(_predict_one(reg, H.pooled_vector(emb.data), meta, info, m))
+            except Exception as e:  # noqa: BLE001
+                results.append({"model": m, "ok": False, "error": repr(e)[:300]})
+        return {"task": meta.get("task"), "kind": meta.get("kind", "regression"),
+                "label": meta.get("label"), "units": meta.get("units"),
+                "region": meta.get("region"), "results": results}
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return JSONResponse({"error": repr(e)}, status_code=500)
+
+
+@app.post("/api/predict_package")
+async def api_predict_package(file: UploadFile = File(...)) -> Any:
+    """Run an uploaded embedding package (.npz from /api/embed) through the heads."""
+    try:
+        meta = _heads_meta()
+        if not meta:
+            return JSONResponse({"error": "no pretrained heads available"}, status_code=404)
+        z = np.load(io.BytesIO(await file.read()), allow_pickle=True)
+        pooled = {k[len("pooled__"):]: np.asarray(z[k]) for k in z.files if k.startswith("pooled__")}
+        if not pooled:
+            return JSONResponse({"error": "no pooled vectors found in package"}, status_code=400)
+        results = []
+        for m, vec in pooled.items():
+            reg = _load_head(m)
+            info = meta.get("models", {}).get(m, {})
+            if reg is None:
+                results.append({"model": m, "ok": False, "error": "no pretrained head for this model"})
+                continue
+            try:
+                results.append(_predict_one(reg, np.asarray(vec), meta, info, m))
+            except Exception as e:  # noqa: BLE001
+                results.append({"model": m, "ok": False, "error": repr(e)[:300]})
+        return {"task": meta.get("task"), "kind": meta.get("kind", "regression"),
+                "label": meta.get("label"), "units": meta.get("units"), "results": results}
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         return JSONResponse({"error": repr(e)}, status_code=500)
