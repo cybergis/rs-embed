@@ -18,6 +18,7 @@ from .api import (
     list_models,
     reset_runtime,
 )
+from .core._warnings import disable_pretty_warnings, enable_pretty_warnings
 from .core.specs import (
     BBox,
     FetchSpec,
@@ -37,6 +38,10 @@ from .core.types import (
 from .load import ExportResult, ModelResult, load_export
 from .model import Model
 from .pipelines.exporter import BatchExporter
+
+# Render rs-embed's own warnings as a structured, colourised block instead of
+# Python's terse default. Opt out with ``RS_EMBED_PLAIN_WARNINGS=1``.
+enable_pretty_warnings()
 
 __all__ = [
     # Specs
@@ -72,5 +77,8 @@ __all__ = [
     "inspect_provider_patch",
     # Backward-compatible alias for inspect_provider_patch
     "inspect_gee_patch",
+    # Warning display controls
+    "enable_pretty_warnings",
+    "disable_pretty_warnings",
     "__version__",
 ]

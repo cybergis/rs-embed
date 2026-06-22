@@ -27,6 +27,10 @@ from ..core.specs import (
 )
 from ..providers import ProviderBase
 from ..providers.fetch import (
+    count_distinct_frames,
+    frame_diversity_meta,
+)
+from ..providers.fetch import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
 )
 from ..providers.resolution import (
@@ -711,6 +715,13 @@ class AgriFMEmbedder(EmbedderBase):
             raw_tchw = np.nan_to_num(raw_tchw, nan=0.0, posinf=0.0, neginf=0.0)
             raw_tchw = np.clip(raw_tchw, 0.0, 10000.0).astype(np.float32)
 
+        # Frame diversity of the series actually fed to the encoder (tiles preserve
+        # the back-filled duplicates), so it lands on the tiled path too.
+        diversity_meta = frame_diversity_meta(
+            n_requested=int(raw_tchw.shape[0]),
+            n_distinct=count_distinct_frames(raw_tchw),
+        )
+
         # Optional: inspect first frame on normalized [0,1] scale.
         from ..tools.inspection import checks_should_raise, maybe_inspect_chw
 
@@ -757,6 +768,7 @@ class AgriFMEmbedder(EmbedderBase):
                 "norm_mode": norm_mode,
                 "input_hw": (int(raw_tchw.shape[-2]), int(raw_tchw.shape[-1])),
                 "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                **diversity_meta,
                 **check_meta,
                 **wmeta,
                 **fmeta,

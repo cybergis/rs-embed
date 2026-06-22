@@ -75,6 +75,17 @@ To stay in-distribution, **narrow the temporal window** so the frames land near 
 
 ---
 
+## Data availability: empty sub-windows are never silent
+
+Choosing `T` frames assumes each frame's sub-window actually contains a clear scene. When some don't (clouds, gaps in coverage, a tiny trailing bin), `rs-embed` makes the gap explicit instead of pretending the series is full. Two mechanisms, by model family:
+
+- **`olmoearth`** (drops empty bins): the empty bins are removed from the sequence, so `T` shrinks. Recorded as `meta["n_bins"]` (bins the window produced), `meta["n_frames"]` (frames encoded), and `meta["dropped_bins"]` (the dropped `[start, end]` ranges), with a `UserWarning`.
+- **`prithvi` / `galileo` / `anysat` / `agrifm`** (back-fill): the multi-frame provider fetch keeps `T` fixed by **back-filling empty sub-windows with the whole-window composite** (and padding short series by repeating the last frame) — i.e. duplicate frames. `rs-embed` records `meta["n_frames_requested"]`, `meta["n_distinct_frames"]`, and `meta["n_backfilled_frames"]`, and emits a `UserWarning` naming how many of the `T` sub-windows actually had distinct imagery. `prithvi` additionally **collapses** the duplicate frames (so its encoded `T` shrinks — see also `meta["requested_frames"]` vs `meta["num_frames"]`); the others feed the duplicate timesteps to the encoder.
+
+So `n_distinct_frames < n_frames_requested` (or `n_frames < n_bins` for `olmoearth`) means the window was sparser than the requested frame count — **narrow/shift the window, raise `cloudy_pct`, or lower the frame count** to recover genuine temporal diversity. The warning fires from the shared fetch helper, so it covers the single, tiled, batch, and export paths uniformly.
+
+---
+
 ## Cost
 
 `multi` fetches **one composite per frame** from the provider (e.g. GEE), so a multi-month/-year window costs up to `T`× the fetches/time of a single composite — up to **12×** for `olmoearth`/`galileo`, **4×** for `prithvi`. This matters most for large `export_batch` runs over many points. To control it:

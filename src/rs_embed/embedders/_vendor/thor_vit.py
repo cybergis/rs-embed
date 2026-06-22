@@ -8,6 +8,8 @@ Local changes:
 - removed TerraTorch registry integration
 - trimmed to the direct THOR loading path used by rs-embed
 - replaced upstream thor package imports with vendored local runtime imports
+- only warn on input param override when the value actually differs from the
+  default (was warning unconditionally whenever the key was present)
 """
 
 from __future__ import annotations
@@ -525,9 +527,13 @@ def load_thor_model(
     if input_params:
         _ensure_allowed_input_params(input_params.keys())
         for key, value in input_params.items():
-            if key in model_config["input_params"]:
+            if (
+                key in model_config["input_params"]
+                and model_config["input_params"][key] != value
+            ):
                 warnings.warn(
-                    f"Overwriting input param {key} for model {model_checkpoint_key} with {value}",
+                    f"Overwriting input param {key} for model {model_checkpoint_key} "
+                    f"from {model_config['input_params'][key]} to {value}",
                     stacklevel=2,
                 )
             model_config["input_params"][key] = value

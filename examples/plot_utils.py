@@ -297,6 +297,36 @@ def show_input_chw(x_chw: np.ndarray, title: str, rgb_idx=(0, 1, 2), p_low=1, p_
     plt.show()
 
 
+def show_input_series(frames, *, title=None, rgb_idx=(0, 1, 2), p_low=1, p_high=99, figsize=(3, 3)):
+    """Visualize a time series of CHW patches as a row of RGB panels.
+
+    ``frames`` is a list of ``(label, chw_array)`` tuples — e.g. one composite
+    per temporal bin. Mirrors :func:`show_input_chw`, but lays the frames out
+    side by side so the sequence reads left-to-right.
+    """
+    frames = [(lab, np.asarray(x)) for lab, x in frames if getattr(x, "ndim", 0) == 3]
+    if not frames:
+        print(f"Skip {title}: no 3D frames to show")
+        return
+
+    n = len(frames)
+    fig, axes = plt.subplots(1, n, figsize=(figsize[0] * n, figsize[1]), squeeze=False)
+    for ax, (label, x_chw) in zip(axes[0], frames, strict=True):
+        r, g, b = rgb_idx
+        rgb = np.stack([x_chw[r], x_chw[g], x_chw[b]], axis=-1)  # HWC
+        rgb = percentile_stretch(rgb, p_low=p_low, p_high=p_high, gamma=1.0)
+        ax.imshow(rgb)
+        ax.set_title(label, fontsize=9)
+        ax.axis("off")
+
+    if title:
+        fig.suptitle(title)
+        plt.tight_layout(rect=(0.0, 0.0, 1.0, 0.95))
+    else:
+        plt.tight_layout()
+    plt.show()
+
+
 def show_s1_vvvh_chw(
     x_chw: np.ndarray,
     *,

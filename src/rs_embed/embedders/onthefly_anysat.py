@@ -22,6 +22,10 @@ from ..core.specs import (
 )
 from ..providers import ProviderBase
 from ..providers.fetch import (
+    count_distinct_frames,
+    frame_diversity_meta,
+)
+from ..providers.fetch import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
 )
 from ..providers.resolution import (
@@ -638,6 +642,13 @@ class AnySatEmbedder(EmbedderBase):
                 model_name="anysat",
             )
 
+        # Frame diversity of the series actually fed to the encoder (tiles preserve
+        # the back-filled duplicates), so it lands on the tiled path too.
+        diversity_meta = frame_diversity_meta(
+            n_requested=int(raw_tchw.shape[0]),
+            n_distinct=count_distinct_frames(raw_tchw),
+        )
+
         doy0_values = _frame_doy0_sequence(t, n_frames=int(raw_tchw.shape[0]))
 
         model, lmeta, dev = _load_anysat(
@@ -700,6 +711,7 @@ class AnySatEmbedder(EmbedderBase):
                 "start": t.start,
                 "end": t.end,
                 "n_frames": int(raw_tchw.shape[0]),
+                **diversity_meta,
                 "doy0_values": tuple(int(v) for v in doy0_values.tolist()),
                 "device": dev,
                 "hf_repo": str(runtime_cfg["hf_repo"]),

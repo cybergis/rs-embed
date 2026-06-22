@@ -131,6 +131,9 @@ Prithvi-EO 2.0 was pretrained on **4-timestep** HLS series with **1–6 month ga
 !!! note "Output dimensionality is unchanged"
     Multi-frame tokens are pooled over time (and space), so `pooled` is still `(D,)` and `grid` is still `(D, H', W')` — switching modes never changes the embedding shape, only the values and the `num_frames` / `frame_dates` metadata. To stay near the training regime, give `multi` a window of a few months up to ~a year.
 
+!!! note "Same multi-frame series on every API path"
+    The window-adaptive multi-frame fetch is used **consistently** across `get_embedding`, `get_embeddings_batch`, `export_batch`, and every `input_prep` mode (`resize`/`tile`/`auto`). Prithvi overrides the API-side prefetch (`fetch_input`) so the tiled/export paths receive the same `[T,6,H,W]` series as a direct call — they never silently collapse to a single composite. (Because `model_config` is not available at prefetch time, the prefetch honors an explicit `temporal_mode` argument, the `RS_EMBED_PRITHVI_TEMPORAL_MODE` env var, or the `auto` default — matching `olmoearth`/`galileo`.)
+
 ```python
 emb = get_embedding(
     "prithvi",

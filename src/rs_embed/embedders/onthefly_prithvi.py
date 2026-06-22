@@ -20,7 +20,12 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import FetchResult
 from ..providers import ProviderBase
+from ..providers.fetch import (
+    count_distinct_frames,
+    frame_diversity_meta,
+)
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
 )
@@ -1042,6 +1047,54 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
     def _default_sensor(self) -> SensorSpec:
         return self.input_spec.to_sensor_spec()
 
+    def fetch_input(
+        self,
+        provider: ProviderBase,
+        *,
+        spatial: SpatialSpec,
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec,
+        temporal_mode: str | None = None,
+    ) -> FetchResult | None:
+        """Prefetch the raw S2 6-band input for API-side tiling / export.
+
+        Overrides the generic base prefetch (which fetches a single composite)
+        so the ``tile``/``auto``/``export_batch`` paths receive the **same
+        window-adaptive multi-frame series** as the direct ``get_embedding``
+        path — instead of silently degrading to ``T=1``. Returns raw DN
+        ``[T,6,H,W]`` (0..10000) when the window resolves to multi-frame, or
+        ``None`` for a single-frame window so the caller uses the generic
+        single-composite fetch. Single/multi and the frame count follow the
+        same ``temporal_mode`` / window logic as the direct path (``model_config``
+        is unavailable at prefetch time, so an explicit ``temporal_mode`` arg,
+        the env var, or the ``auto`` default decides — matching ``olmoearth`` /
+        ``galileo``).
+        """
+        if sensor is None:
+            sensor = self._default_sensor()
+        t = temporal_to_range(temporal)
+        cfg = {"temporal_mode": temporal_mode} if temporal_mode is not None else None
+        if _effective_temporal_mode(cfg, t) != "multi":
+            return None  # single-frame window: defer to the generic composite prefetch
+        n_frames = _auto_num_frames(
+            t,
+            max_frames=_resolve_max_frames(cfg),
+            stride_days=_resolve_frame_stride_days(),
+        )
+        raw_tchw = _fetch_s2_prithvi6_tchw(
+            provider,
+            spatial=spatial,
+            temporal=t,
+            n_frames=n_frames,
+            scale_m=int(sensor.scale_m),
+            cloudy_pct=int(sensor.cloudy_pct),
+            composite=str(sensor.composite),
+            fill_value=float(sensor.fill_value),
+        )
+        return FetchResult(
+            data=raw_tchw, meta={"temporal_mode": "multi", "n_frames": int(n_frames)}
+        )
+
     @staticmethod
     def _resolve_fetch_workers(n_items: int) -> int:
         v = int(
@@ -1321,6 +1374,14 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                     f"got {getattr(input_chw, 'shape', None)}"
                 )
 
+        # Frame diversity of the fetched/provided series before duplicate frames are
+        # collapsed below — captured on both paths (the tiled path feeds back-filled
+        # tiles via input_chw), so it lands in meta everywhere.
+        diversity_meta = frame_diversity_meta(
+            n_requested=int(raw_tchw.shape[0]),
+            n_distinct=count_distinct_frames(raw_tchw),
+        )
+
         x_tchw = _raw_tchw_to_unit(raw_tchw)
         x_tchw, dates = _drop_duplicate_frames(x_tchw, dates)
         x_tchw, prep_meta = _prepare_prithvi_tchw(x_tchw, fill_value=float(sensor.fill_value))
@@ -1354,6 +1415,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 "temporal_mode": "multi",
                 "num_frames": n_frames,
                 "requested_frames": int(requested),
+                **diversity_meta,
                 "frame_dates": tuple(dates),
                 "frame_stride_days_min": int(stride_days),
                 "frame_stride_days_max": int(max_stride_days),
