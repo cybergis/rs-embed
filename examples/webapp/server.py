@@ -48,7 +48,19 @@ import iguide_demo_helpers as H  # noqa: E402
 
 # --- rs-embed + Earth Engine (initialized once, lazily) ---------------------
 PRECOMPUTED = {"gse", "tessera", "copernicus"}
+# On-the-fly models that consume a *time series* (multiple frames) rather than a
+# single composite frame — either a static ModelInputSpec.temporal_mode == "multi"
+# (agrifm/anysat) or a window-adaptive temporal_mode defaulting to "auto"→multi for
+# multi-month windows (galileo/olmoearth/prithvi). Everything else takes one frame.
+TIMESERIES = {"agrifm", "anysat", "galileo", "olmoearth", "prithvi"}
 COPERNICUS_FIXED_YEAR = 2021  # copernicus product currently covers only 2021
+
+
+def _input_kind(model: str) -> str | None:
+    """Input contract for on-the-fly models: 'timeseries' | 'single' (None if precomputed)."""
+    if model in PRECOMPUTED:
+        return None
+    return "timeseries" if model in TIMESERIES else "single"
 
 # Saved embedding packages (.npz) live here; served back via /api/download.
 DOWNLOADS = HERE / "downloads"
@@ -250,10 +262,18 @@ def api_models() -> Any:
         rs = _rs()
         ids = rs["list_models"]()
         models = [
-            {"id": m, "type": "precomputed" if m in PRECOMPUTED else "onthefly"}
+            {
+                "id": m,
+                "type": "precomputed" if m in PRECOMPUTED else "onthefly",
+                "input": _input_kind(m),
+            }
             for m in sorted(ids)
         ]
-        return {"models": models, "precomputed": sorted(PRECOMPUTED)}
+        return {
+            "models": models,
+            "precomputed": sorted(PRECOMPUTED),
+            "timeseries": sorted(TIMESERIES),
+        }
     except Exception as e:  # noqa: BLE001
         return JSONResponse({"error": repr(e)}, status_code=500)
 

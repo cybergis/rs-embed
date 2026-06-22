@@ -42,16 +42,32 @@
   .badge{font-size:10px;font-weight:700;padding:1px 6px;border-radius:999px;margin-left:auto}
   .badge.pc{background:rgba(46,125,50,.12);color:var(--leaf)}
   .badge.otf{background:rgba(21,101,192,.10);color:#1565c0}
+  .badge.otf.ts{background:rgba(123,67,201,.12);color:#7b43c9}
   .grp{font-size:11px;font-weight:700;color:var(--muted);margin:8px 0 2px}
   button{font:inherit;font-weight:600;border:1px solid var(--line);background:#fff;border-radius:9px;padding:7px 12px;cursor:pointer}
   button.primary{background:var(--leaf);color:#fff;border-color:var(--leaf)}
   button.citrus{background:var(--citrus);color:#3a2a00;border-color:var(--citrus)}
   button:disabled{opacity:.5;cursor:not-allowed}
-  #slider{margin:38px 14px 50px}
+  #slider{margin:38px 14px 44px}
   #slider .noUi-tooltip{font-size:11px;font-weight:700;padding:1px 5px}
   #slider .noUi-value{font-size:10px;color:var(--muted)}
   #slider .noUi-pips{pointer-events:none}            /* labels must not steal clicks */
   #slider .noUi-pips-horizontal{height:34px;padding:8px 0}
+  /* overview axis: pan/zoom the visible window of the main slider */
+  #axisWrap{margin:2px 14px 6px}
+  .axisrow{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+  .axislabel{font-size:10px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:700}
+  .axisspan{font-size:11px;color:var(--muted);font-variant-numeric:tabular-nums}
+  #axisSlider{height:7px;margin:0 0 26px}
+  #axisSlider .noUi-connect{background:rgba(245,166,35,.55);cursor:grab}
+  #axisSlider .noUi-connect:active{cursor:grabbing}
+  #axisSlider .noUi-handle{width:12px;height:17px;top:-5px;right:-6px!important;border-radius:4px;
+        box-shadow:0 1px 2px rgba(0,0,0,.25)}
+  #axisSlider .noUi-handle::before,#axisSlider .noUi-handle::after{display:none}
+  #axisSlider .noUi-value{font-size:9px;color:var(--muted)}
+  #axisSlider .noUi-pips{pointer-events:none}
+  #axisSlider .noUi-pips-horizontal{height:20px;padding:6px 0 0}
+  #axisSlider .noUi-marker-horizontal.noUi-marker{height:4px}
   .yrlabel{font-variant-numeric:tabular-nums;font-weight:700}
   .tpick-btn{margin-top:8px;width:100%;text-align:left}
   #tpick{display:none;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
@@ -84,13 +100,26 @@
         border-radius:50%;animation:s .7s linear infinite;vertical-align:-2px;margin-right:5px}
   @keyframes s{to{transform:rotate(360deg)}}
   .bubble-results{width:312px;max-height:62vh;overflow:auto}
-  .bubble-results .cards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:7px}
-  .gcard{border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;background:#fff;transition:box-shadow .12s}
+  .bubble-results .cards,#resultsCards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:7px}
+  #resultsSec .dl{margin-top:0;margin-bottom:2px}
+  .gcard{position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;background:#fff;transition:box-shadow .12s,border-color .12s}
   .gcard:hover{box-shadow:0 2px 8px rgba(0,0,0,.18)}
+  .gcard.active{border-color:var(--citrus);box-shadow:0 0 0 2px rgba(245,166,35,.45)}
   .gcard img{width:100%;display:block;image-rendering:pixelated}
   .gcard .gcap{font-size:11px;font-weight:600;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gcard .gzoom{position:absolute;top:3px;right:3px;width:20px;height:20px;line-height:1;padding:0;
+        border:none;border-radius:5px;background:rgba(15,23,32,.62);color:#fff;font-size:12px;cursor:pointer}
+  .gcard .gzoom:hover{background:rgba(15,23,32,.85)}
   .gcard.err{cursor:default;padding:6px}
   .gcard.err .e{color:#b3261e;font-size:10px;margin-top:3px;word-break:break-word}
+  /* embedding overlay controls (in the results bubble) */
+  .ovctl{display:flex;align-items:center;gap:7px;margin-top:8px}
+  .ovctl label{font-size:11px;font-weight:700;color:var(--muted);text-transform:uppercase;letter-spacing:.04em;white-space:nowrap}
+  .ovctl select{flex:1;padding:5px 6px;border:1px solid var(--line);border-radius:7px;font:inherit;font-size:12px;background:#fff}
+  .ovctl input[type=range]{flex:1;accent-color:var(--citrus)}
+  .ovctl button{padding:4px 9px;font-size:11px;font-weight:600}
+  #ovInfo{font-size:11px;color:var(--muted);margin-top:6px;font-variant-numeric:tabular-nums}
+  .leaflet-image-layer.embed-ov{image-rendering:pixelated}
   #lightbox{position:fixed;inset:0;z-index:3000;background:rgba(0,0,0,.62);display:none;
             align-items:center;justify-content:center;padding:24px}
   #lightbox .lb-inner{background:#fff;border-radius:12px;padding:14px;max-width:min(92vw,560px);
@@ -115,6 +144,12 @@
   .selbar{display:flex;gap:6px;margin-bottom:2px}
   .selbar button{padding:3px 8px;font-size:11px;font-weight:600}
   .status{font-size:12px;color:var(--muted)}
+  #toast{position:fixed;top:16px;left:calc(50% - 180px);transform:translate(-50%,-14px);
+        z-index:2500;background:rgba(15,23,32,.92);color:#fff;font-size:13px;font-weight:600;
+        padding:9px 14px;border-radius:10px;box-shadow:0 3px 14px rgba(0,0,0,.3);
+        opacity:0;pointer-events:none;white-space:nowrap;transition:opacity .25s,transform .25s}
+  #toast.show{opacity:1;transform:translate(-50%,0)}
+  #toast .tk{color:var(--citrus)}
 </style>
 </head>
 <body>
@@ -159,17 +194,34 @@
       <div class="sec">
         <h2>3 · Time range
           <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
-            <span class="yrlabel" id="trange">2021-06 – 2023-09</span>
+            <span class="yrlabel" id="trange">2022-06 – 2022-09</span>
           </span>
         </h2>
         <div id="slider"></div>
+        <div id="axisWrap">
+          <div class="axisrow"><span class="axislabel">Axis scale</span>
+            <span class="axisspan" id="axisspan">2022</span></div>
+          <div id="axisSlider"></div>
+        </div>
+        <div class="hint" style="margin:2px 0 2px">Drag the lower bar to <b>pan</b> the axis; drag its ends to <b>zoom</b> the visible span (3 mo → full).</div>
         <button id="tpickBtn" class="tpick-btn">📅 Pick year / month ▾</button>
         <div id="tpick">
-          <div class="tpick-head"><button id="tprev">◀</button><span id="tpickYear">2021</span><button id="tnext">▶</button></div>
+          <div class="tpick-head"><button id="tprev">◀</button><span id="tpickYear">2022</span><button id="tnext">▶</button></div>
           <div id="tgrid" class="tgrid"></div>
           <div class="tpick-hint">Click a month to set <b>start</b>, click again to set <b>end</b>.</div>
         </div>
         <div class="hint" style="margin-top:8px">Annual models (gse/tessera/copernicus) use the latest year; on-the-fly models use the selected month window.</div>
+      </div>
+
+      <div class="sec" id="resultsSec" style="display:none">
+        <h2>4 · Results
+          <span style="float:right;font-weight:400;text-transform:none;letter-spacing:0">
+            <span class="status" id="resultsCount"></span>
+          </span>
+        </h2>
+        <div id="resultsCtrl"></div>
+        <div id="resultsCards" class="cards"></div>
+        <div id="resultsNote"></div>
       </div>
     </div>
 
@@ -193,6 +245,7 @@
 </div>
 
 <div id="lightbox"><div class="lb-inner"></div></div>
+<div id="toast"></div>
 
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.js"></script>
@@ -203,8 +256,15 @@ L.control.zoom({position:'topleft'}).addTo(map);
 L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
   {maxZoom:19}).addTo(map);
 
+// dedicated pane for the embedding overlay: above basemap tiles (200) but below
+// the ROI outline / markers / popups so the orange box stays visible on top.
+map.createPane('embedPane');
+map.getPane('embedPane').style.zIndex = 350;
+map.getPane('embedPane').style.pointerEvents = 'none';
+
 let geometry = null;     // {type:'point',lon,lat} | {type:'bbox',minlon,...}
 let roiLayer = null;     // the box drawn on the map
+let embedOverlay = null; // L.imageOverlay of the currently shown embedding (PCA-RGB)
 let drawing = false, startLL = null, dragRect = null;
 const KM = 1/111.0;      // ~degrees latitude per km
 
@@ -229,7 +289,7 @@ map.on('mouseup', e => {
   else setBBox(L.latLngBounds(startLL, e.latlng));// a drag → freeform box
 });
 
-function clearRoi(){ if (roiLayer){ map.removeLayer(roiLayer); roiLayer = null; } }
+function clearRoi(){ if (roiLayer){ map.removeLayer(roiLayer); roiLayer = null; } clearEmbedOverlay(); clearResultsPanel(); }
 function roiStatus(t){ ['selinfo','useStatus'].forEach(id=>{ const e=document.getElementById(id); if(e) e.textContent=t; }); }
 
 function setPointBox(ll){
@@ -257,7 +317,7 @@ function roiCenter(){
 }
 
 // ---------------------------------------------------------------- panel state
-let MODELS = [];                 // [{id,type}]
+let MODELS = [];                 // [{id,type,input}]
 let currentTab = 'extract';      // 'extract' | 'use'
 let HEADS = null;                // /api/heads response
 const checked = new Set(['gse']);
@@ -270,25 +330,72 @@ const midx = (y,m) => (y-MIN_Y)*12 + (m-1);
 const mY = i => MIN_Y + Math.floor(i/12);
 const mM = i => (i%12) + 1;
 const ymLabel = i => `${mY(i)}-${String(mM(i)).padStart(2,'0')}`;
-let tStart = midx(2021,6), tEnd = midx(2023,9);
-let pickYear = 2021, pickPhase = 'start';
+let tStart = midx(2022,6), tEnd = midx(2022,9);     // selected month window
+let pickYear = 2022, pickPhase = 'start';
+// visible window of the detail slider (its x-axis); defaults to one calendar year.
+const MIN_VIEW = 2;                                  // smallest zoom = 3-month span
+let viewStart = midx(2022,1), viewEnd = midx(2022,12);
 const startStr = () => ymLabel(Math.min(tStart,tEnd));
 const endStr   = () => ymLabel(Math.max(tStart,tEnd));
 function endExclusive(){ let i=Math.max(tStart,tEnd), y=mY(i), m=mM(i)+1; if(m>12){m=1;y++;} return `${y}-${String(m).padStart(2,'0')}-01`; }
 
-// month double-slider (handles are month indices 0..MAXIDX; pips label years)
+// Pips for the detail slider scale with the visible span: months when zoomed in,
+// years when zoomed out — so labels stay readable at any scale.
+function makePips(lo, hi){
+  const span = hi - lo, values = [];
+  if (span <= 18){
+    const step = span <= 5 ? 1 : (span <= 8 ? 2 : 3);
+    for (let i=lo; i<=hi; i+=step) values.push(i);
+    if (values[values.length-1] !== hi) values.push(hi);
+    return {mode:'values', values, density:4, stepped:true, format:{to:v=>ymLabel(Math.round(v))}};
+  }
+  for (let i=lo; i<=hi; i++) if (mM(i)===1) values.push(i);   // each January
+  if (!values.length || values[0] !== lo) values.unshift(lo);
+  return {mode:'values', values, density:3, stepped:true, format:{to:v=>String(mY(Math.round(v)))}};
+}
+
+// month double-slider (handles are month indices; range = the visible window)
 const ymTip = {to: v => ymLabel(Math.round(v))};
 const slider = document.getElementById('slider');
 noUiSlider.create(slider, {
-  start:[tStart, tEnd], connect:true, step:1, margin:0, range:{min:0, max:MAXIDX},
-  tooltips:[ymTip, ymTip],
-  pips:{mode:'values', values:[0,12,24,36,48,60,72,84,96,MAXIDX], density:3, stepped:true,
-        format:{to:v=>String(mY(Math.round(v)))}},
+  start:[tStart, tEnd], connect:true, step:1, margin:0, range:{min:viewStart, max:viewEnd},
+  tooltips:[ymTip, ymTip], pips: makePips(viewStart, viewEnd),
 });
 slider.noUiSlider.on('update', vals => {
   tStart = Math.round(+vals[0]); tEnd = Math.round(+vals[1]);
   refreshTimeUI();
 });
+
+// overview/axis slider: its two handles bound the visible window of the detail
+// slider over the full 2017–2025 timeline. Drag the bar to pan, ends to zoom.
+const axisEl = document.getElementById('axisSlider');
+noUiSlider.create(axisEl, {
+  start:[viewStart, viewEnd], connect:true, step:1, margin:MIN_VIEW, behaviour:'drag',
+  range:{min:0, max:MAXIDX},
+  pips:{mode:'values', values:[0,12,24,36,48,60,72,84,96,MAXIDX], density:3, stepped:true,
+        format:{to:v=>String(mY(Math.round(v)))}},
+});
+axisEl.noUiSlider.on('update', vals => {
+  viewStart = Math.round(+vals[0]); viewEnd = Math.round(+vals[1]);
+  applyView();
+});
+// Re-scale the detail slider to the visible window, clamping the selection into it.
+function applyView(){
+  const sp = document.getElementById('axisspan');
+  if (sp) sp.textContent = (mY(viewStart)===mY(viewEnd))
+      ? String(mY(viewStart)) : `${ymLabel(viewStart)} → ${ymLabel(viewEnd)}`;
+  const s = Math.max(viewStart, Math.min(viewEnd, Math.min(tStart,tEnd)));
+  const e = Math.max(viewStart, Math.min(viewEnd, Math.max(tStart,tEnd)));
+  slider.noUiSlider.updateOptions(
+    {range:{min:viewStart, max:viewEnd}, pips: makePips(viewStart, viewEnd)}, false);
+  slider.noUiSlider.set([s, e]);   // → fires detail 'update' → refreshTimeUI
+}
+// Widen/pan the axis so the visible window contains [a,b] (used by the picker).
+function ensureViewCovers(a, b){
+  const lo = Math.min(a,b), hi = Math.max(a,b);
+  let vs = Math.min(viewStart, lo), ve = Math.max(viewEnd, hi);
+  if (vs !== viewStart || ve !== viewEnd) axisEl.noUiSlider.set([vs, ve]);  // → applyView
+}
 function refreshTimeUI(){
   const t = document.getElementById('trange');
   if (t) t.textContent = startStr()+' – '+endStr();
@@ -312,6 +419,7 @@ function renderPicker(){
 function pickMonth(ci){
   if(pickPhase==='start'){ tStart=ci; tEnd=ci; pickPhase='end'; }
   else { if(ci>=tStart){ tEnd=ci; } else { tEnd=tStart; tStart=ci; } pickPhase='start'; }
+  ensureViewCovers(tStart, tEnd);  // pan/zoom the axis so the picked months are visible
   slider.noUiSlider.set([Math.min(tStart,tEnd), Math.max(tStart,tEnd)]);  // → fires update → refreshTimeUI
 }
 (function initPicker(){
@@ -330,23 +438,29 @@ async function loadModels(){
     const r = await fetch('/api/models'); const j = await r.json();
     if (j.error){ box.textContent = 'error: '+j.error; return; }
     MODELS = j.models;
-    const pc = MODELS.filter(m=>m.type==='precomputed');
-    const otf = MODELS.filter(m=>m.type==='onthefly');
+    const pc    = MODELS.filter(m=>m.type==='precomputed');
+    const otfTs = MODELS.filter(m=>m.type==='onthefly' && m.input==='timeseries');
+    const otfSf = MODELS.filter(m=>m.type==='onthefly' && m.input!=='timeseries');
     box.innerHTML = '';
     const group = (title, arr) => {
+      if (!arr.length) return;
       const h = document.createElement('div'); h.className='grp'; h.textContent=title; box.appendChild(h);
       arr.forEach(m => {
         const lab = document.createElement('label');
         const cb = document.createElement('input'); cb.type='checkbox'; cb.value=m.id; cb.checked=checked.has(m.id);
         cb.onchange = () => { cb.checked ? checked.add(m.id) : checked.delete(m.id); updateQuery(); };
         const span = document.createElement('span'); span.textContent = m.id;
-        const bdg = document.createElement('span'); bdg.className='badge '+(m.type==='precomputed'?'pc':'otf');
-        bdg.textContent = m.type==='precomputed'?'precomp':'on-the-fly';
+        const bdg = document.createElement('span');
+        bdg.className = 'badge '+(m.type==='precomputed' ? 'pc'
+                                : m.input==='timeseries' ? 'otf ts' : 'otf');
+        bdg.textContent = m.type==='precomputed' ? 'precomp'
+                        : m.input==='timeseries' ? 'time-series' : 'single-frame';
         lab.append(cb, span, bdg); box.appendChild(lab);
       });
     };
     group('Precomputed (fast)', pc);
-    group('On-the-fly', otf);
+    group('On-the-fly · time-series input', otfTs);
+    group('On-the-fly · single-frame input', otfSf);
     updateQuery();
   }catch(e){ box.textContent = 'failed to load models: '+e; }
 }
@@ -435,11 +549,38 @@ function sparkline(vals){
 function modelCardHTML(x, i){
   const badge = `<span class="badge ${x.type==='precomputed'?'pc':'otf'}">${x.type==='precomputed'?'precomp':'on-the-fly'}</span>`;
   if (x.ok){
-    return `<div class="gcard" onclick="openLightbox(${i})" title="click to enlarge">`+
+    return `<div class="gcard" data-model="${x.model}" onclick="selectEmbedOverlay('${x.model}')" title="click → show on map">`+
+      `<button class="gzoom" title="enlarge" onclick="event.stopPropagation();openLightbox(${i})">⤢</button>`+
       `<img src="${x.image}" alt="PCA-RGB"><div class="gcap">${x.model}</div></div>`;
   }
   return `<div class="gcard err"><div class="gcap">${x.model}${badge}</div><div class="e">${x.error}</div></div>`;
 }
+
+// ── embedding map overlay: scale the PCA-RGB grid to the ROI box on the map ──
+function ovOpacityVal(){ const o = document.getElementById('ovOpacity'); return o ? +o.value : 0.7; }
+function clearEmbedOverlay(){
+  if (embedOverlay){ map.removeLayer(embedOverlay); embedOverlay = null; }
+  const info = document.getElementById('ovInfo'); if (info) info.textContent = '';
+  document.querySelectorAll('.gcard.active').forEach(c => c.classList.remove('active'));
+}
+function selectEmbedOverlay(model){
+  const x = (window.lastResults || []).find(r => r.model === model && r.ok);
+  const bounds = window.lastEmbedBounds;
+  if (!x || !bounds) return;
+  // sync the picker + card highlight
+  const sel = document.getElementById('ovModel'); if (sel && sel.value !== model) sel.value = model;
+  document.querySelectorAll('.gcard').forEach(c =>
+    c.classList.toggle('active', c.getAttribute('data-model') === model));
+  // (re)draw the overlay, stretched to the ROI bounds (auto-scales any grid size)
+  if (embedOverlay) map.removeLayer(embedOverlay);
+  embedOverlay = L.imageOverlay(x.image, bounds,
+    {opacity: ovOpacityVal(), pane: 'embedPane', className: 'embed-ov', interactive: false}).addTo(map);
+  const info = document.getElementById('ovInfo');
+  if (info) info.innerHTML =
+    `<b>${x.model}</b> · grid ${x.grid_hw[0]}×${x.grid_hw[1]} → ROI · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}`
+    + sparkline(x.vector_preview);
+}
+function setEmbedOpacity(v){ if (embedOverlay) embedOverlay.setOpacity(+v); }
 function openLightbox(i){
   const x = (window.lastResults || [])[i];
   if (!x || !x.ok) return;
@@ -458,13 +599,44 @@ function openLightbox(i){
   lb.querySelector('.lb-inner').addEventListener('click', e => e.stopPropagation());
   document.addEventListener('keydown', e => { if (e.key === 'Escape') lb.style.display = 'none'; });
 })();
-function resultsBubbleHTML(j){
-  const cards = j.results.map(modelCardHTML).join('');
+// Brief, self-dismissing toast — used to point the user to the Results panel.
+let toastTimer = null;
+function showToast(html, ms=2800){
+  const t = document.getElementById('toast'); if (!t) return;
+  t.innerHTML = html; t.classList.add('show');
+  if (toastTimer) clearTimeout(toastTimer);
+  toastTimer = setTimeout(() => t.classList.remove('show'), ms);
+}
+
+// Render embedding results into the right-hand panel (keeps the map unobstructed).
+function clearResultsPanel(){
+  const sec = document.getElementById('resultsSec'); if (sec) sec.style.display = 'none';
+  ['resultsCtrl','resultsCards','resultsNote','resultsCount'].forEach(id => {
+    const e = document.getElementById(id); if (e) e.innerHTML = '';
+  });
+}
+function renderResultsPanel(j){
+  const ok = j.results.filter(r => r.ok);
+  const ctrl = ok.length ?
+    `<div class="ovctl"><label>Show on map</label>`+
+      `<select id="ovModel" onchange="selectEmbedOverlay(this.value)">`+
+        ok.map(r=>`<option value="${r.model}">${r.model}</option>`).join('')+
+      `</select></div>`+
+    `<div class="ovctl"><label>Opacity</label>`+
+      `<input id="ovOpacity" type="range" min="0.15" max="1" step="0.05" value="0.7" oninput="setEmbedOpacity(this.value)">`+
+      `<button onclick="clearEmbedOverlay()">hide</button></div>`+
+    `<div id="ovInfo"></div>`
+    : `<div class="hint">No embedding produced — see errors below.</div>`;
   const dl = j.download_url ? `<a class="dl" href="${j.download_url}" download>💾 Save embedding package (.npz)</a>` : '';
   const note = j.package
     ? `<div class="status" style="margin-top:6px">Use in the notebook:<br><code>H.load_embedding_package("…/${j.package.filename}")</code></div>` : '';
-  return `<div class="pop bubble-results"><b>Embeddings</b> <span class="status">· ${j.results.length} model(s)</span>`+
-         `${dl}<div class="cards">${cards}</div>${note}</div>`;
+  document.getElementById('resultsCount').textContent = `· ${j.results.length} model(s)`;
+  document.getElementById('resultsCtrl').innerHTML = ctrl + dl;
+  document.getElementById('resultsCards').innerHTML = j.results.map(modelCardHTML).join('');
+  document.getElementById('resultsNote').innerHTML = note;
+  const sec = document.getElementById('resultsSec');
+  sec.style.display = '';
+  sec.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
 async function runEmbed(pop){
   const models = selectedModels();
@@ -476,7 +648,16 @@ async function runEmbed(pop){
     const j = await r.json();
     if (j.error){ if(pop) pop.setContent('<div class="pop">⚠️ '+j.error+'</div>'); return; }
     window.lastResults = j.results;
-    if (pop){ pop.setContent(resultsBubbleHTML(j)); pop.update(); }
+    window.lastEmbedBounds = roiLayer ? roiLayer.getBounds() : null;  // overlay extent
+    if (pop) map.closePopup(pop);            // free the map — results go to the panel
+    renderResultsPanel(j);
+    // auto-show the first successful embedding on the map
+    const first = j.results.find(r => r.ok);
+    if (first) selectEmbedOverlay(first.model);
+    const okCount = j.results.filter(r => r.ok).length;
+    showToast(okCount
+      ? `✓ ${okCount} embedding(s) ready — see <span class="tk">Results</span> in the panel →`
+      : `⚠ No embedding produced — see <span class="tk">Results</span> in the panel →`);
   }catch(e){ if(pop) pop.setContent('<div class="pop">⚠️ embed failed: '+e+'</div>'); }
 }
 
