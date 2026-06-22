@@ -17,8 +17,8 @@ from ..core.errors import ModelError
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ModelConfig, TaskResult
 from ..tools.output import normalize_embedding_output
-from ..tools.runtime import call_embedder_get_embedding as _runtime_call_embedder_get_embedding
 from ..tools.runtime import (
+    _embedder_method_accepts_parameter,
     embedder_accepts_model_config,
     get_embedder_bundle_cached,
     require_model_config_support,
@@ -27,6 +27,7 @@ from ..tools.runtime import (
     supports_batch_api,
     supports_prefetched_batch_api,
 )
+from ..tools.runtime import call_embedder_get_embedding as _runtime_call_embedder_get_embedding
 from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..tools.tiling import (
     INPUT_PREP_VERSION,
@@ -251,6 +252,7 @@ class InferenceEngine:
         use_lock: bool,
         model_name: str,
         model_config: dict[str, Any] | None = None,
+        get_fetch_meta_fn: Callable[[int], dict[str, Any] | None] | None = None,
     ) -> tuple[dict[int, TaskResult], bool]:
         """Run tier-1 batch inference using prefetched provider inputs."""
         cfg = self.config
@@ -275,7 +277,7 @@ class InferenceEngine:
                 sub_sp = [t[1] for t in sub]
                 sub_inp = [t[2] for t in sub]
 
-                def _infer_prefetched(_sp=sub_sp, _inp=sub_inp):
+                def _infer_prefetched(_sp=sub_sp, _inp=sub_inp, _idx=sub_idx):
                     if model_config is not None:
                         require_model_config_support(
                             embedder=embedder,
@@ -296,6 +298,10 @@ class InferenceEngine:
                         "get_embeddings_batch_from_inputs",
                     ):
                         batch_kwargs["model_config"] = model_config
+                    if get_fetch_meta_fn is not None and _embedder_method_accepts_parameter(
+                        type(embedder), "get_embeddings_batch_from_inputs", "fetch_metas"
+                    ):
+                        batch_kwargs["fetch_metas"] = [get_fetch_meta_fn(i) for i in _idx]
                     if use_lock:
                         with lock:
                             return embedder.get_embeddings_batch_from_inputs(**batch_kwargs)
@@ -402,6 +408,7 @@ class InferenceEngine:
         model_name: str,
         model_config: dict[str, Any] | None = None,
         input_prep_resolved: Any | None = None,
+        get_fetch_meta_fn: Callable[[int], dict[str, Any] | None] | None = None,
     ) -> tuple[dict[int, TaskResult], bool]:
         """Run tile-mode batch inference across multiple spatial points.
 
@@ -443,6 +450,10 @@ class InferenceEngine:
 
             all_tiles: list[np.ndarray] = []
             all_tile_spatials: list[SpatialSpec] = []
+            # Per-tile fetch metadata (each tile inherits its source image's
+            # fetch_meta), parallel to ``all_tiles``. Only consumed by embedders
+            # whose batch API accepts ``fetch_metas`` (e.g. satvision).
+            all_tile_fetch_metas: list[dict[str, Any] | None] = []
             # {spatial_idx: (flat_start, tile_count, tile_metas, h, w)}
             tile_map: dict[int, tuple[int, int, list[dict[str, Any]], int, int]] = {}
 
@@ -500,6 +511,8 @@ class InferenceEngine:
                 flat_start = len(all_tiles)
                 all_tiles.extend(tiles)
                 all_tile_spatials.extend(tile_spatials_pt)
+                img_fmeta = get_fetch_meta_fn(i) if get_fetch_meta_fn is not None else None
+                all_tile_fetch_metas.extend([img_fmeta] * len(tiles))
                 tile_map[i] = (flat_start, len(tiles), tile_metas, h, w)
 
             if not all_tiles:
@@ -521,6 +534,10 @@ class InferenceEngine:
                 }
                 if tiled_model_config is not None:
                     batch_kwargs["model_config"] = tiled_model_config
+                if get_fetch_meta_fn is not None and _embedder_method_accepts_parameter(
+                    type(embedder), "get_embeddings_batch_from_inputs", "fetch_metas"
+                ):
+                    batch_kwargs["fetch_metas"] = all_tile_fetch_metas[start : start + batch_size]
 
                 def _infer_tiles(_kw: dict[str, Any] = batch_kwargs) -> list[Embedding]:
                     if use_lock:
@@ -655,6 +672,11 @@ class InferenceEngine:
                     raise RuntimeError(f"Prefetch failed for model={_mc.name}, index={i}: {err}")
                 raise RuntimeError(f"Missing prefetched input for model={_mc.name}, index={i}")
 
+            def _get_fmeta(i: int, _ctx=ctx) -> dict[str, Any] | None:
+                if prefetch_meta is None or not _ctx.needs_provider_input or _ctx.skey is None:
+                    return None
+                return prefetch_meta.get((i, _ctx.skey)) or None
+
             def _single(i: int, _ctx=ctx, _mc=mc, _prep=eff_input_prep) -> Embedding:
                 inp = _get_input(i) if _ctx.needs_provider_input else None
                 fmeta = None
@@ -714,6 +736,7 @@ class InferenceEngine:
                     use_lock=False,
                     model_name=mc.name,
                     model_config=mc.model_config,
+                    get_fetch_meta_fn=_get_fmeta,
                 )
                 for i, rec in prefetched_out.items():
                     out[(i, mc.name)] = rec
@@ -753,6 +776,7 @@ class InferenceEngine:
                     model_name=mc.name,
                     model_config=mc.model_config,
                     input_prep_resolved=input_prep_resolved,
+                    get_fetch_meta_fn=_get_fmeta,
                 )
                 for i, rec in tiled_out.items():
                     out[(i, mc.name)] = rec
@@ -830,6 +854,11 @@ class InferenceEngine:
             provider_enabled=provider_enabled,
         )
         eff_input_prep, input_prep_resolved, explicit_nonresize = self._model_input_prep(model_name)
+
+        def _batch_fmeta_fn(i: int) -> dict[str, Any] | None:
+            if get_fetch_meta_fn is None or ctx.skey is None or not ctx.needs_provider_input:
+                return None
+            return get_fetch_meta_fn(i, ctx.skey) or None
 
         strategy = str(inference_strategy).strip().lower()
         prefer_batch = (strategy == "batch") or (strategy == "auto")
@@ -909,6 +938,7 @@ class InferenceEngine:
                 use_lock=True,
                 model_name=model_name,
                 model_config=model_config,
+                get_fetch_meta_fn=_batch_fmeta_fn,
             )
             out.update(prefetched_out)
 
@@ -951,6 +981,7 @@ class InferenceEngine:
                 model_name=model_name,
                 model_config=model_config,
                 input_prep_resolved=input_prep_resolved,
+                get_fetch_meta_fn=_batch_fmeta_fn,
             )
             out.update(tiled_out)
 
