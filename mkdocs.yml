@@ -75,7 +75,6 @@ nav:
   - Models:
       - Overview: models.md
       - Advanced Reference: models_reference.md
-      - Temporal Sampling: temporal_sampling.md
       - Precomputed:
           - Tessera: models/tessera.md
           - GSE: models/gse.md
@@ -104,6 +103,7 @@ nav:
   - API:
       - Overview: api.md
       - Specs & Data Structures: api_specs.md
+      - Temporal Sampling: temporal_sampling.md
       - Embedding API: api_embedding.md
       - Export API: api_export.md
       - Load API: api_load.md

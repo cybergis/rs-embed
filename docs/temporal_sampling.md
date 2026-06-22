@@ -8,13 +8,7 @@ Several on-the-fly models are **multi-temporal**: they were pretrained on a *ser
 ---
 
 ## Why the frame count is derived from the window
-
-Older versions packed every window into a fixed number of frames (e.g. always 8). That is wrong at both ends:
-
-- a 2-week window split into 8 frames → 8 near-identical composites (denser than the model ever saw in training);
-- a 3-year window split into 8 frames → frames months apart (far sparser than training).
-
-Instead, the temporal models now choose `T` from the **window length**, matched to their training cadence, and fall back gracefully when the window is too short (collapse to `T=1`) or too long (cover the whole window but flag it as out-of-distribution). Monthly-cadence models (`olmoearth`, `galileo`) share a single policy helper, `rs_embed.tools.temporal.fixed_or_equal_bins`.
+The temporal models choose `T` from the **window length**, matched to their training cadence, and fall back gracefully when the window is too short (collapse to `T=1`) or too long (cover the whole window but flag it as out-of-distribution). Monthly-cadence models (`olmoearth`, `galileo`) share a single policy helper, `rs_embed.tools.temporal.fixed_or_equal_bins`.
 
 ---
 
@@ -83,6 +77,16 @@ Choosing `T` frames assumes each frame's sub-window actually contains a clear sc
 - **`prithvi` / `galileo` / `anysat` / `agrifm`** (back-fill): the multi-frame provider fetch keeps `T` fixed by **back-filling empty sub-windows with the whole-window composite** (and padding short series by repeating the last frame) — i.e. duplicate frames. `rs-embed` records `meta["n_frames_requested"]`, `meta["n_distinct_frames"]`, and `meta["n_backfilled_frames"]`, and emits a `UserWarning` naming how many of the `T` sub-windows actually had distinct imagery. `prithvi` additionally **collapses** the duplicate frames (so its encoded `T` shrinks — see also `meta["requested_frames"]` vs `meta["num_frames"]`); the others feed the duplicate timesteps to the encoder.
 
 So `n_distinct_frames < n_frames_requested` (or `n_frames < n_bins` for `olmoearth`) means the window was sparser than the requested frame count — **narrow/shift the window, raise `cloudy_pct`, or lower the frame count** to recover genuine temporal diversity. The warning fires from the shared fetch helper, so it covers the single, tiled, batch, and export paths uniformly.
+
+---
+
+## Frame order
+
+Frames are always arranged **earliest-first** (chronological): `T=0` is the oldest sub-window, `T=N-1` the newest. The provider sorts imagery by acquisition time and the window splitter emits bins in ascending order, so you never sort the series yourself.
+
+Every multi-temporal model is **order-sensitive** — the per-frame time encoding in the [decision table](#decision-table) means reordering the frames changes the embedding. This holds even for `agrifm`, which carries no calendar date and encodes only the frame *position*.
+
+One case puts ordering in your hands: if you bypass fetching and pass your own array via `input_chw`, a `(T, C, H, W)` stack is consumed exactly as given (never reordered), so it **must be earliest-first** to match the fetched convention.
 
 ---
 
