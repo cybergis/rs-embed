@@ -19,6 +19,7 @@ from ..tools.manifest import summarize_status
 from ..tools.normalization import normalize_model_name
 from ..tools.runtime import (
     get_embedder_bundle_cached,
+    resolve_model_aware_input_prep,
     run_with_retry,
     sensor_key,
 )
@@ -222,7 +223,15 @@ def build_one_point_payload(
                 m_entry["fetch_meta"] = jsonable(_fmeta)
 
             if save_embeddings:
-                input_prep = getattr(config, "input_prep", "resize")
+                # Mirror get_embedding's model-aware resolution so image-level
+                # ViT grid models downgrade an unset/auto input_prep to resize
+                # (avoiding tiled stitching seams) on the per-item CPU path too,
+                # rather than silently tiling like the raw config default would.
+                input_prep = resolve_model_aware_input_prep(
+                    model_n=normalize_model_name(m),
+                    input_prep=getattr(config, "input_prep", "resize"),
+                    output=output,
+                )[0]
 
                 def _infer_once(
                     _m_backend=m_backend,
