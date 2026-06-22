@@ -319,7 +319,10 @@ class ExportConfig:
     show_progress : bool
         Whether to display progress indicators.
     input_prep : InputPrepSpec or str or None
-        API-side input preprocessing policy.
+        API-side input preprocessing policy. ``None`` (the default) uses the
+        package default ``"tile"`` (large inputs are tiled + stitched to preserve
+        native resolution). Pass ``"resize"`` to downsample to the model image
+        size, or ``"auto"`` to tile only when beneficial.
     """
 
     format: str = "npz"
@@ -337,7 +340,7 @@ class ExportConfig:
     writer_workers: int = 2
     resume: bool = False
     show_progress: bool = True
-    input_prep: InputPrepSpec | str | None = "resize"
+    input_prep: InputPrepSpec | str | None = None
 
     @property
     def effective_infer_batch_size(self) -> int:

@@ -25,7 +25,7 @@ Read this section before comparing any model that accepts `TemporalSpec.range(..
 
 For most on-the-fly adapters, `TemporalSpec.range(start, end)` means "filter imagery in `[start, end)` and build one composite patch for model input," usually with `median` and optionally `mosaic` through `SensorSpec.composite`.
 
-The multi-frame adapters `agrifm`, `anysat`, and `galileo` instead split the requested range into sub-windows and composite one frame per bin. Current single-composite adapters include `remoteclip`, `satmae`, `satmaepp`, `satmaepp_s2_10b`, `scalemae`, `wildsat`, `prithvi`, `terrafm`, `terramind`, `dofa`, `fomo`, `thor`, and `satvision`.
+The multi-frame adapters `agrifm`, `anysat`, and `galileo` instead split the requested range into sub-windows and composite one frame per bin. Current single-composite adapters include `remoteclip`, `satmae`, `satmaepp`, `satmaepp_s2_10b`, `scalemae`, `wildsat`, `prithvi`, `terrafm`, `terramind`, `dofa`, `fomo`, `thor`, `satvision`, and `olmoearth`.
 
 ### Multi-frame Semantics
 
@@ -41,7 +41,7 @@ Per-model temporal packaging:
 | --------- | ------------------------------- | ------------------------------------ | -------------------------------------------------------------------------------------------------------- |
 | `agrifm`  | `RS_EMBED_AGRIFM_FRAMES` (`8`)  | none (uses `TCHW` directly)          | Temporal information is encoded only in the frame stack.                                                 |
 | `anysat`  | `RS_EMBED_ANYSAT_FRAMES` (`8`)  | `s2_dates` (per-frame DOY, `0..364`) | DOY values are derived from each frame bin midpoint date.                                                |
-| `galileo` | `RS_EMBED_GALILEO_FRAMES` (`8`) | `months` (per-frame month, `1..12`)  | By default from frame bin midpoints; `RS_EMBED_GALILEO_MONTH` can force a constant month for all frames. |
+| `galileo` | window-adaptive (`temporal_mode="auto"`); `RS_EMBED_GALILEO_FRAMES` pins a manual count | `months` (per-frame month, `1..12`)  | Frame count is derived from the window (~30-day frames, ≤12) to match Galileo's monthly cadence; longer windows are equal-divided with a warning. Months from frame-bin midpoints; `RS_EMBED_GALILEO_MONTH` can force a constant month. See [galileo](models/galileo.md#temporal-sampling). |
 
 ### Modality and Extra Inputs Matrix
 
@@ -68,6 +68,7 @@ Use this table to avoid unfair comparisons between plain image encoders and adap
 | `thor`            | Yes (`S1`/`S2`)               | Yes (select one modality per call: `s1` or `s2`)          | No                                                            | No hard extra metadata (optional S1 options: orbit, linear/DB path) |
 | `agrifm`          | No (this adapter path)        | No                                                        | No extra side tensor, but temporal stack `[T,C,H,W]` required | Temporal coverage is important (no separate metadata tensor)        |
 | `satvision`       | No (this adapter path)        | No                                                        | No separate side tensor                                       | Yes: strict 14-channel order/calibration schema (band semantics)    |
+| `olmoearth`       | Yes (multi-modal architecture) | S2 L2A only in this adapter                              | Yes (image + mask + timestamps; all derived automatically)    | No hard extra metadata (timestamps derived from temporal midpoint)  |
 
 In practice, the most obviously multi-input models here are `prithvi` (image plus temporal and location coordinates), `anysat` (time series plus `s2_dates`), `galileo` (image-derived tensors plus masks and `months`), `dofa` (image plus wavelengths), and `scalemae` (image plus `input_res_m`).
 
@@ -83,7 +84,7 @@ This table only lists env vars that materially change model input construction o
 | `satmaepp_s2_10b` | `RS_EMBED_SATMAEPP_S2_CKPT_REPO`, `RS_EMBED_SATMAEPP_S2_CKPT_FILE`, `RS_EMBED_SATMAEPP_S2_MODEL_FN`, `RS_EMBED_SATMAEPP_S2_IMG`, `RS_EMBED_SATMAEPP_S2_PATCH`, `RS_EMBED_SATMAEPP_S2_GRID_REDUCE`, `RS_EMBED_SATMAEPP_S2_WEIGHTS_ONLY` |
 | `scalemae`        | `RS_EMBED_SCALEMAE_IMG`                                                                                                                                                                                                                |
 | `anysat`          | `RS_EMBED_ANYSAT_IMG`, `RS_EMBED_ANYSAT_NORM`, `RS_EMBED_ANYSAT_FRAMES`, `RS_EMBED_ANYSAT_GRID_MODE`, `RS_EMBED_ANYSAT_POOLED_SOURCE`                                                                                                  |
-| `galileo`         | `RS_EMBED_GALILEO_IMG`, `RS_EMBED_GALILEO_PATCH`, `RS_EMBED_GALILEO_NORM`, `RS_EMBED_GALILEO_FRAMES`, `RS_EMBED_GALILEO_MONTH`                                                                                                         |
+| `galileo`         | `RS_EMBED_GALILEO_IMG`, `RS_EMBED_GALILEO_PATCH`, `RS_EMBED_GALILEO_NORM`, `RS_EMBED_GALILEO_TEMPORAL_MODE`, `RS_EMBED_GALILEO_FRAMES`, `RS_EMBED_GALILEO_MONTH`                                                                       |
 | `wildsat`         | `RS_EMBED_WILDSAT_IMG`, `RS_EMBED_WILDSAT_NORM`                                                                                                                                                                                        |
 | `prithvi`         | `RS_EMBED_PRITHVI_PREP`, `RS_EMBED_PRITHVI_IMG`, `RS_EMBED_PRITHVI_PATCH_MULT`                                                                                                                                                         |
 | `terrafm`         | modality and sensor-side options (`s2`/`s1`); image size fixed to 224 in implementation                                                                                                                                                |
@@ -93,6 +94,7 @@ This table only lists env vars that materially change model input construction o
 | `thor`            | `RS_EMBED_THOR_IMG`, `RS_EMBED_THOR_NORMALIZE`, plus modality and sensor-side options (`s2`/`s1`)                                                                                                                                      |
 | `agrifm`          | `RS_EMBED_AGRIFM_IMG`, `RS_EMBED_AGRIFM_NORM`, `RS_EMBED_AGRIFM_FRAMES`                                                                                                                                                                |
 | `satvision`       | `RS_EMBED_SATVISION_TOA_IMG`, `RS_EMBED_SATVISION_TOA_NORM`, channel-index and calibration env keys                                                                                                                                    |
+| `olmoearth`       | `RS_EMBED_OLMOEARTH_VARIANT`, `RS_EMBED_OLMOEARTH_IMAGE_SIZE`, `RS_EMBED_OLMOEARTH_PATCH_SIZE`                                                                                                                                          |
 
 ### Practical Guidance
 

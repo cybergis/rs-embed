@@ -32,9 +32,10 @@ def test_scalemae_input_override_skips_pre_resize_and_adjusts_input_res(monkeypa
     def _fake_load(*, model_id, device):
         return object(), {"device": "cpu"}
 
-    def _fake_forward(model, rgb_u8, *, image_size, device, input_res_m):
+    def _fake_forward(model, rgb_u8, *, image_size, device, input_res_m, preprocess_mode):
         seen["shape"] = tuple(rgb_u8.shape)
         seen["input_res_m"] = float(input_res_m)
+        seen["preprocess_mode"] = preprocess_mode
         return np.full((4, 2), 1.0, dtype=np.float32), {"tokens_kind": "tokens_forward"}
 
     monkeypatch.setattr(sm, "_load_scalemae", _fake_load)
@@ -52,7 +53,8 @@ def test_scalemae_input_override_skips_pre_resize_and_adjusts_input_res(monkeypa
     )
 
     assert seen["shape"] == (11, 13, 3)
-    assert seen["input_res_m"] == pytest.approx(10.0 * (11.0 / 256.0))
+    assert seen["input_res_m"] == pytest.approx(10.0 * (11.0 / 224.0))
+    assert seen["preprocess_mode"] == "direct"
 
 
 def test_scalemae_resolves_nested_forward_features():

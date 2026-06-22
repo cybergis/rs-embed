@@ -13,8 +13,10 @@ _gee_checks/
 exports/
 examples/**
 demo_export/
+*.png
 
-!examples/
+.codex/
+.agents/
 
 !examples/playground.ipynb
 !examples/plot_utils.py

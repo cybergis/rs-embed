@@ -21,6 +21,7 @@ MODEL_SPECS: dict[str, tuple[str, str]] = {
     "thor": ("onthefly_thor", "THORBaseEmbedder"),
     "agrifm": ("onthefly_agrifm", "AgriFMEmbedder"),
     "satvision": ("onthefly_satvision_toa", "SatVisionTOAEmbedder"),
+    "olmoearth": ("onthefly_olmoearth", "OlmoEarthEmbedder"),
 }
 
 MODEL_ALIASES: dict[str, str] = {

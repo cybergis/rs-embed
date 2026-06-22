@@ -11,6 +11,7 @@ from __future__ import annotations
 import inspect
 import sys
 import time
+import warnings
 from collections.abc import Callable
 from dataclasses import dataclass
 from functools import lru_cache
@@ -23,7 +24,7 @@ from ..core import registry as _runtime_registry
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import get_embedder_cls
-from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import FetchResult
 from ..core.validation import assert_supported
 from ..providers import ProviderBase, get_provider, has_provider
@@ -77,8 +78,74 @@ class _EmbeddingRequestContext:
     model_config: dict[str, Any] | None
     input_prep: Any | None
     input_prep_resolved: Any
+    input_prep_requested_mode: str
+    input_prep_model_policy: str | None
     embedder: Any
     lock: Any
+
+
+_IMAGE_LEVEL_VIT_GRID_MODELS = frozenset(
+    {
+        "remoteclip",
+        "satmae",
+        "satmaepp",
+        "satmaepp_s2_10b",
+        "scalemae",
+    }
+)
+
+
+def _is_image_level_vit_grid_model(model_n: str) -> bool:
+    return str(model_n).strip().lower() in _IMAGE_LEVEL_VIT_GRID_MODELS
+
+
+def resolve_model_aware_input_prep(
+    *,
+    model_n: str,
+    input_prep: Any | None,
+    output: OutputSpec,
+) -> tuple[Any | None, Any, str, str | None]:
+    """Resolve input prep with model-specific safety defaults.
+
+    Some image-level ViT adapters expose patch-token grids. Their tiled grid
+    output is useful for experiments but is not a reliable seamless spatial
+    mosaic, so unset/auto input prep resolves to resize for those models.
+    Explicit tile requests still run, but callers get a warning.
+    """
+    from .tiling import _resolve_input_prep_spec
+
+    resolved = _resolve_input_prep_spec(input_prep)
+    requested_mode = "default" if input_prep is None else str(resolved.mode)
+    model_l = str(model_n).strip().lower()
+    if not _is_image_level_vit_grid_model(model_l):
+        return input_prep, resolved, requested_mode, None
+
+    if input_prep is None or str(resolved.mode) == "auto":
+        effective = InputPrepSpec.resize()
+        effective_resolved = _resolve_input_prep_spec(effective)
+        policy = "resize_default_for_image_level_vit_patch_grid"
+        if output.mode == "grid":
+            warnings.warn(
+                f"{model_l} grid output uses image-level ViT patch tokens; "
+                "input_prep unset/auto resolves to resize by default because tiled grids "
+                "can show stitching seams. Pass input_prep='tile' explicitly for "
+                "experimental tiled visualization.",
+                UserWarning,
+                stacklevel=3,
+            )
+        return effective, effective_resolved, requested_mode, policy
+
+    if str(resolved.mode) == "tile" and output.mode == "grid":
+        warnings.warn(
+            f"{model_l} tiled grid output is experimental: image-level ViT patch tokens "
+            "can show stitching seams. Prefer pooled output or resize-mode grid unless "
+            "you explicitly need tiled visualization.",
+            UserWarning,
+            stacklevel=3,
+        )
+        return input_prep, resolved, requested_mode, "explicit_tile_not_recommended_for_grid"
+
+    return input_prep, resolved, requested_mode, None
 
 
 @lru_cache(maxsize=64)
@@ -336,12 +403,19 @@ def _prepare_embedding_request_context(
     device: str,
     input_prep: Any | None,
 ) -> _EmbeddingRequestContext:
-    from .tiling import _resolve_input_prep_spec
-
     model_n = normalize_model_name(model)
     backend_n = _resolve_embedding_api_backend(model_n, normalize_backend_name(backend))
     device_n = normalize_device_name(device)
-    input_prep_resolved = _resolve_input_prep_spec(input_prep)
+    (
+        input_prep_eff,
+        input_prep_resolved,
+        input_prep_requested_mode,
+        input_prep_model_policy,
+    ) = resolve_model_aware_input_prep(
+        model_n=model_n,
+        input_prep=input_prep,
+        output=output,
+    )
 
     sensor_eff = sensor
     if input_prep_resolved.mode == "tile" and sensor_eff is None:
@@ -357,11 +431,65 @@ def _prepare_embedding_request_context(
         device=device_n,
         sensor_eff=sensor_eff,
         model_config=model_config,
-        input_prep=input_prep,
+        input_prep=input_prep_eff,
         input_prep_resolved=input_prep_resolved,
+        input_prep_requested_mode=input_prep_requested_mode,
+        input_prep_model_policy=input_prep_model_policy,
         embedder=embedder,
         lock=lock,
     )
+
+
+def _annotate_image_level_vit_grid_embedding(
+    *,
+    emb: Embedding,
+    ctx: _EmbeddingRequestContext,
+    output: OutputSpec,
+) -> Embedding:
+    if not _is_image_level_vit_grid_model(ctx.model_n):
+        return emb
+    meta = getattr(emb, "meta", None)
+    if not isinstance(meta, dict):
+        return emb
+    from .tiling import INPUT_PREP_VERSION
+
+    prep = meta.setdefault(
+        "input_prep",
+        {
+            "prep_version": INPUT_PREP_VERSION,
+            "requested_mode": str(ctx.input_prep_requested_mode),
+            "resolved_mode": str(getattr(ctx.input_prep_resolved, "mode", "resize")),
+        },
+    )
+    if isinstance(prep, dict):
+        prep.setdefault("prep_version", INPUT_PREP_VERSION)
+        prep.setdefault("requested_mode", str(ctx.input_prep_requested_mode))
+        prep.setdefault("resolved_mode", str(getattr(ctx.input_prep_resolved, "mode", "resize")))
+        if ctx.input_prep_model_policy is not None:
+            prep["model_policy"] = str(ctx.input_prep_model_policy)
+            prep["resolved_by_model_policy"] = (
+                str(ctx.input_prep_model_policy) == "resize_default_for_image_level_vit_patch_grid"
+            )
+        if output.mode == "grid":
+            prep["tiled_grid_seam_risk"] = "high"
+            prep["tiled_grid_recommended"] = False
+
+    if output.mode == "grid":
+        meta.setdefault("grid_semantics", "vit_patch_tokens")
+        meta.setdefault("grid_tile_recommended", False)
+        meta.setdefault("preferred_output", "pooled")
+    return emb
+
+
+def _annotate_embedding_list(
+    *,
+    embs: list[Embedding],
+    ctx: _EmbeddingRequestContext,
+    output: OutputSpec,
+) -> list[Embedding]:
+    return [
+        _annotate_image_level_vit_grid_embedding(emb=emb, ctx=ctx, output=output) for emb in embs
+    ]
 
 
 def fetch_api_side_inputs(
@@ -389,24 +517,18 @@ def fetch_api_side_inputs(
     if getattr(type(embedder), "_is_precomputed", False):
         return None
 
+    # API-side tiling needs a provider backend, a sensor, and an embedder that
+    # accepts prefetched CHW input. When any prerequisite is missing we degrade
+    # gracefully (let the embedder fetch internally and resize) rather than
+    # raising — ``tile`` is the package default, so it must never hard-fail basic
+    # usage. The embedding's meta["input_prep"] records the resolved mode so the
+    # fallback stays auditable. This applies to both ``tile`` and ``auto``.
     factory = provider_factory_for_backend(backend_n)
     if factory is None:
-        if mode == "tile":
-            raise ModelError(
-                "input_prep.mode='tile' currently requires a provider backend (e.g. gee)."
-            )
         return None
     if sensor_eff is None:
-        if mode == "tile":
-            raise ModelError(
-                "input_prep.mode='tile' requires a sensor for provider-backed on-the-fly models."
-            )
         return None
     if not embedder_accepts_input_chw(type(embedder)):
-        if mode == "tile":
-            raise ModelError(
-                f"Model {model_n} does not accept input_chw; cannot apply input_prep.mode='tile'."
-            )
         return None
 
     provider = factory()
@@ -478,7 +600,7 @@ def run_embedding_request(
                     fetch_meta=fr.meta if fr.meta else None,
                 )
             out.append(emb)
-        return out
+        return _annotate_embedding_list(embs=out, ctx=ctx, output=output)
 
     if len(spatials) == 1:
         with ctx.lock:
@@ -492,7 +614,7 @@ def run_embedding_request(
                 backend=ctx.backend_n,
                 device=ctx.device,
             )
-        return [emb]
+        return _annotate_embedding_list(embs=[emb], ctx=ctx, output=output)
 
     if ctx.model_config is not None and not embedder_accepts_model_config(
         type(ctx.embedder),
@@ -512,7 +634,7 @@ def run_embedding_request(
                     device=ctx.device,
                 )
             out.append(emb)
-        return out
+        return _annotate_embedding_list(embs=out, ctx=ctx, output=output)
 
     with ctx.lock:
         kwargs: dict[str, Any] = {
@@ -529,4 +651,8 @@ def run_embedding_request(
         ):
             kwargs["model_config"] = ctx.model_config
         embs = ctx.embedder.get_embeddings_batch(**kwargs)
-    return [normalize_embedding_output(emb=emb, output=output) for emb in embs]
+    return _annotate_embedding_list(
+        embs=[normalize_embedding_output(emb=emb, output=output) for emb in embs],
+        ctx=ctx,
+        output=output,
+    )

@@ -155,7 +155,7 @@ def test_evaluate_batch_capability_respects_gates(monkeypatch):
         lambda _e: True,
     )
 
-    can_prefetch, can_no_input = engine._evaluate_batch_capability(
+    can_prefetch, can_no_input, can_tiled = engine._evaluate_batch_capability(
         embedder=embedder,
         needs_provider_input=True,
         sensor=SensorSpec(collection="C", bands=("B1",)),
@@ -165,6 +165,7 @@ def test_evaluate_batch_capability_respects_gates(monkeypatch):
     )
     assert can_prefetch is True
     assert can_no_input is False
+    assert can_tiled is False  # input_prep_mode defaults to "resize"
 
 
 def test_run_batch_prefetched_returns_results_and_failures():

@@ -35,11 +35,9 @@ from .tools.runtime import (
     _EmbeddingRequestContext,
     get_embedder_bundle_cached,
     require_model_config_support,
+    resolve_model_aware_input_prep,
     run_embedding_request,
     sensor_key,
-)
-from .tools.tiling import (
-    _resolve_input_prep_spec,
 )
 
 
@@ -70,7 +68,11 @@ class Model:
     output : OutputSpec
         Embedding output spec (default: pooled).
     input_prep : str or InputPrepSpec or None
-        Input preparation mode.
+        Input preparation mode. ``None`` (the default) uses the package default,
+        which is ``"tile"``: large on-the-fly inputs are tiled and stitched so
+        native resolution is preserved. Pass ``"resize"`` to downsample the whole
+        input to the model's image size instead, or ``"auto"`` to tile only when
+        beneficial.
     **model_kwargs
         Model-specific settings (e.g. ``variant="large"``).  The accepted
         keys depend on the model; see :func:`rs_embed.describe_model`.
@@ -91,7 +93,7 @@ class Model:
         fetch: FetchSpec | None = None,
         modality: str | None = None,
         output: OutputSpec = OutputSpec.pooled(),
-        input_prep: InputPrepSpec | str | None = "resize",
+        input_prep: InputPrepSpec | str | None = None,
         **model_kwargs: Any,
     ) -> None:
         model_config = model_kwargs or None
@@ -102,8 +104,16 @@ class Model:
         self._device = normalize_device_name(device)
         self._output = output
         self._model_config = model_config
-        self._input_prep = input_prep
-        self._input_prep_resolved = _resolve_input_prep_spec(input_prep)
+        (
+            self._input_prep,
+            self._input_prep_resolved,
+            self._input_prep_requested_mode,
+            self._input_prep_model_policy,
+        ) = resolve_model_aware_input_prep(
+            model_n=self._model_n,
+            input_prep=input_prep,
+            output=output,
+        )
 
         self._sensor = resolve_sensor_for_model(
             self._model_n,
@@ -138,6 +148,8 @@ class Model:
             model_config=self._model_config,
             input_prep=self._input_prep,
             input_prep_resolved=self._input_prep_resolved,
+            input_prep_requested_mode=self._input_prep_requested_mode,
+            input_prep_model_policy=self._input_prep_model_policy,
             embedder=self._embedder,
             lock=self._lock,
         )

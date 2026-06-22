@@ -27,22 +27,31 @@ def _sensor_bands(sensor_meta) -> list[str]:
 
 def _to_dhw(arr):
     if hasattr(arr, "values"):  # xarray
-        arr = arr.values
+        dims = tuple(str(d).lower() for d in getattr(arr, "dims", ()))
+        if len(dims) == 3 and {"d", "y", "x"}.issubset(dims):
+            arr = arr.transpose("d", "y", "x").values
+        elif len(dims) == 3 and {"band", "y", "x"}.issubset(dims):
+            arr = arr.transpose("band", "y", "x").values
+        elif len(dims) == 3 and {"y", "x"}.issubset(dims):
+            y_axis = dims.index("y")
+            x_axis = dims.index("x")
+            d_axis = next(i for i in range(3) if i not in (y_axis, x_axis))
+            arr = np.moveaxis(arr.values, (d_axis, y_axis, x_axis), (0, 1, 2))
+        else:
+            arr = arr.values
     arr = np.asarray(arr)
     if arr.ndim == 2:
         return arr[None, ...].astype(np.float32)
     if arr.ndim != 3:
         raise ValueError(f"Expected 2D/3D array, got {arr.shape}")
     # HWD -> DHW if last dim looks like D
-    if arr.shape[-1] in (32, 64, 128, 256, 512, 768, 1024) and arr.shape[0] not in (
-        32,
-        64,
-        128,
-        256,
-        512,
-        768,
-        1024,
-    ):
+    embedding_dims = (32, 64, 128, 192, 256, 384, 512, 768, 1024)
+    last_axis_looks_like_d = arr.shape[-1] in embedding_dims and (
+        arr.shape[0] not in embedding_dims
+        or arr.shape[-1] > max(arr.shape[0], arr.shape[1])
+        or (arr.shape[0] == arr.shape[1] and arr.shape[-1] != arr.shape[0])
+    )
+    if last_axis_looks_like_d:
         arr = np.moveaxis(arr, -1, 0)
     return arr.astype(np.float32)
 

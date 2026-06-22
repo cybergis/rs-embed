@@ -324,7 +324,9 @@ def test_two_model_instances_share_cached_embedder():
 
 def test_model_sensor_flows_to_embedding():
     sensor = SensorSpec(collection="COPERNICUS/S2", bands=("B4", "B3", "B2"))
-    m = Model("mock_model", sensor=sensor)
+    # Pin resize so the mock echoes the sensor directly instead of triggering an
+    # API-side provider prefetch (the tile default would).
+    m = Model("mock_model", sensor=sensor, input_prep="resize")
     emb = m.get_embedding(_SPATIAL)
     # The mock embedder echoes the sensor in meta
     assert emb.meta["sensor"] == sensor

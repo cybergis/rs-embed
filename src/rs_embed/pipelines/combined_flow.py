@@ -12,7 +12,7 @@ from typing import Any
 
 import numpy as np
 
-from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, Status, TaskResult
 from ..tools.checkpoint_utils import drop_model_arrays
 from ..tools.normalization import normalize_model_name
@@ -59,6 +59,7 @@ def run_pending_models(
     progress: Any,
     inference_engine: Any | None = None,
     progress_factory: Callable[..., Any] | None = None,
+    input_prep: InputPrepSpec | str | None = None,
 ) -> dict[str, Any]:
     """Run inference for each pending model, delegating to *inference_engine*.
 
@@ -90,6 +91,7 @@ def run_pending_models(
                 max_retries=max_retries,
                 retry_backoff_s=retry_backoff_s,
                 show_progress=show_progress,
+                input_prep=input_prep,
             ),
         )
 

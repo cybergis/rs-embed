@@ -43,7 +43,7 @@ get_embedding(
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
-    input_prep: InputPrepSpec | str | None = "resize",
+    input_prep: InputPrepSpec | str | None = None,
     **model_kwargs,
 ) -> Embedding
 ```
@@ -70,7 +70,7 @@ Runtime and branch selection:
 | `modality`   | Optional model-facing modality selector such as `s1`, `s2`, or `s2_l2a` for models that expose multiple branches. The API normalizes common aliases such as `sentinel-1 -> s1` and `sentinel-2 -> s2`.              |
 | `backend`    | Access backend. `backend="auto"` is the public default and the recommended choice. Precomputed models typically expect `auto`, while provider-backed on-the-fly paths commonly use `gee` through the auto resolver. |
 | `device`     | `"auto"`, `"cpu"`, or `"cuda"` for torch-backed models.                                                                                                                                                             |
-| `input_prep` | `"resize"` (default), `"tile"`, `"auto"`, `InputPrepSpec(...)`, or `None`. `None` is treated like the default resize path.                                                                                          |
+| `input_prep` | `"resize"`, `"tile"`, `"auto"`, `InputPrepSpec(...)`, or `None` (default). For image-level ViT patch-token grid models (`remoteclip`, `scalemae`, `satmae`, `satmaepp`, `satmaepp_s2_10b`), `None`/`"auto"` with `OutputSpec.grid()` resolves to `"resize"` and warns; explicit `"tile"` also warns. Explicit `"resize"` does not warn. |
 
 Model-specific settings:
 
@@ -141,7 +141,7 @@ get_embeddings_batch(
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
-    input_prep: InputPrepSpec | str | None = "resize",
+    input_prep: InputPrepSpec | str | None = None,
     **model_kwargs,
 ) -> List[Embedding]
 ```
@@ -168,7 +168,7 @@ Runtime and branch selection:
 | `modality`   | Optional model-facing modality selector such as `s1`, `s2`, or `s2_l2a` for models that expose multiple branches. The API normalizes common aliases such as `sentinel-1 -> s1` and `sentinel-2 -> s2`.              |
 | `backend`    | Access backend. `backend="auto"` is the public default and the recommended choice. Precomputed models typically expect `auto`, while provider-backed on-the-fly paths commonly use `gee` through the auto resolver. |
 | `device`     | `"auto"`, `"cpu"`, or `"cuda"` for torch-backed models.                                                                                                                                                             |
-| `input_prep` | `"resize"` (default), `"tile"`, `"auto"`, `InputPrepSpec(...)`, or `None`. `None` is treated like the default resize path.                                                                                          |
+| `input_prep` | `"resize"`, `"tile"`, `"auto"`, `InputPrepSpec(...)`, or `None` (default). For image-level ViT patch-token grid models (`remoteclip`, `scalemae`, `satmae`, `satmaepp`, `satmaepp_s2_10b`), `None`/`"auto"` with `OutputSpec.grid()` resolves to `"resize"` and warns; explicit `"tile"` also warns. Explicit `"resize"` does not warn. |
 
 Model-specific settings:
 

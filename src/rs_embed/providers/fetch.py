@@ -229,6 +229,157 @@ def fetch_s2_multiframe_raw_tchw(
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
 
 
+def _stack_binned_frames(
+    frames: list[np.ndarray | None],
+    bins: Sequence[tuple[str, str]],
+    *,
+    expected_channels: int | None,
+    context: str,
+    last_error: str | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Stack per-bin frames into [T,C,H,W]; empty bins become all-NaN sentinel frames.
+
+    The NaN sentinel keeps ``T == len(bins)`` so frame/bin alignment survives
+    array-only transport (e.g. through ``input_chw`` pipelines); consumers
+    detect empty frames via ``np.isnan(frame).all()`` or the returned meta.
+    """
+    shapes = {f.shape for f in frames if f is not None}
+    if not shapes:
+        detail = f" Last fetch error: {last_error}" if last_error else ""
+        raise ModelError(
+            f"{context}: no imagery found in any of the {len(bins)} time bins.{detail}"
+        )
+    if len(shapes) > 1:
+        raise ModelError(
+            f"{context}: inconsistent frame shapes across time bins: {sorted(shapes)}."
+        )
+    shape = shapes.pop()
+    if expected_channels is not None and int(shape[0]) != int(expected_channels):
+        raise ModelError(f"{context}: expected C={expected_channels} per frame, got shape={shape}.")
+
+    out: list[np.ndarray] = []
+    frame_meta: list[dict[str, Any]] = []
+    for (start, end), f in zip(bins, frames, strict=True):
+        empty = f is None
+        out.append(np.full(shape, np.nan, dtype=np.float32) if empty else f.astype(np.float32))
+        frame_meta.append({"start": start, "end": end, "empty": empty})
+    arr = np.stack(out, axis=0)
+    meta: dict[str, Any] = {
+        "frames": frame_meta,
+        "n_empty": int(sum(1 for m in frame_meta if m["empty"])),
+    }
+    return arr, meta
+
+
+def fetch_collection_binned_raw_tchw(
+    provider: ProviderBase,
+    *,
+    spatial: SpatialSpec,
+    bins: Sequence[tuple[str, str]],
+    collection: str,
+    bands: Sequence[str],
+    scale_m: int = 10,
+    cloudy_pct: int | None = 30,
+    composite: str = "median",
+    fill_value: float = 0.0,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Fetch one composite per explicit time bin as raw float32 [T,C,H,W].
+
+    Unlike :func:`fetch_s2_multiframe_raw_tchw` (equal division of one window),
+    the caller supplies the exact ``(start, end)`` date bins. Bins with no
+    imagery yield all-NaN sentinel frames flagged in the returned meta instead
+    of failing or duplicating neighbours; at least one bin must have data.
+    """
+    if not bins:
+        raise ModelError("fetch_collection_binned_raw_tchw requires at least one time bin.")
+    frames: list[np.ndarray | None] = []
+    last_error: str | None = None
+    for start, end in bins:
+        try:
+            frames.append(
+                fetch_collection_patch_chw(
+                    provider,
+                    spatial=spatial,
+                    temporal=TemporalSpec.range(start, end),
+                    collection=str(collection),
+                    bands=tuple(str(b) for b in bands),
+                    scale_m=int(scale_m),
+                    cloudy_pct=cloudy_pct,
+                    composite=str(composite),
+                    fill_value=float(fill_value),
+                )
+            )
+        except ModelError as exc:
+            last_error = str(exc)
+            frames.append(None)
+    return _stack_binned_frames(
+        frames,
+        bins,
+        expected_channels=len(tuple(bands)),
+        context=f"binned fetch of {collection}",
+        last_error=last_error,
+    )
+
+
+def fetch_s1_vvvh_binned_raw_tchw(
+    provider: ProviderBase,
+    *,
+    spatial: SpatialSpec,
+    bins: Sequence[tuple[str, str]],
+    scale_m: int = 10,
+    orbit: str | None = None,
+    use_float_linear: bool = True,
+    composite: str = "median",
+    fill_value: float = 0.0,
+    require_iw: bool = True,
+    relax_iw_on_empty: bool = True,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Fetch one S1 VV/VH composite per explicit time bin as raw float32 [T,2,H,W].
+
+    Reuses the single-frame S1 path per bin, so IW filtering, dual-pol
+    selection, and the relaxed retry all apply within each bin. Bins with no
+    S1 coverage yield all-NaN sentinel frames flagged in the returned meta;
+    at least one bin must have data.
+    """
+    if not bins:
+        raise ModelError("fetch_s1_vvvh_binned_raw_tchw requires at least one time bin.")
+    _require_s1_support(provider, "fetch_s1_vvvh_raw_chw_with_meta")
+    frames: list[np.ndarray | None] = []
+    frame_fetch_meta: list[dict[str, Any] | None] = []
+    last_error: str | None = None
+    for start, end in bins:
+        try:
+            arr, fmeta = fetch_s1_vvvh_raw_chw_with_meta(
+                provider,
+                spatial=spatial,
+                temporal=TemporalSpec.range(start, end),
+                scale_m=int(scale_m),
+                orbit=orbit,
+                use_float_linear=bool(use_float_linear),
+                composite=str(composite),
+                fill_value=float(fill_value),
+                require_iw=bool(require_iw),
+                relax_iw_on_empty=bool(relax_iw_on_empty),
+            )
+            frames.append(arr)
+            frame_fetch_meta.append(fmeta)
+        except ModelError as exc:
+            last_error = str(exc)
+            frames.append(None)
+            frame_fetch_meta.append(None)
+    arr, meta = _stack_binned_frames(
+        frames,
+        bins,
+        expected_channels=2,
+        context="binned S1 VV/VH fetch",
+        last_error=last_error,
+    )
+    for m, fm in zip(meta["frames"], frame_fetch_meta, strict=True):
+        if fm:
+            m["fetch"] = fm
+    return arr, meta
+
+
 def normalize_s1_vvvh_chw(raw_chw: np.ndarray) -> np.ndarray:
     """Convert raw S1 VV/VH to numerically stable [0,1] CHW."""
     arr = np.asarray(raw_chw, dtype=np.float32)

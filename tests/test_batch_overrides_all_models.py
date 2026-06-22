@@ -73,7 +73,15 @@ def test_scalemae_batch_prefetch_and_single_model_load(monkeypatch):
         calls["load"] += 1
         return object(), {"device": "cpu"}
 
-    def _fake_forward_batch(model, rgb_u8_batch, *, image_size, device, input_res_m):
+    def _fake_forward_batch(
+        model,
+        rgb_u8_batch,
+        *,
+        image_size,
+        device,
+        input_res_m,
+        preprocess_mode,
+    ):
         vals = [float(rgb_u8[0, 0, 0]) for rgb_u8 in rgb_u8_batch]
         assert len(vals) == len(input_res_m)
         return [np.full((4, 2), val, dtype=np.float32) for val in vals], {
@@ -121,6 +129,7 @@ def test_prithvi_batch_prefetch_passes_raw_input(monkeypatch):
         temporal=TemporalSpec.year(2020),
         output=OutputSpec.pooled(),
         backend="gee",
+        model_config={"temporal_mode": "single"},
     )
 
     assert len(out) == 3

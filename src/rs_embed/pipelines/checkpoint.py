@@ -210,13 +210,20 @@ class CheckpointManager:
             retries=cfg.max_retries,
             backoff_s=cfg.retry_backoff_s,
         )
+        # write_arrays operates on a jsonable copy; merge its path keys back
+        # and return the original dict so callers that keep mutating the
+        # manifest (e.g. appending model entries between checkpoints) and
+        # closures holding a reference to it stay in sync.
+        for key in ("manifest_path", "npz_path", "npz_keys", "nc_path", "nc_variables"):
+            if key in written:
+                manifest[key] = written[key]
         if final and not cfg.save_manifest:
             try:
                 if os.path.exists(json_path):
                     os.remove(json_path)
             except Exception as _e:
                 pass
-        return written
+        return manifest
 
     # ── combined helpers ───────────────────────────────────────────
 

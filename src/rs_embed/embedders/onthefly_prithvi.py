@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
@@ -23,12 +24,16 @@ from ..providers import ProviderBase
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
 )
+from ..providers.fetch import (
+    fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+)
 from ..providers.resolution import (
     is_provider_backend,
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.temporal import temporal_frame_midpoints as _temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_midpoint_str, temporal_to_range
@@ -94,6 +99,53 @@ def tokens_to_grid_dhw(tokens):
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
 
+def _split_prithvi_patch_tokens(tokens, n_frames: int):
+    """Split a token sequence into per-frame square patch grids.
+
+    Prithvi returns CLS + ``T·(h·w)`` patch tokens in ``(t h w)`` order (see the
+    vendored ``prepare_features_for_image_model``). Returns
+    ``(patch[T, h, w, D], has_cls, (h, w))``.
+    """
+    n = int(tokens.shape[0])
+    d = int(tokens.shape[1])
+    nf = max(1, int(n_frames))
+    for has_cls in (True, False):
+        n_patch = n - 1 if has_cls else n
+        if n_patch <= 0 or n_patch % nf != 0:
+            continue
+        per_frame = n_patch // nf
+        hw = int(round(per_frame**0.5))
+        if hw >= 1 and hw * hw == per_frame:
+            patch = tokens[1:] if has_cls else tokens
+            return patch.reshape(nf, hw, hw, d).astype("float32"), has_cls, (hw, hw)
+    raise ModelError(f"Cannot split Prithvi tokens (N={n}) into {nf} frames of square patches.")
+
+
+def pool_from_tokens_tchw(tokens, n_frames: int, pooling: str):
+    """Pool patch tokens over time + space → (D,). Excludes CLS if present."""
+    patch, has_cls, _ = _split_prithvi_patch_tokens(tokens, n_frames)  # [T,h,w,D]
+    flat = patch.reshape(-1, patch.shape[-1])
+    if flat.shape[0] == 0:
+        return tokens[0].astype("float32"), has_cls
+    if pooling == "mean":
+        return flat.mean(axis=0).astype("float32"), has_cls
+    if pooling == "max":
+        return flat.max(axis=0).astype("float32"), has_cls
+    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
+
+
+def tokens_to_grid_dhw_tchw(tokens, n_frames: int, pooling: str):
+    """Reduce per-frame patch grids over time → grid [D,h,w] and (h,w)."""
+    patch, has_cls, (h, w) = _split_prithvi_patch_tokens(tokens, n_frames)  # [T,h,w,D]
+    if pooling == "mean":
+        g = patch.mean(axis=0)  # [h,w,D]
+    elif pooling == "max":
+        g = patch.max(axis=0)
+    else:
+        raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
+    return g.transpose(2, 0, 1).astype("float32"), (h, w), has_cls
+
+
 # -------------------------
 # Provider: Sentinel-2 -> Prithvi 6-band (CHW float32 in [0,1])
 # -------------------------
@@ -124,6 +176,160 @@ _PRITHVI_HF_SPECS = {
         "checkpoint": "Prithvi_EO_V2_600M_TL.pt",
     },
 }
+
+
+# -------------------------
+# Temporal (multi-frame) configuration
+# -------------------------
+# Prithvi-EO-2.0 was pretrained on 4-timestep HLS series with consecutive-frame
+# gaps of ~1–6 months (≈28–184 days; arXiv:2412.02732). We therefore:
+#   - default to single-frame (median composite) for backward compatibility;
+#   - in multi mode, derive T from the requested window with a ~28-day minimum
+#     spacing (low end of the training interval), capped at 4 frames;
+#   - never duplicate frames to reach a target T — identical frames returned by
+#     the provider (empty sub-windows are back-filled with the whole-window
+#     composite) are collapsed, so windows lacking temporal diversity degrade
+#     gracefully to T=1;
+#   - flag (not silently fix) frame gaps beyond the ~184-day training maximum,
+#     which can only occur for very long windows once T is capped at 4.
+# "auto" (default) picks single/multi from the window: multi when the window
+# yields ≥2 frames, single otherwise. Use "single"/"multi" to force a mode.
+_DEFAULT_TEMPORAL_MODE = "auto"
+_DEFAULT_MAX_FRAMES = 4  # matches Prithvi-EO-2.0 pretraining (4 timesteps)
+_DEFAULT_FRAME_STRIDE_DAYS = 28  # min spacing = low end of training's 1–6 month gap
+_DEFAULT_MAX_FRAME_STRIDE_DAYS = 184  # max gap (~6 months) seen in pretraining
+
+
+def _normalize_temporal_mode(mode: Any) -> str:
+    m = str(mode if mode is not None else _DEFAULT_TEMPORAL_MODE).strip().lower()
+    if m not in ("single", "multi", "auto"):
+        raise ModelError(
+            f"prithvi temporal_mode must be 'single', 'multi', or 'auto', got {mode!r}."
+        )
+    return m
+
+
+def _resolve_temporal_mode(model_config: dict[str, Any] | None) -> str:
+    """Resolve the *configured* temporal mode (may be ``"auto"``)."""
+    v = model_config_value(model_config, "temporal_mode")
+    if v is not None:
+        return _normalize_temporal_mode(v)
+    env = os.environ.get("RS_EMBED_PRITHVI_TEMPORAL_MODE", "").strip()
+    if env:
+        return _normalize_temporal_mode(env)
+    return _DEFAULT_TEMPORAL_MODE
+
+
+def _effective_temporal_mode(model_config: dict[str, Any] | None, temporal: TemporalSpec) -> str:
+    """Resolve single/multi, expanding ``"auto"`` from the window.
+
+    ``auto`` → ``"multi"`` when the window yields ≥2 frames
+    (``T = clamp(window_days // stride, 1, max_frames) >= 2``), else ``"single"``
+    (a 1-frame window where multi adds nothing but fetch cost).
+    """
+    mode = _resolve_temporal_mode(model_config)
+    if mode != "auto":
+        return mode
+    n = _auto_num_frames(
+        temporal,
+        max_frames=_resolve_max_frames(model_config),
+        stride_days=_resolve_frame_stride_days(),
+    )
+    return "multi" if n >= 2 else "single"
+
+
+def _resolve_max_frames(model_config: dict[str, Any] | None) -> int:
+    v = model_config_value(model_config, "max_frames")
+    if v is None:
+        v = model_config_value(model_config, "n_frames")
+    if v is None:
+        env = os.environ.get("RS_EMBED_PRITHVI_MAX_FRAMES", "").strip()
+        v = env or _DEFAULT_MAX_FRAMES
+    try:
+        n = int(v)
+    except (TypeError, ValueError) as exc:
+        raise ModelError(f"prithvi max_frames must be an integer, got {v!r}.") from exc
+    if n < 1:
+        raise ModelError(f"prithvi max_frames must be >= 1, got {n}.")
+    return n
+
+
+def _resolve_frame_stride_days() -> int:
+    env = os.environ.get("RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS", "").strip()
+    if not env:
+        return _DEFAULT_FRAME_STRIDE_DAYS
+    try:
+        n = int(env)
+    except ValueError as exc:
+        raise ModelError(
+            f"RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS must be an integer, got {env!r}."
+        ) from exc
+    return max(1, n)
+
+
+def _auto_num_frames(temporal: TemporalSpec, *, max_frames: int, stride_days: int) -> int:
+    """Pick a frame count from the window length: clamp(window_days // stride, 1, max_frames).
+
+    Small windows (no room for month-spaced frames) collapse to T=1; large windows
+    cap at ``max_frames`` so spacing stays within Prithvi's training regime.
+    """
+    from datetime import date as _date
+
+    start = getattr(temporal, "start", None)
+    end = getattr(temporal, "end", None)
+    if not start or not end:
+        return 1
+    window_days = max(1, (_date.fromisoformat(str(end)) - _date.fromisoformat(str(start))).days)
+    n = window_days // max(1, int(stride_days))
+    return int(max(1, min(int(max_frames), n)))
+
+
+def _resolve_max_frame_stride_days() -> int:
+    env = os.environ.get("RS_EMBED_PRITHVI_MAX_STRIDE_DAYS", "").strip()
+    if not env:
+        return _DEFAULT_MAX_FRAME_STRIDE_DAYS
+    try:
+        n = int(env)
+    except ValueError as exc:
+        raise ModelError(
+            f"RS_EMBED_PRITHVI_MAX_STRIDE_DAYS must be an integer, got {env!r}."
+        ) from exc
+    return max(1, n)
+
+
+def _max_consecutive_gap_days(dates: list[str]) -> int:
+    """Largest gap (in days) between consecutive frame dates; 0 for < 2 frames."""
+    from datetime import date as _date
+
+    if len(dates) < 2:
+        return 0
+    ds = sorted(_date.fromisoformat(str(d)) for d in dates)
+    return max((ds[i + 1] - ds[i]).days for i in range(len(ds) - 1))
+
+
+def _temporal_spacing_meta(
+    dates: list[str], *, max_stride_days: int, label: str = ""
+) -> dict[str, Any]:
+    """Report the largest frame gap and flag/warn when it exceeds the training max.
+
+    Prithvi-EO-2.0 saw ~1–6 month gaps in pretraining; gaps beyond ``max_stride_days``
+    (~184 d ≈ 6 months) are out of distribution. This only *reports* it (meta flag +
+    warning) and never truncates the window, so the embedding still represents the
+    full requested period.
+    """
+    gap = _max_consecutive_gap_days(dates)
+    meta: dict[str, Any] = {"max_frame_gap_days": int(gap)}
+    if gap > int(max_stride_days):
+        meta["temporal_spacing_out_of_range"] = True
+        warnings.warn(
+            f"Prithvi multi-frame spacing {gap}d exceeds the ~{int(max_stride_days)}d "
+            f"(~6 month) maximum interval seen in pretraining"
+            f"{(' for ' + label) if label else ''}; embeddings may be extrapolated. "
+            "Shorten the temporal window to bring frame spacing back into range.",
+            UserWarning,
+            stacklevel=2,
+        )
+    return meta
 
 
 def _normalize_prithvi_variant(variant: Any) -> str:
@@ -233,6 +439,79 @@ def _fetch_s2_prithvi6_chw(
     x_chw = np.clip(x_chw, 0.0, 1.0)
     x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
     return x_chw
+
+
+def _fetch_s2_prithvi6_tchw(
+    provider: ProviderBase,
+    spatial: SpatialSpec,
+    temporal: TemporalSpec,
+    *,
+    n_frames: int,
+    scale_m: int = 30,
+    cloudy_pct: int = 30,
+    composite: str = "median",
+    fill_value: float = 0.0,
+) -> np.ndarray:
+    """Fetch an S2 6-band time series as raw float32 [T,6,H,W] in [0,10000].
+
+    Bins align with ``temporal_frame_midpoints`` (both use the shared
+    ``split_date_range``), so frame ``i`` corresponds to midpoint date ``i``.
+    """
+    return _fetch_s2_multiframe_raw_tchw(
+        provider,
+        spatial=spatial,
+        temporal=temporal,
+        bands=PRITHVI_S2_BANDS_DST,
+        n_frames=int(n_frames),
+        collection="COPERNICUS/S2_SR_HARMONIZED",
+        scale_m=scale_m,
+        cloudy_pct=cloudy_pct,
+        composite=composite,
+        fill_value=fill_value,
+    )
+
+
+def _raw_tchw_to_unit(x_tchw: np.ndarray) -> np.ndarray:
+    """Scale raw S2 SR series [T,6,H,W] in 0..10000 to [0,1] float32."""
+    x = np.asarray(x_tchw, dtype=np.float32) / 10000.0
+    x = np.clip(x, 0.0, 1.0)
+    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+
+
+def _drop_duplicate_frames(x_tchw: np.ndarray, dates: list[str]) -> tuple[np.ndarray, list[str]]:
+    """Collapse bit-identical frames, keeping first occurrence and its date.
+
+    The provider back-fills empty sub-windows with the whole-window composite,
+    yielding identical frames; dropping them avoids feeding Prithvi duplicate
+    timesteps and lets diversity-free windows degrade to T=1.
+    """
+    if x_tchw.ndim != 4:
+        raise ModelError(f"Expected [T,C,H,W], got {getattr(x_tchw, 'shape', None)}")
+    kept: list[np.ndarray] = []
+    kept_dates: list[str] = []
+    for i in range(int(x_tchw.shape[0])):
+        frame = x_tchw[i]
+        if any(np.array_equal(frame, k) for k in kept):
+            continue
+        kept.append(frame)
+        kept_dates.append(dates[i] if i < len(dates) else dates[-1])
+    return np.stack(kept, axis=0).astype(np.float32), kept_dates
+
+
+def _prepare_prithvi_tchw(
+    x_tchw: np.ndarray,
+    *,
+    fill_value: float,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Apply the per-frame Prithvi prep (resize/pad) across a [T,C,H,W] stack."""
+    if x_tchw.ndim != 4:
+        raise ModelError(f"Expected [T,C,H,W], got {getattr(x_tchw, 'shape', None)}")
+    frames: list[np.ndarray] = []
+    prep_meta: dict[str, Any] = {}
+    for i in range(int(x_tchw.shape[0])):
+        y, prep_meta = _prepare_prithvi_chw(x_tchw[i], fill_value=fill_value)
+        frames.append(y)
+    return np.stack(frames, axis=0).astype(np.float32), prep_meta
 
 
 def _pad_chw_to_multiple(x_chw: np.ndarray, mult: int = 16, value: float = 0.0) -> np.ndarray:
@@ -549,6 +828,126 @@ def _prithvi_forward_tokens_batch(
     return [toks_np[i] for i in range(bsz)]
 
 
+def _extract_tokens(out):
+    """Normalize a Prithvi forward output into a token tensor."""
+    if isinstance(out, (tuple, list)):
+        return out[-1]
+    if hasattr(out, "last_hidden_state"):
+        return out.last_hidden_state
+    if isinstance(out, dict):
+        tok = out.get("tokens") or out.get("last_hidden_state") or out.get("hidden_states")
+        return tok[-1] if isinstance(tok, (tuple, list)) else tok
+    return out
+
+
+def _temporal_coords_from_dates(date_strs: list[str]):
+    """Build a [T,2] (year, day-of-year) list from ISO date strings."""
+    import pandas as pd
+
+    coords = []
+    for ds in date_strs:
+        d = pd.to_datetime(ds)
+        coords.append([float(d.year), float(d.dayofyear)])
+    return coords
+
+
+def _prithvi_forward_tokens_multiframe(
+    model,
+    x_tchw: np.ndarray,
+    *,
+    lon: float,
+    lat: float,
+    date_strs: list[str],
+    device: str,
+) -> np.ndarray:
+    """Run Prithvi over a [T,6,H,W] series; return token sequence [N,D]."""
+    ensure_torch()
+    import torch
+
+    if x_tchw.ndim != 4 or x_tchw.shape[1] != 6:
+        raise ModelError(f"Prithvi expects [T,6,H,W], got {getattr(x_tchw, 'shape', None)}")
+    t = int(x_tchw.shape[0])
+    if len(date_strs) != t:
+        raise ModelError(f"date_strs length {len(date_strs)} != T={t}.")
+
+    # [T,C,H,W] -> [1,C,T,H,W]
+    x = torch.from_numpy(x_tchw).permute(1, 0, 2, 3).unsqueeze(0).to(device)
+    temporal_coords = torch.tensor(
+        [_temporal_coords_from_dates(date_strs)], dtype=torch.float32, device=device
+    )  # [1,T,2]
+    location_coords = torch.tensor(
+        [[float(lat), float(lon)]], dtype=torch.float32, device=device
+    )  # [1,2]
+
+    with torch.no_grad():
+        if hasattr(model, "forward_features"):
+            out = model.forward_features(
+                x, temporal_coords=temporal_coords, location_coords=location_coords
+            )
+        else:
+            out = model(x, temporal_coords=temporal_coords, location_coords=location_coords)
+
+    tokens = _extract_tokens(out)
+    if tokens is None or not hasattr(tokens, "ndim") or tokens.ndim != 3:
+        raise ModelError(
+            f"Unexpected Prithvi tokens shape/type: {type(tokens)} {getattr(tokens, 'shape', None)}"
+        )
+    return tokens[0].detach().float().cpu().numpy().astype(np.float32)
+
+
+def _prithvi_forward_tokens_batch_multiframe(
+    model,
+    x_btchw: np.ndarray,
+    *,
+    lon_lat_batch: list[tuple[float, float]],
+    date_strs_batch: list[list[str]],
+    device: str,
+) -> list[np.ndarray]:
+    """Batch Prithvi forward for [B,T,6,H,W] series (uniform T within a call)."""
+    ensure_torch()
+    import torch
+
+    if x_btchw.ndim != 5 or x_btchw.shape[2] != 6:
+        raise ModelError(f"Prithvi expects [B,T,6,H,W], got {getattr(x_btchw, 'shape', None)}")
+    bsz = int(x_btchw.shape[0])
+    t = int(x_btchw.shape[1])
+    if len(lon_lat_batch) != bsz or len(date_strs_batch) != bsz:
+        raise ModelError("lon_lat_batch/date_strs_batch size mismatch with input batch.")
+    if any(len(ds) != t for ds in date_strs_batch):
+        raise ModelError(f"every date_strs entry must have length T={t}.")
+
+    # [B,T,C,H,W] -> [B,C,T,H,W]
+    xb = torch.from_numpy(x_btchw).permute(0, 2, 1, 3, 4).to(device)
+    temporal_coords = torch.tensor(
+        [_temporal_coords_from_dates(ds) for ds in date_strs_batch],
+        dtype=torch.float32,
+        device=device,
+    )  # [B,T,2]
+    location_coords = torch.tensor(
+        [[float(lat), float(lon)] for (lon, lat) in lon_lat_batch],
+        dtype=torch.float32,
+        device=device,
+    )  # [B,2]
+
+    with torch.inference_mode():
+        if hasattr(model, "forward_features"):
+            out = model.forward_features(
+                xb, temporal_coords=temporal_coords, location_coords=location_coords
+            )
+        else:
+            out = model(xb, temporal_coords=temporal_coords, location_coords=location_coords)
+
+    tokens = _extract_tokens(out)
+    if tokens is None or not hasattr(tokens, "ndim") or int(tokens.ndim) != 3:
+        raise ModelError(
+            f"Unexpected Prithvi batch tokens shape/type: {type(tokens)} {getattr(tokens, 'shape', None)}"
+        )
+    if int(tokens.shape[0]) != bsz:
+        raise ModelError(f"Prithvi batch mismatch: got B={int(tokens.shape[0])}, expected {bsz}")
+    toks_np = tokens.detach().float().cpu().numpy().astype(np.float32)
+    return [toks_np[i] for i in range(bsz)]
+
+
 # -------------------------
 # Embedder
 # -------------------------
@@ -609,11 +1008,34 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         "prithvi_eo_v2_300_tl",
                         "prithvi_eo_v2_600_tl",
                     ],
-                }
+                },
+                "temporal_mode": {
+                    "type": "string",
+                    "default": _DEFAULT_TEMPORAL_MODE,
+                    "choices": ["auto", "single", "multi"],
+                    "description": (
+                        "auto (default): single when the window yields one frame, "
+                        "else multi (≥2 frames). single: one median composite over the "
+                        "whole window (T=1). multi: a true time series — T derived from "
+                        "the window length (~28-day min spacing, capped at max_frames), "
+                        "matching Prithvi's multi-temporal pretraining; provider-duplicated "
+                        "frames are dropped so diversity-free windows degrade to T=1."
+                    ),
+                },
+                "max_frames": {
+                    "type": "int",
+                    "default": _DEFAULT_MAX_FRAMES,
+                    "description": (
+                        "Max frames in multi mode (default 4, matching Prithvi-EO-2.0 "
+                        "pretraining). Actual T = clamp(window_days // 30, 1, max_frames)."
+                    ),
+                },
             },
             "notes": [
                 "Uses vendored PrithviMAE runtime with weights downloaded from Hugging Face.",
                 "Requires temporal_coords (year, dayofyear) and location_coords (lat, lon).",
+                "temporal_mode='multi' feeds a [B,6,T,H,W] series with per-frame dates; "
+                "output dimensionality is identical to single mode (tokens pooled over time).",
             ],
         }
 
@@ -660,6 +1082,18 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             sensor = self._default_sensor()
 
         t = temporal_to_range(temporal)  # normalize to range
+
+        if _effective_temporal_mode(model_config, t) == "multi":
+            return self._get_embedding_multiframe(
+                spatial=spatial,
+                temporal=t,
+                sensor=sensor,
+                output=output,
+                backend=backend,
+                device=device,
+                input_chw=input_chw,
+                model_config=model_config,
+            )
 
         # Load model
         model_key, variant = _resolve_prithvi_model_key(
@@ -829,6 +1263,153 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         raise ModelError(f"Unknown output mode: {output.mode}")
 
+    def _get_embedding_multiframe(
+        self,
+        *,
+        spatial: SpatialSpec,
+        temporal: TemporalSpec,
+        sensor: SensorSpec,
+        output: OutputSpec,
+        backend: str,
+        device: str,
+        input_chw: np.ndarray | None,
+        model_config: dict[str, Any] | None,
+    ) -> Embedding:
+        """Multi-frame Prithvi path: T derived from the window (≤ max_frames),
+        provider-duplicated frames collapsed, then a true [B,6,T,H,W] forward."""
+        t = temporal
+        model_key, variant = _resolve_prithvi_model_key(
+            model_config=model_config,
+            default_model_key=self.DEFAULT_MODEL_KEY,
+        )
+        pretrained = os.environ.get("RS_EMBED_PRITHVI_PRETRAINED", "1").strip() not in (
+            "0",
+            "false",
+            "False",
+        )
+        coords_encoding = ("time", "location")
+        max_frames = _resolve_max_frames(model_config)
+        stride_days = _resolve_frame_stride_days()
+        max_stride_days = _resolve_max_frame_stride_days()
+        requested = _auto_num_frames(t, max_frames=max_frames, stride_days=stride_days)
+
+        # Obtain a raw [T,6,H,W] series (provider fetch, or shape-driven override).
+        if input_chw is None:
+            provider = self._get_provider(backend)
+            raw_tchw = _fetch_s2_prithvi6_tchw(
+                provider,
+                spatial=spatial,
+                temporal=t,
+                n_frames=requested,
+                scale_m=int(sensor.scale_m),
+                cloudy_pct=int(sensor.cloudy_pct),
+                composite=str(sensor.composite),
+                fill_value=float(sensor.fill_value),
+            )
+            dates = list(_temporal_frame_midpoints(t, requested))
+        else:
+            arr = np.asarray(input_chw, dtype=np.float32)
+            if arr.ndim == 3 and arr.shape[0] == 6:
+                raw_tchw = arr[np.newaxis]  # treat as a single frame, never duplicated
+                dates = [temporal_midpoint_str(t) or "2022-07-01"]
+            elif arr.ndim == 4 and arr.shape[1] == 6:
+                raw_tchw = arr
+                dates = list(_temporal_frame_midpoints(t, int(arr.shape[0])))
+            else:
+                raise ModelError(
+                    f"input_chw must be CHW or TCHW with 6 bands for prithvi, "
+                    f"got {getattr(input_chw, 'shape', None)}"
+                )
+
+        x_tchw = _raw_tchw_to_unit(raw_tchw)
+        x_tchw, dates = _drop_duplicate_frames(x_tchw, dates)
+        x_tchw, prep_meta = _prepare_prithvi_tchw(x_tchw, fill_value=float(sensor.fill_value))
+        n_frames = int(x_tchw.shape[0])
+
+        model, wmeta, dev = _load_prithvi(
+            model_key,
+            pretrained=pretrained,
+            bands=tuple(PRITHVI_S2_BANDS_DST),
+            num_frames=n_frames,
+            coords_encoding=coords_encoding,
+            device=device,
+        )
+
+        lon, lat = _spatial_center_lon_lat(spatial)
+        tokens = _prithvi_forward_tokens_multiframe(
+            model, x_tchw, lon=lon, lat=lat, date_strs=dates, device=dev
+        )
+        spacing_meta = _temporal_spacing_meta(dates, max_stride_days=max_stride_days)
+
+        meta = base_meta(
+            model_name=self.model_name,
+            hf_id=str(wmeta.get("repo_id") or model_key),
+            backend=str(backend).lower(),
+            image_size=int(x_tchw.shape[-1]),
+            sensor=sensor,
+            temporal=t,
+            source=sensor.collection,
+            extra={
+                "temporal_range": (t.start, t.end),
+                "temporal_mode": "multi",
+                "num_frames": n_frames,
+                "requested_frames": int(requested),
+                "frame_dates": tuple(dates),
+                "frame_stride_days_min": int(stride_days),
+                "frame_stride_days_max": int(max_stride_days),
+                "coords_lonlat": (float(lon), float(lat)),
+                "tokens_shape": tuple(tokens.shape),
+                "model_key": model_key,
+                "variant": variant,
+                "pretrained": bool(pretrained),
+                "coords_encoding": coords_encoding,
+                "input_hw": (int(x_tchw.shape[-2]), int(x_tchw.shape[-1])),
+                **spacing_meta,
+                **prep_meta,
+            },
+        )
+
+        if output.mode == "pooled":
+            vec, cls_removed = pool_from_tokens_tchw(tokens, n_frames, output.pooling)
+            meta.update(
+                {
+                    "pooling": f"patch_temporal_{output.pooling}",
+                    "temporal_pooling": output.pooling,
+                    "cls_removed": bool(cls_removed),
+                }
+            )
+            return Embedding(data=vec, meta=meta)
+
+        if output.mode == "grid":
+            grid, (h, w), cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
+            meta.update(
+                {
+                    "grid_hw": (h, w),
+                    "grid_kind": "patch_tokens",
+                    "temporal_pooling": output.pooling,
+                    "cls_removed": bool(cls_removed),
+                }
+            )
+            try:
+                import xarray as xr
+            except Exception as e:
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+
+            da = xr.DataArray(
+                grid,
+                dims=("d", "y", "x"),
+                coords={
+                    "d": np.arange(grid.shape[0]),
+                    "y": np.arange(h),
+                    "x": np.arange(w),
+                },
+                name="embedding",
+                attrs=meta,
+            )
+            return Embedding(data=da, meta=meta)
+
+        raise ModelError(f"Unknown output mode: {output.mode}")
+
     def get_embeddings_batch(
         self,
         *,
@@ -849,11 +1430,34 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             sensor = self._default_sensor()
 
         t = temporal_to_range(temporal)
+        multi = _effective_temporal_mode(model_config, t) == "multi"
+        n_frames_req = (
+            _auto_num_frames(
+                t,
+                max_frames=_resolve_max_frames(model_config),
+                stride_days=_resolve_frame_stride_days(),
+            )
+            if multi
+            else 1
+        )
         provider = self._get_provider(backend)
         n = len(spatials)
         prefetched_raw: list[np.ndarray | None] = [None] * n
 
         def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
+            if multi:
+                # Raw [T,6,H,W] in 0..10000; from_inputs detects the 4D shape.
+                raw = _fetch_s2_prithvi6_tchw(
+                    provider,
+                    spatial=sp,
+                    temporal=t,
+                    n_frames=n_frames_req,
+                    scale_m=int(sensor.scale_m),
+                    cloudy_pct=int(sensor.cloudy_pct),
+                    composite=str(sensor.composite),
+                    fill_value=float(sensor.fill_value),
+                )
+                return i, np.clip(raw, 0.0, 10000.0).astype(np.float32)
             x_chw = _fetch_s2_prithvi6_chw(
                 provider,
                 spatial=sp,
@@ -920,6 +1524,21 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             sensor = self._default_sensor()
 
         t = temporal_to_range(temporal)
+
+        if _effective_temporal_mode(model_config, t) == "multi" or any(
+            np.asarray(x).ndim == 4 for x in input_chws
+        ):
+            return self._batch_from_inputs_multiframe(
+                spatials=spatials,
+                input_chws=input_chws,
+                temporal=t,
+                sensor=sensor,
+                model_config=model_config,
+                output=output,
+                backend=backend,
+                device=device,
+            )
+
         model_key, variant = _resolve_prithvi_model_key(
             model_config=model_config,
             default_model_key=self.DEFAULT_MODEL_KEY,
@@ -1042,6 +1661,180 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                             {
                                 "grid_hw": (h, w),
                                 "grid_kind": "patch_tokens",
+                                "cls_removed": bool(cls_removed),
+                            }
+                        )
+                        assert xr_mod is not None
+                        da = xr_mod.DataArray(
+                            grid,
+                            dims=("d", "y", "x"),
+                            coords={
+                                "d": np.arange(grid.shape[0]),
+                                "y": np.arange(h),
+                                "x": np.arange(w),
+                            },
+                            name="embedding",
+                            attrs=meta,
+                        )
+                        out[i] = Embedding(data=da, meta=meta)
+                        continue
+
+                    raise ModelError(f"Unknown output mode: {output.mode}")
+
+        if any(e is None for e in out):
+            raise ModelError("prithvi_eo_v2_s2_6b batch inference produced incomplete outputs.")
+        return [e for e in out if e is not None]
+
+    def _batch_from_inputs_multiframe(
+        self,
+        *,
+        spatials: list[SpatialSpec],
+        input_chws: list[np.ndarray],
+        temporal: TemporalSpec,
+        sensor: SensorSpec,
+        model_config: dict[str, Any] | None,
+        output: OutputSpec,
+        backend: str,
+        device: str,
+    ) -> list[Embedding]:
+        """Batch multi-frame path. Per item: 3D→single frame, 4D→binned series;
+        identical frames collapsed, then grouped by prepared (T,H,W) shape so a
+        model with matching ``num_frames`` runs each group as [B,6,T,H,W]."""
+        t = temporal
+        model_key, variant = _resolve_prithvi_model_key(
+            model_config=model_config,
+            default_model_key=self.DEFAULT_MODEL_KEY,
+        )
+        pretrained = os.environ.get("RS_EMBED_PRITHVI_PRETRAINED", "1").strip() not in (
+            "0",
+            "false",
+            "False",
+        )
+        coords_encoding = ("time", "location")
+        stride_days = _resolve_frame_stride_days()
+        max_stride_days = _resolve_max_frame_stride_days()
+
+        # Prepare each item to (T_eff, 6, H, W) + per-frame dates.
+        prepared: list[np.ndarray] = []
+        item_dates: list[list[str]] = []
+        lon_lat: list[tuple[float, float]] = []
+        for i, raw in enumerate(input_chws):
+            arr = np.asarray(raw, dtype=np.float32)
+            if arr.ndim == 3 and arr.shape[0] == 6:
+                raw_tchw = arr[np.newaxis]
+                dates = [temporal_midpoint_str(t) or "2022-07-01"]
+            elif arr.ndim == 4 and arr.shape[1] == 6:
+                raw_tchw = arr
+                dates = list(_temporal_frame_midpoints(t, int(arr.shape[0])))
+            else:
+                raise ModelError(
+                    f"input_chw must be CHW or TCHW with 6 bands for prithvi, "
+                    f"got {getattr(arr, 'shape', None)} at index={i}"
+                )
+            x_tchw = _raw_tchw_to_unit(raw_tchw)
+            x_tchw, dates = _drop_duplicate_frames(x_tchw, dates)
+            x_tchw, _ = _prepare_prithvi_tchw(x_tchw, fill_value=float(sensor.fill_value))
+            prepared.append(x_tchw)
+            item_dates.append(dates)
+            lon_lat.append(_spatial_center_lon_lat(spatials[i]))
+
+        # Group by full prepared shape (T,H,W) so each batch shares num_frames.
+        shape_groups: dict[tuple[int, ...], list[int]] = {}
+        for i, x in enumerate(prepared):
+            shape_groups.setdefault(tuple(x.shape), []).append(i)
+
+        xr_mod = None
+        if output.mode == "grid":
+            try:
+                import xarray as xr  # type: ignore
+
+                xr_mod = xr
+            except Exception as e:
+                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+
+        out: list[Embedding | None] = [None] * len(spatials)
+        for idxs in shape_groups.values():
+            n_frames = int(prepared[idxs[0]].shape[0])
+            model, wmeta, dev = _load_prithvi(
+                model_key,
+                pretrained=pretrained,
+                bands=tuple(PRITHVI_S2_BANDS_DST),
+                num_frames=n_frames,
+                coords_encoding=coords_encoding,
+                device=device,
+            )
+            infer_bs = self._resolve_infer_batch(str(dev))
+            for s0 in range(0, len(idxs), infer_bs):
+                chunk_ids = idxs[s0 : s0 + infer_bs]
+                xb = np.stack([prepared[i] for i in chunk_ids], axis=0).astype(np.float32)
+                toks_list = _prithvi_forward_tokens_batch_multiframe(
+                    model,
+                    xb,
+                    lon_lat_batch=[lon_lat[i] for i in chunk_ids],
+                    date_strs_batch=[item_dates[i] for i in chunk_ids],
+                    device=dev,
+                )
+                if len(toks_list) != len(chunk_ids):
+                    raise ModelError(
+                        f"Prithvi batch output mismatch: {len(toks_list)} != {len(chunk_ids)}"
+                    )
+                for j, i in enumerate(chunk_ids):
+                    tokens = toks_list[j]
+                    lon, lat = lon_lat[i]
+                    x_item = prepared[i]
+                    spacing_meta = _temporal_spacing_meta(
+                        item_dates[i],
+                        max_stride_days=max_stride_days,
+                        label=f"spatial index {i}",
+                    )
+                    meta = base_meta(
+                        model_name=self.model_name,
+                        hf_id=str(wmeta.get("repo_id") or model_key),
+                        backend=str(backend).lower(),
+                        image_size=int(x_item.shape[-1]),
+                        sensor=sensor,
+                        temporal=t,
+                        source=sensor.collection,
+                        extra={
+                            "temporal_range": (t.start, t.end),
+                            "temporal_mode": "multi",
+                            "num_frames": n_frames,
+                            "frame_dates": tuple(item_dates[i]),
+                            "frame_stride_days_min": int(stride_days),
+                            "frame_stride_days_max": int(max_stride_days),
+                            "coords_lonlat": (float(lon), float(lat)),
+                            "tokens_shape": tuple(tokens.shape),
+                            "model_key": model_key,
+                            "variant": variant,
+                            "pretrained": bool(pretrained),
+                            "coords_encoding": coords_encoding,
+                            "input_hw": (int(x_item.shape[-2]), int(x_item.shape[-1])),
+                            "batch_infer": True,
+                            **spacing_meta,
+                        },
+                    )
+
+                    if output.mode == "pooled":
+                        vec, cls_removed = pool_from_tokens_tchw(tokens, n_frames, output.pooling)
+                        meta.update(
+                            {
+                                "pooling": f"patch_temporal_{output.pooling}",
+                                "temporal_pooling": output.pooling,
+                                "cls_removed": bool(cls_removed),
+                            }
+                        )
+                        out[i] = Embedding(data=vec, meta=meta)
+                        continue
+
+                    if output.mode == "grid":
+                        grid, (h, w), cls_removed = tokens_to_grid_dhw_tchw(
+                            tokens, n_frames, output.pooling
+                        )
+                        meta.update(
+                            {
+                                "grid_hw": (h, w),
+                                "grid_kind": "patch_tokens",
+                                "temporal_pooling": output.pooling,
                                 "cls_removed": bool(cls_removed),
                             }
                         )

@@ -1525,3 +1525,137 @@ class SatVisionTOAEmbedder(EmbedderBase):
         if any(e is None for e in out):
             raise ModelError("satvision_toa batch inference produced incomplete outputs.")
         return [e for e in out if e is not None]
+
+    def get_embeddings_batch_from_inputs(
+        self,
+        *,
+        spatials: list[SpatialSpec],
+        input_chws: list[np.ndarray],
+        temporal: TemporalSpec | None = None,
+        sensor: SensorSpec | None = None,
+        output: OutputSpec = OutputSpec.pooled(),
+        backend: str = "auto",
+        device: str = "auto",
+    ) -> list[Embedding]:
+        if not input_chws:
+            return []
+        if not is_provider_backend(backend, allow_auto=True):
+            raise ModelError("satvision_toa expects a provider backend (or 'auto').")
+        if sensor is None:
+            sensor = self._default_sensor()
+
+        t = temporal_to_range(temporal)
+        rt = self._resolve_runtime(sensor=sensor, device=device)
+
+        x_batch: list[np.ndarray] = []
+        for inp in input_chws:
+            x_batch.append(
+                self._prepare_input(
+                    np.asarray(inp, dtype=np.float32),
+                    in_chans=rt["in_chans"],
+                    image_size=rt["image_size"],
+                    norm_mode=rt["norm_mode"],
+                    reflectance_indices=rt["reflectance_indices"],
+                    emissive_indices=rt["emissive_indices"],
+                    reflectance_divisor=rt["reflectance_divisor"],
+                    emissive_mins=rt["emissive_mins"],
+                    emissive_maxs=rt["emissive_maxs"],
+                )
+            )
+
+        arrs, fmeta = _satvision_forward_batch(
+            rt["model"],
+            x_batch,
+            device=rt["device"],
+            output_mode=output.mode,
+        )
+
+        embeddings: list[Embedding] = []
+        for j, arr in enumerate(arrs):
+            raw_shape = tuple(int(v) for v in np.asarray(input_chws[j]).shape)
+            meta = base_meta(
+                model_name=self.model_name,
+                hf_id=rt["model_id"],
+                backend=str(backend).lower(),
+                image_size=int(rt["image_size"]),
+                sensor=sensor,
+                temporal=t,
+                source=sensor.collection,
+                extra={
+                    "in_chans": int(rt["in_chans"]),
+                    "norm_mode": rt["norm_mode"],
+                    "norm_mode_effective": rt["norm_mode"],
+                    "reflectance_indices": tuple(
+                        int(k)
+                        for k in _normalize_indices(rt["reflectance_indices"], rt["in_chans"])
+                    ),
+                    "emissive_indices": tuple(
+                        int(k) for k in _normalize_indices(rt["emissive_indices"], rt["in_chans"])
+                    ),
+                    "reflectance_divisor": float(rt["reflectance_divisor"]),
+                    "emissive_mins": tuple(float(v) for v in rt["emissive_mins"]),
+                    "emissive_maxs": tuple(float(v) for v in rt["emissive_maxs"]),
+                    "raw_input_shape": raw_shape,
+                    "model_output_shape": tuple(int(v) for v in arr.shape),
+                    "source_collection": None,
+                    "fallback_used": False,
+                    "already_unit_scaled": False,
+                    **rt["model_meta"],
+                    **fmeta,
+                },
+            )
+
+            if output.mode == "pooled":
+                if arr.ndim == 2:
+                    vec, cls_removed = pool_from_tokens(arr, output.pooling)
+                    meta.update(
+                        {"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)}
+                    )
+                    embeddings.append(Embedding(data=vec, meta=meta))
+                elif arr.ndim == 1:
+                    meta.update({"pooling": "model_pooled", "cls_removed": False})
+                    embeddings.append(Embedding(data=arr.astype(np.float32), meta=meta))
+                else:
+                    raise ModelError(
+                        f"Unexpected SatVision output shape for pooled mode: {arr.shape}"
+                    )
+            elif output.mode == "grid":
+                if arr.ndim != 2:
+                    raise ModelError(
+                        f"grid output requires token sequence [N,D]. Got {arr.shape} "
+                        f"(tokens_kind={meta.get('tokens_kind')})."
+                    )
+                grid, (h, w), cls_removed = tokens_to_grid_dhw(arr)
+                meta.update(
+                    {
+                        "grid_hw": (h, w),
+                        "grid_kind": (
+                            "last_stage_feature_map"
+                            if str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
+                            else "patch_tokens"
+                        ),
+                        "cls_removed": bool(cls_removed),
+                    }
+                )
+                try:
+                    import xarray as xr
+                except Exception as e:
+                    raise ModelError(
+                        "grid output requires xarray. Install: pip install xarray"
+                    ) from e
+                da = xr.DataArray(
+                    grid,
+                    dims=("d", "y", "x"),
+                    coords={
+                        "d": np.arange(grid.shape[0]),
+                        "y": np.arange(h),
+                        "x": np.arange(w),
+                    },
+                    name="embedding",
+                    attrs=meta,
+                )
+                embeddings.append(Embedding(data=da, meta=meta))
+            else:
+                raise ModelError(f"Unknown output mode: {output.mode}")
+
+        return embeddings

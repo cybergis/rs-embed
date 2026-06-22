@@ -218,3 +218,58 @@ def test_copernicus_vendor_window_math():
 def test_copernicus_vendor_axis_order_detection():
     assert _infer_axis_order((768, 721, 1440)) == "chw"
     assert _infer_axis_order((721, 1440, 768)) == "hwc"
+
+
+# ---------------------------------------------------------------------------
+# Contract: on-the-fly embedders that accept input_chw must implement
+# get_embeddings_batch_from_inputs as a true GPU-batch override.
+# New embedders must NOT be added to this allowlist without also adding the
+# batch implementation.
+# ---------------------------------------------------------------------------
+
+_KNOWN_MISSING_BATCH_FROM_INPUTS: frozenset[str] = frozenset(
+    {
+        "agrifm",
+        "anysat",
+        "galileo",
+        "thor",
+    }
+)
+
+
+def test_onthefly_embedders_that_accept_input_chw_implement_batch_from_inputs():
+    """Every on-the-fly embedder accepting input_chw must override
+    get_embeddings_batch_from_inputs, unless listed in the allowlist above.
+    """
+    from importlib import import_module
+
+    from rs_embed.embedders.base import EmbedderBase
+    from rs_embed.embedders.catalog import MODEL_SPECS as _CATALOG
+    from rs_embed.tools.runtime import embedder_accepts_input_chw
+
+    missing_override: list[str] = []
+    for model_id, (module_suffix, cls_name) in _CATALOG.items():
+        if not module_suffix.startswith("onthefly_"):
+            continue  # precomputed embedder — not subject to this contract
+
+        try:
+            mod = import_module(f"rs_embed.embedders.{module_suffix}")
+            cls = getattr(mod, cls_name)
+        except Exception:
+            continue  # import failure is a separate concern
+
+        if not embedder_accepts_input_chw(cls):
+            continue
+
+        batch_fn = getattr(cls, "get_embeddings_batch_from_inputs", None)
+        base_fn = getattr(EmbedderBase, "get_embeddings_batch_from_inputs", None)
+        if batch_fn is base_fn:
+            if model_id not in _KNOWN_MISSING_BATCH_FROM_INPUTS:
+                missing_override.append(model_id)
+
+    assert not missing_override, (
+        "The following on-the-fly embedders accept input_chw but do NOT override "
+        "get_embeddings_batch_from_inputs (add a real batch implementation, then "
+        "remove from _KNOWN_MISSING_BATCH_FROM_INPUTS if present):\n  "
+        + "\n  ".join(sorted(missing_override))
+    )

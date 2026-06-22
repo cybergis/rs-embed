@@ -108,6 +108,10 @@ def _warn_gse_input_prep(model_n: str, input_prep: Any) -> None:
 
     if model_n != "gse":
         return
+    # ``None`` is the unset/package-default sentinel; don't warn when the user
+    # made no explicit choice (gse always manages its own tiling regardless).
+    if input_prep is None:
+        return
     if _resolve_input_prep_spec(input_prep).mode != "resize":
         warnings.warn(
             "model='gse' manages spatial tiling automatically based on request size; "
@@ -203,7 +207,7 @@ def get_embedding(
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
-    input_prep: InputPrepSpec | str | None = "resize",
+    input_prep: InputPrepSpec | str | None = None,
     **model_kwargs: Any,
 ) -> Embedding:
     """Compute a single embedding.
@@ -231,7 +235,10 @@ def get_embedding(
     device : str
         Target inference device.
     input_prep : InputPrepSpec or str or None
-        Optional API-side input preprocessing policy.
+        API-side input preprocessing policy. ``None`` (the default) uses the
+        package default ``"tile"`` (large inputs are tiled + stitched to preserve
+        native resolution). Pass ``"resize"`` to downsample to the model image
+        size, or ``"auto"`` to tile only when beneficial.
     **model_kwargs
         Model-specific settings passed directly as keyword arguments.
         For example, ``variant="large"`` selects the large DOFA variant.
@@ -300,7 +307,7 @@ def get_embeddings_batch(
     output: OutputSpec = OutputSpec.pooled(),
     backend: str = "auto",
     device: str = "auto",
-    input_prep: InputPrepSpec | str | None = "resize",
+    input_prep: InputPrepSpec | str | None = None,
     **model_kwargs: Any,
 ) -> list[Embedding]:
     """Compute embeddings for multiple spatials using a shared embedder instance.
@@ -328,7 +335,10 @@ def get_embeddings_batch(
     device : str
         Target inference device.
     input_prep : InputPrepSpec or str or None
-        Optional API-side input preprocessing policy.
+        API-side input preprocessing policy. ``None`` (the default) uses the
+        package default ``"tile"`` (large inputs are tiled + stitched to preserve
+        native resolution). Pass ``"resize"`` to downsample to the model image
+        size, or ``"auto"`` to tile only when beneficial.
     **model_kwargs
         Model-specific settings passed directly as keyword arguments.
         For example, ``variant="large"`` selects the large DOFA variant.

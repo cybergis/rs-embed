@@ -21,7 +21,7 @@ This page helps you decide **which knobs to turn and when**.
 | Use a larger backbone | `variant="large"` (if available) | More GPU memory and latency |
 | Increase image resolution | Model-specific `..._IMG` env vars | Compute grows quickly with image size |
 | Get denser spatial tokens | Model-specific `..._PATCH` env vars (smaller value) | Higher token count and memory |
-| Capture finer temporal detail | `RS_EMBED_ANYSAT_FRAMES`, `RS_EMBED_GALILEO_FRAMES` | More frames = more runtime |
+| Capture finer temporal detail | `RS_EMBED_ANYSAT_FRAMES`; for `galileo`, widen the temporal window (frames auto-scale, ≤12) or pin `RS_EMBED_GALILEO_FRAMES` | More frames = more runtime |
 | Keep spatial structure in output | `OutputSpec.grid()` instead of `.pooled()` | Larger outputs, heavier downstream processing |
 
 ---
@@ -40,6 +40,9 @@ This is often the first and most impactful quality-versus-runtime decision.
 | How it works | Compresses the ROI into one image | Splits the ROI into overlapping tiles |
 | Output with `grid()` | Single grid | Stitched spatial field |
 | Runtime | Fastest path | Scales with tile count |
+
+!!! warning "Patch-token grids are not always tile-friendly"
+    For image-level ViT patch-token grid models (`remoteclip`, `scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`), `OutputSpec.grid()` is not a seamless dense geospatial field. With `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` and emits a warning. Explicit `input_prep="tile"` is still allowed but emits a warning and metadata marks the tiled grid as seam-prone. Explicit `input_prep="resize"` is the recommended path and does not warn.
 
 See also [API Specs — InputPrepSpec](api_specs.md#inputprepspec) and [Common Workflows](workflows.md).
 
@@ -109,7 +112,8 @@ For exact constraints, see [THOR](models/thor.md).
 
 For multi-frame models, frame count is part of the model design.
 
-- Increasing `RS_EMBED_ANYSAT_FRAMES` or `RS_EMBED_GALILEO_FRAMES` gives a finer temporal summary.
+- `anysat` uses a fixed frame count: increase `RS_EMBED_ANYSAT_FRAMES` for a finer temporal summary.
+- `galileo` derives its frame count from the window (`temporal_mode="auto"`, ~30-day frames, ≤12) to match its monthly cadence — widen the temporal window for more frames, or pin `RS_EMBED_GALILEO_FRAMES` / `n_frames=` for a manual count. Windows beyond ~1 year are equal-divided with an out-of-distribution warning. See [Galileo › Temporal Sampling](models/galileo.md#temporal-sampling).
 - Increasing `..._IMG` preserves more per-frame detail.
 - Changing `..._PATCH` alters grid density and often has divisibility constraints.
 

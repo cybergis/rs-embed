@@ -104,3 +104,84 @@ def test_runtime_utils_fetch_all_bands_uses_provider_and_returns_names():
     )
     assert arr.shape == (3, 2, 2)
     assert names == ("E1", "E2", "E3")
+
+
+def test_fetch_collection_binned_raw_tchw_stacks_and_flags_empty_bins():
+    bins = [
+        ("2022-01-01", "2022-01-31"),
+        ("2022-01-31", "2022-03-02"),
+        ("2022-03-02", "2022-04-01"),
+    ]
+    calls = {"n": 0}
+
+    class _FakeProvider:
+        def fetch_sensor_patch_chw(self, *, spatial, temporal, sensor, to_float_image=False):
+            calls["n"] += 1
+            if str(temporal.start) == "2022-01-31":  # second bin has no imagery
+                from rs_embed.core.errors import ProviderError
+
+                raise ProviderError("no images found")
+            return np.full((3, 4, 4), float(calls["n"]), dtype=np.float32)
+
+    arr, meta = ru.fetch_collection_binned_raw_tchw(
+        _FakeProvider(),
+        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+        bins=bins,
+        collection="FAKE/COLL",
+        bands=("B1", "B2", "B3"),
+    )
+    assert arr.shape == (3, 3, 4, 4)
+    assert not np.isnan(arr[0]).any()
+    assert np.isnan(arr[1]).all()  # NaN sentinel for empty bin
+    assert not np.isnan(arr[2]).any()
+    assert [m["empty"] for m in meta["frames"]] == [False, True, False]
+    assert meta["n_empty"] == 1
+    assert meta["frames"][1]["start"] == "2022-01-31"
+
+
+def test_fetch_collection_binned_raw_tchw_raises_when_all_bins_empty():
+    import pytest
+
+    from rs_embed.core.errors import ModelError, ProviderError
+
+    class _FakeProvider:
+        def fetch_sensor_patch_chw(self, **kwargs):
+            raise ProviderError("no images found")
+
+    with pytest.raises(ModelError, match="no imagery found in any"):
+        ru.fetch_collection_binned_raw_tchw(
+            _FakeProvider(),
+            spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+            bins=[("2022-01-01", "2022-01-31"), ("2022-01-31", "2022-03-02")],
+            collection="FAKE/COLL",
+            bands=("B1",),
+        )
+
+
+def test_fetch_s1_vvvh_binned_raw_tchw_reuses_single_frame_path():
+    bins = [("2022-01-01", "2022-01-31"), ("2022-01-31", "2022-03-02")]
+    seen = []
+
+    class _FakeProvider:
+        def fetch_s1_vvvh_raw_chw_with_meta(self, *, spatial, temporal, **kwargs):
+            seen.append((str(temporal.start), kwargs["require_iw"], kwargs["use_float_linear"]))
+            if str(temporal.start) == "2022-01-31":
+                from rs_embed.core.errors import ProviderError
+
+                raise ProviderError("no S1 imagery")
+            return np.full((2, 4, 4), -15.0, dtype=np.float32), {"iw_applied": True}
+
+    arr, meta = ru.fetch_s1_vvvh_binned_raw_tchw(
+        _FakeProvider(),
+        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+        bins=bins,
+        use_float_linear=False,
+        require_iw=True,
+    )
+    assert arr.shape == (2, 2, 4, 4)
+    assert not np.isnan(arr[0]).any()
+    assert np.isnan(arr[1]).all()
+    assert meta["frames"][0]["fetch"] == {"iw_applied": True}
+    assert meta["frames"][1]["empty"] is True
+    # per-bin calls carry the S1-specific options through
+    assert seen == [("2022-01-01", True, False), ("2022-01-31", True, False)]
