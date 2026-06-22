@@ -86,11 +86,9 @@ See the visualization helper and end-to-end notebook in the repository:
 
 ## 🚀 Interactive Demo
 
-This repo ships an interactive demo under [`examples/`](examples/):
+This repo ships an interactive web app under [`examples/webapp/`](examples/webapp/) — a Leaflet + FastAPI app where you pick an ROI on the map and either **extract embeddings** (Extract tab) or run a **pretrained downstream head** (Use tab):
 
-- **`examples/webapp/`** — a Leaflet + FastAPI web app. Pick an ROI on the map and either **extract embeddings** (Extract tab) or run a **pretrained downstream head** (Use tab).
-- **`examples/iguide_demo.ipynb`** — interactive notebook (🌍 Earth's Twins · ⏳ Time Machine · 🎨 Instant Land-Cover · 🏆 Model Showdown).
-- **`examples/iguide_demo_maize.ipynb`** — all-in-one Illinois maize-yield walkthrough.
+- **`examples/webapp/`** — the FastAPI backend (`server.py`) + map UI (`index.html`).
 - **`examples/webapp/prototype.html`** — mock-data UI you can open directly (no backend, no Earth Engine).
 
 ### Quick look (no setup)
@@ -126,14 +124,7 @@ Then open **http://localhost:8000**:
 - **① Extract** — right-click the map for a 2 km box (or right-drag a freeform box) → Sentinel-2 preview → embeddings, downloadable as an `.npz` package.
 - **② Use** — pick a model, right-click the map, then **Predict here** → corn-presence prediction from a pretrained head; or upload an embedding package.
 
-### Run the notebooks
-
-```bash
-rsembed/bin/pip install jupyterlab ipywidgets geemap
-rsembed/bin/jupyter lab examples/iguide_demo.ipynb     # cached mode by default; set RUN_LIVE=True for live
-```
-
-> The `build_demo_cache.py` step needs Earth Engine auth (and, for the maize-yield head, the SPAM2020 CSVs). Without the cache, the notebooks show friendly "build the cache" notices and the web app's Extract tab still works live.
+> The `build_demo_cache.py --only corn_heads` step (GEE-native, USDA CDL labels — no external files) trains the head used by the Use tab. It needs Earth Engine auth. The **Extract** tab works live without it.
 
 ## Main API
 
