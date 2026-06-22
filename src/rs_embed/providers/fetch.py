@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Sequence
 from typing import Any
 
@@ -190,6 +191,63 @@ def fetch_s1_vvvh_raw_chw_with_meta(
     return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32), dict(meta or {})
 
 
+def count_distinct_frames(x_tchw: np.ndarray) -> int:
+    """Number of bit-distinct frames in a ``[T, C, H, W]`` stack.
+
+    The multi-frame fetch back-fills empty sub-windows with the whole-window
+    composite and pads short series by repeating the last frame; both produce
+    *exact* duplicate frames. Counting distinct frames recovers how many time
+    steps carried genuinely different imagery. Returns ``arr.shape[0]`` (or 1)
+    for non-multi input.
+    """
+    arr = np.asarray(x_tchw)
+    if arr.ndim != 4:
+        return 1
+    if arr.shape[0] <= 1:
+        return int(arr.shape[0])
+    seen: list[np.ndarray] = []
+    for i in range(int(arr.shape[0])):
+        frame = arr[i]
+        if not any(np.array_equal(frame, s) for s in seen):
+            seen.append(frame)
+    return len(seen)
+
+
+def frame_diversity_meta(*, n_requested: int, n_distinct: int) -> dict[str, Any]:
+    """Meta describing back-filled / duplicate frames in a multi-frame fetch."""
+    n_requested = int(n_requested)
+    n_distinct = int(n_distinct)
+    return {
+        "n_frames_requested": n_requested,
+        "n_distinct_frames": n_distinct,
+        "n_backfilled_frames": max(0, n_requested - n_distinct),
+    }
+
+
+def _warn_if_backfilled_frames(arr: np.ndarray, *, collection: str) -> None:
+    """Warn when fewer sub-windows than requested carried distinct imagery.
+
+    Surfaces the data-availability gap that the back-filling fetch would
+    otherwise hide. Fires from the shared fetch helper so every temporal model
+    (and both the single and batch/prefetch paths) gets it uniformly.
+    """
+    if arr.ndim != 4 or arr.shape[0] <= 1:
+        return
+    n_requested = int(arr.shape[0])
+    n_distinct = count_distinct_frames(arr)
+    n_back = n_requested - n_distinct
+    if n_back <= 0:
+        return
+    warnings.warn(
+        f"Multi-frame fetch from {collection}: only {n_distinct} of {n_requested} temporal "
+        f"sub-window(s) had a clear scene; the other {n_back} were back-filled with the "
+        "whole-window composite (duplicate frames). Narrow/shift the temporal window, raise "
+        "cloudy_pct, or lower the frame count to keep the series in-distribution.",
+        UserWarning,
+        stacklevel=3,
+    )
+
+
 def fetch_s2_multiframe_raw_tchw(
     provider: ProviderBase,
     *,
@@ -203,7 +261,12 @@ def fetch_s2_multiframe_raw_tchw(
     composite: str = "median",
     fill_value: float = 0.0,
 ) -> np.ndarray:
-    """Fetch an S2 time series as raw float32 [T,C,H,W] in [0,10000]."""
+    """Fetch an S2 time series as raw float32 [T,C,H,W] in [0,10000].
+
+    Empty sub-windows are back-filled with the whole-window composite; a
+    ``UserWarning`` is emitted (and the count is recoverable via
+    :func:`count_distinct_frames`) so the data-availability gap is not silent.
+    """
     try:
         arr = provider.fetch_multiframe_collection_raw_tchw(
             spatial=spatial,
@@ -226,7 +289,9 @@ def fetch_s2_multiframe_raw_tchw(
         raise ModelError(
             f"Time series channel mismatch: got C={int(arr.shape[1])}, expected C={len(tuple(bands))}"
         )
-    return np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    _warn_if_backfilled_frames(arr, collection=str(collection))
+    return arr
 
 
 def _stack_binned_frames(

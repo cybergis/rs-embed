@@ -356,6 +356,18 @@ All built-in embedders now share the same minimum `Embedding.meta` contract. The
 
 Model-specific adapters can still attach additional keys beyond this stable base, such as checkpoint IDs, normalization details, token counts, frame counts, CRS hints, crop provenance, or modality-specific runtime flags.
 
+##### Temporal frame-availability fields (multi-temporal models)
+
+Multi-temporal models (`olmoearth`, `galileo`, `prithvi`, `anysat`, `agrifm`) attach fields that make the gap between the *requested* and the *effective* temporal frames explicit — so a window that was sparser than the requested frame count is never silent. See [Temporal Sampling → Data availability](temporal_sampling.md#data-availability-empty-sub-windows-are-never-silent).
+
+| Field                                                          | Models                                  | Meaning                                                                                                              |
+| -------------------------------------------------------------- | --------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| `n_frames`                                                     | all temporal models                     | Temporal frames actually encoded.                                                                                   |
+| `n_bins`, `dropped_bins`                                       | `olmoearth`                             | Bins the window produced, and the `[start, end]` ranges dropped for lack of imagery (drop model).                   |
+| `n_frames_requested`, `n_distinct_frames`, `n_backfilled_frames` | `prithvi`, `galileo`, `anysat`, `agrifm` | Frames requested from the provider, those carrying distinct imagery, and those back-filled with the whole-window composite (duplicates). |
+
+A `UserWarning` is emitted whenever frames were dropped (`olmoearth`) or back-filled (the others), so the degradation surfaces in interactive use as well as in metadata.
+
 #### Example
 
 ```python

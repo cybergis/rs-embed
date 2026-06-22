@@ -164,7 +164,13 @@ its `(day, month, year)` timestamp. The adapter reproduces exactly that:
 - Per-frame timestamp = bin start date (matching the official pipeline).
 - Bins with no imagery are **dropped from the sequence** (the encoder runs with
   `fast_pass=True`, which ignores attention masks, so empty frames cannot be
-  masked out — they are excluded instead). At least one bin must have data.
+  masked out — they are excluded instead). At least one bin must have data. This
+  drop is **not silent**: `meta["n_bins"]` records the bins the window produced,
+  `meta["n_frames"]` the frames actually encoded, and `meta["dropped_bins"]`
+  lists the `[start, end]` ranges that had no usable imagery, alongside a
+  `UserWarning`. So `n_frames` < `n_bins` simply means some bins had no
+  cloud-free scene — raise `cloudy_pct`, widen/shift the window, or use
+  `temporal_mode="single"`.
 - Works for both `s2` and `s1`. S1 reuses the single-frame S1 fetch per bin, so
   IW filtering and dB handling apply within each bin.
 

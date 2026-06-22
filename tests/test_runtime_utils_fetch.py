@@ -185,3 +185,78 @@ def test_fetch_s1_vvvh_binned_raw_tchw_reuses_single_frame_path():
     assert meta["frames"][1]["empty"] is True
     # per-bin calls carry the S1-specific options through
     assert seen == [("2022-01-01", True, False), ("2022-01-31", True, False)]
+
+
+# ---------------------------------------------------------------------------
+# Frame-diversity helpers (back-filled / duplicate multi-frame detection)
+# ---------------------------------------------------------------------------
+
+
+def test_count_distinct_frames_collapses_duplicates():
+    f0 = np.arange(2 * 3 * 3, dtype=np.float32).reshape(2, 3, 3)
+    f2 = (f0 + 1000.0).astype(np.float32)
+    # frames 1 and 3 are exact back-filled copies of frame 0 -> 2 distinct
+    x = np.stack([f0, f0.copy(), f2, f0.copy()], axis=0)
+    assert ru.count_distinct_frames(x) == 2
+
+
+def test_count_distinct_frames_all_distinct_and_edge_shapes():
+    x = np.stack([np.full((2, 2, 2), float(i), dtype=np.float32) for i in range(3)], axis=0)
+    assert ru.count_distinct_frames(x) == 3
+    assert ru.count_distinct_frames(np.zeros((1, 2, 2, 2), dtype=np.float32)) == 1
+    assert ru.count_distinct_frames(np.zeros((3, 4, 4), dtype=np.float32)) == 1  # non-4D -> 1
+
+
+def test_frame_diversity_meta_keys():
+    assert ru.frame_diversity_meta(n_requested=4, n_distinct=2) == {
+        "n_frames_requested": 4,
+        "n_distinct_frames": 2,
+        "n_backfilled_frames": 2,
+    }
+    # all distinct -> nothing back-filled
+    assert ru.frame_diversity_meta(n_requested=3, n_distinct=3)["n_backfilled_frames"] == 0
+
+
+def test_multiframe_fetch_warns_on_backfilled_frames():
+    import warnings
+
+    f0 = np.arange(3 * 2 * 2, dtype=np.float32).reshape(3, 2, 2)
+    f2 = (f0 + 5000.0).astype(np.float32)
+    backfilled = np.stack([f0, f0.copy(), f2, f0.copy()], axis=0)  # 2 distinct of 4
+
+    class _FakeProvider:
+        def fetch_multiframe_collection_raw_tchw(self, **kwargs):
+            return backfilled
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        ru.fetch_s2_multiframe_raw_tchw(
+            _FakeProvider(),
+            spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+            temporal=TemporalSpec.range("2024-01-01", "2024-04-01"),
+            bands=("B4", "B3", "B2"),
+            n_frames=4,
+        )
+    msgs = [str(m.message) for m in w if issubclass(m.category, UserWarning)]
+    assert any("only 2 of 4 temporal sub-window" in m for m in msgs)
+
+
+def test_multiframe_fetch_silent_when_all_frames_distinct():
+    import warnings
+
+    distinct = np.stack([np.full((3, 2, 2), float(i), dtype=np.float32) for i in range(4)], axis=0)
+
+    class _FakeProvider:
+        def fetch_multiframe_collection_raw_tchw(self, **kwargs):
+            return distinct
+
+    with warnings.catch_warnings(record=True) as w:
+        warnings.simplefilter("always")
+        ru.fetch_s2_multiframe_raw_tchw(
+            _FakeProvider(),
+            spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+            temporal=TemporalSpec.range("2024-01-01", "2024-04-01"),
+            bands=("B4", "B3", "B2"),
+            n_frames=4,
+        )
+    assert [m for m in w if "sub-window" in str(m.message)] == []

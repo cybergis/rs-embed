@@ -1006,9 +1006,35 @@ def test_prepare_frames_drops_nan_frames_and_aligns_timestamps():
     )
     x = np.random.uniform(0, 3000, (3, 12, 32, 32)).astype(np.float32)
     x[1] = np.nan  # empty-bin sentinel
-    out, ts = oe._prepare_frames(x, bins=bins, modality="s2", image_size=64, patch_size=4)
+    out, ts, dropped = oe._prepare_frames(x, bins=bins, modality="s2", image_size=64, patch_size=4)
     assert out.shape == (2, 12, 64, 64)
     assert ts == [(15, 5, 2022), (14, 7, 2022)]  # June and August bin starts
+    assert dropped == [("2022-07-15", "2022-08-14")]  # the empty middle bin
+
+
+def test_warn_dropped_bins_emits_and_lists_ranges():
+    with pytest.warns(UserWarning, match="dropped 1 of 3 temporal bin"):
+        oe._warn_dropped_bins([("2022-07-15", "2022-08-14")], n_bins=3, n_frames=2)
+
+
+def test_warn_dropped_bins_silent_when_none():
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")  # would raise if any warning fired
+        oe._warn_dropped_bins([], n_bins=3, n_frames=3)
+
+
+def test_multi_meta_extra_records_bins_and_dropped():
+    extra = oe._multi_meta_extra(
+        "multi", {"temporal_sampling": "fixed_stride"}, 3, [("2022-07-15", "2022-08-14")]
+    )
+    assert extra["n_bins"] == 3
+    assert extra["dropped_bins"] == [["2022-07-15", "2022-08-14"]]
+    assert extra["temporal_sampling"] == "fixed_stride"
+    # single mode and no-drop cases stay minimal
+    assert oe._multi_meta_extra("single", {}, 3, []) == {}
+    assert "dropped_bins" not in oe._multi_meta_extra("multi", {}, 3, [])
 
 
 def test_prepare_frames_all_nan_raises():

@@ -95,6 +95,9 @@ flowchart LR
 | `RS_EMBED_ANYSAT_CKPT_MIN_BYTES` | adapter threshold          | Download size sanity check                                          |
 | `RS_EMBED_ANYSAT_FETCH_WORKERS`  | `8`                        | Provider prefetch workers for batch APIs                            |
 
+!!! note "Empty sub-windows are back-filled — and surfaced"
+    AnySat always feeds a fixed `T` frames. When a sub-window has no clear scene, the provider back-fills it with the whole-window composite (a duplicate frame). This is no longer silent: `meta` records `n_frames_requested` / `n_distinct_frames` / `n_backfilled_frames`, and a `UserWarning` fires when `n_distinct_frames < T`. See [Temporal Sampling → Data availability](../temporal_sampling.md#data-availability-empty-sub-windows-are-never-silent). Narrow/shift the window or raise `cloudy_pct` to recover genuine temporal diversity.
+
 ## Output Semantics
 
 **`pooled`**: defaults to spatial pooling over AnySat's `patch` grid; pass `pooled_source="tile"` (or `RS_EMBED_ANYSAT_POOLED_SOURCE=tile`) to use the native AnySat tile embedding instead.

@@ -293,6 +293,36 @@ def _warn_stretched_sampling(sampling_meta: dict[str, Any]) -> None:
     )
 
 
+def _warn_dropped_bins(dropped: list[tuple[str, str]], *, n_bins: int, n_frames: int) -> None:
+    """Warn when 30-day bins were dropped from the series for lack of imagery."""
+    if not dropped:
+        return
+    ranges = ", ".join(f"{s}→{e}" for s, e in dropped)
+    warnings.warn(
+        f"OlmoEarth dropped {len(dropped)} of {n_bins} temporal bin(s) with no usable "
+        f"imagery (no scene passed the cloud filter): {ranges}. Encoded {n_frames} "
+        "frame(s) instead. To recover them, raise cloudy_pct, widen/shift the window, "
+        "or pass temporal_mode='single' if a single composite is acceptable.",
+        UserWarning,
+        stacklevel=2,
+    )
+
+
+def _multi_meta_extra(
+    mode: str,
+    sampling_meta: dict[str, Any],
+    n_bins: int,
+    dropped: list[tuple[str, str]],
+) -> dict[str, Any]:
+    """Per-item multi-frame meta: sampling info, bin count, and any dropped bins."""
+    if mode != "multi":
+        return {}
+    extra: dict[str, Any] = {**sampling_meta, "n_bins": n_bins}
+    if dropped:
+        extra["dropped_bins"] = [list(b) for b in dropped]
+    return extra
+
+
 # ---------------------------------------------------------------------------
 # Modality helpers
 # ---------------------------------------------------------------------------
@@ -433,7 +463,7 @@ def _prepare_frames(
     modality: str,
     image_size: int,
     patch_size: int,
-) -> tuple[np.ndarray, list[tuple[int, int, int]]]:
+) -> tuple[np.ndarray, list[tuple[int, int, int]], list[tuple[str, str]]]:
     """Prepare a binned [T,C,H,W] stack: drop empty frames, normalize, resize.
 
     Empty bins arrive as all-NaN sentinel frames (see the binned fetch
@@ -441,6 +471,11 @@ def _prepare_frames(
     ignores attention masks, so excluding empty frames is the only way to keep
     them out of the forward pass. Timestamps (frame-start dates, mirroring the
     official pipeline) are kept aligned with the surviving frames.
+
+    Returns ``(stack, timestamps, dropped)`` where ``dropped`` lists the
+    ``(start, end)`` ranges of the bins that had no imagery; callers surface it
+    via ``meta['dropped_bins']`` and a ``UserWarning`` so the gap between the
+    requested bins and the encoded frames is never silent.
     """
     n_bands = _modality_n_bands(modality)
     if x_tchw.ndim != 4 or x_tchw.shape[1] != n_bands:
@@ -456,9 +491,11 @@ def _prepare_frames(
 
     frames: list[np.ndarray] = []
     timestamps: list[tuple[int, int, int]] = []
-    for i, (start, _end) in enumerate(bins):
+    dropped: list[tuple[str, str]] = []
+    for i, (start, end) in enumerate(bins):
         frame = x_tchw[i]
         if np.isnan(frame).all():
+            dropped.append((start, end))
             continue  # empty bin sentinel
         frames.append(
             _prepare_chw(
@@ -471,7 +508,7 @@ def _prepare_frames(
         timestamps.append(_date_to_timestamp(start))
     if not frames:
         raise ModelError("All frames in the multi-frame OlmoEarth input are empty.")
-    return np.stack(frames, axis=0), timestamps
+    return np.stack(frames, axis=0), timestamps, dropped
 
 
 # ---------------------------------------------------------------------------
@@ -719,6 +756,8 @@ class OlmoEarthEmbedder(EmbedderBase):
                 "Normalization: per-band mean±2σ clipping (OlmoEarth COMPUTED strategy).",
                 "S1 modality via modality='s1' (VV/VH dB, COPERNICUS/S1_GRD).",
                 "temporal_mode='multi' fetches one composite per 30-day bin (S1 and S2).",
+                "Multi-frame bins with no usable imagery are dropped from the series; "
+                "meta records n_bins/n_frames/dropped_bins and a UserWarning is emitted.",
             ],
         }
 
@@ -894,10 +933,13 @@ class OlmoEarthEmbedder(EmbedderBase):
         # array-only transport (prefetch pipelines, user-provided input_chw).
         date_str = temporal_midpoint_str(t)
         sampling_meta: dict[str, Any] = {}
+        dropped_bins: list[tuple[str, str]] = []
+        n_bins = 0
         if x_raw.ndim == 4:
             bins, stretched = _temporal_bins(t)
+            n_bins = len(bins)
             sampling_meta = _temporal_sampling_meta(bins, stretched)
-            x_t, timestamps = _prepare_frames(
+            x_t, timestamps, dropped_bins = _prepare_frames(
                 x_raw, bins=bins, modality=modality, image_size=image_size, patch_size=patch_size
             )
         else:
@@ -917,7 +959,11 @@ class OlmoEarthEmbedder(EmbedderBase):
             extra["requested_temporal_mode"] = temporal_mode
         if effective_mode == "multi":
             extra.update(sampling_meta)
+            extra["n_bins"] = n_bins
+            if dropped_bins:
+                extra["dropped_bins"] = [list(b) for b in dropped_bins]
             _warn_stretched_sampling(sampling_meta)
+            _warn_dropped_bins(dropped_bins, n_bins=n_bins, n_frames=len(timestamps))
         if fetch_meta:
             extra["s1_fetch" if modality == "s1" else "fetch"] = fetch_meta
         meta = _build_embedding_meta(
@@ -1055,6 +1101,8 @@ class OlmoEarthEmbedder(EmbedderBase):
         prepared: list[np.ndarray] = []  # each (T_i, C, H, W)
         item_timestamps: list[list[tuple[int, int, int]]] = []
         item_modes: list[str] = []  # effective temporal mode per item (by array shape)
+        item_dropped: list[list[tuple[str, str]]] = []  # dropped bins per item
+        n_bins = 0  # number of 30-day bins from the window (shared by multi items)
         for i, x_raw in enumerate(input_chws):
             if x_raw.ndim == 3 and x_raw.shape[0] == n_bands:
                 prepared.append(
@@ -1067,12 +1115,14 @@ class OlmoEarthEmbedder(EmbedderBase):
                 )
                 item_timestamps.append([_date_to_timestamp(date_str)])
                 item_modes.append("single")
+                item_dropped.append([])
             elif x_raw.ndim == 4 and x_raw.shape[1] == n_bands:
                 if bins is None:
                     bins, stretched = _temporal_bins(t)
+                    n_bins = len(bins)
                     sampling_meta = _temporal_sampling_meta(bins, stretched)
                     _warn_stretched_sampling(sampling_meta)  # once per batch
-                x_t, ts = _prepare_frames(
+                x_t, ts, dropped = _prepare_frames(
                     x_raw.astype(np.float32),
                     bins=bins,
                     modality=modality,
@@ -1082,11 +1132,28 @@ class OlmoEarthEmbedder(EmbedderBase):
                 prepared.append(x_t)
                 item_timestamps.append(ts)
                 item_modes.append("multi")
+                item_dropped.append(dropped)
             else:
                 raise ModelError(
                     f"input_chw at index {i} must be CHW (or TCHW) with {n_bands} bands "
                     f"({modality}), got {getattr(x_raw, 'shape', None)}."
                 )
+
+        affected = [d for d in item_dropped if d]
+        if affected and len({tuple(d) for d in affected}) == 1:
+            # All affected inputs dropped the same bins — the common case when one
+            # ROI is tiled into many sub-inputs. Report at the bin level so the
+            # message doesn't leak tile/item counts.
+            _warn_dropped_bins(affected[0], n_bins=n_bins, n_frames=n_bins - len(affected[0]))
+        elif affected:
+            # Genuinely different inputs (a multi-ROI batch) dropped different bins.
+            warnings.warn(
+                f"OlmoEarth dropped empty temporal bins for {len(affected)} of "
+                f"{len(input_chws)} input(s) (no usable imagery in parts of the "
+                "window); see each embedding's meta['dropped_bins'].",
+                UserWarning,
+                stacklevel=2,
+            )
 
         shape_groups: dict[tuple[int, ...], list[int]] = {}
         for i, x in enumerate(prepared):
@@ -1136,7 +1203,9 @@ class OlmoEarthEmbedder(EmbedderBase):
                                 "batch_infer": True,
                                 "temporal_mode": item_modes[i],
                                 "n_frames": len(item_timestamps[i]),
-                                **(sampling_meta if item_modes[i] == "multi" else {}),
+                                **_multi_meta_extra(
+                                    item_modes[i], sampling_meta, n_bins, item_dropped[i]
+                                ),
                             },
                         )
                         meta["pooling"] = f"spatial_temporal_bandset_{output.pooling}"
@@ -1169,7 +1238,9 @@ class OlmoEarthEmbedder(EmbedderBase):
                                 "batch_infer": True,
                                 "temporal_mode": item_modes[i],
                                 "n_frames": len(item_timestamps[i]),
-                                **(sampling_meta if item_modes[i] == "multi" else {}),
+                                **_multi_meta_extra(
+                                    item_modes[i], sampling_meta, n_bins, item_dropped[i]
+                                ),
                             },
                         )
                         d, h, w = grid_np.shape

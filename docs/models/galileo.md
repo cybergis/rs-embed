@@ -39,7 +39,7 @@
 
 ## Temporal Sampling
 
-Galileo encodes **month-of-year** (0–11) per frame and pretrains on ~monthly composites capped at 12 frames. `rs-embed` matches that cadence by deriving the frame count from the requested window instead of using a fixed number — the same `fixed_or_equal_bins` policy used by [`olmoearth`](olmoearth.md#temporal-modes):
+Galileo encodes **month-of-year** (0–11) per frame and pretrains on ~monthly composites capped at 12 frames. `rs-embed` matches that cadence by deriving the frame count from the requested window instead of using a fixed number — the same `fixed_or_equal_bins` policy used by [`olmoearth`](olmoearth.md#temporal_mode) (see the cross-model [Temporal Sampling](../temporal_sampling.md) overview):
 
 | `temporal_mode` | Behavior |
 | --------------- | -------- |
