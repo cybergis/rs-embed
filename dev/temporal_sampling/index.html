@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../api_load/">
+        <link rel="prev" href="../api_specs/">
       
       
-        <link rel="next" href="../architecture/">
+        <link rel="next" href="../api_embedding/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Inspect API - rs-embed</title>
+        <title>Temporal Sampling - rs-embed</title>
       
     
     
@@ -84,7 +84,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#api-inspect" class="md-skip">
+        <a href="#temporal-sampling" class="md-skip">
           Skip to content
         </a>
       
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Inspect API
+              Temporal Sampling
             
           </span>
         </div>
@@ -1466,10 +1466,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../temporal_sampling/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal Sampling
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1485,6 +1512,125 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#why-the-frame-count-is-derived-from-the-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Why the frame count is derived from the window
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#temporal_mode-auto-single-multi" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        temporal_mode: auto / single / multi
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-distribution-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out-of-distribution windows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-availability-empty-sub-windows-are-never-silent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data availability: empty sub-windows are never silent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frame-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frame order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1578,37 +1724,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Inspect API
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../api_inspect/" class="md-nav__link">
         
   
   
@@ -1624,48 +1743,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#inspect_provider_patch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        inspect_provider_patch (recommended)
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#inspect_gee_patch" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        inspect_gee_patch
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -1951,10 +2028,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#inspect_provider_patch" class="md-nav__link">
+  <a href="#why-the-frame-count-is-derived-from-the-window" class="md-nav__link">
     <span class="md-ellipsis">
       
-        inspect_provider_patch (recommended)
+        Why the frame count is derived from the window
       
     </span>
   </a>
@@ -1962,10 +2039,87 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#inspect_gee_patch" class="md-nav__link">
+  <a href="#temporal_mode-auto-single-multi" class="md-nav__link">
     <span class="md-ellipsis">
       
-        inspect_gee_patch
+        temporal_mode: auto / single / multi
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#decision-table" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Decision table
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#worked-examples" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Worked examples
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#out-of-distribution-windows" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Out-of-distribution windows
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#data-availability-empty-sub-windows-are-never-silent" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Data availability: empty sub-windows are never silent
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#frame-order" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Frame order
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#cost" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Cost
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#see-also" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        See also
       
     </span>
   </a>
@@ -1992,61 +2146,189 @@
   
 
 
-<h1 id="api-inspect">API: Inspect<a class="headerlink" href="#api-inspect" title="Permanent link">&para;</a></h1>
-<p>This page documents raw input inspection utilities (patch checks) used before model inference.</p>
-<p>Related reference pages: <a href="../api_specs/">API: Specs and Data Structures</a>, <a href="../api_embedding/">API: Embedding</a>, and <a href="../api_export/">API: Export</a>.</p>
+<h1 id="temporal-sampling">Temporal Sampling<a class="headerlink" href="#temporal-sampling" title="Permanent link">&para;</a></h1>
+<p>Several on-the-fly models are <strong>multi-temporal</strong>: they were pretrained on a <em>series</em> of images over time, not a single scene. In <code>rs-embed</code> you only ever pass a <code>TemporalSpec.range(start, end)</code> — the adapter decides how many frames <code>T</code> to sample from that window and how to space them. This page explains how that decision is made, model by model.</p>
+<div class="admonition abstract">
+<p class="admonition-title">The one idea</p>
+<p>A <code>TemporalSpec.range</code> is a <strong>window</strong>, not a single date. For multi-temporal models the window is turned into <code>T</code> frames whose count and spacing are chosen to match how each model was trained. Wider window → more frames (up to a model-specific cap); a sub-month window collapses to a single composite (<code>T=1</code>).</p>
+</div>
 <hr />
-<h2 id="inspect_provider_patch">inspect_provider_patch (recommended)<a class="headerlink" href="#inspect_provider_patch" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">inspect_provider_patch</span><span class="p">(</span>
-    <span class="o">*</span><span class="p">,</span>
-    <span class="n">spatial</span><span class="p">:</span> <span class="n">SpatialSpec</span><span class="p">,</span>
-    <span class="n">temporal</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">TemporalSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">sensor</span><span class="p">:</span> <span class="n">SensorSpec</span><span class="p">,</span>
-    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;gee_patch&quot;</span><span class="p">,</span>
-    <span class="n">value_range</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">return_array</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>
-</code></pre></div>
-<p>Provider-agnostic patch inspection utility (recommended entry point).
-Use this when you want the same inspection flow but with a non-GEE provider backend.</p>
+<h2 id="why-the-frame-count-is-derived-from-the-window">Why the frame count is derived from the window<a class="headerlink" href="#why-the-frame-count-is-derived-from-the-window" title="Permanent link">&para;</a></h2>
+<p>The temporal models choose <code>T</code> from the <strong>window length</strong>, matched to their training cadence, and fall back gracefully when the window is too short (collapse to <code>T=1</code>) or too long (cover the whole window but flag it as out-of-distribution). Monthly-cadence models (<code>olmoearth</code>, <code>galileo</code>) share a single policy helper, <code>rs_embed.tools.temporal.fixed_or_equal_bins</code>.</p>
 <hr />
-<h2 id="inspect_gee_patch">inspect_gee_patch<a class="headerlink" href="#inspect_gee_patch" title="Permanent link">&para;</a></h2>
-<div class="highlight"><pre><span></span><code><span class="n">inspect_gee_patch</span><span class="p">(</span>
-    <span class="o">*</span><span class="p">,</span>
-    <span class="n">spatial</span><span class="p">:</span> <span class="n">SpatialSpec</span><span class="p">,</span>
-    <span class="n">temporal</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">TemporalSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">sensor</span><span class="p">:</span> <span class="n">SensorSpec</span><span class="p">,</span>
-    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;gee_patch&quot;</span><span class="p">,</span>
-    <span class="n">value_range</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">return_array</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
-<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>
-</code></pre></div>
-<p>Backwards-compatible GEE-focused wrapper around <code>inspect_provider_patch(...)</code> (compatibility wrapper).
-New code should prefer <code>inspect_provider_patch(...)</code> unless you specifically want the older GEE-focused name.
-It performs the same input quality checks (<strong>without running the model</strong>).</p>
-<p><strong>Returns</strong></p>
-<p>The function returns a JSON-serializable dict containing <code>ok</code>, <code>report</code>, <code>sensor</code>, <code>temporal</code>, <code>backend</code>, and optional quicklook save paths under <code>artifacts</code>. When <code>return_array=True</code>, the result also includes <code>array_chw</code>, which is a NumPy array and therefore not JSON-serializable.</p>
-<p><strong>Example</strong></p>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">inspect_gee_patch</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">SensorSpec</span>
-
-<span class="n">rep</span> <span class="o">=</span> <span class="n">inspect_gee_patch</span><span class="p">(</span>
-    <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">sensor</span><span class="o">=</span><span class="n">SensorSpec</span><span class="p">(</span>
-        <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;COPERNICUS/S2_SR_HARMONIZED&quot;</span><span class="p">,</span>
-        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;B4&quot;</span><span class="p">,</span> <span class="s2">&quot;B3&quot;</span><span class="p">,</span> <span class="s2">&quot;B2&quot;</span><span class="p">),</span>
-        <span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
-        <span class="n">cloudy_pct</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>
-        <span class="n">composite</span><span class="o">=</span><span class="s2">&quot;median&quot;</span><span class="p">,</span>
-        <span class="n">check_input</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-        <span class="n">check_save_dir</span><span class="o">=</span><span class="s2">&quot;artifacts&quot;</span><span class="p">,</span>
-    <span class="p">),</span>
-    <span class="n">return_array</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
-<span class="p">)</span>
-</code></pre></div>
+<h2 id="temporal_mode-auto-single-multi"><code>temporal_mode</code>: <code>auto</code> / <code>single</code> / <code>multi</code><a class="headerlink" href="#temporal_mode-auto-single-multi" title="Permanent link">&para;</a></h2>
+<p>Models that support adaptive sampling expose a <code>temporal_mode</code> knob (default <code>auto</code>):</p>
+<table>
+<thead>
+<tr>
+<th><code>temporal_mode</code></th>
+<th>Meaning</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>auto</code> (default)</td>
+<td>Pick from the window: <code>single</code> when the window is too short to yield ≥2 frames, else <code>multi</code>.</td>
+</tr>
+<tr>
+<td><code>single</code></td>
+<td>One composite over the whole range (<code>T=1</code>) — cheapest; ignores temporal structure.</td>
+</tr>
+<tr>
+<td><code>multi</code></td>
+<td>Force the multi-frame series even for a short window.</td>
+</tr>
+</tbody>
+</table>
+<p>Set it as a keyword argument (<code>get_embedding(..., temporal_mode="single")</code>) or via the model's environment variable.</p>
 <hr />
+<h2 id="decision-table">Decision table<a class="headerlink" href="#decision-table" title="Permanent link">&para;</a></h2>
+<p>How each model turns <code>TemporalSpec.range(start, end)</code> (length = <code>window_days</code>) into frames:</p>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th>Per-frame time encoding</th>
+<th>Training cadence</th>
+<th><code>auto</code> → <code>single</code> when</th>
+<th><code>multi</code> frame count</th>
+<th>Max frames</th>
+<th>Out-of-distribution (too-wide) handling</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><a href="../models/olmoearth/"><code>olmoearth</code></a></td>
+<td>sequence position + month (0–11)</td>
+<td>~monthly</td>
+<td><code>window_days</code> ≤ ~30 (one 30-day bin)</td>
+<td>fixed 30-day bins anchored at <code>start</code></td>
+<td><strong>12</strong></td>
+<td><code>window_days</code> &gt; ~390 → equal-divide into 12 frames; <code>temporal_spacing_stretched=True</code> + <code>UserWarning</code></td>
+</tr>
+<tr>
+<td><a href="../models/galileo/"><code>galileo</code></a></td>
+<td>month-of-year (0–11)</td>
+<td>~monthly</td>
+<td><code>window_days</code> ≤ ~30 (one 30-day frame)</td>
+<td>~30-day frames anchored at <code>start</code></td>
+<td><strong>12</strong></td>
+<td><code>window_days</code> &gt; ~390 → equal-divide into 12 frames; <code>temporal_spacing_stretched=True</code> + <code>UserWarning</code></td>
+</tr>
+<tr>
+<td><a href="../models/prithvi/"><code>prithvi</code></a></td>
+<td>(year, day-of-year)</td>
+<td>1–6 month gaps (≈28–184 days)</td>
+<td><code>window_days</code> &lt; ~56 (i.e. <code>window_days // 28 &lt; 2</code>)</td>
+<td><code>T = clamp(window_days // 28, 1, 4)</code>, equal bins</td>
+<td><strong>4</strong></td>
+<td>window beyond ~2 yr → frame gap &gt; 184 days; <code>temporal_spacing_out_of_range=True</code> + <code>UserWarning</code></td>
+</tr>
+<tr>
+<td><a href="../models/anysat/"><code>anysat</code></a></td>
+<td>day-of-year (0–364)</td>
+<td>dense (S2 revisit)</td>
+<td>— (no <code>auto</code>; always multi)</td>
+<td>fixed <code>N</code> equal frames (<code>RS_EMBED_ANYSAT_FRAMES</code>, default 8)</td>
+<td>—</td>
+<td>none — date-aware and cadence-agnostic by design</td>
+</tr>
+<tr>
+<td><a href="../models/agrifm/"><code>agrifm</code></a></td>
+<td>none (frame order only)</td>
+<td>dense intra-season</td>
+<td>— (no <code>auto</code>; always multi)</td>
+<td>fixed <code>N</code> equal frames (<code>RS_EMBED_AGRIFM_FRAMES</code>, default 8)</td>
+<td>—</td>
+<td>n/a — no calendar encoding, only frame order</td>
+</tr>
+</tbody>
+</table>
+<div class="admonition note">
+<p class="admonition-title">Why <code>anysat</code> and <code>agrifm</code> keep a fixed frame count</p>
+<p><code>anysat</code> injects each frame's real day-of-year and was trained for <em>any</em> cadence, so it doesn't need a window-derived count or an out-of-distribution warning. <code>agrifm</code> is a Video Swin model that encodes only frame <strong>order</strong> (no calendar date) and was trained on fixed-length intra-season stacks, so changing the frame count would change its learned temporal receptive field. Both therefore stay on a fixed <code>N</code> (tune via their <code>_FRAMES</code> env var).</p>
+</div>
+<hr />
+<h2 id="worked-examples">Worked examples<a class="headerlink" href="#worked-examples" title="Permanent link">&para;</a></h2>
+<p>Using <code>olmoearth</code> (monthly, cap 12):</p>
+<table>
+<thead>
+<tr>
+<th><code>TemporalSpec.range</code></th>
+<th><code>window_days</code></th>
+<th><code>auto</code> resolves to</th>
+<th>Frames (<code>T</code>)</th>
+<th>Notes</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>2022-06-01 → 2022-06-20</code></td>
+<td>19</td>
+<td><code>single</code></td>
+<td>1</td>
+<td>&lt; 30 days → one composite</td>
+</tr>
+<tr>
+<td><code>2022-06-01 → 2022-09-01</code></td>
+<td>92</td>
+<td><code>multi</code></td>
+<td>3–4</td>
+<td>fixed 30-day bins</td>
+</tr>
+<tr>
+<td><code>2022-01-01 → 2023-01-01</code></td>
+<td>365</td>
+<td><code>multi</code></td>
+<td>12</td>
+<td>full monthly year (in-distribution)</td>
+</tr>
+<tr>
+<td><code>2022-01-01 → 2025-01-01</code></td>
+<td>1096</td>
+<td><code>multi</code></td>
+<td>12 (equal-divided)</td>
+<td>&gt; ~390 days → <strong>stretched</strong>, ~91-day spacing, <code>UserWarning</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>galileo</code> behaves the same way (monthly, cap 12). <code>prithvi</code> uses the same idea with a ~28-day stride and a cap of 4, so its single/multi switch is at ~56 days and it saturates at 4 frames.</p>
+<hr />
+<h2 id="out-of-distribution-windows">Out-of-distribution windows<a class="headerlink" href="#out-of-distribution-windows" title="Permanent link">&para;</a></h2>
+<p>When a window is wider than a model's frame budget can cover at its training cadence, <code>rs-embed</code> <strong>does not silently drop the trailing time</strong>. Instead it covers the whole window with the available frames (spaced wider than training) and records that the result is extrapolated:</p>
+<ul>
+<li><strong><code>olmoearth</code> / <code>galileo</code></strong>: <code>meta["temporal_sampling"]="equal_divided"</code>, <code>meta["temporal_spacing_stretched"]=True</code>, <code>meta["effective_stride_days"]</code>, plus a <code>UserWarning</code>.</li>
+<li><strong><code>prithvi</code></strong>: <code>meta["temporal_spacing_out_of_range"]=True</code>, <code>meta["max_frame_gap_days"]</code>, plus a <code>UserWarning</code>.</li>
+</ul>
+<p>To stay in-distribution, <strong>narrow the temporal window</strong> so the frames land near the model's training cadence.</p>
+<hr />
+<h2 id="data-availability-empty-sub-windows-are-never-silent">Data availability: empty sub-windows are never silent<a class="headerlink" href="#data-availability-empty-sub-windows-are-never-silent" title="Permanent link">&para;</a></h2>
+<p>Choosing <code>T</code> frames assumes each frame's sub-window actually contains a clear scene. When some don't (clouds, gaps in coverage, a tiny trailing bin), <code>rs-embed</code> makes the gap explicit instead of pretending the series is full. Two mechanisms, by model family:</p>
+<ul>
+<li><strong><code>olmoearth</code></strong> (drops empty bins): the empty bins are removed from the sequence, so <code>T</code> shrinks. Recorded as <code>meta["n_bins"]</code> (bins the window produced), <code>meta["n_frames"]</code> (frames encoded), and <code>meta["dropped_bins"]</code> (the dropped <code>[start, end]</code> ranges), with a <code>UserWarning</code>.</li>
+<li><strong><code>prithvi</code> / <code>galileo</code> / <code>anysat</code> / <code>agrifm</code></strong> (back-fill): the multi-frame provider fetch keeps <code>T</code> fixed by <strong>back-filling empty sub-windows with the whole-window composite</strong> (and padding short series by repeating the last frame) — i.e. duplicate frames. <code>rs-embed</code> records <code>meta["n_frames_requested"]</code>, <code>meta["n_distinct_frames"]</code>, and <code>meta["n_backfilled_frames"]</code>, and emits a <code>UserWarning</code> naming how many of the <code>T</code> sub-windows actually had distinct imagery. <code>prithvi</code> additionally <strong>collapses</strong> the duplicate frames (so its encoded <code>T</code> shrinks — see also <code>meta["requested_frames"]</code> vs <code>meta["num_frames"]</code>); the others feed the duplicate timesteps to the encoder.</li>
+</ul>
+<p>So <code>n_distinct_frames &lt; n_frames_requested</code> (or <code>n_frames &lt; n_bins</code> for <code>olmoearth</code>) means the window was sparser than the requested frame count — <strong>narrow/shift the window, raise <code>cloudy_pct</code>, or lower the frame count</strong> to recover genuine temporal diversity. The warning fires from the shared fetch helper, so it covers the single, tiled, batch, and export paths uniformly.</p>
+<hr />
+<h2 id="frame-order">Frame order<a class="headerlink" href="#frame-order" title="Permanent link">&para;</a></h2>
+<p>Frames are always arranged <strong>earliest-first</strong> (chronological): <code>T=0</code> is the oldest sub-window, <code>T=N-1</code> the newest. The provider sorts imagery by acquisition time and the window splitter emits bins in ascending order, so you never sort the series yourself.</p>
+<p>Every multi-temporal model is <strong>order-sensitive</strong> — the per-frame time encoding in the <a href="#decision-table">decision table</a> means reordering the frames changes the embedding. This holds even for <code>agrifm</code>, which carries no calendar date and encodes only the frame <em>position</em>.</p>
+<p>One case puts ordering in your hands: if you bypass fetching and pass your own array via <code>input_chw</code>, a <code>(T, C, H, W)</code> stack is consumed exactly as given (never reordered), so it <strong>must be earliest-first</strong> to match the fetched convention.</p>
+<hr />
+<h2 id="cost">Cost<a class="headerlink" href="#cost" title="Permanent link">&para;</a></h2>
+<p><code>multi</code> fetches <strong>one composite per frame</strong> from the provider (e.g. GEE), so a multi-month/-year window costs up to <code>T</code>× the fetches/time of a single composite — up to <strong>12×</strong> for <code>olmoearth</code>/<code>galileo</code>, <strong>4×</strong> for <code>prithvi</code>. This matters most for large <code>export_batch</code> runs over many points. To control it:</p>
+<ul>
+<li>pass <code>temporal_mode="single"</code> to force one composite regardless of window length;</li>
+<li>or narrow the window so <code>auto</code> resolves to fewer frames.</li>
+</ul>
+<p>Sub-month windows are <em>cheaper</em> than the old fixed-count behavior, since <code>auto</code> collapses them to <code>T=1</code>.</p>
+<hr />
+<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
+<ul>
+<li><a href="../models/">Models Overview</a> — the on-the-fly model table (Temporal style column).</li>
+<li><a href="../models_reference/">Advanced Reference</a> — per-model temporal packaging and side inputs.</li>
+<li>Per-model temporal sections: <a href="../models/olmoearth/#temporal_mode">olmoearth</a>, <a href="../models/galileo/#temporal-sampling">galileo</a>, <a href="../models/prithvi/#temporal-mode-temporal_mode">prithvi</a>.</li>
+</ul>
 
 
 
