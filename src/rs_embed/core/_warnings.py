@@ -122,6 +122,7 @@ def _highlight(line: str) -> str:
         _token_re = _build_token_re()
     return _token_re.sub(_highlight_token, line)
 
+
 # Saved handler we replace, so we can both delegate non-rs_embed warnings and
 # cleanly restore on disable. ``None`` means we are not currently installed.
 _previous_showwarning = None

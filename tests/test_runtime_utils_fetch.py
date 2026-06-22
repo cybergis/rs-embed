@@ -244,9 +244,7 @@ def test_multiframe_fetch_warns_on_backfilled_frames():
 def test_multiframe_fetch_silent_when_all_frames_distinct():
     import warnings
 
-    distinct = np.stack(
-        [np.full((3, 2, 2), float(i), dtype=np.float32) for i in range(4)], axis=0
-    )
+    distinct = np.stack([np.full((3, 2, 2), float(i), dtype=np.float32) for i in range(4)], axis=0)
 
     class _FakeProvider:
         def fetch_multiframe_collection_raw_tchw(self, **kwargs):

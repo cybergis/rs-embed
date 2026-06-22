@@ -1006,9 +1006,7 @@ def test_prepare_frames_drops_nan_frames_and_aligns_timestamps():
     )
     x = np.random.uniform(0, 3000, (3, 12, 32, 32)).astype(np.float32)
     x[1] = np.nan  # empty-bin sentinel
-    out, ts, dropped = oe._prepare_frames(
-        x, bins=bins, modality="s2", image_size=64, patch_size=4
-    )
+    out, ts, dropped = oe._prepare_frames(x, bins=bins, modality="s2", image_size=64, patch_size=4)
     assert out.shape == (2, 12, 64, 64)
     assert ts == [(15, 5, 2022), (14, 7, 2022)]  # June and August bin starts
     assert dropped == [("2022-07-15", "2022-08-14")]  # the empty middle bin
