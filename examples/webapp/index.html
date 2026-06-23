@@ -474,9 +474,9 @@ function updateQuery(){
   const q = document.getElementById('query');
   const sel = selectedModels();
   const m0 = sel[0] || '<model>';
-  const spatial = !geometry ? 'PointBuffer(lon, lat, buffer_m=1000)'
+  const spatial = !geometry ? 'PointBuffer(lon, lat, buffer_m=2048)'
     : geometry.type==='point'
-      ? `PointBuffer(lon=${geometry.lon}, lat=${geometry.lat}, buffer_m=1000)`
+      ? `PointBuffer(lon=${geometry.lon}, lat=${geometry.lat}, buffer_m=2048)`
       : `BBox(${geometry.minlon}, ${geometry.minlat}, ${geometry.maxlon}, ${geometry.maxlat})`;
   const rangeT = `TemporalSpec.range("${startStr()}-01", "${endExclusive()}")`;
   if (currentTab === 'use'){

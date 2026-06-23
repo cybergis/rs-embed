@@ -17,7 +17,7 @@ Run (from the repo root, in the rsembed venv with GEE authenticated)::
 Then open http://localhost:8000.
 
 The ROI/temporal/model contract mirrors the demo notebook:
-* point  → ``PointBuffer(lon, lat, buffer_m=1000)``  (a ~2 km box)
+* point  → ``PointBuffer(lon, lat, buffer_m=2048)``  (a ~4 km box)
 * bbox   → ``BBox(minlon, minlat, maxlon, maxlat)``
 * a year-range [y0, y1] maps to ``TemporalSpec.year(...)`` for annual precomputed
   models and ``TemporalSpec.range("{y0}-06-01", "{y1}-09-01")`` for on-the-fly ones.
@@ -62,6 +62,7 @@ def _input_kind(model: str) -> str | None:
         return None
     return "timeseries" if model in TIMESERIES else "single"
 
+
 # Saved embedding packages (.npz) live here; served back via /api/download.
 DOWNLOADS = HERE / "downloads"
 DOWNLOADS.mkdir(exist_ok=True)
@@ -74,6 +75,7 @@ _HEADS: dict[str, Any] = {}  # model -> loaded regressor (lazy)
 
 def _heads_dir() -> Path:
     import iguide_demo_helpers as _H
+
     return _H.DemoCache.find(HERE).root / "heads"
 
 
@@ -88,6 +90,7 @@ def _load_head(model: str):
     meta = _heads_meta()
     task = (meta or {}).get("task", "maize_yield")
     import joblib
+
     p = _heads_dir() / f"{task}__{model}.pkl"
     if not p.exists():
         return None
@@ -105,14 +108,28 @@ def _predict_one(reg, vec: np.ndarray, meta: dict, info: dict, model: str) -> di
         pidx = classes.index(1) if 1 in classes else len(classes) - 1
         p = float(proba[pidx])
         names = meta.get("classes", ["negative", "positive"])
-        return {"model": model, "ok": True, "kind": "classification",
-                "prediction": round(p, 3), "label_pred": names[1] if p >= 0.5 else names[0],
-                "score": info.get("score"), "score_name": info.get("score_name", "accuracy")}
+        return {
+            "model": model,
+            "ok": True,
+            "kind": "classification",
+            "prediction": round(p, 3),
+            "label_pred": names[1] if p >= 0.5 else names[0],
+            "score": info.get("score"),
+            "score_name": info.get("score_name", "accuracy"),
+        }
     pred = float(reg.predict(v)[0])  # regression head
     lo, hi = info.get("y_min"), info.get("y_max")
-    return {"model": model, "ok": True, "kind": "regression", "prediction": round(pred, 3),
-            "in_range": bool(lo is None or (lo <= pred <= hi)),
-            "score": info.get("score", info.get("r2")), "score_name": info.get("score_name", "R²")}
+    return {
+        "model": model,
+        "ok": True,
+        "kind": "regression",
+        "prediction": round(pred, 3),
+        "in_range": bool(lo is None or (lo <= pred <= hi)),
+        "score": info.get("score", info.get("r2")),
+        "score_name": info.get("score_name", "R²"),
+    }
+
+
 GRID_SAVE_MAX_CELLS = 300 * 300  # cap grids saved into the package (keeps it small)
 
 _ee_ready = False
@@ -130,21 +147,6 @@ def _ensure_ee() -> None:
 
 
 def _rs():
-    from rs_embed import (
-        BBox,
-        ExportConfig,
-        ExportTarget,
-        OutputSpec,
-        PointBuffer,
-        SensorSpec,
-        TemporalSpec,
-        export_batch,
-        get_embedding,
-        inspect_provider_patch,
-        list_models,
-        load_export,
-    )
-
     return locals()
 
 
@@ -161,22 +163,21 @@ class Geometry(BaseModel):
 
 class PreviewReq(BaseModel):
     geometry: Geometry
-    start: str = "2022-06"   # "YYYY-MM" inclusive start month
-    end: str = "2022-09"     # "YYYY-MM" inclusive end month
+    start: str = "2022-06"  # "YYYY-MM" inclusive start month
+    end: str = "2022-09"  # "YYYY-MM" inclusive end month
+    buffer_m: int = 2048  # single-click point buffer (~4 km box)
 
 
 class EmbedReq(PreviewReq):
     models: list[str] = []
-    buffer_m: int = 1000
 
 
 class PredictReq(PreviewReq):
-    models: list[str] = []     # embedding models to run through their heads
-    buffer_m: int = 1000
+    models: list[str] = []  # embedding models to run through their heads
 
 
 # --- helpers -----------------------------------------------------------------
-def _spatial(rs: dict, g: Geometry, buffer_m: int = 1000):
+def _spatial(rs: dict, g: Geometry, buffer_m: int = 2048):
     if g.type == "point":
         if g.lon is None or g.lat is None:
             raise ValueError("point geometry requires lon/lat")
@@ -186,8 +187,10 @@ def _spatial(rs: dict, g: Geometry, buffer_m: int = 1000):
             if getattr(g, k) is None:
                 raise ValueError("bbox geometry requires minlon/minlat/maxlon/maxlat")
         return rs["BBox"](
-            minlon=float(g.minlon), minlat=float(g.minlat),
-            maxlon=float(g.maxlon), maxlat=float(g.maxlat),
+            minlon=float(g.minlon),
+            minlat=float(g.minlat),
+            maxlon=float(g.maxlon),
+            maxlat=float(g.maxlat),
         )
     raise ValueError(f"unknown geometry type: {g.type!r}")
 
@@ -284,21 +287,29 @@ def api_preview(req: PreviewReq) -> Any:
     try:
         _ensure_ee()
         rs = _rs()
-        spatial = _spatial(rs, req.geometry, getattr(req, "buffer_m", 1000))
+        spatial = _spatial(rs, req.geometry, req.buffer_m)
         start_d, end_excl, _y0, _y1 = _range_dates(req.start, req.end)
         temporal = rs["TemporalSpec"].range(start_d, end_excl)
         sensor = rs["SensorSpec"](
             collection="COPERNICUS/S2_SR_HARMONIZED",
-            bands=("B4", "B3", "B2"), scale_m=10, cloudy_pct=30, composite="median",
+            bands=("B4", "B3", "B2"),
+            scale_m=10,
+            cloudy_pct=30,
+            composite="median",
         )
         rep = rs["inspect_provider_patch"](
-            spatial=spatial, temporal=temporal, sensor=sensor,
-            backend="gee", name="s2_preview", return_array=True,
+            spatial=spatial,
+            temporal=temporal,
+            sensor=sensor,
+            backend="gee",
+            name="s2_preview",
+            return_array=True,
         )
         chw = rep.get("array_chw")
         if chw is None:
-            return JSONResponse({"error": "no imagery returned for this ROI/time."},
-                                status_code=502)
+            return JSONResponse(
+                {"error": "no imagery returned for this ROI/time."}, status_code=502
+            )
         rgb = _s2_rgb_to_float(chw)
         return {
             "image": _png_b64(rgb),
@@ -321,8 +332,8 @@ def api_embed(req: EmbedReq) -> Any:
 
         models = list(req.models)
         results: list[dict[str, Any]] = []
-        pkg: dict[str, np.ndarray] = {}          # arrays written into the package
-        pkg_models: list[dict[str, Any]] = []    # per-model metadata for the manifest
+        pkg: dict[str, np.ndarray] = {}  # arrays written into the package
+        pkg_models: list[dict[str, Any]] = []  # per-model metadata for the manifest
 
         def _ok(m: str, grid: np.ndarray) -> None:
             vec = H.pooled_vector(grid)
@@ -332,16 +343,37 @@ def api_embed(req: EmbedReq) -> Any:
             saved = gh * gw <= GRID_SAVE_MAX_CELLS
             if saved:
                 pkg[f"grid__{m}"] = grid.astype(np.float32)
-            pkg_models.append({"model": m, "type": mtype, "dim": int(vec.shape[0]),
-                               "grid_hw": [gh, gw], "grid_saved": bool(saved)})
-            results.append({"model": m, "type": mtype, "ok": True,
-                            "image": _png_b64(H.pca_rgb(grid)), "dim": int(vec.shape[0]),
-                            "grid_hw": [gh, gw], "norm": float(np.linalg.norm(vec)),
-                            "vector_preview": [round(float(v), 4) for v in vec[:32]]})
+            pkg_models.append(
+                {
+                    "model": m,
+                    "type": mtype,
+                    "dim": int(vec.shape[0]),
+                    "grid_hw": [gh, gw],
+                    "grid_saved": bool(saved),
+                }
+            )
+            results.append(
+                {
+                    "model": m,
+                    "type": mtype,
+                    "ok": True,
+                    "image": _png_b64(H.pca_rgb(grid)),
+                    "dim": int(vec.shape[0]),
+                    "grid_hw": [gh, gw],
+                    "norm": float(np.linalg.norm(vec)),
+                    "vector_preview": [round(float(v), 4) for v in vec[:32]],
+                }
+            )
 
         def _err(m: str, msg: Any) -> None:
-            results.append({"model": m, "type": "precomputed" if m in PRECOMPUTED else "onthefly",
-                            "ok": False, "error": str(msg)[:400]})
+            results.append(
+                {
+                    "model": m,
+                    "type": "precomputed" if m in PRECOMPUTED else "onthefly",
+                    "ok": False,
+                    "error": str(msg)[:400],
+                }
+            )
 
         # ── single model → get_embedding ; multiple → export_batch (shared fetch) ──
         if len(models) <= 1:
@@ -349,8 +381,12 @@ def api_embed(req: EmbedReq) -> Any:
             for m in models:
                 try:
                     emb = rs["get_embedding"](
-                        m, spatial=spatial, temporal=_temporal(rs, m, req.start, req.end),
-                        output=rs["OutputSpec"].grid(), backend="auto")
+                        m,
+                        spatial=spatial,
+                        temporal=_temporal(rs, m, req.start, req.end),
+                        output=rs["OutputSpec"].grid(),
+                        backend="auto",
+                    )
                     _ok(m, H.to_dhw(emb.data))
                 except Exception as e:  # noqa: BLE001
                     _err(m, repr(e))
@@ -362,26 +398,43 @@ def api_embed(req: EmbedReq) -> Any:
             tmp = DOWNLOADS / f"_export_{uuid.uuid4().hex[:8]}.npz"
             try:
                 rs["export_batch"](
-                    spatials=[spatial], temporal=temporal, models=models,
+                    spatials=[spatial],
+                    temporal=temporal,
+                    models=models,
                     output=rs["OutputSpec"].grid(),
                     target=rs["ExportTarget"].combined(str(tmp)),
-                    config=rs["ExportConfig"](save_inputs=False, save_embeddings=True,
-                                              continue_on_error=True, show_progress=False),
-                    backend="auto")
+                    config=rs["ExportConfig"](
+                        save_inputs=False,
+                        save_embeddings=True,
+                        continue_on_error=True,
+                        show_progress=False,
+                    ),
+                    backend="auto",
+                )
                 er = rs["load_export"](str(tmp))
                 # Read embeddings straight from the .npz arrays keyed by model.
                 # (rs-embed's combined manifest can omit a model's entry even when
                 # its `embeddings__<model>` array was written, so load_export alone
                 # under-reports; the arrays are the source of truth.)
                 with np.load(tmp, allow_pickle=True) as z:
-                    by_model = {k[len("embeddings__"):]: k for k in z.files
-                                if k.startswith("embeddings__")}
+                    by_model = {
+                        k[len("embeddings__") :]: k for k in z.files if k.startswith("embeddings__")
+                    }
                     for m in models:
                         arr = np.asarray(z[by_model[m]]) if m in by_model else None
                         if arr is None:  # fall back to load_export's view
                             mr = er.models.get(m)
-                            arr = np.asarray(mr.embeddings) if (mr and mr.embeddings is not None) else None
-                        if arr is not None and arr.ndim >= 3 and arr.shape[0] >= 1 and np.isfinite(arr).any():
+                            arr = (
+                                np.asarray(mr.embeddings)
+                                if (mr and mr.embeddings is not None)
+                                else None
+                            )
+                        if (
+                            arr is not None
+                            and arr.ndim >= 3
+                            and arr.shape[0] >= 1
+                            and np.isfinite(arr).any()
+                        ):
                             _ok(m, H.to_dhw(arr[0]))  # (1,C,H,W) → (C,H,W)
                         else:
                             mr = er.models.get(m)
@@ -398,18 +451,29 @@ def api_embed(req: EmbedReq) -> Any:
         if pkg:
             manifest = {
                 "geometry": req.geometry.model_dump(),
-                "start": req.start, "end": req.end,
-                "buffer_m": req.buffer_m, "models": pkg_models, "compute": compute,
+                "start": req.start,
+                "end": req.end,
+                "buffer_m": req.buffer_m,
+                "models": pkg_models,
+                "compute": compute,
                 "note": "Load with: import iguide_demo_helpers as H; H.load_embedding_package(path)",
             }
             pkg["meta"] = np.array(json.dumps(manifest))
             fname = f"rsembed_pkg_{uuid.uuid4().hex[:10]}.npz"
             np.savez_compressed(DOWNLOADS / fname, **pkg)
             download = f"/api/download/{fname}"
-            package = {"filename": fname, "compute": compute,
-                       "models": [mm["model"] for mm in pkg_models],
-                       "grids_saved": [mm["model"] for mm in pkg_models if mm["grid_saved"]]}
-        return {"results": results, "download_url": download, "package": package, "compute": compute}
+            package = {
+                "filename": fname,
+                "compute": compute,
+                "models": [mm["model"] for mm in pkg_models],
+                "grids_saved": [mm["model"] for mm in pkg_models if mm["grid_saved"]],
+            }
+        return {
+            "results": results,
+            "download_url": download,
+            "package": package,
+            "compute": compute,
+        }
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         return JSONResponse({"error": repr(e)}, status_code=500)
@@ -420,14 +484,26 @@ def api_heads() -> Any:
     """List available pretrained downstream heads (for the 'Use' tab)."""
     meta = _heads_meta()
     if not meta:
-        return {"task": None, "models": [],
-                "note": "No pretrained heads. Run: python build_demo_cache.py --only heads"}
+        return {
+            "task": None,
+            "models": [],
+            "note": "No pretrained heads. Run: python build_demo_cache.py --only heads",
+        }
     root, task = _heads_dir(), meta.get("task", "maize_yield")
-    models = [{"model": m, **info} for m, info in meta.get("models", {}).items()
-              if (root / f"{task}__{m}.pkl").exists()]
-    return {"task": task, "kind": meta.get("kind", "regression"), "label": meta.get("label"),
-            "units": meta.get("units"), "region": meta.get("region"),
-            "classes": meta.get("classes"), "models": models}
+    models = [
+        {"model": m, **info}
+        for m, info in meta.get("models", {}).items()
+        if (root / f"{task}__{m}.pkl").exists()
+    ]
+    return {
+        "task": task,
+        "kind": meta.get("kind", "regression"),
+        "label": meta.get("label"),
+        "units": meta.get("units"),
+        "region": meta.get("region"),
+        "classes": meta.get("classes"),
+        "models": models,
+    }
 
 
 @app.post("/api/predict")
@@ -441,22 +517,33 @@ def api_predict(req: PredictReq) -> Any:
         rs = _rs()
         spatial = _spatial(rs, req.geometry, req.buffer_m)
         results = []
-        for m in (req.models or []):
+        for m in req.models or []:
             reg = _load_head(m)
             info = meta.get("models", {}).get(m, {})
             if reg is None:
-                results.append({"model": m, "ok": False, "error": "no pretrained head for this model"})
+                results.append(
+                    {"model": m, "ok": False, "error": "no pretrained head for this model"}
+                )
                 continue
             try:
                 emb = rs["get_embedding"](
-                    m, spatial=spatial, temporal=_temporal(rs, m, req.start, req.end),
-                    output=rs["OutputSpec"].pooled(), backend="auto")
+                    m,
+                    spatial=spatial,
+                    temporal=_temporal(rs, m, req.start, req.end),
+                    output=rs["OutputSpec"].pooled(),
+                    backend="auto",
+                )
                 results.append(_predict_one(reg, H.pooled_vector(emb.data), meta, info, m))
             except Exception as e:  # noqa: BLE001
                 results.append({"model": m, "ok": False, "error": repr(e)[:300]})
-        return {"task": meta.get("task"), "kind": meta.get("kind", "regression"),
-                "label": meta.get("label"), "units": meta.get("units"),
-                "region": meta.get("region"), "results": results}
+        return {
+            "task": meta.get("task"),
+            "kind": meta.get("kind", "regression"),
+            "label": meta.get("label"),
+            "units": meta.get("units"),
+            "region": meta.get("region"),
+            "results": results,
+        }
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         return JSONResponse({"error": repr(e)}, status_code=500)
@@ -470,7 +557,9 @@ async def api_predict_package(file: UploadFile = File(...)) -> Any:
         if not meta:
             return JSONResponse({"error": "no pretrained heads available"}, status_code=404)
         z = np.load(io.BytesIO(await file.read()), allow_pickle=True)
-        pooled = {k[len("pooled__"):]: np.asarray(z[k]) for k in z.files if k.startswith("pooled__")}
+        pooled = {
+            k[len("pooled__") :]: np.asarray(z[k]) for k in z.files if k.startswith("pooled__")
+        }
         if not pooled:
             return JSONResponse({"error": "no pooled vectors found in package"}, status_code=400)
         results = []
@@ -478,14 +567,21 @@ async def api_predict_package(file: UploadFile = File(...)) -> Any:
             reg = _load_head(m)
             info = meta.get("models", {}).get(m, {})
             if reg is None:
-                results.append({"model": m, "ok": False, "error": "no pretrained head for this model"})
+                results.append(
+                    {"model": m, "ok": False, "error": "no pretrained head for this model"}
+                )
                 continue
             try:
                 results.append(_predict_one(reg, np.asarray(vec), meta, info, m))
             except Exception as e:  # noqa: BLE001
                 results.append({"model": m, "ok": False, "error": repr(e)[:300]})
-        return {"task": meta.get("task"), "kind": meta.get("kind", "regression"),
-                "label": meta.get("label"), "units": meta.get("units"), "results": results}
+        return {
+            "task": meta.get("task"),
+            "kind": meta.get("kind", "regression"),
+            "label": meta.get("label"),
+            "units": meta.get("units"),
+            "results": results,
+        }
     except Exception as e:  # noqa: BLE001
         traceback.print_exc()
         return JSONResponse({"error": repr(e)}, status_code=500)

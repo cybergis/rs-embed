@@ -301,9 +301,7 @@ def classification_leaderboard(
         if X.ndim != 2 or X.shape[0] != n:
             # Skip models whose feature matrix doesn't line up with the labels.
             continue
-        clf = RandomForestClassifier(
-            n_estimators=n_estimators, random_state=seed, n_jobs=-1
-        )
+        clf = RandomForestClassifier(n_estimators=n_estimators, random_state=seed, n_jobs=-1)
         clf.fit(X[idx_tr], y[idx_tr])
         pred = clf.predict(X[idx_te])
         scores.append(
@@ -490,8 +488,8 @@ def load_embedding_package(path: str | Path) -> dict[str, Any]:
     """
     z = np.load(Path(path).expanduser(), allow_pickle=True)
     meta = json.loads(str(z["meta"])) if "meta" in z.files else {}
-    pooled = {k[len("pooled__"):]: z[k] for k in z.files if k.startswith("pooled__")}
-    grids = {k[len("grid__"):]: z[k] for k in z.files if k.startswith("grid__")}
+    pooled = {k[len("pooled__") :]: z[k] for k in z.files if k.startswith("pooled__")}
+    grids = {k[len("grid__") :]: z[k] for k in z.files if k.startswith("grid__")}
     return {"meta": meta, "pooled": pooled, "grids": grids}
 
 
