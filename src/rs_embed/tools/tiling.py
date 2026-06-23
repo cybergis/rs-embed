@@ -405,6 +405,18 @@ def _aggregate_tiled_embeddings(
     row_owned = _midpoint_owned_ranges(row_items)
     col_owned = _midpoint_owned_ranges(col_items)
 
+    # When ``pad_edges`` is on, an edge tile shorter than ``tile_size`` is
+    # bottom/right-padded to ``tile_size`` *before* inference, so the per-tile
+    # output grid spans the full padded ``tile_size`` — only the leading
+    # ``valid / tile_size`` fraction is real data. The input→feature mapping
+    # below must therefore measure feature cells against the padded extent
+    # (``tile_size``), not against ``valid``; otherwise the padded region's grid
+    # cells (constant "dead band" embeddings) are kept instead of cropped.
+    pad_edges = bool(prep_meta.get("pad_edges", True))
+
+    def _span(valid: int) -> int:
+        return int(tile_size) if pad_edges else int(valid)
+
     row_heights = [0] * nrows
     col_widths = [0] * ncols
     row_crop: dict[int, tuple[int, int]] = {}
@@ -419,7 +431,7 @@ def _aggregate_tiled_embeddings(
         fy0, fy1 = _map_input_subrange_to_feature(
             rel_start=rel_s,
             rel_end=rel_e,
-            valid_len=int(rr["valid"]),
+            valid_len=_span(int(rr["valid"])),
             out_len=int(rr["out_len"]),
         )
         row_crop[r] = (fy0, fy1)
@@ -434,7 +446,7 @@ def _aggregate_tiled_embeddings(
         fx0, fx1 = _map_input_subrange_to_feature(
             rel_start=rel_s,
             rel_end=rel_e,
-            valid_len=int(cc["valid"]),
+            valid_len=_span(int(cc["valid"])),
             out_len=int(cc["out_len"]),
         )
         col_crop[c] = (fx0, fx1)

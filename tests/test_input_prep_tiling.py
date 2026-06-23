@@ -104,6 +104,41 @@ def test_tiled_grid_stitch_restores_shape_and_values():
     assert emb.batch_calls >= 1
 
 
+def test_tiled_grid_stitch_crops_edge_padding_dead_band():
+    """Padded edge tiles must not leak their padding into the stitched grid.
+
+    When one dimension is shorter than ``tile_size`` (so it is a single,
+    bottom/right-padded tile) while the other is long enough to tile, the
+    per-tile output grid spans the *padded* ``tile_size``. The stitcher must
+    crop the padded fraction; otherwise those constant cells appear as a flat
+    "dead band" along the short edge (regression: Prithvi grid over a wide ROI).
+    """
+    emb = _FakeTileEmbedder()
+    # H=3 (< tile_size 4 → single y-tile, bottom-padded to 4),
+    # W=6 (> 4 → two x-tiles, fully covered by cover-shift, no x padding).
+    x = np.arange(18, dtype=np.float32).reshape(1, 3, 6)
+
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9, pad_edges=True),
+    )
+
+    arr = np.asarray(out.data, dtype=np.float32)
+    # The padded 4th grid row is cropped, so the short edge stays at 3 rows and
+    # the original (unpadded) values are recovered exactly.
+    assert arr.shape == (1, 3, 6)
+    np.testing.assert_allclose(arr, x)
+    assert out.meta["grid_hw"] == (3, 6)
+    assert out.meta["input_prep"]["stitched_grid_shape"] == (3, 6)
+
+
 def test_tiled_pooled_mean_uses_area_weighted_merge():
     emb = _FakeTileEmbedder()
     x = np.arange(36, dtype=np.float32).reshape(1, 6, 6)
