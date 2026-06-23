@@ -805,3 +805,76 @@ def test_snap_reduces_tiles_and_records_meta_on_multitile_path():
     assert prep["snapped_from_hw"] == (5, 9)
     assert prep["snapped_to_hw"] == (4, 8)
     assert np.asarray(out.data).shape[-2:] == (4, 8)
+
+
+def test_batch_tiled_path_matches_single_snap_and_meta():
+    """Batch tiled dispatch snaps and stamps meta identically to the single path.
+
+    Regression: ``InferenceEngine._run_batch_tiled`` used to re-implement tiling
+    without snap-to-tile or the resize-aware pad policy, so the same ROI stitched
+    differently (and with a thinner ``input_prep`` block) under ``export_batch``
+    than under ``get_embedding``. Both now route through the shared tiling
+    helpers, so their stitched meta must be byte-identical.
+    """
+    pytest.importorskip("torch")
+    import threading
+
+    from rs_embed.pipelines.inference import InferenceEngine
+    from rs_embed.tools.serialization import jsonable
+
+    # H=5 (overhang 1 -> snap to 4), W=9 (overhang 1 -> snap to 8 -> two x-tiles).
+    x = np.ones((1, 5, 9), dtype=np.float32)
+    prep_spec = InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.25)
+
+    # Single-point reference.
+    single = _call_embedder_get_embedding_with_input_prep(
+        embedder=_FakeTileEmbedder(),
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=prep_spec,
+    )
+    single_prep = single.meta["input_prep"]
+
+    # Batch path through the engine.
+    engine = InferenceEngine(
+        device="cpu",
+        output=OutputSpec.grid(),
+        config=ExportConfig(input_prep=prep_spec, max_retries=0),
+    )
+    done: list[int] = []
+    out, ok = engine._run_batch_tiled(
+        idxs=[0],
+        spatials=[_bbox()],
+        temporal=None,
+        sensor=None,
+        embedder=_FakeTileEmbedder(),
+        lock=threading.Lock(),
+        backend="gee",
+        get_input_fn=lambda _i: x,
+        batch_size=16,
+        continue_on_error=False,
+        on_done=done.append,
+        use_lock=False,
+        model_name="fake_tile",
+    )
+
+    assert ok is True
+    assert done == [0]
+    batch_prep = out[0].meta["input_prep"]
+
+    # The drift fix in action: batch now snaps (2 tiles, not the 6 an un-snapped
+    # cover-shift over 5x9 would spawn) and carries the full reproducibility block.
+    assert batch_prep["tile_count"] == 2
+    assert batch_prep["pad_policy"] == "none_model_resizes_tiles"
+    assert batch_prep["tile_snap_frac"] == 0.25
+    assert tuple(batch_prep["snapped_from_hw"]) == (5, 9)
+    assert tuple(batch_prep["snapped_to_hw"]) == (4, 8)
+
+    # Parity: the two paths stamp an identical input_prep block (jsonable() has
+    # already turned the batch path's tuples into lists, so normalize both).
+    assert jsonable(single_prep) == batch_prep
