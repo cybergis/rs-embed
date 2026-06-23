@@ -94,6 +94,9 @@ flowchart LR
 | `RS_EMBED_AGRIFM_CKPT_URL`       | project default URL        | Checkpoint download URL        |
 | `RS_EMBED_AGRIFM_CKPT_MIN_BYTES` | large-size threshold       | Download validation threshold  |
 
+!!! note "Empty sub-windows are back-filled — and surfaced"
+    AgriFM always feeds a fixed `T` frames. When a sub-window has no clear scene, the provider back-fills it with the whole-window composite (a duplicate frame). This is no longer silent: `meta` records `n_frames_requested` / `n_distinct_frames` / `n_backfilled_frames`, and a `UserWarning` fires when `n_distinct_frames < T`. See [Temporal Sampling → Data availability](../temporal_sampling.md#data-availability-empty-sub-windows-are-never-silent). Narrow/shift the window or raise `cloudy_pct` to recover genuine temporal diversity.
+
 ## Output Semantics
 
 **`pooled`**: spatial mean/max pooling over the AgriFM feature grid; metadata records frame count and normalization settings.

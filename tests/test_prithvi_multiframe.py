@@ -310,3 +310,58 @@ def test_resolve_max_frame_stride_days_env(monkeypatch):
     assert pr._resolve_max_frame_stride_days() == 184
     monkeypatch.setenv("RS_EMBED_PRITHVI_MAX_STRIDE_DAYS", "120")
     assert pr._resolve_max_frame_stride_days() == 120
+
+
+# ---------------------------------------------------------------------------
+# fetch_input override: prefetch (tile/auto/export) gets the SAME adaptive
+# multi-frame series as the direct path — no silent degradation to T=1.
+# ---------------------------------------------------------------------------
+
+
+def _prithvi_embedder():
+    emb = pr.PrithviEOV2S2_6B_Embedder()
+    emb.model_name = "prithvi"
+    return emb
+
+
+def test_fetch_input_single_window_returns_none_without_touching_provider():
+    """A sub-stride window stays single: fetch_input defers to the generic
+    composite prefetch (returns None) and must not call the provider."""
+    emb = _prithvi_embedder()
+
+    class _BoomProvider:
+        def __getattr__(self, name):
+            raise AssertionError("provider must not be called for a single-frame window")
+
+    fr = emb.fetch_input(
+        _BoomProvider(),
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=100),
+        temporal=TemporalSpec.range("2022-07-05", "2022-07-22"),  # 17d -> single
+        sensor=emb._default_sensor(),
+    )
+    assert fr is None
+
+
+def test_fetch_input_multi_window_returns_adaptive_tchw(monkeypatch):
+    """A multi window prefetches a [T,6,H,W] series with the adaptive T, so the
+    tiled/export path matches the direct path instead of degrading to T=1."""
+    emb = _prithvi_embedder()
+    seen = {}
+
+    def _fake_fetch(provider, *, spatial, temporal, n_frames, **kw):
+        seen["n_frames"] = int(n_frames)
+        return np.zeros((int(n_frames), 6, 8, 8), dtype=np.float32)
+
+    monkeypatch.setattr(pr, "_fetch_s2_prithvi6_tchw", _fake_fetch)
+
+    fr = emb.fetch_input(
+        object(),  # provider unused by the fake fetch
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=100),
+        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),  # 92d -> 3 frames
+        sensor=emb._default_sensor(),
+    )
+    assert fr is not None
+    assert fr.data.shape == (3, 6, 8, 8)  # clamp(92 // 30, 1, 4) == 3
+    assert seen["n_frames"] == 3
+    assert fr.meta["temporal_mode"] == "multi"
+    assert fr.meta["n_frames"] == 3

@@ -19,7 +19,7 @@
     In `rs-embed`, its most important characteristics are:
 
     - **required** temporal (`year, day_of_year`) and location (`lat, lon`) side inputs auto-derived by the adapter: see [Input Contract](#input-contract)
-    - **multi-temporal at heart**: defaults to a single composite (`temporal_mode="single"`), but `temporal_mode="multi"` feeds a real time series matching its 4-timestep pretraining: see [Temporal mode](#temporal-mode-temporal_mode)
+    - **multi-temporal at heart**: `temporal_mode` defaults to `"auto"` (single composite for sub-2-month windows, else a real multi-frame series matching its 4-timestep pretraining); see [Temporal mode](#temporal-mode-temporal_mode) and [Temporal Sampling](../temporal_sampling.md)
     - 30 m default `sensor.scale_m`, not the more common S2 10 m default — a frequent source of silent drift: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
     - `resize` vs `pad` preprocessing changes token geometry and should be treated as part of the experiment, not as a cosmetic knob: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
 
@@ -130,6 +130,9 @@ Prithvi-EO 2.0 was pretrained on **4-timestep** HLS series with **1–6 month ga
 
 !!! note "Output dimensionality is unchanged"
     Multi-frame tokens are pooled over time (and space), so `pooled` is still `(D,)` and `grid` is still `(D, H', W')` — switching modes never changes the embedding shape, only the values and the `num_frames` / `frame_dates` metadata. To stay near the training regime, give `multi` a window of a few months up to ~a year.
+
+!!! note "Same multi-frame series on every API path"
+    The window-adaptive multi-frame fetch is used **consistently** across `get_embedding`, `get_embeddings_batch`, `export_batch`, and every `input_prep` mode (`resize`/`tile`/`auto`). Prithvi overrides the API-side prefetch (`fetch_input`) so the tiled/export paths receive the same `[T,6,H,W]` series as a direct call — they never silently collapse to a single composite. (Because `model_config` is not available at prefetch time, the prefetch honors an explicit `temporal_mode` argument, the `RS_EMBED_PRITHVI_TEMPORAL_MODE` env var, or the `auto` default — matching `olmoearth`/`galileo`.)
 
 ```python
 emb = get_embedding(

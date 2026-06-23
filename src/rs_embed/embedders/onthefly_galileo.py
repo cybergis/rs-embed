@@ -25,6 +25,10 @@ from ..core.specs import (
 from ..core.types import FetchResult
 from ..providers import ProviderBase
 from ..providers.fetch import (
+    count_distinct_frames,
+    frame_diversity_meta,
+)
+from ..providers.fetch import (
     fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
 )
 from ..providers.resolution import (
@@ -999,6 +1003,13 @@ class GalileoEmbedder(EmbedderBase):
                 model_name="galileo",
             )
 
+        # Frame diversity of the series actually fed to the encoder (tiles preserve
+        # the back-filled duplicates), so it lands on the tiled path too.
+        diversity_meta = frame_diversity_meta(
+            n_requested=int(raw_tchw.shape[0]),
+            n_distinct=count_distinct_frames(raw_tchw),
+        )
+
         if month_override is not None:
             months_seq = _month_override_sequence(
                 int(month_override),
@@ -1058,6 +1069,7 @@ class GalileoEmbedder(EmbedderBase):
                 "normalization": str(norm_mode),
                 "include_ndvi": False,
                 "device": dev,
+                **diversity_meta,
                 **sampling_meta,
                 **lmeta,
                 **pmeta,

@@ -1536,6 +1536,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
         if not input_chws:
             return []
@@ -1548,13 +1549,24 @@ class SatVisionTOAEmbedder(EmbedderBase):
         rt = self._resolve_runtime(sensor=sensor, device=device)
 
         x_batch: list[np.ndarray] = []
-        for inp in input_chws:
+        norm_modes_eff: list[str] = []
+        unit_flags: list[bool] = []
+        for k, inp in enumerate(input_chws):
+            fm = fetch_metas[k] if (fetch_metas is not None and k < len(fetch_metas)) else None
+            # Mirror get_embedding / get_embeddings_batch: provider inputs that
+            # are already unit-scaled must NOT be re-scaled, even under
+            # norm_mode="raw". Without the fetch_meta provenance this path used
+            # to blindly apply the configured norm and diverge from get_embedding.
+            already_unit = bool(fm.get("already_unit_scaled")) if fm is not None else False
+            norm_mode_eff = "unit" if already_unit else str(rt["norm_mode"])
+            norm_modes_eff.append(norm_mode_eff)
+            unit_flags.append(already_unit)
             x_batch.append(
                 self._prepare_input(
                     np.asarray(inp, dtype=np.float32),
                     in_chans=rt["in_chans"],
                     image_size=rt["image_size"],
-                    norm_mode=rt["norm_mode"],
+                    norm_mode=norm_mode_eff,
                     reflectance_indices=rt["reflectance_indices"],
                     emissive_indices=rt["emissive_indices"],
                     reflectance_divisor=rt["reflectance_divisor"],
@@ -1584,7 +1596,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
                 extra={
                     "in_chans": int(rt["in_chans"]),
                     "norm_mode": rt["norm_mode"],
-                    "norm_mode_effective": rt["norm_mode"],
+                    "norm_mode_effective": norm_modes_eff[j],
                     "reflectance_indices": tuple(
                         int(k)
                         for k in _normalize_indices(rt["reflectance_indices"], rt["in_chans"])
@@ -1599,7 +1611,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
                     "model_output_shape": tuple(int(v) for v in arr.shape),
                     "source_collection": None,
                     "fallback_used": False,
-                    "already_unit_scaled": False,
+                    "already_unit_scaled": bool(unit_flags[j]),
                     **rt["model_meta"],
                     **fmeta,
                 },
