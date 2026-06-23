@@ -319,10 +319,14 @@ class ExportConfig:
     show_progress : bool
         Whether to display progress indicators.
     input_prep : InputPrepSpec or str or None
-        API-side input preprocessing policy. ``None`` (the default) uses the
-        package default ``"tile"`` (large inputs are tiled + stitched to preserve
-        native resolution). Pass ``"resize"`` to downsample to the model image
-        size, or ``"auto"`` to tile only when beneficial.
+        API-side input preprocessing policy, resolved per model exactly as
+        :func:`get_embedding` does. ``None`` (the default) uses the package
+        default ``"tile"`` (large inputs are tiled + stitched to preserve native
+        resolution), except for image-level ViT grid models (satmae, scalemae,
+        remoteclip, ...) which downgrade an unset/auto policy to ``"resize"`` to
+        avoid tiled stitching seams. Pass ``"resize"`` to downsample to the
+        model image size, or ``"auto"`` to tile only when beneficial. An
+        explicit ``"tile"`` is always honored.
     """
 
     format: str = "npz"

@@ -17,15 +17,17 @@ from ..core.errors import ModelError
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ModelConfig, TaskResult
 from ..tools.output import normalize_embedding_output
-from ..tools.runtime import call_embedder_get_embedding as _runtime_call_embedder_get_embedding
 from ..tools.runtime import (
+    _embedder_method_accepts_parameter,
     embedder_accepts_model_config,
     get_embedder_bundle_cached,
     require_model_config_support,
+    resolve_model_aware_input_prep,
     sensor_key,
     supports_batch_api,
     supports_prefetched_batch_api,
 )
+from ..tools.runtime import call_embedder_get_embedding as _runtime_call_embedder_get_embedding
 from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..tools.tiling import (
     INPUT_PREP_VERSION,
@@ -44,6 +46,10 @@ from .runner import run_with_retry
 
 # Backward-compatible module attribute for tests/monkeypatches.
 call_embedder_get_embedding = _runtime_call_embedder_get_embedding
+
+# Sentinel distinguishing "argument not supplied" from an explicit ``None``
+# (which is itself a meaningful input_prep value: "use the package default").
+_UNSET = object()
 
 
 class _ModelContext(NamedTuple):
@@ -82,12 +88,40 @@ class InferenceEngine:
         self.device = device
         self.output = output
         self.config = config
+        # Global (model-agnostic) resolution of the configured input_prep. Kept
+        # only as the fallback for ``_run_batch_tiled``; per-model gating and
+        # dispatch go through ``_model_input_prep`` so the export path matches
+        # get_embedding (some ViT-grid models downgrade tile -> resize).
         self.input_prep_resolved = _resolve_input_prep_spec(config.input_prep)
         self.prefer_batch = _device_has_gpu(device)
-        # Gate on the *resolved* mode, not on whether input_prep was explicitly
-        # set: ``None`` now resolves to the package default ("tile"), so an unset
-        # config must still take the tiled batch path.
-        self._explicit_nonresize = self.input_prep_resolved.mode in {"tile", "auto"}
+        # Per-model model-aware input_prep cache: ``model_name -> (effective
+        # input_prep, resolved spec, explicit_nonresize)``. Resolved once per
+        # model so per-point inference does not re-emit stitching-seam warnings.
+        self._input_prep_by_model: dict[str, tuple[Any, Any, bool]] = {}
+
+    def _model_input_prep(self, model_name: str) -> tuple[Any, Any, bool]:
+        """Resolve model-aware input_prep for one model (mirrors get_embedding).
+
+        Returns ``(effective_input_prep, resolved_spec, explicit_nonresize)``:
+        *effective_input_prep* is the value forwarded to the embedder,
+        *resolved_spec* drives tile geometry/gating, and *explicit_nonresize*
+        gates batch tiling. Image-level ViT grid models downgrade an unset/auto
+        input_prep to ``resize`` to avoid tiled stitching seams, exactly as the
+        single-embedding API does. Cached (and warned) once per model name.
+        """
+        from ..tools.normalization import normalize_model_name
+
+        key = normalize_model_name(model_name)
+        cached = self._input_prep_by_model.get(key)
+        if cached is None:
+            eff, resolved, _requested_mode, _policy = resolve_model_aware_input_prep(
+                model_n=key,
+                input_prep=self.config.input_prep,
+                output=self.output,
+            )
+            cached = (eff, resolved, resolved.mode in {"tile", "auto"})
+            self._input_prep_by_model[key] = cached
+        return cached
 
     # ── single-point inference ─────────────────────────────────────
 
@@ -103,9 +137,16 @@ class InferenceEngine:
         input_chw: np.ndarray | None = None,
         model_config: dict[str, Any] | None = None,
         fetch_meta: dict[str, Any] | None = None,
+        input_prep: Any = _UNSET,
     ) -> Embedding:
-        """Run a single embedding with retry + optional tiling."""
+        """Run a single embedding with retry + optional tiling.
+
+        ``input_prep`` defaults to the configured value; callers that have
+        resolved a model-aware override (see :meth:`_model_input_prep`) pass it
+        explicitly so ViT-grid models match get_embedding's resize default.
+        """
         cfg = self.config
+        prep = cfg.input_prep if input_prep is _UNSET else input_prep
         return run_with_retry(
             lambda: _call_embedder_get_embedding_with_input_prep(
                 embedder=embedder,
@@ -116,7 +157,7 @@ class InferenceEngine:
                 backend=backend,
                 device=self.device,
                 input_chw=input_chw,
-                input_prep=cfg.input_prep,
+                input_prep=prep,
                 model_config=model_config,
                 fetch_meta=fetch_meta,
             ),
@@ -211,6 +252,7 @@ class InferenceEngine:
         use_lock: bool,
         model_name: str,
         model_config: dict[str, Any] | None = None,
+        get_fetch_meta_fn: Callable[[int], dict[str, Any] | None] | None = None,
     ) -> tuple[dict[int, TaskResult], bool]:
         """Run tier-1 batch inference using prefetched provider inputs."""
         cfg = self.config
@@ -235,7 +277,7 @@ class InferenceEngine:
                 sub_sp = [t[1] for t in sub]
                 sub_inp = [t[2] for t in sub]
 
-                def _infer_prefetched(_sp=sub_sp, _inp=sub_inp):
+                def _infer_prefetched(_sp=sub_sp, _inp=sub_inp, _idx=sub_idx):
                     if model_config is not None:
                         require_model_config_support(
                             embedder=embedder,
@@ -256,6 +298,10 @@ class InferenceEngine:
                         "get_embeddings_batch_from_inputs",
                     ):
                         batch_kwargs["model_config"] = model_config
+                    if get_fetch_meta_fn is not None and _embedder_method_accepts_parameter(
+                        type(embedder), "get_embeddings_batch_from_inputs", "fetch_metas"
+                    ):
+                        batch_kwargs["fetch_metas"] = [get_fetch_meta_fn(i) for i in _idx]
                     if use_lock:
                         with lock:
                             return embedder.get_embeddings_batch_from_inputs(**batch_kwargs)
@@ -361,14 +407,18 @@ class InferenceEngine:
         use_lock: bool,
         model_name: str,
         model_config: dict[str, Any] | None = None,
+        input_prep_resolved: Any | None = None,
+        get_fetch_meta_fn: Callable[[int], dict[str, Any] | None] | None = None,
     ) -> tuple[dict[int, TaskResult], bool]:
         """Run tile-mode batch inference across multiple spatial points.
 
         Each input image is tiled, all tiles from all spatial points are batched
         together for model inference, then stitched back into per-point results.
+        ``input_prep_resolved`` is the model-aware resolved spec; it falls back
+        to the global resolution when not supplied.
         """
         cfg = self.config
-        spec = self.input_prep_resolved
+        spec = input_prep_resolved if input_prep_resolved is not None else self.input_prep_resolved
         out: dict[int, TaskResult] = {}
         try:
             model_img = _embedder_default_image_size(embedder)
@@ -400,6 +450,10 @@ class InferenceEngine:
 
             all_tiles: list[np.ndarray] = []
             all_tile_spatials: list[SpatialSpec] = []
+            # Per-tile fetch metadata (each tile inherits its source image's
+            # fetch_meta), parallel to ``all_tiles``. Only consumed by embedders
+            # whose batch API accepts ``fetch_metas`` (e.g. satvision).
+            all_tile_fetch_metas: list[dict[str, Any] | None] = []
             # {spatial_idx: (flat_start, tile_count, tile_metas, h, w)}
             tile_map: dict[int, tuple[int, int, list[dict[str, Any]], int, int]] = {}
 
@@ -457,6 +511,8 @@ class InferenceEngine:
                 flat_start = len(all_tiles)
                 all_tiles.extend(tiles)
                 all_tile_spatials.extend(tile_spatials_pt)
+                img_fmeta = get_fetch_meta_fn(i) if get_fetch_meta_fn is not None else None
+                all_tile_fetch_metas.extend([img_fmeta] * len(tiles))
                 tile_map[i] = (flat_start, len(tiles), tile_metas, h, w)
 
             if not all_tiles:
@@ -478,6 +534,10 @@ class InferenceEngine:
                 }
                 if tiled_model_config is not None:
                     batch_kwargs["model_config"] = tiled_model_config
+                if get_fetch_meta_fn is not None and _embedder_method_accepts_parameter(
+                    type(embedder), "get_embeddings_batch_from_inputs", "fetch_metas"
+                ):
+                    batch_kwargs["fetch_metas"] = all_tile_fetch_metas[start : start + batch_size]
 
                 def _infer_tiles(_kw: dict[str, Any] = batch_kwargs) -> list[Embedding]:
                     if use_lock:
@@ -597,6 +657,9 @@ class InferenceEngine:
                 is_precomputed=mc.is_precomputed,
                 provider_enabled=True,
             )
+            eff_input_prep, input_prep_resolved, explicit_nonresize = self._model_input_prep(
+                mc.name
+            )
 
             def _get_input(i: int, _ctx=ctx, _mc=mc) -> np.ndarray:
                 if not _ctx.needs_provider_input or _ctx.skey is None:
@@ -609,7 +672,12 @@ class InferenceEngine:
                     raise RuntimeError(f"Prefetch failed for model={_mc.name}, index={i}: {err}")
                 raise RuntimeError(f"Missing prefetched input for model={_mc.name}, index={i}")
 
-            def _single(i: int, _ctx=ctx, _mc=mc) -> Embedding:
+            def _get_fmeta(i: int, _ctx=ctx) -> dict[str, Any] | None:
+                if prefetch_meta is None or not _ctx.needs_provider_input or _ctx.skey is None:
+                    return None
+                return prefetch_meta.get((i, _ctx.skey)) or None
+
+            def _single(i: int, _ctx=ctx, _mc=mc, _prep=eff_input_prep) -> Embedding:
                 inp = _get_input(i) if _ctx.needs_provider_input else None
                 fmeta = None
                 if (
@@ -628,6 +696,7 @@ class InferenceEngine:
                     input_chw=inp,
                     fetch_meta=fmeta,
                     model_config=_mc.model_config,
+                    input_prep=_prep,
                 )
 
             def _mark_done(_: int, _mc=mc) -> None:
@@ -645,8 +714,8 @@ class InferenceEngine:
                     sensor=mc.sensor,
                     skey=ctx.skey,
                     prefer_batch=(self.prefer_batch or mc.is_precomputed),
-                    allow_nonresize=not self._explicit_nonresize,
-                    input_prep_mode=self.input_prep_resolved.mode,
+                    allow_nonresize=not explicit_nonresize,
+                    input_prep_mode=input_prep_resolved.mode,
                 )
             )
 
@@ -667,6 +736,7 @@ class InferenceEngine:
                     use_lock=False,
                     model_name=mc.name,
                     model_config=mc.model_config,
+                    get_fetch_meta_fn=_get_fmeta,
                 )
                 for i, rec in prefetched_out.items():
                     out[(i, mc.name)] = rec
@@ -705,6 +775,8 @@ class InferenceEngine:
                     use_lock=False,
                     model_name=mc.name,
                     model_config=mc.model_config,
+                    input_prep_resolved=input_prep_resolved,
+                    get_fetch_meta_fn=_get_fmeta,
                 )
                 for i, rec in tiled_out.items():
                     out[(i, mc.name)] = rec
@@ -781,6 +853,12 @@ class InferenceEngine:
             is_precomputed=is_precomputed,
             provider_enabled=provider_enabled,
         )
+        eff_input_prep, input_prep_resolved, explicit_nonresize = self._model_input_prep(model_name)
+
+        def _batch_fmeta_fn(i: int) -> dict[str, Any] | None:
+            if get_fetch_meta_fn is None or ctx.skey is None or not ctx.needs_provider_input:
+                return None
+            return get_fetch_meta_fn(i, ctx.skey) or None
 
         strategy = str(inference_strategy).strip().lower()
         prefer_batch = (strategy == "batch") or (strategy == "auto")
@@ -810,7 +888,7 @@ class InferenceEngine:
                     "backend": model_backend,
                     "device": self.device,
                     "input_chw": inp,
-                    "input_prep": self.config.input_prep,
+                    "input_prep": eff_input_prep,
                 }
                 if fmeta is not None:
                     kwargs["fetch_meta"] = fmeta
@@ -833,8 +911,8 @@ class InferenceEngine:
             sensor=sensor,
             skey=ctx.skey,
             prefer_batch=(allow_batch and prefer_batch),
-            allow_nonresize=not self._explicit_nonresize,
-            input_prep_mode=self.input_prep_resolved.mode,
+            allow_nonresize=not explicit_nonresize,
+            input_prep_mode=input_prep_resolved.mode,
         )
 
         batch_attempted = False
@@ -860,6 +938,7 @@ class InferenceEngine:
                 use_lock=True,
                 model_name=model_name,
                 model_config=model_config,
+                get_fetch_meta_fn=_batch_fmeta_fn,
             )
             out.update(prefetched_out)
 
@@ -901,6 +980,8 @@ class InferenceEngine:
                 use_lock=True,
                 model_name=model_name,
                 model_config=model_config,
+                input_prep_resolved=input_prep_resolved,
+                get_fetch_meta_fn=_batch_fmeta_fn,
             )
             out.update(tiled_out)
 

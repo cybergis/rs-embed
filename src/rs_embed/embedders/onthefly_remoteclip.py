@@ -668,7 +668,10 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 raise ModelError(
                     f"input_chw must be CHW with 3 bands for remoteclip_s2rgb, got {getattr(input_chw, 'shape', None)}"
                 )
-            s2_rgb_chw = np.clip(input_chw.astype(np.float32) / 10000.0, 0.0, 1.0)
+            # Keep raw S2 SR values here, exactly like the self-fetch path:
+            # ``_s2_rgb_u8_from_chw`` is the single normalization step (/10000).
+            # Pre-dividing here would double-normalize and yield a black image.
+            s2_rgb_chw = np.asarray(input_chw, dtype=np.float32)
 
         # Optional: inspect on-the-fly provider input
         from ..tools.inspection import (
@@ -684,7 +687,9 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             sensor=sensor,
             name="provider_s2_rgb_chw",
             expected_channels=3,
-            value_range=(0.0, 1.0),
+            # s2_rgb_chw holds raw S2 SR DN (~0..10000) on both the self-fetch
+            # and input_chw paths, so the range check must match raw values.
+            value_range=(0.0, 10000.0),
             fill_value=0.0,
             meta=extra_checks,
         )
@@ -702,8 +707,9 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                     s2_rgb_chw,
                     path=os.path.join(sd, fn),
                     bands=(0, 1, 2),
+                    # s2_rgb_chw is raw S2 SR DN; stretch to its native range.
                     vmin=0.0,
-                    vmax=1.0,
+                    vmax=10000.0,
                 )
                 extra_checks.setdefault("input_checks_artifacts", []).append(
                     {"name": "quicklook_rgb", "path": os.path.join(sd, fn)}
@@ -924,7 +930,8 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 raise ModelError(
                     f"input_chw must be CHW with 3 bands for remoteclip_s2rgb, got {getattr(input_chw, 'shape', None)} at index={i}"
                 )
-            s2_rgb_chw = np.clip(input_chw.astype(np.float32) / 10000.0, 0.0, 1.0)
+            # Raw S2 SR values; ``_s2_rgb_u8_from_chw`` normalizes once (/10000).
+            s2_rgb_chw = np.asarray(input_chw, dtype=np.float32)
             rgb_u8_all.append(_s2_rgb_u8_from_chw(s2_rgb_chw))
 
         sensor_meta = {
