@@ -518,6 +518,15 @@ def _call_embedder_get_embedding_tiled(
     h, w = _input_hw(x)
     model_img = _embedder_default_image_size(embedder)
     tile_size = int(input_prep.tile_size or model_img or 0)
+    # A model that advertises a fixed input size resizes every tile to it, so a
+    # sub-tile edge tile (a dimension shorter than ``tile_size``) can be fed at
+    # its natural size and let the model upsample it — no padding, no fabricated
+    # pixels, no boundary "dead band". This is the anisotropic case: the long
+    # axis tiles (native resolution preserved) while the short axis resizes.
+    # Edge-replicate padding is kept only as the fallback for models without a
+    # fixed input size, which may require exactly ``tile_size`` tiles.
+    model_resizes = model_img is not None and int(model_img) > 0
+    effective_pad_edges = bool(input_prep.pad_edges) and not model_resizes
     if tile_size <= 0:
         # No tile size could be determined (no explicit tile_size and the model
         # exposes no describe().defaults.image_size). Tiling is the package
@@ -544,12 +553,17 @@ def _call_embedder_get_embedding_tiled(
     )
     num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
     if input_prep.mode == "auto":
+        # A dimension smaller than a tile only forces a plain resize for models
+        # that cannot resize a sub-tile edge tile themselves. Resize-capable
+        # models tile the long axis (keeping its native resolution) and resize
+        # the short axis, so a wide/flat or tall/thin ROI keeps detail on its
+        # long side instead of being squashed by a whole-ROI resize.
+        small_dim_forces_resize = (h <= tile_size or w <= tile_size) and not model_resizes
         if (
             output.mode != "grid"
-            or h <= tile_size
-            or w <= tile_size
             or num_tiles <= 1
             or num_tiles > input_prep.max_tiles
+            or small_dim_forces_resize
         ):
             return _call_embedder_get_embedding(
                 embedder=embedder,
@@ -582,6 +596,28 @@ def _call_embedder_get_embedding_tiled(
             "boundary tiles may still be shifted to avoid padding."
         )
 
+    # In the anisotropic case (one axis tiled, the other shorter than a tile and
+    # resized) a very short axis is upsampled hard: the embedding there is
+    # interpolated from few native pixels. Flag it (don't block) so the low
+    # native resolution on that axis is visible rather than silent.
+    if model_resizes:
+        if h < tile_size and w > tile_size and (tile_size / max(1, h)) > 4.0:
+            warnings.warn(
+                f"input_prep tiling upsamples the height {h}px to the model input "
+                f"{tile_size}px (~{tile_size / max(1, h):.1f}x); the embedding's vertical "
+                "resolution is interpolated from few native pixels. Consider a taller ROI "
+                "or input_prep='resize'.",
+                stacklevel=2,
+            )
+        if w < tile_size and h > tile_size and (tile_size / max(1, w)) > 4.0:
+            warnings.warn(
+                f"input_prep tiling upsamples the width {w}px to the model input "
+                f"{tile_size}px (~{tile_size / max(1, w):.1f}x); the embedding's horizontal "
+                "resolution is interpolated from few native pixels. Consider a wider ROI "
+                "or input_prep='resize'.",
+                stacklevel=2,
+            )
+
     ys, xs = _tile_yx_starts(h=h, w=w, tile_size=tile_size, stride=stride)
     fill_value = float(sensor.fill_value) if sensor is not None else 0.0
     tiles: list[np.ndarray] = []
@@ -594,7 +630,7 @@ def _call_embedder_get_embedding_tiled(
                 y0=int(y0),
                 x0=int(x0),
                 tile_size=tile_size,
-                pad_edges=bool(input_prep.pad_edges),
+                pad_edges=effective_pad_edges,
                 fill_value=fill_value,
             )
             meta["row"] = int(r)
@@ -690,7 +726,12 @@ def _call_embedder_get_embedding_tiled(
         "tile_size": int(tile_size),
         "tile_stride": int(stride),
         "tile_count": int(len(tiles)),
-        "pad_edges": bool(input_prep.pad_edges),
+        "pad_edges": bool(effective_pad_edges),
+        "pad_policy": (
+            "none_model_resizes_tiles"
+            if model_resizes
+            else ("edge_replicate" if effective_pad_edges else "none")
+        ),
         "max_tiles": int(input_prep.max_tiles),
         "max_tiles_hard": int(input_prep.max_tiles_hard),
         "input_hw": (int(h), int(w)),
