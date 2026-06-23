@@ -1,4 +1,5 @@
 import numpy as np
+import pytest
 
 from rs_embed.core.embedding import Embedding
 from rs_embed.core.specs import BBox, InputPrepSpec, OutputSpec
@@ -6,6 +7,8 @@ from rs_embed.core.types import ExportConfig
 from rs_embed.tools.tiling import (
     INPUT_PREP_VERSION,
     _call_embedder_get_embedding_with_input_prep,
+    _slice_and_pad_tile,
+    _snap_axis_to_tile,
     _tile_yx_starts,
 )
 
@@ -104,6 +107,166 @@ def test_tiled_grid_stitch_restores_shape_and_values():
     assert emb.batch_calls >= 1
 
 
+def test_tiled_resize_model_skips_padding_on_short_axis():
+    """Wide/flat ROI: resize-capable model tiles the long axis, resizes the short.
+
+    When one dimension is shorter than ``tile_size`` and the other is long
+    enough to tile, a model that resizes each tile to a fixed input size needs
+    no padding at all — the short axis is fed at its natural size and upsampled.
+    No fabricated pixels, no boundary "dead band". (regression: Prithvi grid
+    over a wide ROI.)
+    """
+    emb = _FakeTileEmbedder()  # describe().defaults.image_size = 4 → resize-capable
+    # H=3 (< tile_size 4 → single y-tile, fed unpadded), W=6 (> 4 → two x-tiles).
+    x = np.arange(18, dtype=np.float32).reshape(1, 3, 6)
+
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9, pad_edges=True),
+    )
+
+    arr = np.asarray(out.data, dtype=np.float32)
+    # No padding occurred (model resizes tiles), so the original values come back
+    # exactly and the short axis stays at its native 3 rows.
+    assert arr.shape == (1, 3, 6)
+    np.testing.assert_allclose(arr, x)
+    assert out.meta["grid_hw"] == (3, 6)
+    assert out.meta["input_prep"]["stitched_grid_shape"] == (3, 6)
+    # Even though pad_edges=True was requested, the resize-capable model path
+    # disables padding entirely.
+    assert out.meta["input_prep"]["pad_edges"] is False
+    assert out.meta["input_prep"]["pad_policy"] == "none_model_resizes_tiles"
+
+
+def test_tiled_resize_model_anisotropic_tall_thin():
+    """Tall/thin ROI is the symmetric case: tile the long (height) axis."""
+    emb = _FakeTileEmbedder()
+    # H=6 (> 4 → two y-tiles), W=3 (< 4 → single x-tile, fed unpadded).
+    x = np.arange(18, dtype=np.float32).reshape(1, 6, 3)
+
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9, pad_edges=True),
+    )
+
+    arr = np.asarray(out.data, dtype=np.float32)
+    assert arr.shape == (1, 6, 3)
+    np.testing.assert_allclose(arr, x)
+    assert out.meta["input_prep"]["pad_policy"] == "none_model_resizes_tiles"
+
+
+def test_slice_and_pad_tile_replicates_edge_not_constant_fill():
+    """Edge padding must replicate boundary pixels, not write a constant fill.
+
+    A patch/ViT model tokenizes the padded tile; constant (zero) padding turns
+    the patch straddling the valid/pad boundary into an out-of-distribution
+    token that renders as a flat "dead band". Edge replication keeps that patch
+    on real surface values. (regression: residual band on Prithvi's short edge.)
+    """
+    # Distinct per-row values so a replicated edge is visibly different from a
+    # constant fill of 0.0.
+    x = np.arange(1, 4, dtype=np.float32)[:, None] * np.ones((1, 3), dtype=np.float32)
+    x = x[None]  # (1, 3, 3): rows are 1.0, 2.0, 3.0
+
+    tile, meta = _slice_and_pad_tile(x, y0=0, x0=0, tile_size=5, pad_edges=True, fill_value=0.0)
+    assert tile.shape == (1, 5, 5)
+    assert meta["valid_h"] == 3 and meta["valid_w"] == 3
+    # Bottom padding rows replicate the last valid row (3.0), not the 0.0 fill.
+    np.testing.assert_allclose(tile[0, 3:, :3], 3.0)
+    # Right padding cols replicate the last valid col of each row.
+    np.testing.assert_allclose(tile[0, :3, 3:], np.broadcast_to(x[0, :, 2:3], (3, 2)))
+    assert not np.any(tile == 0.0)
+
+
+def test_tiled_nonresize_model_edge_pads_and_crops():
+    """Models without a fixed input size keep the edge-replicate + crop fallback.
+
+    A model that advertises no image_size may require exactly ``tile_size``
+    tiles, so the short axis is edge-padded to ``tile_size`` and the stitcher
+    crops the padded fraction back off (the replicated pad never reaches output).
+    """
+
+    class _NonResizePassthrough:
+        model_name = "nonresize_passthrough"
+
+        def describe(self):
+            return {"defaults": {}}  # no image_size → not resize-capable
+
+        def get_embedding(
+            self,
+            *,
+            spatial,
+            temporal=None,
+            sensor=None,
+            output=OutputSpec.pooled(),
+            backend="gee",
+            device="cpu",
+            input_chw=None,
+        ):
+            xx = np.asarray(input_chw, dtype=np.float32)
+            return Embedding(
+                data=xx[:1].copy(),
+                meta={"grid_hw": (int(xx.shape[-2]), int(xx.shape[-1]))},
+            )
+
+    emb = _NonResizePassthrough()
+    # H=3 (< tile_size 4 → single y-tile, edge-padded to 4), W=6 (> 4 → two x-tiles).
+    x = np.arange(1, 19, dtype=np.float32).reshape(1, 3, 6)
+
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9, pad_edges=True),
+    )
+
+    arr = np.asarray(out.data, dtype=np.float32)
+    # Padded 4th row cropped → native 3 rows; replicated pad never reaches output.
+    assert arr.shape == (1, 3, 6)
+    np.testing.assert_allclose(arr, x)
+    assert out.meta["input_prep"]["pad_edges"] is True
+    assert out.meta["input_prep"]["pad_policy"] == "edge_replicate"
+
+
+def test_tiled_resize_model_warns_on_extreme_short_axis_upsample():
+    """A very short axis (>4x upsample) warns that its resolution is interpolated."""
+    emb = _FakeTileEmbedder()  # resize-capable
+    # tile_size=20: H=4 (20/4 = 5x > 4x → warn), W=40 (> 20 → tiled).
+    x = np.arange(4 * 40, dtype=np.float32).reshape(1, 4, 40)
+
+    with pytest.warns(UserWarning, match="upsamples the height"):
+        _call_embedder_get_embedding_with_input_prep(
+            embedder=emb,
+            spatial=_bbox(),
+            temporal=None,
+            sensor=None,
+            output=OutputSpec.grid(),
+            backend="gee",
+            device="cpu",
+            input_chw=x,
+            input_prep=InputPrepSpec.tile(tile_size=20, max_tiles=16, pad_edges=True),
+        )
+
+
 def test_tiled_pooled_mean_uses_area_weighted_merge():
     emb = _FakeTileEmbedder()
     x = np.arange(36, dtype=np.float32).reshape(1, 6, 6)
@@ -181,7 +344,10 @@ def test_tiled_single_path_falls_back_when_batch_lacks_model_config():
         backend="gee",
         device="cpu",
         input_chw=np.ones((1, 5, 5), dtype=np.float32),
-        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16),
+        # tile_snap_frac=0 keeps the 5x5/tile-4 cover-shift overlap (4 tiles) so this
+        # test exercises the multi-tile single-call fallback; snapping would otherwise
+        # collapse the 1px overhang to a single 4x4 tile.
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.0),
         model_config={"value": 7.0},
     )
 
@@ -557,3 +723,158 @@ def test_infer_chunk_tile_mode_uses_batch_on_gpu(monkeypatch):
         key = (i, mc.name)
         assert key in out, f"missing result for {key}"
         assert out[key].status.value == "ok"
+
+
+def test_snap_axis_to_tile_unit():
+    # Small overhang past a tile multiple -> snap down to the multiple.
+    assert _snap_axis_to_tile(68, tile_size=64, snap_frac=0.25) == 64
+    assert _snap_axis_to_tile(130, tile_size=64, snap_frac=0.25) == 128  # 2px over 128
+    assert _snap_axis_to_tile(5, tile_size=4, snap_frac=0.25) == 4
+    # Large overhang -> already small overlap, keep native (no fabricated pixels).
+    assert _snap_axis_to_tile(96, tile_size=64, snap_frac=0.25) == 96
+    assert _snap_axis_to_tile(126, tile_size=64, snap_frac=0.25) == 126
+    # Exact multiple and sub-tile dims are untouched.
+    assert _snap_axis_to_tile(128, tile_size=64, snap_frac=0.25) == 128
+    assert _snap_axis_to_tile(40, tile_size=64, snap_frac=0.25) == 40
+    # frac=0 disables snapping entirely.
+    assert _snap_axis_to_tile(68, tile_size=64, snap_frac=0.0) == 68
+
+
+def test_snap_disabled_keeps_native_overlap_tiling():
+    """With snapping off, a 1px overhang still spawns the cover-shift overlap tiles."""
+    emb = _FakeTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 5, 5), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.0),
+    )
+    assert out.meta["input_prep"]["resolved_mode"] == "tile"
+    assert out.meta["input_prep"]["tile_count"] == 4
+
+
+def test_snap_collapses_small_overhang_to_single_tile():
+    """A 1px overhang on both axes snaps away, collapsing 4 overlap tiles into one."""
+    pytest.importorskip("torch")
+    emb = _FakeTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 5, 5), dtype=np.float32),
+        # snap_frac=0.25 -> round(0.25*4)=1px threshold catches the 1px overhang
+        # (the default 0.1 rounds to a 0px threshold at this toy tile_size=4).
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.25),
+    )
+    arr = np.asarray(out.data, dtype=np.float32)
+    # Single 4x4 tile fed after snapping 5x5 -> 4x4; no overlap-stitch inflation.
+    assert arr.shape[-2:] == (4, 4)
+    # Single-tile path reports a plain resize, and only one model call ran.
+    assert emb.single_calls + emb.batch_calls >= 1
+    assert out.meta["input_prep"]["resolved_mode"] == "resize"
+
+
+def test_snap_reduces_tiles_and_records_meta_on_multitile_path():
+    """When snapping still leaves >1 tile, the stitch meta records the snap."""
+    pytest.importorskip("torch")
+    emb = _FakeTileEmbedder()
+    # H=5 (overhang 1 -> snap to 4), W=9 (overhang 1 -> snap to 8 -> two x-tiles).
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 5, 9), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.25),
+    )
+    prep = out.meta["input_prep"]
+    assert prep["resolved_mode"] == "tile"
+    assert prep["tile_count"] == 2
+    assert prep["snapped_from_hw"] == (5, 9)
+    assert prep["snapped_to_hw"] == (4, 8)
+    assert np.asarray(out.data).shape[-2:] == (4, 8)
+
+
+def test_batch_tiled_path_matches_single_snap_and_meta():
+    """Batch tiled dispatch snaps and stamps meta identically to the single path.
+
+    Regression: ``InferenceEngine._run_batch_tiled`` used to re-implement tiling
+    without snap-to-tile or the resize-aware pad policy, so the same ROI stitched
+    differently (and with a thinner ``input_prep`` block) under ``export_batch``
+    than under ``get_embedding``. Both now route through the shared tiling
+    helpers, so their stitched meta must be byte-identical.
+    """
+    pytest.importorskip("torch")
+    import threading
+
+    from rs_embed.pipelines.inference import InferenceEngine
+    from rs_embed.tools.serialization import jsonable
+
+    # H=5 (overhang 1 -> snap to 4), W=9 (overhang 1 -> snap to 8 -> two x-tiles).
+    x = np.ones((1, 5, 9), dtype=np.float32)
+    prep_spec = InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.25)
+
+    # Single-point reference.
+    single = _call_embedder_get_embedding_with_input_prep(
+        embedder=_FakeTileEmbedder(),
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=prep_spec,
+    )
+    single_prep = single.meta["input_prep"]
+
+    # Batch path through the engine.
+    engine = InferenceEngine(
+        device="cpu",
+        output=OutputSpec.grid(),
+        config=ExportConfig(input_prep=prep_spec, max_retries=0),
+    )
+    done: list[int] = []
+    out, ok = engine._run_batch_tiled(
+        idxs=[0],
+        spatials=[_bbox()],
+        temporal=None,
+        sensor=None,
+        embedder=_FakeTileEmbedder(),
+        lock=threading.Lock(),
+        backend="gee",
+        get_input_fn=lambda _i: x,
+        batch_size=16,
+        continue_on_error=False,
+        on_done=done.append,
+        use_lock=False,
+        model_name="fake_tile",
+    )
+
+    assert ok is True
+    assert done == [0]
+    batch_prep = out[0].meta["input_prep"]
+
+    # The drift fix in action: batch now snaps (2 tiles, not the 6 an un-snapped
+    # cover-shift over 5x9 would spawn) and carries the full reproducibility block.
+    assert batch_prep["tile_count"] == 2
+    assert batch_prep["pad_policy"] == "none_model_resizes_tiles"
+    assert batch_prep["tile_snap_frac"] == 0.25
+    assert tuple(batch_prep["snapped_from_hw"]) == (5, 9)
+    assert tuple(batch_prep["snapped_to_hw"]) == (4, 8)
+
+    # Parity: the two paths stamp an identical input_prep block (jsonable() has
+    # already turned the batch path's tuples into lists, so normalize both).
+    assert jsonable(single_prep) == batch_prep
