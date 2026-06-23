@@ -239,7 +239,21 @@ def _slice_and_pad_tile(
         pad_spec = [(0, 0)] * tile.ndim
         pad_spec[-2] = (0, max(0, tile_size - valid_h))
         pad_spec[-1] = (0, max(0, tile_size - valid_w))
-        tile = np.pad(tile, pad_spec, mode="constant", constant_values=float(fill_value))
+        # Replicate the edge rather than fill with a constant. A patch/ViT model
+        # tokenizes the padded tile in fixed-size patches; when the valid region
+        # does not end on a patch boundary, the straddling patch is computed over
+        # valid + padded pixels. Constant (e.g. zero) padding drags that boundary
+        # token toward an out-of-distribution "all fill" point, which surfaces as a
+        # flat colored "dead band" along the short edge of the stitched grid.
+        # Edge replication keeps the boundary patch on real surface values, so it
+        # blends in; fully-padded patches beyond the valid fraction are cropped by
+        # the stitcher regardless of pad content. ``fill_value`` is retained for the
+        # degenerate case of a zero-extent tile, where ``mode="edge"`` is undefined.
+        pad_mode = "edge" if (valid_h > 0 and valid_w > 0) else "constant"
+        if pad_mode == "edge":
+            tile = np.pad(tile, pad_spec, mode="edge")
+        else:
+            tile = np.pad(tile, pad_spec, mode="constant", constant_values=float(fill_value))
     return tile, {
         "y0": int(y0),
         "y1": int(y1),

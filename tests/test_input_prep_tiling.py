@@ -6,6 +6,7 @@ from rs_embed.core.types import ExportConfig
 from rs_embed.tools.tiling import (
     INPUT_PREP_VERSION,
     _call_embedder_get_embedding_with_input_prep,
+    _slice_and_pad_tile,
     _tile_yx_starts,
 )
 
@@ -137,6 +138,31 @@ def test_tiled_grid_stitch_crops_edge_padding_dead_band():
     np.testing.assert_allclose(arr, x)
     assert out.meta["grid_hw"] == (3, 6)
     assert out.meta["input_prep"]["stitched_grid_shape"] == (3, 6)
+
+
+def test_slice_and_pad_tile_replicates_edge_not_constant_fill():
+    """Edge padding must replicate boundary pixels, not write a constant fill.
+
+    A patch/ViT model tokenizes the padded tile; constant (zero) padding turns
+    the patch straddling the valid/pad boundary into an out-of-distribution
+    token that renders as a flat "dead band". Edge replication keeps that patch
+    on real surface values. (regression: residual band on Prithvi's short edge.)
+    """
+    # Distinct per-row values so a replicated edge is visibly different from a
+    # constant fill of 0.0.
+    x = (np.arange(1, 4, dtype=np.float32)[:, None] * np.ones((1, 3), dtype=np.float32))
+    x = x[None]  # (1, 3, 3): rows are 1.0, 2.0, 3.0
+
+    tile, meta = _slice_and_pad_tile(
+        x, y0=0, x0=0, tile_size=5, pad_edges=True, fill_value=0.0
+    )
+    assert tile.shape == (1, 5, 5)
+    assert meta["valid_h"] == 3 and meta["valid_w"] == 3
+    # Bottom padding rows replicate the last valid row (3.0), not the 0.0 fill.
+    np.testing.assert_allclose(tile[0, 3:, :3], 3.0)
+    # Right padding cols replicate the last valid col of each row.
+    np.testing.assert_allclose(tile[0, :3, 3:], np.broadcast_to(x[0, :, 2:3], (3, 2)))
+    assert not np.any(tile == 0.0)
 
 
 def test_tiled_pooled_mean_uses_area_weighted_merge():
