@@ -30,17 +30,17 @@ from ..tools.runtime import (
 from ..tools.runtime import call_embedder_get_embedding as _runtime_call_embedder_get_embedding
 from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
 from ..tools.tiling import (
-    INPUT_PREP_VERSION,
     _aggregate_tiled_embeddings,
     _augment_model_config_for_tiled_dispatch,
+    _build_tile_prep_meta,
     _call_embedder_get_embedding_with_input_prep,
-    _embedder_default_image_size,
     _estimate_tile_count,
+    _input_hw,
+    _maybe_snap_input,
     _resolve_input_prep_spec,
-    _slice_and_pad_tile,
+    _resolve_tile_params,
     _stamp_input_prep_meta,
-    _tile_subspatial,
-    _tile_yx_starts,
+    _tile_one_image,
 )
 from .runner import run_with_retry
 
@@ -421,11 +421,11 @@ class InferenceEngine:
         spec = input_prep_resolved if input_prep_resolved is not None else self.input_prep_resolved
         out: dict[int, TaskResult] = {}
         try:
-            model_img = _embedder_default_image_size(embedder)
-            tile_size = int(spec.tile_size or model_img or 0)
+            params = _resolve_tile_params(embedder, spec)
+            tile_size = params.tile_size
             if tile_size <= 0:
                 return out, False
-            stride = int(spec.tile_stride or tile_size)
+            stride = params.stride
             if stride <= 0 or stride != tile_size:
                 return out, False
             tiled_model_config = _augment_model_config_for_tiled_dispatch(
@@ -454,11 +454,20 @@ class InferenceEngine:
             # fetch_meta), parallel to ``all_tiles``. Only consumed by embedders
             # whose batch API accepts ``fetch_metas`` (e.g. satvision).
             all_tile_fetch_metas: list[dict[str, Any] | None] = []
-            # {spatial_idx: (flat_start, tile_count, tile_metas, h, w)}
-            tile_map: dict[int, tuple[int, int, list[dict[str, Any]], int, int]] = {}
+            # {spatial_idx: (flat_start, tile_count, tile_metas, h, w, snapped_from_hw)}
+            tile_map: dict[
+                int, tuple[int, int, list[dict[str, Any]], int, int, tuple[int, int] | None]
+            ] = {}
 
+            fill_value = float(sensor.fill_value) if sensor is not None else 0.0
             for i, spatial, inp in ready:
-                h, w = int(inp.shape[-2]), int(inp.shape[-1])
+                # Snap-to-tile and edge-pad policy go through the same shared
+                # helpers as the single-point path so batch- and single-dispatched
+                # stitches (and their input_prep meta) are identical.
+                inp, snapped_from = _maybe_snap_input(
+                    inp, tile_size=tile_size, stride=stride, snap_frac=spec.tile_snap_frac
+                )
+                h, w = _input_hw(inp)
                 num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
                 if num_tiles > spec.max_tiles_hard:
                     err = ModelError(
@@ -478,42 +487,20 @@ class InferenceEngine:
                         "memory-heavy. Tiling proceeds; raise max_tiles to silence this warning.",
                         stacklevel=2,
                     )
-                fill_value = float(sensor.fill_value) if sensor is not None else 0.0
-                ys, xs = _tile_yx_starts(h=h, w=w, tile_size=tile_size, stride=stride)
-                tiles: list[np.ndarray] = []
-                tile_metas: list[dict[str, Any]] = []
-                tile_spatials_pt: list[SpatialSpec] = []
-                for r, y0 in enumerate(ys):
-                    for c, x0 in enumerate(xs):
-                        tile, meta = _slice_and_pad_tile(
-                            inp,
-                            y0=int(y0),
-                            x0=int(x0),
-                            tile_size=tile_size,
-                            pad_edges=bool(spec.pad_edges),
-                            fill_value=fill_value,
-                        )
-                        meta["row"] = int(r)
-                        meta["col"] = int(c)
-                        tiles.append(tile)
-                        tile_metas.append(meta)
-                        tile_spatials_pt.append(
-                            _tile_subspatial(
-                                spatial,
-                                full_h=h,
-                                full_w=w,
-                                y0=meta["y0"],
-                                y1=meta["y1"],
-                                x0=meta["x0"],
-                                x1=meta["x1"],
-                            )
-                        )
+                tiles, tile_metas, tile_spatials_pt = _tile_one_image(
+                    inp,
+                    spatial=spatial,
+                    tile_size=tile_size,
+                    stride=stride,
+                    pad_edges=params.effective_pad_edges,
+                    fill_value=fill_value,
+                )
                 flat_start = len(all_tiles)
                 all_tiles.extend(tiles)
                 all_tile_spatials.extend(tile_spatials_pt)
                 img_fmeta = get_fetch_meta_fn(i) if get_fetch_meta_fn is not None else None
                 all_tile_fetch_metas.extend([img_fmeta] * len(tiles))
-                tile_map[i] = (flat_start, len(tiles), tile_metas, h, w)
+                tile_map[i] = (flat_start, len(tiles), tile_metas, h, w, snapped_from)
 
             if not all_tiles:
                 return out, True
@@ -560,7 +547,7 @@ class InferenceEngine:
             # Step 3: stitch tiles back into per-point embeddings. Iterate
             # tile_map (not ready): points that exceeded max_tiles under
             # continue_on_error were already marked failed and never tiled.
-            for i, (flat_start, tile_count, tile_metas, h, w) in tile_map.items():
+            for i, (flat_start, tile_count, tile_metas, h, w, snapped_from) in tile_map.items():
                 tile_embs = all_tile_embs[flat_start : flat_start + tile_count]
                 tile_embs_n = [
                     normalize_embedding_output(emb=e, output=self.output) for e in tile_embs
@@ -574,19 +561,19 @@ class InferenceEngine:
                         )
                     )
                 else:
-                    prep_meta: dict[str, Any] = {
-                        "prep_version": INPUT_PREP_VERSION,
-                        "requested_mode": spec.mode,
-                        "resolved_mode": "tile",
-                        "tile_layout": "cover_shift",
-                        "tile_size": int(tile_size),
-                        "tile_stride": int(stride),
-                        "tile_count": int(tile_count),
-                        "pad_edges": bool(spec.pad_edges),
-                        "max_tiles": int(spec.max_tiles),
-                        "max_tiles_hard": int(spec.max_tiles_hard),
-                        "input_hw": (int(h), int(w)),
-                    }
+                    prep_meta = _build_tile_prep_meta(
+                        requested_mode=spec.mode,
+                        tile_size=tile_size,
+                        stride=stride,
+                        tile_count=tile_count,
+                        effective_pad_edges=params.effective_pad_edges,
+                        model_resizes=params.model_resizes,
+                        max_tiles=spec.max_tiles,
+                        max_tiles_hard=spec.max_tiles_hard,
+                        input_hw=(h, w),
+                        tile_snap_frac=spec.tile_snap_frac,
+                        snapped_from_hw=snapped_from,
+                    )
                     stitched = _aggregate_tiled_embeddings(
                         embs=tile_embs_n,
                         tile_meta=tile_metas,

@@ -8,6 +8,7 @@ backward-compatibility with test imports is needed.
 from __future__ import annotations
 
 import math
+import os
 import warnings
 from dataclasses import dataclass
 from typing import Any
@@ -62,6 +63,7 @@ class _ResolvedInputPrepSpec:
     max_tiles: int
     max_tiles_hard: int
     pad_edges: bool
+    tile_snap_frac: float
 
 
 def _resolve_input_prep_spec(
@@ -94,6 +96,18 @@ def _resolve_input_prep_spec(
     max_tiles = int(getattr(spec, "max_tiles", 64))
     max_tiles_hard = int(getattr(spec, "max_tiles_hard", 1024))
     pad_edges = bool(getattr(spec, "pad_edges", True))
+    tile_snap_frac = float(getattr(spec, "tile_snap_frac", 0.1))
+    env_snap = str(os.environ.get("RS_EMBED_TILE_SNAP_FRAC") or "").strip()
+    if env_snap:
+        try:
+            tile_snap_frac = float(env_snap)
+        except ValueError as e:
+            raise ModelError(
+                f"RS_EMBED_TILE_SNAP_FRAC must be a float in [0, 0.5], got {env_snap!r}."
+            ) from e
+    # Snapping more than half a tile would downscale an axis by >33%, which
+    # distorts more than the overlap it removes; clamp to a safe band.
+    tile_snap_frac = float(min(0.5, max(0.0, tile_snap_frac)))
     if tile_size is not None:
         tile_size = int(tile_size)
         if tile_size <= 0:
@@ -113,6 +127,7 @@ def _resolve_input_prep_spec(
         max_tiles=max_tiles,
         max_tiles_hard=max_tiles_hard,
         pad_edges=pad_edges,
+        tile_snap_frac=tile_snap_frac,
     )
 
 
@@ -151,6 +166,115 @@ def _input_hw(x: np.ndarray) -> tuple[int, int]:
             f"Tiling currently supports CHW or TCHW inputs only, got shape={getattr(x, 'shape', None)}"
         )
     return int(x.shape[-2]), int(x.shape[-1])
+
+
+def _snap_axis_to_tile(dim: int, *, tile_size: int, snap_frac: float) -> int:
+    """Return the target length for one axis so it tiles without a degenerate overlap.
+
+    With ``stride == tile_size`` the tiler keeps tiles non-overlapping except for
+    the trailing tile, which is shifted back to cover the edge. That shift overlaps
+    the previous tile by ``tile_size - (dim % tile_size)`` pixels, so a *small*
+    overhang past a tile multiple produces a *large* overlap — two near-identical
+    tiles whose stitched grid carries duplicated cells. When the overhang is within
+    ``snap_frac * tile_size`` we drop it by downscaling the axis to the multiple
+    (one fewer, fully-covered tile). Only downscaling is used: a large overhang
+    already yields a small overlap, so it needs no fix and no fabricated pixels.
+    """
+    if tile_size <= 0 or snap_frac <= 0.0 or dim <= tile_size:
+        return int(dim)
+    rem = int(dim) % int(tile_size)
+    if 0 < rem <= int(round(snap_frac * tile_size)):
+        return int(dim) - rem
+    return int(dim)
+
+
+def _resize_spatial_hw(x: np.ndarray, *, out_h: int, out_w: int) -> np.ndarray:
+    """Bilinearly resize the last two (spatial) dims of a CHW/TCHW array.
+
+    Used to apply :func:`_snap_axis_to_tile` before tiling. Returns ``x`` unchanged
+    if torch is unavailable so snapping degrades gracefully to native tiling.
+    """
+    h, w = _input_hw(x)
+    if int(out_h) == h and int(out_w) == w:
+        return x
+    try:
+        import torch
+        import torch.nn.functional as F
+    except Exception:
+        return x
+    t = torch.from_numpy(np.asarray(x, dtype=np.float32))
+    squeeze = t.ndim == 3
+    if squeeze:
+        t = t.unsqueeze(0)  # CHW -> 1CHW; TCHW is already NCHW-shaped for interpolate
+    y = F.interpolate(t, size=(int(out_h), int(out_w)), mode="bilinear", align_corners=False)
+    if squeeze:
+        y = y[0]
+    return y.detach().cpu().numpy().astype(np.float32)
+
+
+@dataclass(frozen=True)
+class _TileParams:
+    """Per-(embedder, spec) tiling parameters shared by single and batch paths."""
+
+    tile_size: int
+    stride: int
+    model_resizes: bool
+    effective_pad_edges: bool
+
+
+def _resolve_tile_params(
+    embedder: Any,
+    input_prep: _ResolvedInputPrepSpec,
+) -> _TileParams:
+    """Resolve tile size/stride and the padding policy for an embedder + spec.
+
+    ``tile_size`` is the explicit ``input_prep.tile_size`` or, failing that, the
+    model's advertised ``describe().defaults.image_size``; ``0`` signals that no
+    tile size could be determined and the caller should fall back to a plain
+    call. A model that advertises a fixed input size resizes every tile to it,
+    so a sub-tile edge tile needs no edge padding: ``effective_pad_edges`` is
+    forced off and the boundary "dead band" is avoided.
+    """
+    model_img = _embedder_default_image_size(embedder)
+    tile_size = int(input_prep.tile_size or model_img or 0)
+    stride = int(input_prep.tile_stride or tile_size)
+    model_resizes = model_img is not None and int(model_img) > 0
+    effective_pad_edges = bool(input_prep.pad_edges) and not model_resizes
+    return _TileParams(
+        tile_size=tile_size,
+        stride=stride,
+        model_resizes=model_resizes,
+        effective_pad_edges=effective_pad_edges,
+    )
+
+
+def _maybe_snap_input(
+    x: np.ndarray,
+    *,
+    tile_size: int,
+    stride: int,
+    snap_frac: float,
+) -> tuple[np.ndarray, tuple[int, int] | None]:
+    """Apply snap-to-tile downscaling to an input before tiling.
+
+    Returns ``(x_maybe_resized, snapped_from_hw)``: ``snapped_from_hw`` is the
+    original ``(h, w)`` when a snap happened, else ``None`` (no snap requested,
+    axes already on a tile multiple, or torch unavailable so the resize was a
+    no-op). Only applies under the ``stride == tile_size`` overlap-shift model;
+    see :func:`_snap_axis_to_tile`.
+    """
+    h, w = _input_hw(x)
+    if not (stride == tile_size and snap_frac > 0.0):
+        return x, None
+    snap_h = _snap_axis_to_tile(h, tile_size=tile_size, snap_frac=snap_frac)
+    snap_w = _snap_axis_to_tile(w, tile_size=tile_size, snap_frac=snap_frac)
+    if (snap_h, snap_w) == (h, w):
+        return x, None
+    x_snapped = _resize_spatial_hw(x, out_h=snap_h, out_w=snap_w)
+    # Guard against a no-op when torch is unavailable (resize returns x).
+    if _input_hw(x_snapped) == (h, w):
+        return x, None
+    return x_snapped, (int(h), int(w))
 
 
 def _augment_model_config_for_tiled_dispatch(
@@ -239,7 +363,21 @@ def _slice_and_pad_tile(
         pad_spec = [(0, 0)] * tile.ndim
         pad_spec[-2] = (0, max(0, tile_size - valid_h))
         pad_spec[-1] = (0, max(0, tile_size - valid_w))
-        tile = np.pad(tile, pad_spec, mode="constant", constant_values=float(fill_value))
+        # Replicate the edge rather than fill with a constant. A patch/ViT model
+        # tokenizes the padded tile in fixed-size patches; when the valid region
+        # does not end on a patch boundary, the straddling patch is computed over
+        # valid + padded pixels. Constant (e.g. zero) padding drags that boundary
+        # token toward an out-of-distribution "all fill" point, which surfaces as a
+        # flat colored "dead band" along the short edge of the stitched grid.
+        # Edge replication keeps the boundary patch on real surface values, so it
+        # blends in; fully-padded patches beyond the valid fraction are cropped by
+        # the stitcher regardless of pad content. ``fill_value`` is retained for the
+        # degenerate case of a zero-extent tile, where ``mode="edge"`` is undefined.
+        pad_mode = "edge" if (valid_h > 0 and valid_w > 0) else "constant"
+        if pad_mode == "edge":
+            tile = np.pad(tile, pad_spec, mode="edge")
+        else:
+            tile = np.pad(tile, pad_spec, mode="constant", constant_values=float(fill_value))
     return tile, {
         "y0": int(y0),
         "y1": int(y1),
@@ -250,17 +388,58 @@ def _slice_and_pad_tile(
     }
 
 
+def _tile_one_image(
+    x: np.ndarray,
+    *,
+    spatial: SpatialSpec,
+    tile_size: int,
+    stride: int,
+    pad_edges: bool,
+    fill_value: float,
+) -> tuple[list[np.ndarray], list[dict[str, int]], list[SpatialSpec]]:
+    """Slice one CHW/TCHW image into a row-major tile grid.
+
+    Returns parallel lists ``(tiles, tile_meta, tile_spatials)``; each tile_meta
+    carries ``row``/``col`` plus the slice bounds from :func:`_slice_and_pad_tile`,
+    and each spatial is the sub-extent from :func:`_tile_subspatial`. Shared by
+    the single-point and batch tiled dispatch paths so both slice identically.
+    """
+    h, w = _input_hw(x)
+    ys, xs = _tile_yx_starts(h=h, w=w, tile_size=tile_size, stride=stride)
+    tiles: list[np.ndarray] = []
+    tile_meta: list[dict[str, int]] = []
+    tile_spatials: list[SpatialSpec] = []
+    for r, y0 in enumerate(ys):
+        for c, x0 in enumerate(xs):
+            tile, meta = _slice_and_pad_tile(
+                x,
+                y0=int(y0),
+                x0=int(x0),
+                tile_size=tile_size,
+                pad_edges=pad_edges,
+                fill_value=fill_value,
+            )
+            meta["row"] = int(r)
+            meta["col"] = int(c)
+            tiles.append(tile)
+            tile_meta.append(meta)
+            tile_spatials.append(
+                _tile_subspatial(
+                    spatial,
+                    full_h=h,
+                    full_w=w,
+                    y0=meta["y0"],
+                    y1=meta["y1"],
+                    x0=meta["x0"],
+                    x1=meta["x1"],
+                )
+            )
+    return tiles, tile_meta, tile_spatials
+
+
 # ---------------------------------------------------------------------------
 # Tile aggregation (stitching)
 # ---------------------------------------------------------------------------
-
-
-def _crop_len_for_valid(valid: int, *, nominal: int, out_len: int) -> int:
-    if nominal <= 0:
-        return int(out_len)
-    ratio = float(valid) / float(nominal)
-    n = int(round(ratio * float(out_len)))
-    return max(1, min(int(out_len), n))
 
 
 def _midpoint_owned_ranges(
@@ -405,6 +584,18 @@ def _aggregate_tiled_embeddings(
     row_owned = _midpoint_owned_ranges(row_items)
     col_owned = _midpoint_owned_ranges(col_items)
 
+    # When ``pad_edges`` is on, an edge tile shorter than ``tile_size`` is
+    # bottom/right-padded to ``tile_size`` *before* inference, so the per-tile
+    # output grid spans the full padded ``tile_size`` — only the leading
+    # ``valid / tile_size`` fraction is real data. The input→feature mapping
+    # below must therefore measure feature cells against the padded extent
+    # (``tile_size``), not against ``valid``; otherwise the padded region's grid
+    # cells (constant "dead band" embeddings) are kept instead of cropped.
+    pad_edges = bool(prep_meta.get("pad_edges", True))
+
+    def _span(valid: int) -> int:
+        return int(tile_size) if pad_edges else int(valid)
+
     row_heights = [0] * nrows
     col_widths = [0] * ncols
     row_crop: dict[int, tuple[int, int]] = {}
@@ -419,7 +610,7 @@ def _aggregate_tiled_embeddings(
         fy0, fy1 = _map_input_subrange_to_feature(
             rel_start=rel_s,
             rel_end=rel_e,
-            valid_len=int(rr["valid"]),
+            valid_len=_span(int(rr["valid"])),
             out_len=int(rr["out_len"]),
         )
         row_crop[r] = (fy0, fy1)
@@ -434,7 +625,7 @@ def _aggregate_tiled_embeddings(
         fx0, fx1 = _map_input_subrange_to_feature(
             rel_start=rel_s,
             rel_end=rel_e,
-            valid_len=int(cc["valid"]),
+            valid_len=_span(int(cc["valid"])),
             out_len=int(cc["out_len"]),
         )
         col_crop[c] = (fx0, fx1)
@@ -475,6 +666,51 @@ def _aggregate_tiled_embeddings(
 # ---------------------------------------------------------------------------
 
 
+def _build_tile_prep_meta(
+    *,
+    requested_mode: str,
+    tile_size: int,
+    stride: int,
+    tile_count: int,
+    effective_pad_edges: bool,
+    model_resizes: bool,
+    max_tiles: int,
+    max_tiles_hard: int,
+    input_hw: tuple[int, int],
+    tile_snap_frac: float,
+    snapped_from_hw: tuple[int, int] | None = None,
+) -> dict[str, Any]:
+    """Build the ``input_prep`` meta block stamped onto a stitched embedding.
+
+    Shared by the single-point and batch tiled dispatch paths so both stamp an
+    identical, complete reproducibility block (same keys, same ``pad_policy``
+    derivation, same snap bookkeeping).
+    """
+    prep_meta: dict[str, Any] = {
+        "prep_version": INPUT_PREP_VERSION,
+        "requested_mode": str(requested_mode),
+        "resolved_mode": "tile",
+        "tile_layout": "cover_shift",
+        "tile_size": int(tile_size),
+        "tile_stride": int(stride),
+        "tile_count": int(tile_count),
+        "pad_edges": bool(effective_pad_edges),
+        "pad_policy": (
+            "none_model_resizes_tiles"
+            if model_resizes
+            else ("edge_replicate" if effective_pad_edges else "none")
+        ),
+        "max_tiles": int(max_tiles),
+        "max_tiles_hard": int(max_tiles_hard),
+        "input_hw": (int(input_hw[0]), int(input_hw[1])),
+        "tile_snap_frac": float(tile_snap_frac),
+    }
+    if snapped_from_hw is not None:
+        prep_meta["snapped_from_hw"] = (int(snapped_from_hw[0]), int(snapped_from_hw[1]))
+        prep_meta["snapped_to_hw"] = (int(input_hw[0]), int(input_hw[1]))
+    return prep_meta
+
+
 def _call_embedder_get_embedding_tiled(
     *,
     embedder: Any,
@@ -489,9 +725,17 @@ def _call_embedder_get_embedding_tiled(
     model_config: dict[str, Any] | None = None,
 ) -> Embedding:
     x = np.asarray(input_chw, dtype=np.float32)
-    h, w = _input_hw(x)
-    model_img = _embedder_default_image_size(embedder)
-    tile_size = int(input_prep.tile_size or model_img or 0)
+    params = _resolve_tile_params(embedder, input_prep)
+    tile_size = params.tile_size
+    # A model that advertises a fixed input size resizes every tile to it, so a
+    # sub-tile edge tile (a dimension shorter than ``tile_size``) can be fed at
+    # its natural size and let the model upsample it — no padding, no fabricated
+    # pixels, no boundary "dead band". This is the anisotropic case: the long
+    # axis tiles (native resolution preserved) while the short axis resizes.
+    # Edge-replicate padding is kept only as the fallback for models without a
+    # fixed input size, which may require exactly ``tile_size`` tiles.
+    model_resizes = params.model_resizes
+    effective_pad_edges = params.effective_pad_edges
     if tile_size <= 0:
         # No tile size could be determined (no explicit tile_size and the model
         # exposes no describe().defaults.image_size). Tiling is the package
@@ -508,9 +752,17 @@ def _call_embedder_get_embedding_tiled(
             device=device,
             input_chw=x,
         )
-    stride = int(input_prep.tile_stride or tile_size)
+    stride = params.stride
     if stride <= 0:
         raise ModelError(f"Invalid tile_stride={stride}")
+    # Snap-to-tile: when an axis only slightly exceeds a tile multiple, downscale
+    # that overhang away so the axis tiles cleanly instead of spawning a
+    # near-fully-overlapping shifted edge tile (which duplicates cells in the
+    # stitched grid). Only applies under the stride==tile_size overlap-shift model.
+    x, snapped_input_hw = _maybe_snap_input(
+        x, tile_size=tile_size, stride=stride, snap_frac=input_prep.tile_snap_frac
+    )
+    h, w = _input_hw(x)
     tiled_model_config = _augment_model_config_for_tiled_dispatch(
         embedder,
         model_config,
@@ -518,12 +770,17 @@ def _call_embedder_get_embedding_tiled(
     )
     num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
     if input_prep.mode == "auto":
+        # A dimension smaller than a tile only forces a plain resize for models
+        # that cannot resize a sub-tile edge tile themselves. Resize-capable
+        # models tile the long axis (keeping its native resolution) and resize
+        # the short axis, so a wide/flat or tall/thin ROI keeps detail on its
+        # long side instead of being squashed by a whole-ROI resize.
+        small_dim_forces_resize = (h <= tile_size or w <= tile_size) and not model_resizes
         if (
             output.mode != "grid"
-            or h <= tile_size
-            or w <= tile_size
             or num_tiles <= 1
             or num_tiles > input_prep.max_tiles
+            or small_dim_forces_resize
         ):
             return _call_embedder_get_embedding(
                 embedder=embedder,
@@ -556,36 +813,37 @@ def _call_embedder_get_embedding_tiled(
             "boundary tiles may still be shifted to avoid padding."
         )
 
-    ys, xs = _tile_yx_starts(h=h, w=w, tile_size=tile_size, stride=stride)
+    # In the anisotropic case (one axis tiled, the other shorter than a tile and
+    # resized) a very short axis is upsampled hard: the embedding there is
+    # interpolated from few native pixels. Flag it (don't block) so the low
+    # native resolution on that axis is visible rather than silent.
+    if model_resizes:
+        if h < tile_size and w > tile_size and (tile_size / max(1, h)) > 4.0:
+            warnings.warn(
+                f"input_prep tiling upsamples the height {h}px to the model input "
+                f"{tile_size}px (~{tile_size / max(1, h):.1f}x); the embedding's vertical "
+                "resolution is interpolated from few native pixels. Consider a taller ROI "
+                "or input_prep='resize'.",
+                stacklevel=2,
+            )
+        if w < tile_size and h > tile_size and (tile_size / max(1, w)) > 4.0:
+            warnings.warn(
+                f"input_prep tiling upsamples the width {w}px to the model input "
+                f"{tile_size}px (~{tile_size / max(1, w):.1f}x); the embedding's horizontal "
+                "resolution is interpolated from few native pixels. Consider a wider ROI "
+                "or input_prep='resize'.",
+                stacklevel=2,
+            )
+
     fill_value = float(sensor.fill_value) if sensor is not None else 0.0
-    tiles: list[np.ndarray] = []
-    tile_meta: list[dict[str, int]] = []
-    tile_spatials: list[SpatialSpec] = []
-    for r, y0 in enumerate(ys):
-        for c, x0 in enumerate(xs):
-            tile, meta = _slice_and_pad_tile(
-                x,
-                y0=int(y0),
-                x0=int(x0),
-                tile_size=tile_size,
-                pad_edges=bool(input_prep.pad_edges),
-                fill_value=fill_value,
-            )
-            meta["row"] = int(r)
-            meta["col"] = int(c)
-            tiles.append(tile)
-            tile_meta.append(meta)
-            tile_spatials.append(
-                _tile_subspatial(
-                    spatial,
-                    full_h=h,
-                    full_w=w,
-                    y0=meta["y0"],
-                    y1=meta["y1"],
-                    x0=meta["x0"],
-                    x1=meta["x1"],
-                )
-            )
+    tiles, tile_meta, tile_spatials = _tile_one_image(
+        x,
+        spatial=spatial,
+        tile_size=tile_size,
+        stride=stride,
+        pad_edges=effective_pad_edges,
+        fill_value=fill_value,
+    )
 
     if len(tiles) <= 1:
         return _call_embedder_get_embedding(
@@ -656,19 +914,19 @@ def _call_embedder_get_embedding_tiled(
             for i in range(len(tiles))
         ]
 
-    prep_meta: dict[str, Any] = {
-        "prep_version": INPUT_PREP_VERSION,
-        "requested_mode": input_prep.mode,
-        "resolved_mode": "tile",
-        "tile_layout": "cover_shift",
-        "tile_size": int(tile_size),
-        "tile_stride": int(stride),
-        "tile_count": int(len(tiles)),
-        "pad_edges": bool(input_prep.pad_edges),
-        "max_tiles": int(input_prep.max_tiles),
-        "max_tiles_hard": int(input_prep.max_tiles_hard),
-        "input_hw": (int(h), int(w)),
-    }
+    prep_meta = _build_tile_prep_meta(
+        requested_mode=input_prep.mode,
+        tile_size=tile_size,
+        stride=stride,
+        tile_count=len(tiles),
+        effective_pad_edges=effective_pad_edges,
+        model_resizes=model_resizes,
+        max_tiles=input_prep.max_tiles,
+        max_tiles_hard=input_prep.max_tiles_hard,
+        input_hw=(h, w),
+        tile_snap_frac=input_prep.tile_snap_frac,
+        snapped_from_hw=snapped_input_hw,
+    )
     return _aggregate_tiled_embeddings(
         embs=tile_embs,
         tile_meta=tile_meta,
