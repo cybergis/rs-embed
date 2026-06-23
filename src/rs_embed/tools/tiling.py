@@ -8,6 +8,7 @@ backward-compatibility with test imports is needed.
 from __future__ import annotations
 
 import math
+import os
 import warnings
 from dataclasses import dataclass
 from typing import Any
@@ -62,6 +63,7 @@ class _ResolvedInputPrepSpec:
     max_tiles: int
     max_tiles_hard: int
     pad_edges: bool
+    tile_snap_frac: float
 
 
 def _resolve_input_prep_spec(
@@ -94,6 +96,18 @@ def _resolve_input_prep_spec(
     max_tiles = int(getattr(spec, "max_tiles", 64))
     max_tiles_hard = int(getattr(spec, "max_tiles_hard", 1024))
     pad_edges = bool(getattr(spec, "pad_edges", True))
+    tile_snap_frac = float(getattr(spec, "tile_snap_frac", 0.1))
+    env_snap = str(os.environ.get("RS_EMBED_TILE_SNAP_FRAC") or "").strip()
+    if env_snap:
+        try:
+            tile_snap_frac = float(env_snap)
+        except ValueError as e:
+            raise ModelError(
+                f"RS_EMBED_TILE_SNAP_FRAC must be a float in [0, 0.5], got {env_snap!r}."
+            ) from e
+    # Snapping more than half a tile would downscale an axis by >33%, which
+    # distorts more than the overlap it removes; clamp to a safe band.
+    tile_snap_frac = float(min(0.5, max(0.0, tile_snap_frac)))
     if tile_size is not None:
         tile_size = int(tile_size)
         if tile_size <= 0:
@@ -113,6 +127,7 @@ def _resolve_input_prep_spec(
         max_tiles=max_tiles,
         max_tiles_hard=max_tiles_hard,
         pad_edges=pad_edges,
+        tile_snap_frac=tile_snap_frac,
     )
 
 
@@ -151,6 +166,50 @@ def _input_hw(x: np.ndarray) -> tuple[int, int]:
             f"Tiling currently supports CHW or TCHW inputs only, got shape={getattr(x, 'shape', None)}"
         )
     return int(x.shape[-2]), int(x.shape[-1])
+
+
+def _snap_axis_to_tile(dim: int, *, tile_size: int, snap_frac: float) -> int:
+    """Return the target length for one axis so it tiles without a degenerate overlap.
+
+    With ``stride == tile_size`` the tiler keeps tiles non-overlapping except for
+    the trailing tile, which is shifted back to cover the edge. That shift overlaps
+    the previous tile by ``tile_size - (dim % tile_size)`` pixels, so a *small*
+    overhang past a tile multiple produces a *large* overlap — two near-identical
+    tiles whose stitched grid carries duplicated cells. When the overhang is within
+    ``snap_frac * tile_size`` we drop it by downscaling the axis to the multiple
+    (one fewer, fully-covered tile). Only downscaling is used: a large overhang
+    already yields a small overlap, so it needs no fix and no fabricated pixels.
+    """
+    if tile_size <= 0 or snap_frac <= 0.0 or dim <= tile_size:
+        return int(dim)
+    rem = int(dim) % int(tile_size)
+    if 0 < rem <= int(round(snap_frac * tile_size)):
+        return int(dim) - rem
+    return int(dim)
+
+
+def _resize_spatial_hw(x: np.ndarray, *, out_h: int, out_w: int) -> np.ndarray:
+    """Bilinearly resize the last two (spatial) dims of a CHW/TCHW array.
+
+    Used to apply :func:`_snap_axis_to_tile` before tiling. Returns ``x`` unchanged
+    if torch is unavailable so snapping degrades gracefully to native tiling.
+    """
+    h, w = _input_hw(x)
+    if int(out_h) == h and int(out_w) == w:
+        return x
+    try:
+        import torch
+        import torch.nn.functional as F
+    except Exception:
+        return x
+    t = torch.from_numpy(np.asarray(x, dtype=np.float32))
+    squeeze = t.ndim == 3
+    if squeeze:
+        t = t.unsqueeze(0)  # CHW -> 1CHW; TCHW is already NCHW-shaped for interpolate
+    y = F.interpolate(t, size=(int(out_h), int(out_w)), mode="bilinear", align_corners=False)
+    if squeeze:
+        y = y[0]
+    return y.detach().cpu().numpy().astype(np.float32)
 
 
 def _augment_model_config_for_tiled_dispatch(
@@ -546,6 +605,22 @@ def _call_embedder_get_embedding_tiled(
     stride = int(input_prep.tile_stride or tile_size)
     if stride <= 0:
         raise ModelError(f"Invalid tile_stride={stride}")
+    # Snap-to-tile: when an axis only slightly exceeds a tile multiple, downscale
+    # that overhang away so the axis tiles cleanly instead of spawning a
+    # near-fully-overlapping shifted edge tile (which duplicates cells in the
+    # stitched grid). Only applies under the stride==tile_size overlap-shift model.
+    snapped_input_hw: tuple[int, int] | None = None
+    if stride == tile_size and input_prep.tile_snap_frac > 0.0:
+        snap_h = _snap_axis_to_tile(h, tile_size=tile_size, snap_frac=input_prep.tile_snap_frac)
+        snap_w = _snap_axis_to_tile(w, tile_size=tile_size, snap_frac=input_prep.tile_snap_frac)
+        if (snap_h, snap_w) != (h, w):
+            x_snapped = _resize_spatial_hw(x, out_h=snap_h, out_w=snap_w)
+            new_hw = _input_hw(x_snapped)
+            # Guard against a no-op when torch is unavailable (resize returns x).
+            if new_hw != (h, w):
+                snapped_input_hw = (int(h), int(w))
+                x = x_snapped
+                h, w = new_hw
     tiled_model_config = _augment_model_config_for_tiled_dispatch(
         embedder,
         model_config,
@@ -735,7 +810,11 @@ def _call_embedder_get_embedding_tiled(
         "max_tiles": int(input_prep.max_tiles),
         "max_tiles_hard": int(input_prep.max_tiles_hard),
         "input_hw": (int(h), int(w)),
+        "tile_snap_frac": float(input_prep.tile_snap_frac),
     }
+    if snapped_input_hw is not None:
+        prep_meta["snapped_from_hw"] = (int(snapped_input_hw[0]), int(snapped_input_hw[1]))
+        prep_meta["snapped_to_hw"] = (int(h), int(w))
     return _aggregate_tiled_embeddings(
         embs=tile_embs,
         tile_meta=tile_meta,

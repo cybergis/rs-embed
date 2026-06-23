@@ -8,6 +8,7 @@ from rs_embed.tools.tiling import (
     INPUT_PREP_VERSION,
     _call_embedder_get_embedding_with_input_prep,
     _slice_and_pad_tile,
+    _snap_axis_to_tile,
     _tile_yx_starts,
 )
 
@@ -178,12 +179,10 @@ def test_slice_and_pad_tile_replicates_edge_not_constant_fill():
     """
     # Distinct per-row values so a replicated edge is visibly different from a
     # constant fill of 0.0.
-    x = (np.arange(1, 4, dtype=np.float32)[:, None] * np.ones((1, 3), dtype=np.float32))
+    x = np.arange(1, 4, dtype=np.float32)[:, None] * np.ones((1, 3), dtype=np.float32)
     x = x[None]  # (1, 3, 3): rows are 1.0, 2.0, 3.0
 
-    tile, meta = _slice_and_pad_tile(
-        x, y0=0, x0=0, tile_size=5, pad_edges=True, fill_value=0.0
-    )
+    tile, meta = _slice_and_pad_tile(x, y0=0, x0=0, tile_size=5, pad_edges=True, fill_value=0.0)
     assert tile.shape == (1, 5, 5)
     assert meta["valid_h"] == 3 and meta["valid_w"] == 3
     # Bottom padding rows replicate the last valid row (3.0), not the 0.0 fill.
@@ -345,7 +344,10 @@ def test_tiled_single_path_falls_back_when_batch_lacks_model_config():
         backend="gee",
         device="cpu",
         input_chw=np.ones((1, 5, 5), dtype=np.float32),
-        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16),
+        # tile_snap_frac=0 keeps the 5x5/tile-4 cover-shift overlap (4 tiles) so this
+        # test exercises the multi-tile single-call fallback; snapping would otherwise
+        # collapse the 1px overhang to a single 4x4 tile.
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.0),
         model_config={"value": 7.0},
     )
 
@@ -721,3 +723,85 @@ def test_infer_chunk_tile_mode_uses_batch_on_gpu(monkeypatch):
         key = (i, mc.name)
         assert key in out, f"missing result for {key}"
         assert out[key].status.value == "ok"
+
+
+def test_snap_axis_to_tile_unit():
+    # Small overhang past a tile multiple -> snap down to the multiple.
+    assert _snap_axis_to_tile(68, tile_size=64, snap_frac=0.25) == 64
+    assert _snap_axis_to_tile(130, tile_size=64, snap_frac=0.25) == 128  # 2px over 128
+    assert _snap_axis_to_tile(5, tile_size=4, snap_frac=0.25) == 4
+    # Large overhang -> already small overlap, keep native (no fabricated pixels).
+    assert _snap_axis_to_tile(96, tile_size=64, snap_frac=0.25) == 96
+    assert _snap_axis_to_tile(126, tile_size=64, snap_frac=0.25) == 126
+    # Exact multiple and sub-tile dims are untouched.
+    assert _snap_axis_to_tile(128, tile_size=64, snap_frac=0.25) == 128
+    assert _snap_axis_to_tile(40, tile_size=64, snap_frac=0.25) == 40
+    # frac=0 disables snapping entirely.
+    assert _snap_axis_to_tile(68, tile_size=64, snap_frac=0.0) == 68
+
+
+def test_snap_disabled_keeps_native_overlap_tiling():
+    """With snapping off, a 1px overhang still spawns the cover-shift overlap tiles."""
+    emb = _FakeTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 5, 5), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.0),
+    )
+    assert out.meta["input_prep"]["resolved_mode"] == "tile"
+    assert out.meta["input_prep"]["tile_count"] == 4
+
+
+def test_snap_collapses_small_overhang_to_single_tile():
+    """A 1px overhang on both axes snaps away, collapsing 4 overlap tiles into one."""
+    pytest.importorskip("torch")
+    emb = _FakeTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 5, 5), dtype=np.float32),
+        # snap_frac=0.25 -> round(0.25*4)=1px threshold catches the 1px overhang
+        # (the default 0.1 rounds to a 0px threshold at this toy tile_size=4).
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.25),
+    )
+    arr = np.asarray(out.data, dtype=np.float32)
+    # Single 4x4 tile fed after snapping 5x5 -> 4x4; no overlap-stitch inflation.
+    assert arr.shape[-2:] == (4, 4)
+    # Single-tile path reports a plain resize, and only one model call ran.
+    assert emb.single_calls + emb.batch_calls >= 1
+    assert out.meta["input_prep"]["resolved_mode"] == "resize"
+
+
+def test_snap_reduces_tiles_and_records_meta_on_multitile_path():
+    """When snapping still leaves >1 tile, the stitch meta records the snap."""
+    pytest.importorskip("torch")
+    emb = _FakeTileEmbedder()
+    # H=5 (overhang 1 -> snap to 4), W=9 (overhang 1 -> snap to 8 -> two x-tiles).
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 5, 9), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.25),
+    )
+    prep = out.meta["input_prep"]
+    assert prep["resolved_mode"] == "tile"
+    assert prep["tile_count"] == 2
+    assert prep["snapped_from_hw"] == (5, 9)
+    assert prep["snapped_to_hw"] == (4, 8)
+    assert np.asarray(out.data).shape[-2:] == (4, 8)

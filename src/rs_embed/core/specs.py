@@ -429,6 +429,15 @@ class InputPrepSpec:
         mistakes. Clamped to be ``>= max_tiles``. Defaults to 1024.
     pad_edges : bool
         If ``True``, pad boundary tiles to preserve shape.
+    tile_snap_frac : float
+        Snap-to-tile threshold in ``[0, 0.5]``. When a tiled axis exceeds a
+        multiple of ``tile_size`` by no more than ``tile_snap_frac * tile_size``
+        pixels, that small overhang is dropped by downscaling the axis to the
+        multiple, so the axis tiles cleanly instead of spawning a near-fully
+        overlapping shifted edge tile (which duplicates cells in the stitched
+        grid). ``0`` disables snapping. Defaults to ``0.1`` — only the most
+        degenerate cases (avoided overlap >= 90%) snap, capping the worst-case
+        axis squeeze at ~9%.
     """
 
     mode: Literal["auto", "resize", "tile"] = "resize"
@@ -437,6 +446,7 @@ class InputPrepSpec:
     max_tiles: int = 64
     max_tiles_hard: int = 1024
     pad_edges: bool = True
+    tile_snap_frac: float = 0.1
 
     @staticmethod
     def auto(
@@ -446,6 +456,7 @@ class InputPrepSpec:
         max_tiles: int = 64,
         max_tiles_hard: int = 1024,
         pad_edges: bool = True,
+        tile_snap_frac: float = 0.1,
     ) -> InputPrepSpec:
         """Build an adaptive preprocessing policy.
 
@@ -474,6 +485,7 @@ class InputPrepSpec:
             max_tiles=max_tiles,
             max_tiles_hard=max_tiles_hard,
             pad_edges=pad_edges,
+            tile_snap_frac=tile_snap_frac,
         )
 
     @staticmethod
@@ -495,6 +507,7 @@ class InputPrepSpec:
         max_tiles: int = 64,
         max_tiles_hard: int = 1024,
         pad_edges: bool = True,
+        tile_snap_frac: float = 0.1,
     ) -> InputPrepSpec:
         """Build a tile-based preprocessing policy.
 
@@ -523,4 +536,5 @@ class InputPrepSpec:
             max_tiles=max_tiles,
             max_tiles_hard=max_tiles_hard,
             pad_edges=pad_edges,
+            tile_snap_frac=tile_snap_frac,
         )
