@@ -69,17 +69,6 @@
   #axisSlider .noUi-pips-horizontal{height:20px;padding:6px 0 0}
   #axisSlider .noUi-marker-horizontal.noUi-marker{height:4px}
   .yrlabel{font-variant-numeric:tabular-nums;font-weight:700}
-  .tpick-btn{margin-top:8px;width:100%;text-align:left}
-  #tpick{display:none;margin-top:8px;border:1px solid var(--line);border-radius:8px;padding:8px;background:#fff}
-  .tpick-head{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
-  .tpick-head button{padding:2px 9px}
-  .tpick-head span{font-weight:700;font-variant-numeric:tabular-nums}
-  .tgrid{display:grid;grid-template-columns:repeat(4,1fr);gap:4px}
-  .mcell{padding:6px 0;text-align:center;font-size:12px;border-radius:6px;cursor:pointer;border:1px solid transparent}
-  .mcell:hover{background:#f3efe6}
-  .mcell.inrange{background:rgba(245,166,35,.18)}
-  .mcell.endpoint{background:var(--citrus);color:#3a2a00;font-weight:700}
-  .tpick-hint{font-size:11px;color:var(--muted);margin-top:7px}
   .tabs{display:flex;gap:6px;margin:2px 0 4px}
   .tab{flex:1;padding:8px 0;font-weight:700;border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer;color:var(--muted);font-size:13px}
   .tab.active{background:var(--leaf);color:#fff;border-color:var(--leaf)}
@@ -101,7 +90,7 @@
   @keyframes s{to{transform:rotate(360deg)}}
   .bubble-results{width:312px;max-height:62vh;overflow:auto}
   .bubble-results .cards,#resultsCards{display:grid;grid-template-columns:repeat(2,1fr);gap:8px;margin-top:7px}
-  #resultsSec .dl{margin-top:0;margin-bottom:2px}
+  #resultsSec .dl{margin-top:10px}
   .gcard{position:relative;border:1px solid var(--line);border-radius:8px;overflow:hidden;cursor:pointer;background:#fff;transition:box-shadow .12s,border-color .12s}
   .gcard:hover{box-shadow:0 2px 8px rgba(0,0,0,.18)}
   .gcard.active{border-color:var(--citrus);box-shadow:0 0 0 2px rgba(245,166,35,.45)}
@@ -137,7 +126,6 @@
   .card img{width:100%;image-rendering:pixelated;border-radius:6px;margin-top:7px;background:#eee}
   .card .meta{font-size:11px;color:var(--muted);margin-top:5px;font-variant-numeric:tabular-nums}
   .card .err{font-size:11px;color:#b3261e;margin-top:6px;word-break:break-word}
-  .spark{margin-top:5px}
   .pop{font-size:13px;min-width:200px}
   .pop img{width:200px;height:auto;border-radius:6px;image-rendering:pixelated;background:#eee}
   .pop .pbtns{display:flex;gap:6px;margin-top:8px}
@@ -150,6 +138,65 @@
         opacity:0;pointer-events:none;white-space:nowrap;transition:opacity .25s,transform .25s}
   #toast.show{opacity:1;transform:translate(-50%,0)}
   #toast .tk{color:var(--citrus)}
+  /* ── Use tab: application gallery ─────────────────────────────── */
+  #usePanel{display:flex;flex-direction:column;gap:13px}
+  #appGallery{display:flex;flex-direction:column;gap:12px}
+  .appcards{display:flex;flex-direction:column;gap:9px;margin-top:2px}
+  .appcard{display:flex;gap:11px;align-items:flex-start;border:1px solid var(--line);border-radius:12px;
+           background:#fff;padding:11px 12px;cursor:pointer;transition:box-shadow .12s,border-color .12s,transform .06s}
+  .appcard:hover{box-shadow:0 3px 12px rgba(0,0,0,.12);border-color:#d8d3c6}
+  .appcard:active{transform:translateY(1px)}
+  .appcard .ic{font-size:21px;line-height:1;flex:0 0 auto;width:34px;height:34px;display:flex;align-items:center;
+               justify-content:center;border-radius:9px;background:#f3efe6}
+  .appcard .bd{flex:1;min-width:0}
+  .appcard .ti{font-weight:700;font-size:13.5px;display:flex;align-items:center;gap:7px;flex-wrap:wrap}
+  .appcard .ds{font-size:11.5px;color:var(--muted);line-height:1.4;margin-top:3px}
+  .apptag{font-size:9.5px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;padding:1px 6px;border-radius:999px}
+  .apptag.retr{background:rgba(245,166,35,.16);color:#9a6500}
+  .apptag.pred{background:rgba(46,125,50,.13);color:var(--leaf)}
+  .apptag.seg{background:rgba(123,67,201,.13);color:#7b43c9}
+  .apptag.chg{background:rgba(21,101,192,.12);color:#1565c0}
+  .codebadge{font-size:9px;font-weight:700;color:var(--muted);background:#eef1f4;padding:1px 6px;border-radius:999px;margin-left:auto}
+  .backlink{display:inline-flex;align-items:center;gap:5px;font-size:12px;font-weight:600;color:var(--muted);
+            background:none;border:none;padding:0 0 4px;cursor:pointer}
+  .backlink:hover{color:var(--ink)}
+  .appview .simhead{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px}
+  /* region similarity workspace */
+  .simslots{display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-top:10px}
+  .simslot{position:relative;border:1.5px dashed var(--line);border-radius:10px;padding:8px;text-align:center;
+           background:#fff;min-height:104px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px}
+  .simslot.filled{border-style:solid}
+  .simslot.A{border-color:#f5a623}.simslot.B{border-color:#1565c0}
+  .simslot .pin{position:absolute;top:6px;left:6px;font-size:11px;font-weight:800;width:20px;height:20px;border-radius:50%;
+                color:#fff;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 2px rgba(0,0,0,.3)}
+  .simslot.A .pin{background:#f5a623}.simslot.B .pin{background:#1565c0}
+  .simslot img{width:100%;border-radius:6px;image-rendering:pixelated;background:#eee}
+  .simslot .ll{font-size:10px;color:var(--muted);font-variant-numeric:tabular-nums;word-break:break-all;line-height:1.3}
+  .simslot .ph{font-size:11.5px;color:var(--muted);padding:0 4px}
+  .simresult{margin-top:12px;border:1px solid var(--line);border-radius:12px;padding:13px;text-align:center;background:#fff}
+  .simresult .big{font-size:34px;font-weight:800;line-height:1;font-variant-numeric:tabular-nums}
+  .simresult .verdict{font-size:13px;font-weight:700;margin-top:4px}
+  .simresult .lbl{font-size:10.5px;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+  .simbar{height:9px;border-radius:999px;background:#eee;overflow:hidden;margin-top:10px}
+  .simbar > i{display:block;height:100%;background:linear-gradient(90deg,#e0512b,#f5a623,#2e7d32)}
+  .teasercode{white-space:pre-wrap;background:#0f1720;color:#e8eef6;border-radius:10px;padding:11px 12px;
+              font-size:11px;line-height:1.5;font-family:"IBM Plex Mono",ui-monospace,monospace;margin:10px 0 0;overflow:auto}
+  .teasercode .k{color:#7ee0c0}.teasercode .k2{color:#f5a623}.teasercode .c{color:#7f8c99}
+  /* segmentation workspace */
+  .krow{display:flex;align-items:center;gap:8px;margin-top:10px}
+  .krow label{font-size:13px;font-weight:600;white-space:nowrap}
+  .krow input[type=range]{flex:1;accent-color:var(--citrus)}
+  .krow .kv{font-weight:800;font-variant-numeric:tabular-nums;width:18px;text-align:right}
+  /* predict: demo embedding chips */
+  .demomodels{display:flex;flex-wrap:wrap;gap:6px}
+  .demochip{display:inline-flex;align-items:center;gap:5px;font-size:12.5px;font-weight:600;border:1px solid var(--line);
+            border-radius:999px;padding:4px 10px;cursor:pointer;background:#fff}
+  .demochip:hover{background:#f3efe6}
+  .demochip input{margin:0}
+  .seginfo{font-size:12px;color:var(--muted);margin-top:11px;font-variant-numeric:tabular-nums}
+  .legend{display:flex;flex-direction:column;gap:3px;margin-top:8px}
+  .legrow{display:flex;align-items:center;gap:7px;font-size:11.5px;color:var(--ink)}
+  .legsw{width:14px;height:14px;border-radius:3px;border:1px solid rgba(0,0,0,.15);flex:0 0 auto}
 </style>
 </head>
 <body>
@@ -204,13 +251,6 @@
           <div id="axisSlider"></div>
         </div>
         <div class="hint" style="margin:2px 0 2px">Drag the lower bar to <b>pan</b> the axis; drag its ends to <b>zoom</b> the visible span (3 mo → full).</div>
-        <button id="tpickBtn" class="tpick-btn">📅 Pick year / month ▾</button>
-        <div id="tpick">
-          <div class="tpick-head"><button id="tprev">◀</button><span id="tpickYear">2022</span><button id="tnext">▶</button></div>
-          <div id="tgrid" class="tgrid"></div>
-          <div class="tpick-hint">Click a month to set <b>start</b>, click again to set <b>end</b>.</div>
-        </div>
-        <div class="hint" style="margin-top:8px">Annual models (gse/tessera/copernicus) use the latest year; on-the-fly models use the selected month window.</div>
       </div>
 
       <div class="sec" id="resultsSec" style="display:none">
@@ -226,18 +266,101 @@
     </div>
 
     <div id="usePanel" style="display:none">
-      <div class="sec">
-        <h2>Predict with a pretrained head</h2>
-        <div id="useInfo" class="hint">loading…</div>
+      <!-- application gallery -->
+      <div id="appGallery">
+        <div class="sec">
+          <h2>Applications</h2>
+          <div class="hint">One embedding, many tools. Each application turns the same vectors into something useful. The live demo here is <b>retrieval</b> — how alike are two places?</div>
+        </div>
+        <div id="appCards" class="appcards"></div>
+      </div>
+
+      <!-- detail · region similarity (retrieval) -->
+      <div id="appSimilarity" class="appview sec" style="display:none">
+        <button class="backlink" onclick="closeApp()">← Applications</button>
+        <div class="simhead">🧭 Region similarity</div>
+        <div class="hint" style="margin-top:6px"><b>Right-click two places</b> on the map (A, then B). Pick a model, then <b>Compute</b> the cosine similarity of their pooled embeddings.</div>
         <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+          <label style="font-size:13px;font-weight:600">Model</label>
+          <select id="simModel" style="flex:1;padding:6px;border:1px solid var(--line);border-radius:7px;font:inherit"></select>
+        </div>
+        <div id="simSlots" class="simslots"></div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="simRun" class="citrus" style="flex:1;font-weight:700" disabled>Compute similarity</button>
+          <button id="simReset">Reset</button>
+        </div>
+        <div id="simOut"></div>
+      </div>
+
+      <!-- detail · instant land-cover (segmentation) -->
+      <div id="appSegment" class="appview sec" style="display:none">
+        <button class="backlink" onclick="closeApp()">← Applications</button>
+        <div class="simhead">🎨 Instant land-cover</div>
+        <div class="hint" style="margin-top:6px"><b>Right-click one place</b> on the map, pick a model and the number of clusters, then <b>Segment</b>. The grid embedding is k-means-clustered into land-cover-like regions and draped over the ROI as a transparent mask.</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+          <label style="font-size:13px;font-weight:600">Model</label>
+          <select id="segModel" style="flex:1;padding:6px;border:1px solid var(--line);border-radius:7px;font:inherit"></select>
+        </div>
+        <div class="krow">
+          <label>Clusters (k)</label>
+          <input id="segK" type="range" min="2" max="10" step="1" value="6"
+                 oninput="document.getElementById('segKv').textContent=this.value">
+          <span class="kv" id="segKv">6</span>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="segRun" class="citrus" style="flex:1;font-weight:700" disabled>Segment</button>
+          <button id="segReset">Reset</button>
+        </div>
+        <div id="segOut"></div>
+      </div>
+
+      <!-- detail · change over time -->
+      <div id="appChange" class="appview sec" style="display:none">
+        <button class="backlink" onclick="closeApp()">← Applications</button>
+        <div class="simhead">⏳ Change over time</div>
+        <div class="hint" style="margin-top:6px"><b>Right-click one place</b> on the map, pick a model and a year span, then <b>Compute</b>. Each year is embedded and compared to the first year — the curve's spike marks when the place changed.</div>
+        <div style="display:flex;align-items:center;gap:8px;margin-top:10px">
+          <label style="font-size:13px;font-weight:600">Model</label>
+          <select id="chgModel" style="flex:1;padding:6px;border:1px solid var(--line);border-radius:7px;font:inherit"></select>
+        </div>
+        <div class="krow">
+          <label>Years</label>
+          <select id="chgY0" style="flex:1;padding:6px;border:1px solid var(--line);border-radius:7px;font:inherit"></select>
+          <span style="color:var(--muted)">→</span>
+          <select id="chgY1" style="flex:1;padding:6px;border:1px solid var(--line);border-radius:7px;font:inherit"></select>
+        </div>
+        <div style="display:flex;gap:8px;margin-top:10px">
+          <button id="chgRun" class="citrus" style="flex:1;font-weight:700" disabled>Compute change</button>
+          <button id="chgReset">Reset</button>
+        </div>
+        <div id="chgOut"></div>
+      </div>
+
+      <!-- detail · predict a value (pretrained head, or demo over fixed embeddings) -->
+      <div id="appPredict" class="appview sec" style="display:none">
+        <button class="backlink" onclick="closeApp()">← Applications</button>
+        <div class="simhead">🌽 Predict a value</div>
+        <div id="useInfo" class="hint" style="margin-top:6px">loading…</div>
+        <div id="useModelRow" style="display:flex;align-items:center;gap:8px;margin-top:10px">
           <label style="font-size:13px;font-weight:600">Model</label>
           <select id="useModel" style="flex:1;padding:6px;border:1px solid var(--line);border-radius:7px;font:inherit"></select>
         </div>
+        <div id="useDemoModels" class="demomodels" style="display:none"></div>
         <button id="predictBtn" class="citrus" style="width:100%;margin-top:10px;padding:9px;font-weight:700">🌽 Predict here</button>
-        <div class="hint" style="margin-top:10px">Right-click the map to pick a location, then <b>Predict here</b> (or use the bubble). Or run a saved embedding package:</div>
-        <label class="uploadbtn">⬆ Upload package (.npz)<input id="pkgFile" type="file" accept=".npz" style="display:none"></label>
+        <div class="hint" style="margin-top:10px">Right-click the map to pick a location, then <b>Predict here</b> (or confirm in the bubble).</div>
+        <div id="useUploadRow">
+          <div class="hint" style="margin-top:8px">Or run a saved embedding package:</div>
+          <label class="uploadbtn">⬆ Upload package (.npz)<input id="pkgFile" type="file" accept=".npz" style="display:none"></label>
+        </div>
         <div id="useStatus" class="status" style="margin-top:8px">No ROI selected.</div>
         <div id="usePred"></div>
+      </div>
+
+      <!-- detail · read-only application (code teaser) -->
+      <div id="appTeaser" class="appview sec" style="display:none">
+        <button class="backlink" onclick="closeApp()">← Applications</button>
+        <div id="teaserHead" class="simhead"></div>
+        <div id="teaserBody"></div>
       </div>
     </div>
 
@@ -285,20 +408,46 @@ map.on('mouseup', e => {
   if (!drawing) return; drawing = false;
   const movedPx = map.latLngToContainerPoint(startLL).distanceTo(map.latLngToContainerPoint(e.latlng));
   if (dragRect) { map.removeLayer(dragRect); dragRect = null; }
-  if (movedPx < 8) setPointBox(e.latlng);         // a click → 2 km box
-  else setBBox(L.latLngBounds(startLL, e.latlng));// a drag → freeform box
+  handleMapPick(e, movedPx);
 });
+
+// Route a map selection to whatever the active tab/application expects.
+function handleMapPick(e, movedPx){
+  const isPoint = movedPx < 8;                       // a click → 2 km box; a drag → freeform box
+  if (currentTab === 'use' && useApp === 'similarity'){
+    simAddRegion(isPoint ? e.latlng : L.latLngBounds(startLL, e.latlng), isPoint);
+    return;
+  }
+  if (currentTab === 'use' && useApp === 'segment'){
+    // Always a bbox so the embedded region == drawn box == overlay (see setSegRoi).
+    setSegRoi(isPoint ? squareBboxAround(e.latlng, SEG_HALF_M) : L.latLngBounds(startLL, e.latlng));
+    return;
+  }
+  if (currentTab === 'use' && useApp === 'change'){
+    setChangeRoi(isPoint ? squareBboxAround(e.latlng, SEG_HALF_M) : L.latLngBounds(startLL, e.latlng));
+    return;
+  }
+  if (currentTab === 'use' && useApp !== 'predict'){
+    showToast('Open a map application first — try <span class="tk">Region similarity</span>.');
+    return;
+  }
+  if (isPoint) setPointBox(e.latlng);
+  else setBBox(L.latLngBounds(startLL, e.latlng));
+}
 
 function clearRoi(){ if (roiLayer){ map.removeLayer(roiLayer); roiLayer = null; } clearEmbedOverlay(); clearResultsPanel(); }
 function roiStatus(t){ ['selinfo','useStatus'].forEach(id=>{ const e=document.getElementById(id); if(e) e.textContent=t; }); }
 
+const POINT_BUFFER_M = 2048;   // matches the server's PreviewReq.buffer_m for point geometries
 function setPointBox(ll){
   clearRoi();
-  const d = KM, dx = d / Math.max(0.2, Math.cos(ll.lat*Math.PI/180));  // ~1 km half-side
-  const b = L.latLngBounds([ll.lat-d, ll.lng-dx], [ll.lat+d, ll.lng+dx]);
+  // Draw the box at the TRUE footprint of PointBuffer(buffer_m=2048): a ±2048 m
+  // square in EPSG:3857 (providers/gee.py). The PCA overlay is then drawn on these
+  // same bounds, so it aligns to the ground (Leaflet also renders in 3857).
+  const b = squareBboxAround(ll, POINT_BUFFER_M);
   roiLayer = L.rectangle(b, {color:'#f5a623', weight:2, fillOpacity:.08}).addTo(map);
   geometry = {type:'point', lon:+ll.lng.toFixed(5), lat:+ll.lat.toFixed(5)};
-  roiStatus(`Point ${geometry.lat}, ${geometry.lon}  → 2 km box`);
+  roiStatus(`Point ${geometry.lat}, ${geometry.lon}  → 4 km box`);
   onRoiChanged(b.getCenter());
 }
 function setBBox(b){
@@ -319,6 +468,7 @@ function roiCenter(){
 // ---------------------------------------------------------------- panel state
 let MODELS = [];                 // [{id,type,input}]
 let currentTab = 'extract';      // 'extract' | 'use'
+let useApp = null;               // open Use application: null|'similarity'|'predict'|'teaser'
 let HEADS = null;                // /api/heads response
 const checked = new Set(['gse']);
 function selectedModels(){ return MODELS.filter(m => checked.has(m.id)).map(m=>m.id); }
@@ -331,7 +481,6 @@ const mY = i => MIN_Y + Math.floor(i/12);
 const mM = i => (i%12) + 1;
 const ymLabel = i => `${mY(i)}-${String(mM(i)).padStart(2,'0')}`;
 let tStart = midx(2022,6), tEnd = midx(2022,9);     // selected month window
-let pickYear = 2022, pickPhase = 'start';
 // visible window of the detail slider (its x-axis); defaults to one calendar year.
 const MIN_VIEW = 2;                                  // smallest zoom = 3-month span
 let viewStart = midx(2022,1), viewEnd = midx(2022,12);
@@ -390,46 +539,11 @@ function applyView(){
     {range:{min:viewStart, max:viewEnd}, pips: makePips(viewStart, viewEnd)}, false);
   slider.noUiSlider.set([s, e]);   // → fires detail 'update' → refreshTimeUI
 }
-// Widen/pan the axis so the visible window contains [a,b] (used by the picker).
-function ensureViewCovers(a, b){
-  const lo = Math.min(a,b), hi = Math.max(a,b);
-  let vs = Math.min(viewStart, lo), ve = Math.max(viewEnd, hi);
-  if (vs !== viewStart || ve !== viewEnd) axisEl.noUiSlider.set([vs, ve]);  // → applyView
-}
 function refreshTimeUI(){
   const t = document.getElementById('trange');
   if (t) t.textContent = startStr()+' – '+endStr();
-  renderPicker();
   updateQuery();
 }
-function renderPicker(){
-  const grid = document.getElementById('tgrid'); if(!grid) return;
-  document.getElementById('tpickYear').textContent = pickYear;
-  const lo = Math.min(tStart,tEnd), hi = Math.max(tStart,tEnd);
-  grid.innerHTML = '';
-  for(let m=1;m<=12;m++){
-    const ci = midx(pickYear,m);
-    const cell = document.createElement('div');
-    cell.className = 'mcell' + (ci>=lo&&ci<=hi?' inrange':'') + (ci===tStart||ci===tEnd?' endpoint':'');
-    cell.textContent = MONTHS[m-1];
-    cell.onclick = () => pickMonth(ci);
-    grid.appendChild(cell);
-  }
-}
-function pickMonth(ci){
-  if(pickPhase==='start'){ tStart=ci; tEnd=ci; pickPhase='end'; }
-  else { if(ci>=tStart){ tEnd=ci; } else { tEnd=tStart; tStart=ci; } pickPhase='start'; }
-  ensureViewCovers(tStart, tEnd);  // pan/zoom the axis so the picked months are visible
-  slider.noUiSlider.set([Math.min(tStart,tEnd), Math.max(tStart,tEnd)]);  // → fires update → refreshTimeUI
-}
-(function initPicker(){
-  const btn=document.getElementById('tpickBtn'), panel=document.getElementById('tpick');
-  btn.onclick = () => { const open = panel.style.display==='block';
-    panel.style.display = open ? 'none' : 'block';
-    if(!open){ pickYear = mY(Math.min(tStart,tEnd)); pickPhase='start'; renderPicker(); } };
-  document.getElementById('tprev').onclick = () => { if(pickYear>MIN_Y){ pickYear--; renderPicker(); } };
-  document.getElementById('tnext').onclick = () => { if(pickYear<MAX_Y){ pickYear++; renderPicker(); } };
-})();
 
 // model list
 async function loadModels(){
@@ -470,21 +584,71 @@ document.getElementById('selNone').onclick = () => { checked.clear(); refreshChe
 document.getElementById('selPc').onclick   = () => { checked.clear(); MODELS.filter(m=>m.type==='precomputed').forEach(m=>checked.add(m.id)); refreshChecks(); };
 
 // ---------------------------------------------------------------- example query
+function spatialStr(g){
+  return !g ? 'PointBuffer(lon, lat, buffer_m=2048)'
+    : g.type==='point'
+      ? `PointBuffer(lon=${g.lon}, lat=${g.lat}, buffer_m=2048)`
+      : `BBox(${g.minlon}, ${g.minlat}, ${g.maxlon}, ${g.maxlat})`;
+}
 function updateQuery(){
   const q = document.getElementById('query');
   const sel = selectedModels();
   const m0 = sel[0] || '<model>';
-  const spatial = !geometry ? 'PointBuffer(lon, lat, buffer_m=2048)'
-    : geometry.type==='point'
-      ? `PointBuffer(lon=${geometry.lon}, lat=${geometry.lat}, buffer_m=2048)`
-      : `BBox(${geometry.minlon}, ${geometry.minlat}, ${geometry.maxlon}, ${geometry.maxlat})`;
+  const spatial = spatialStr(geometry);
   const rangeT = `TemporalSpec.range("${startStr()}-01", "${endExclusive()}")`;
   if (currentTab === 'use'){
-    // downstream usage: embedding → pretrained head → prediction
+    if (useApp === 'similarity'){
+      // retrieval: pool two ROIs with one model → cosine similarity
+      const sm = simModelId();
+      const isPc = (MODELS.find(x=>x.id===sm)||{}).type === 'precomputed';
+      const simT = isPc ? `TemporalSpec.year(${mY(Math.max(tStart,tEnd))})` : rangeT;
+      const spA = spatialStr(simRegions[0] && simRegions[0].geometry);
+      const spB = spatialStr(simRegions[1] && simRegions[1].geometry);
+      q.innerHTML =
+`<span class="k">import numpy as np</span>
+a = <span class="k">get_embedding</span>(<span class="k2">"${sm}"</span>, spatial=${spA},
+                  temporal=${simT}, output=OutputSpec.pooled()).data
+b = <span class="k">get_embedding</span>(<span class="k2">"${sm}"</span>, spatial=${spB},
+                  temporal=${simT}, output=OutputSpec.pooled()).data
+cos = a @ b / (np.linalg.norm(a) * np.linalg.norm(b))   <span style="color:#7f8c99"># retrieval score</span>`;
+      return;
+    }
+    if (useApp === 'segment'){
+      // unsupervised segmentation: cluster a grid embedding into land cover
+      const sm = segModelId();
+      const isPc = (MODELS.find(x=>x.id===sm)||{}).type === 'precomputed';
+      const segT = isPc ? `TemporalSpec.year(${mY(Math.max(tStart,tEnd))})` : rangeT;
+      q.innerHTML =
+`<span class="k">from</span> iguide_demo_helpers <span class="k">import</span> kmeans_landcover
+grid = <span class="k">get_embedding</span>(<span class="k2">"${sm}"</span>, spatial=${spatial},
+                     temporal=${segT}, output=OutputSpec.grid()).data
+labels, rgb = <span class="k">kmeans_landcover</span>(grid, k=${segKVal()})   <span style="color:#7f8c99"># transparent mask</span>`;
+      return;
+    }
+    if (useApp === 'change'){
+      // temporal change: pooled embedding per year → distance from the first year
+      const cm = chgModelId(); const [y0, y1] = chgYears();
+      q.innerHTML =
+`<span class="k">from</span> iguide_demo_helpers <span class="k">import</span> change_curve
+grids = [<span class="k">get_embedding</span>(<span class="k2">"${cm}"</span>, spatial=${spatial},
+                       temporal=TemporalSpec.year(y), output=OutputSpec.grid()).data
+         <span class="k">for</span> y <span class="k">in</span> range(${y0}, ${y1 + 1})]
+dist = <span class="k">change_curve</span>(grids, baseline_index=<span class="k2">0</span>)   <span style="color:#7f8c99"># 1 − cos from year ${y0}</span>`;
+      return;
+    }
+    // downstream usage: embedding → head → prediction
+    const useT = `TemporalSpec.range("${USE_START}-01", "${USE_END}-31")`;
+    if (demoMode){
+      const um = predictModels()[0] || 'gse';
+      q.innerHTML =
+`emb = <span class="k">get_embedding</span>(<span class="k2">"${um}"</span>, spatial=${spatial},
+                    temporal=${useT}, output=OutputSpec.pooled())
+yhat = head.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># corn yield (mt/ha) — plug in a trained head</span>`;
+      return;
+    }
     const um = useModelId();
     const task = (HEADS && HEADS.task) || 'corn_presence';
     const lbl = (HEADS && HEADS.label) || 'prediction';
-    const useT = `TemporalSpec.range("${USE_START}-01", "${USE_END}-31")`;
     q.innerHTML =
 `<span class="k">from joblib import load</span>
 reg = load(<span class="k2">"${task}__${um}.pkl"</span>)        <span style="color:#7f8c99"># pretrained head</span>
@@ -532,18 +696,11 @@ async function onRoiChanged(center){
     if (j.error){ pop.setContent('<div class="pop">⚠️ '+j.error+'</div>'); return; }
     pop.setContent(
       `<div class="pop"><b>Sentinel-2 RGB</b><br><img src="${j.image}"><br>`+
-      `<span class="status">${currentTab==='use' ? ('head: '+useModelId()) : (selectedModels().length+' model(s) selected')}</span>`+
+      `<span class="status">${currentTab==='use' ? (demoMode ? ('demo · '+predictModels().length+' embedding(s)') : ('head: '+useModelId())) : (selectedModels().length+' model(s) selected')}</span>`+
       `<div class="pbtns"><button class="citrus" id="confirmBtn">${currentTab==='use'?'Predict':'Confirm → embed'}</button></div></div>`);
     setTimeout(()=>{ const b=document.getElementById('confirmBtn');
       if(b) b.onclick = () => currentTab==='use' ? runPredict(pop) : runEmbed(pop); }, 0);
   }catch(e){ pop.setContent('<div class="pop">⚠️ preview failed: '+e+'</div>'); }
-}
-
-function sparkline(vals){
-  if(!vals||!vals.length) return '';
-  const w=180,h=26, mn=Math.min(...vals), mx=Math.max(...vals), rng=(mx-mn)||1;
-  const pts = vals.map((v,i)=>`${(i/(vals.length-1)*w).toFixed(1)},${(h-(v-mn)/rng*h).toFixed(1)}`).join(' ');
-  return `<svg class="spark" width="${w}" height="${h}"><polyline fill="none" stroke="#1565c0" stroke-width="1.3" points="${pts}"/></svg>`;
 }
 
 function modelCardHTML(x, i){
@@ -577,8 +734,7 @@ function selectEmbedOverlay(model){
     {opacity: ovOpacityVal(), pane: 'embedPane', className: 'embed-ov', interactive: false}).addTo(map);
   const info = document.getElementById('ovInfo');
   if (info) info.innerHTML =
-    `<b>${x.model}</b> · grid ${x.grid_hw[0]}×${x.grid_hw[1]} → ROI · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}`
-    + sparkline(x.vector_preview);
+    `<b>${x.model}</b> · grid ${x.grid_hw[0]}×${x.grid_hw[1]} → ROI · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}`;
 }
 function setEmbedOpacity(v){ if (embedOverlay) embedOverlay.setOpacity(+v); }
 function openLightbox(i){
@@ -589,7 +745,6 @@ function openLightbox(i){
     `<div class="lb-title">${x.model} <span class="badge ${x.type==='precomputed'?'pc':'otf'}">${x.type==='precomputed'?'precomp':'on-the-fly'}</span></div>`+
     `<img src="${x.image}" alt="${x.model} PCA-RGB">`+
     `<div class="lb-meta">grid ${x.grid_hw[0]}×${x.grid_hw[1]} · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}</div>`+
-    sparkline(x.vector_preview)+
     `<div class="lb-hint">click anywhere / Esc to close</div>`;
   lb.style.display = 'flex';
 }
@@ -631,9 +786,9 @@ function renderResultsPanel(j){
   const note = j.package
     ? `<div class="status" style="margin-top:6px">Use in the notebook:<br><code>H.load_embedding_package("…/${j.package.filename}")</code></div>` : '';
   document.getElementById('resultsCount').textContent = `· ${j.results.length} model(s)`;
-  document.getElementById('resultsCtrl').innerHTML = ctrl + dl;
+  document.getElementById('resultsCtrl').innerHTML = ctrl;
   document.getElementById('resultsCards').innerHTML = j.results.map(modelCardHTML).join('');
-  document.getElementById('resultsNote').innerHTML = note;
+  document.getElementById('resultsNote').innerHTML = note + dl;   // save link last → bottom of the panel
   const sec = document.getElementById('resultsSec');
   sec.style.display = '';
   sec.scrollIntoView({behavior:'smooth', block:'nearest'});
@@ -661,29 +816,385 @@ async function runEmbed(pop){
   }catch(e){ if(pop) pop.setContent('<div class="pop">⚠️ embed failed: '+e+'</div>'); }
 }
 
-// ── Tabs (Extract | Use) + downstream prediction ───────────────────────────
+// ── Tabs (Extract | Use) + application gallery ──────────────────────────────
 function setTab(t){
   currentTab = t;
   document.getElementById('tabExtract').classList.toggle('active', t==='extract');
   document.getElementById('tabUse').classList.toggle('active', t==='use');
   document.getElementById('extractPanel').style.display = t==='extract' ? '' : 'none';
   document.getElementById('usePanel').style.display = t==='use' ? '' : 'none';
+  if (t === 'use'){ renderAppCards(); closeApp(); }   // land on the gallery
+  else { simClear(); useApp = null; }
   updateQuery();
 }
 document.getElementById('tabExtract').onclick = () => setTab('extract');
 document.getElementById('tabUse').onclick = () => setTab('use');
 
+// ── Application gallery: each card opens a downstream use of the embedding ───
+const APPS = [
+  {id:'similarity', icon:'🧭', title:'Region similarity', tag:'retrieval', tagcls:'retr', kind:'similarity',
+   desc:'Click two places → cosine similarity of their embeddings. The core of retrieval.'},
+  {id:'predict', icon:'🌽', title:'Predict a value', tag:'regression', tagcls:'pred', kind:'predict',
+   desc:'Run a pretrained head on the embedding (crop presence, yield, …).'},
+  {id:'landcover', icon:'🎨', title:'Instant land-cover', tag:'segmentation', tagcls:'seg', kind:'segment',
+   desc:'Cluster one grid embedding into land-cover-like regions — no labels needed.'},
+  {id:'change', icon:'⏳', title:'Change over time', tag:'change', tagcls:'chg', kind:'change',
+   desc:'Track how a place drifts year to year — a spike marks when it changed.'},
+];
+function renderAppCards(){
+  const box = document.getElementById('appCards'); if(!box) return;
+  box.innerHTML = APPS.map(a => {
+    const tail = a.kind==='teaser' ? '<span class="codebadge">code</span>'
+                                   : '<span class="codebadge">live</span>';
+    return `<div class="appcard" onclick="openApp('${a.id}')">`+
+      `<div class="ic">${a.icon}</div>`+
+      `<div class="bd"><div class="ti">${a.title} <span class="apptag ${a.tagcls}">${a.tag}</span>${tail}</div>`+
+      `<div class="ds">${a.desc}</div></div></div>`;
+  }).join('');
+}
+function openApp(id){
+  const a = APPS.find(x=>x.id===id); if(!a) return;
+  document.getElementById('appGallery').style.display = 'none';
+  ['appSimilarity','appSegment','appChange','appPredict','appTeaser'].forEach(v => document.getElementById(v).style.display = 'none');
+  useApp = a.kind;
+  if (a.kind === 'similarity'){
+    clearRoi();                                  // clean map for A/B picking
+    document.getElementById('appSimilarity').style.display = '';
+    populateSimModels(); renderSimSlots();
+  } else if (a.kind === 'segment'){
+    clearRoi(); segClearOverlay();               // clean map for the ROI + mask
+    document.getElementById('appSegment').style.display = '';
+    populateSegModels();
+    document.getElementById('segOut').innerHTML = '';
+    document.getElementById('segRun').disabled = !geometry;
+  } else if (a.kind === 'change'){
+    clearRoi(); segClearOverlay();               // clean map for the ROI
+    document.getElementById('appChange').style.display = '';
+    populateChgModels(); populateChgYears();
+    document.getElementById('chgOut').innerHTML = '';
+    document.getElementById('chgRun').disabled = !geometry;
+  } else if (a.kind === 'predict'){
+    document.getElementById('appPredict').style.display = '';
+  } else {
+    showTeaser(a);
+  }
+  updateQuery();
+}
+function closeApp(){
+  useApp = null;
+  simClear(); segClearOverlay();
+  ['appSimilarity','appSegment','appChange','appPredict','appTeaser'].forEach(v => document.getElementById(v).style.display = 'none');
+  document.getElementById('appGallery').style.display = '';
+  updateQuery();
+}
+function showTeaser(a){
+  document.getElementById('teaserHead').innerHTML = `${a.icon} ${a.title}`;
+  document.getElementById('teaserBody').innerHTML =
+    `<div class="hint" style="margin-top:6px">${a.desc}</div>`+
+    `<div class="teasercode">${a.code}</div>`+
+    `<div class="hint" style="margin-top:10px">Try it on your own embeddings in <code>examples/playground.ipynb</code>. `+
+    `The live <b>Region similarity</b> app shows the same retrieval idea on two clicks.</div>`;
+  document.getElementById('appTeaser').style.display = '';
+}
+
+// ── Region similarity (retrieval) ───────────────────────────────────────────
+let simRegions = [];                       // [{geometry, layer, marker, center, preview}]
+const SIM_COLORS = ['#f5a623', '#1565c0']; // A orange · B blue
+const SIM_LABELS = ['A', 'B'];
+const simModelId = () => { const s = document.getElementById('simModel'); return (s && s.value) || 'gse'; };
+
+function pointBounds(ll){
+  const d = KM, dx = d / Math.max(0.2, Math.cos(ll.lat*Math.PI/180));
+  return L.latLngBounds([ll.lat-d, ll.lng-dx], [ll.lat+d, ll.lng+dx]);
+}
+function geomFromBounds(b, isPoint){
+  if (isPoint){ const c = b.getCenter(); return {type:'point', lon:+c.lng.toFixed(5), lat:+c.lat.toFixed(5)}; }
+  const sw = b.getSouthWest(), ne = b.getNorthEast();
+  return {type:'bbox', minlon:+sw.lng.toFixed(5), minlat:+sw.lat.toFixed(5),
+          maxlon:+ne.lng.toFixed(5), maxlat:+ne.lat.toFixed(5)};
+}
+function simAddRegion(latlngOrBounds, isPoint){
+  if (simRegions.length >= 2) simClear();     // a third pick starts a fresh A/B pair
+  const idx = simRegions.length;
+  const b = isPoint ? pointBounds(latlngOrBounds) : latlngOrBounds;
+  const layer = L.rectangle(b, {color:SIM_COLORS[idx], weight:2, fillOpacity:.08}).addTo(map);
+  const marker = L.marker(b.getNorthEast(), {interactive:false, icon: L.divIcon({className:'',
+    html:`<div style="background:${SIM_COLORS[idx]};color:#fff;font-weight:800;font-size:12px;width:22px;height:22px;`+
+         `border-radius:50%;display:flex;align-items:center;justify-content:center;box-shadow:0 1px 3px rgba(0,0,0,.4)">${SIM_LABELS[idx]}</div>`,
+    iconSize:[22,22], iconAnchor:[11,11]})}).addTo(map);
+  const reg = {geometry: geomFromBounds(b, isPoint), layer, marker, center:b.getCenter(), preview:null};
+  simRegions.push(reg);
+  renderSimSlots(); updateQuery();
+  fetchSimPreview(reg);                       // non-blocking S2 thumbnail
+}
+async function fetchSimPreview(reg){
+  try{
+    const r = await fetch('/api/preview', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({geometry:reg.geometry, start:startStr(), end:endStr()})});
+    const j = await r.json();
+    if (!j.error && j.image){ reg.preview = j.image; renderSimSlots(); }
+  }catch(e){ /* thumbnail is optional */ }
+}
+function llText(g){
+  return g.type==='point' ? `${g.lat}, ${g.lon}` : `${g.minlat},${g.minlon} → ${g.maxlat},${g.maxlon}`;
+}
+function renderSimSlots(){
+  const box = document.getElementById('simSlots'); if(!box) return;
+  let html = '';
+  for (let i=0;i<2;i++){
+    const r = simRegions[i], lab = SIM_LABELS[i];
+    if (r){
+      const img = r.preview ? `<img src="${r.preview}">` : `<div class="ph"><span class="spin"></span></div>`;
+      html += `<div class="simslot ${lab} filled"><div class="pin">${lab}</div>${img}<div class="ll">${llText(r.geometry)}</div></div>`;
+    } else {
+      html += `<div class="simslot ${lab}"><div class="pin">${lab}</div><div class="ph">right-click the map to set ${lab}</div></div>`;
+    }
+  }
+  box.innerHTML = html;
+  const run = document.getElementById('simRun'); if (run) run.disabled = simRegions.length < 2;
+}
+function simClear(){
+  simRegions.forEach(r => { if(r.layer) map.removeLayer(r.layer); if(r.marker) map.removeLayer(r.marker); });
+  simRegions = [];
+  renderSimSlots();
+  const out = document.getElementById('simOut'); if (out) out.innerHTML = '';
+}
+function simVerdict(cos){
+  if (cos>=0.92) return ['Nearly identical','#1b7a34'];
+  if (cos>=0.78) return ['Very similar','#2e7d32'];
+  if (cos>=0.55) return ['Similar','#6a8f1f'];
+  if (cos>=0.30) return ['Somewhat different','#b07a00'];
+  return ['Different','#b3261e'];
+}
+function populateSimModels(){
+  const sel = document.getElementById('simModel'); if(!sel) return;
+  const prev = sel.value;
+  const ids = MODELS.length ? MODELS.map(m=>m.id) : ['gse'];
+  sel.innerHTML = ids.map(id=>`<option value="${id}">${id}</option>`).join('');
+  sel.value = ids.includes(prev) ? prev : (ids.includes('gse') ? 'gse' : ids[0]);
+}
+async function runSimilarity(){
+  if (simRegions.length < 2) return;
+  const out = document.getElementById('simOut'), m = simModelId();
+  out.innerHTML = `<div class="status" style="margin-top:10px"><span class="spin"></span>embedding both regions with <b>${m}</b>…</div>`;
+  try{
+    const r = await fetch('/api/similarity', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({geometries:[simRegions[0].geometry, simRegions[1].geometry],
+                            start:startStr(), end:endStr(), model:m})});
+    const j = await r.json();
+    if (j.error){ out.innerHTML = '<div class="status" style="margin-top:10px">⚠️ '+j.error+'</div>'; return; }
+    const cos = j.cosine, pct = Math.max(0, Math.min(1, cos)) * 100;
+    const [verdict, color] = simVerdict(cos);
+    out.innerHTML =
+      `<div class="simresult">`+
+        `<div class="lbl">cosine similarity · ${j.model} · dim ${j.dim}</div>`+
+        `<div class="big" style="color:${color}">${cos.toFixed(3)}</div>`+
+        `<div class="verdict" style="color:${color}">${verdict}</div>`+
+        `<div class="simbar"><i style="width:${pct.toFixed(0)}%"></i></div>`+
+      `</div>`;
+  }catch(e){ out.innerHTML = '<div class="status" style="margin-top:10px">⚠️ '+e+'</div>'; }
+}
+(function initSim(){
+  const run = document.getElementById('simRun'); if (run) run.onclick = runSimilarity;
+  const rst = document.getElementById('simReset'); if (rst) rst.onclick = simClear;
+  const sel = document.getElementById('simModel'); if (sel) sel.onchange = updateQuery;
+})();
+
+// ── Instant land-cover (unsupervised segmentation) ──────────────────────────
+let segOverlay = null, segBounds = null;
+const SEG_HALF_M = 1024;   // half-side (Web-Mercator metres) of a point-click ROI → ~2 km box
+// A square ROI in EPSG:3857 (Web Mercator) around a click. rs-embed samples the
+// region as a 3857 square (providers/gee.py) and Leaflet renders in 3857 too, so
+// drawing/sending/overlaying on this exact square aligns the mask to the ground.
+function squareBboxAround(latlng, halfM){
+  const c = L.CRS.EPSG3857.project(latlng);
+  const sw = L.CRS.EPSG3857.unproject(L.point(c.x - halfM, c.y - halfM));
+  const ne = L.CRS.EPSG3857.unproject(L.point(c.x + halfM, c.y + halfM));
+  return L.latLngBounds(sw, ne);
+}
+const segModelId = () => { const s = document.getElementById('segModel'); return (s && s.value) || 'gse'; };
+const segKVal = () => { const s = document.getElementById('segK'); return s ? +s.value : 6; };
+const segOpacityVal = () => { const o = document.getElementById('segOpacity'); return o ? +o.value : 0.6; };
+function setSegOpacity(v){ if (segOverlay) segOverlay.setOpacity(+v); }
+function segClearOverlay(){ if (segOverlay){ map.removeLayer(segOverlay); segOverlay = null; } }
+function populateSegModels(){
+  const sel = document.getElementById('segModel'); if(!sel) return;
+  const prev = sel.value;
+  const ids = MODELS.length ? MODELS.map(m=>m.id) : ['gse'];
+  sel.innerHTML = ids.map(id=>`<option value="${id}">${id}</option>`).join('');
+  sel.value = ids.includes(prev) ? prev : (ids.includes('gse') ? 'gse' : ids[0]);
+}
+function setSegRoi(b){
+  clearRoi();                                   // drop any old box / extract overlay
+  segClearOverlay();
+  roiLayer = L.rectangle(b, {color:'#f5a623', weight:2, fillOpacity:.05}).addTo(map);
+  geometry = geomFromBounds(b, false);          // always a bbox → embedded region == drawn box == overlay
+  segBounds = b;
+  roiStatus('ROI set — choose k, then Segment.');
+  const run = document.getElementById('segRun'); if (run) run.disabled = false;
+  const out = document.getElementById('segOut'); if (out) out.innerHTML = '';
+  updateQuery();
+}
+function segReset(){
+  segClearOverlay(); clearRoi(); segBounds = null;
+  const run = document.getElementById('segRun'); if (run) run.disabled = true;
+  const out = document.getElementById('segOut'); if (out) out.innerHTML = '';
+}
+async function runSegment(){
+  if (!geometry || !segBounds) return;
+  const out = document.getElementById('segOut'), m = segModelId(), k = segKVal();
+  out.innerHTML = `<div class="status" style="margin-top:11px"><span class="spin"></span>embedding & clustering (k=${k}) with <b>${m}</b>…</div>`;
+  segClearOverlay();
+  try{
+    const r = await fetch('/api/segment', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({geometry, start:startStr(), end:endStr(), model:m, k})});
+    const j = await r.json();
+    if (j.error){ out.innerHTML = '<div class="status" style="margin-top:11px">⚠️ '+j.error+'</div>'; return; }
+    segOverlay = L.imageOverlay(j.image, segBounds,
+      {opacity: segOpacityVal(), pane:'embedPane', className:'embed-ov', interactive:false}).addTo(map);
+    const leg = (j.legend||[]).map(c =>
+      `<div class="legrow"><span class="legsw" style="background:rgb(${c.rgb[0]},${c.rgb[1]},${c.rgb[2]})"></span>`+
+      `cluster ${c.cluster} · ${(c.frac*100).toFixed(0)}%</div>`).join('');
+    out.innerHTML =
+      `<div class="seginfo"><b>${j.k} clusters</b> · ${j.model} · grid ${j.grid_hw[0]}×${j.grid_hw[1]}</div>`+
+      `<div class="ovctl"><label>Opacity</label>`+
+        `<input id="segOpacity" type="range" min="0.15" max="1" step="0.05" value="${segOpacityVal()}" oninput="setSegOpacity(this.value)">`+
+        `<button onclick="segClearOverlay()">hide</button></div>`+
+      `<div class="legend">${leg}</div>`;
+  }catch(e){ out.innerHTML = '<div class="status" style="margin-top:11px">⚠️ '+e+'</div>'; }
+}
+(function initSeg(){
+  const run = document.getElementById('segRun'); if (run) run.onclick = runSegment;
+  const rst = document.getElementById('segReset'); if (rst) rst.onclick = segReset;
+  const sel = document.getElementById('segModel'); if (sel) sel.onchange = updateQuery;
+  const ks  = document.getElementById('segK');     if (ks)  ks.oninput  = () => { document.getElementById('segKv').textContent = ks.value; updateQuery(); };
+})();
+
+// ── Change over time (temporal drift) ───────────────────────────────────────
+const chgModelId = () => { const s = document.getElementById('chgModel'); return (s && s.value) || 'gse'; };
+function chgYears(){
+  const a = +document.getElementById('chgY0').value, b = +document.getElementById('chgY1').value;
+  return [Math.min(a,b), Math.max(a,b)];
+}
+function populateChgModels(){
+  const sel = document.getElementById('chgModel'); if(!sel) return;
+  const prev = sel.value;
+  const ids = MODELS.length ? MODELS.map(m=>m.id) : ['gse'];
+  sel.innerHTML = ids.map(id=>`<option value="${id}">${id}</option>`).join('');
+  sel.value = ids.includes(prev) ? prev : (ids.includes('gse') ? 'gse' : ids[0]);
+}
+function populateChgYears(){
+  const s0 = document.getElementById('chgY0'), s1 = document.getElementById('chgY1');
+  if (!s0 || !s1) return;
+  if (!s0.options.length){          // first open: fill 2017..2024 (gse annual coverage)
+    const opts = [];
+    for (let y=MIN_Y; y<=MAX_Y-1; y++) opts.push(`<option value="${y}">${y}</option>`);
+    s0.innerHTML = opts.join(''); s1.innerHTML = opts.join('');
+    s0.value = '2018'; s1.value = '2023';
+  }
+  s0.onchange = updateQuery; s1.onchange = updateQuery;
+}
+function setChangeRoi(b){
+  clearRoi();
+  roiLayer = L.rectangle(b, {color:'#f5a623', weight:2, fillOpacity:.05}).addTo(map);
+  geometry = geomFromBounds(b, false);
+  roiStatus('ROI set — pick years, then Compute.');
+  const run = document.getElementById('chgRun'); if (run) run.disabled = false;
+  const out = document.getElementById('chgOut'); if (out) out.innerHTML = '';
+  updateQuery();
+}
+function changeReset(){
+  clearRoi();
+  const run = document.getElementById('chgRun'); if (run) run.disabled = true;
+  const out = document.getElementById('chgOut'); if (out) out.innerHTML = '';
+}
+// Small responsive line chart of the year→distance curve (peak highlighted).
+function changeChart(years, dists){
+  const W=300, H=140, padL=30, padR=12, padT=14, padB=24, n=years.length;
+  const maxD = Math.max(...dists, 0.05);
+  const x = i => padL + (n<=1 ? 0 : (i/(n-1))*(W-padL-padR));
+  const y = v => padT + (1 - v/maxD)*(H-padT-padB);
+  const pts = dists.map((d,i)=>`${x(i).toFixed(1)},${y(d).toFixed(1)}`).join(' ');
+  const maxi = dists.indexOf(Math.max(...dists));
+  let marks = '';
+  for (let i=0;i<n;i++){
+    const hl = i===maxi && dists[i] > 0.001;
+    marks += `<circle cx="${x(i).toFixed(1)}" cy="${y(dists[i]).toFixed(1)}" r="${hl?4:2.6}" fill="${hl?'#e0512b':'#1565c0'}"/>`;
+    marks += `<text x="${x(i).toFixed(1)}" y="${H-padB+13}" text-anchor="middle" font-size="9" fill="#5b6770">${String(years[i]).slice(2)}</text>`;
+  }
+  const axis = `<line x1="${padL}" y1="${y(0).toFixed(1)}" x2="${W-padR}" y2="${y(0).toFixed(1)}" stroke="#e3e0d8"/>`+
+    `<text x="${padL-5}" y="${(y(0)+3).toFixed(1)}" text-anchor="end" font-size="8" fill="#9aa6ad">0</text>`+
+    `<text x="${padL-5}" y="${(y(maxD)+3).toFixed(1)}" text-anchor="end" font-size="8" fill="#9aa6ad">${maxD.toFixed(2)}</text>`;
+  return `<svg viewBox="0 0 ${W} ${H}" width="100%" style="margin-top:10px">${axis}`+
+    `<polyline fill="none" stroke="#1565c0" stroke-width="1.6" points="${pts}"/>${marks}</svg>`;
+}
+async function runChange(){
+  if (!geometry) return;
+  const out = document.getElementById('chgOut'), m = chgModelId(), [y0,y1] = chgYears();
+  const years = []; for (let y=y0; y<=y1; y++) years.push(y);
+  if (years.length < 2){ out.innerHTML = '<div class="status" style="margin-top:11px">Pick at least a two-year span.</div>'; return; }
+  out.innerHTML = `<div class="status" style="margin-top:11px"><span class="spin"></span>embedding ${years.length} years with <b>${m}</b>…</div>`;
+  try{
+    const r = await fetch('/api/change', {method:'POST', headers:{'Content-Type':'application/json'},
+      body: JSON.stringify({geometry, model:m, years})});
+    const j = await r.json();
+    if (j.error){ out.innerHTML = '<div class="status" style="margin-top:11px">⚠️ '+j.error+'</div>'; return; }
+    const d = j.distances, mi = d.indexOf(Math.max(...d));
+    const peak = j.years[mi];
+    const note = (j.errors && j.errors.length)
+      ? `<div class="hint" style="margin-top:6px">Skipped: ${j.errors.map(e=>e.year).join(', ')} (no embedding).</div>` : '';
+    out.innerHTML =
+      `<div class="seginfo"><b>change vs ${j.baseline}</b> · ${j.model} · 1 − cosine</div>`+
+      changeChart(j.years, d)+
+      `<div class="hint" style="margin-top:4px">Biggest shift: <b>${peak}</b> (${d[mi].toFixed(3)}).</div>`+
+      note;
+  }catch(e){ out.innerHTML = '<div class="status" style="margin-top:11px">⚠️ '+e+'</div>'; }
+}
+(function initChange(){
+  const run = document.getElementById('chgRun'); if (run) run.onclick = runChange;
+  const rst = document.getElementById('chgReset'); if (rst) rst.onclick = changeReset;
+  const sel = document.getElementById('chgModel'); if (sel) sel.onchange = updateQuery;
+})();
+
 const USE_START = '2022-06', USE_END = '2022-08';   // pretrained head's training window
+const DEMO_MODELS = ['gse', 'tessera', 'olmoearth', 'agrifm', 'terramind', 'thor'];   // embeddings shown in the yield demo
+let demoMode = false;                                   // true when no trained head exists → example mode
 const useModelId = () => { const s = document.getElementById('useModel'); return (s && s.value) || 'gse'; };
+function predictModels(){
+  if (demoMode) return Array.from(document.querySelectorAll('#useDemoModels input:checked')).map(c=>c.value);
+  return [useModelId()];
+}
+const predictUrl = () => demoMode ? '/api/predict_example' : '/api/predict';
+function renderDemoModels(){
+  const box = document.getElementById('useDemoModels'); if(!box) return;
+  box.innerHTML = DEMO_MODELS.map(id =>
+    `<label class="demochip"><input type="checkbox" value="${id}" checked>${id}</label>`).join('');
+  box.querySelectorAll('input').forEach(cb => cb.onchange = updateQuery);
+}
 async function loadHeads(){
   try { const r = await fetch('/api/heads'); HEADS = await r.json(); } catch(e){ HEADS = null; }
   const el = document.getElementById('useInfo');
-  const sel = document.getElementById('useModel');
+  const modelRow = document.getElementById('useModelRow');
+  const demoBox  = document.getElementById('useDemoModels');
+  const uploadRow = document.getElementById('useUploadRow');
   if (!HEADS || !HEADS.task){
-    el.innerHTML = '⚠️ No pretrained head yet. Build it with <code>build_demo_cache.py --only corn_heads</code>.';
+    // No local .pkl → corn-yield demo over a few embeddings (heads trained on SPAM / Illinois).
+    demoMode = true;
+    el.innerHTML = '<b>Corn yield (mt/ha)</b> — heads trained on the <b>SPAM</b> dataset over Illinois '
+                 + '(see the <a href="https://arxiv.org/abs/2602.23678" target="_blank" style="color:#1565c0">rs-embed paper</a>).';
+    modelRow.style.display = 'none';
+    uploadRow.style.display = 'none';
+    demoBox.style.display = '';
+    renderDemoModels();
+    updateQuery();
     return;
   }
+  demoMode = false;
+  modelRow.style.display = '';
+  uploadRow.style.display = '';
+  demoBox.style.display = 'none';
   el.innerHTML = `<b>${HEADS.label} (${HEADS.units})</b> — pretrained on ${HEADS.region}.`;
+  const sel = document.getElementById('useModel');
   sel.innerHTML = '';
   (HEADS.models||[]).forEach(m => {
     const o = document.createElement('option');
@@ -702,19 +1213,21 @@ function predCardHTML(x, units){
   const val = cls
     ? `<span class="v">${x.label_pred}</span> <span class="u">${Math.round(x.prediction*100)}% ${units||''}</span>`
     : `<span class="v">${x.prediction}</span> <span class="u">${units||''}</span>`;
-  const score = (x.score != null) ? x.score : x.train_r2;
-  return `<div class="pred ${ood?'ood':''}"><div class="top">${x.model}${ood}</div>${val}`+
-         `<div class="r2">head ${x.score_name||'R²'}=${score}</div></div>`;
+  const sub = x.demo
+    ? ''
+    : `<div class="r2">head ${x.score_name||'R²'}=${(x.score != null) ? x.score : x.train_r2}</div>`;
+  return `<div class="pred ${ood?'ood':''}"><div class="top">${x.model}${ood}</div>${val}${sub}</div>`;
 }
 function predBubbleHTML(j){
   return `<div class="pop bubble-results"><b>${j.label||'Prediction'}</b> <span class="status">· ${j.region||''}</span>`+
          j.results.map(x=>predCardHTML(x, j.units)).join('')+`</div>`;
 }
 async function runPredict(pop){
-  const models = [useModelId()];
-  if (pop) pop.setContent('<div class="pop"><span class="spin"></span>Predicting…<br><span class="status">embed the ROI, then run the pretrained head.</span></div>');
+  const models = predictModels();
+  if (!models.length){ if(pop) pop.setContent('<div class="pop">Pick at least one embedding.</div>'); return; }
+  if (pop) pop.setContent('<div class="pop"><span class="spin"></span>'+(demoMode?'Estimating (demo)…':'Predicting…')+'<br><span class="status">embed the ROI, then run the head.</span></div>');
   try{
-    const r = await fetch('/api/predict', {method:'POST', headers:{'Content-Type':'application/json'},
+    const r = await fetch(predictUrl(), {method:'POST', headers:{'Content-Type':'application/json'},
       body: JSON.stringify({geometry, start:USE_START, end:USE_END, models})});
     const j = await r.json();
     if (j.error){ if(pop) pop.setContent('<div class="pop">⚠️ '+j.error+'</div>'); return; }
@@ -726,10 +1239,12 @@ async function runPredict(pop){
   b.onclick = async () => {
     const out = document.getElementById('usePred');
     if (!geometry){ out.innerHTML = '<div class="status">Right-click the map to pick a location first.</div>'; return; }
-    out.innerHTML = '<div class="status"><span class="spin"></span>predicting at the selected ROI…</div>';
+    const models = predictModels();
+    if (!models.length){ out.innerHTML = '<div class="status">Pick at least one embedding.</div>'; return; }
+    out.innerHTML = '<div class="status"><span class="spin"></span>'+(demoMode?'estimating (demo) at the ROI…':'predicting at the selected ROI…')+'</div>';
     try{
-      const r = await fetch('/api/predict', {method:'POST', headers:{'Content-Type':'application/json'},
-        body: JSON.stringify({geometry, start:USE_START, end:USE_END, models:[useModelId()]})});
+      const r = await fetch(predictUrl(), {method:'POST', headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({geometry, start:USE_START, end:USE_END, models})});
       const j = await r.json();
       if (j.error){ out.innerHTML = '<div class="status">⚠️ '+j.error+'</div>'; return; }
       out.innerHTML = j.results.map(x=>predCardHTML(x, j.units)).join('');

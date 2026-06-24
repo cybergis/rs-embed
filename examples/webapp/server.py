@@ -26,6 +26,7 @@ The ROI/temporal/model contract mirrors the demo notebook:
 from __future__ import annotations
 
 import base64
+import hashlib
 import io
 import json
 import os
@@ -174,6 +175,31 @@ class EmbedReq(PreviewReq):
 
 class PredictReq(PreviewReq):
     models: list[str] = []  # embedding models to run through their heads
+
+
+class SimilarityReq(BaseModel):
+    geometries: list[Geometry] = []  # exactly two ROIs to compare
+    start: str = "2022-06"
+    end: str = "2022-09"
+    buffer_m: int = 2048
+    model: str = "gse"  # single model used to embed both ROIs
+
+
+class SegmentReq(PreviewReq):
+    model: str = "gse"  # model whose grid embedding is clustered
+    k: int = 6  # number of k-means clusters (land-cover-like regions)
+
+
+class ChangeReq(BaseModel):
+    geometry: Geometry  # single ROI tracked across years
+    buffer_m: int = 2048
+    model: str = "gse"  # model used to embed each year
+    years: list[int] = []  # years to compare; baseline = first
+
+
+class PredictExampleReq(PreviewReq):
+    # Corn-yield demo over several embeddings (heads framed as trained on SPAM / Illinois).
+    models: list[str] = ["gse", "tessera", "olmoearth", "agrifm", "terramind", "thor"]
 
 
 # --- helpers -----------------------------------------------------------------
@@ -542,6 +568,217 @@ def api_predict(req: PredictReq) -> Any:
             "label": meta.get("label"),
             "units": meta.get("units"),
             "region": meta.get("region"),
+            "results": results,
+        }
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return JSONResponse({"error": repr(e)}, status_code=500)
+
+
+@app.post("/api/similarity")
+def api_similarity(req: SimilarityReq) -> Any:
+    """Two ROIs → one model → pooled vectors → cosine similarity.
+
+    The retrieval primitive: the same pooled descriptor that powers nearest-
+    neighbour search, here used to score how alike any two places look.
+    """
+    try:
+        if len(req.geometries) != 2:
+            return JSONResponse(
+                {"error": "similarity needs exactly two regions (A and B)"}, status_code=400
+            )
+        _ensure_ee()
+        rs = _rs()
+        m = req.model
+        temporal = _temporal(rs, m, req.start, req.end)
+        vecs: list[np.ndarray] = []
+        regions: list[dict[str, Any]] = []
+        for i, g in enumerate(req.geometries):
+            spatial = _spatial(rs, g, req.buffer_m)
+            emb = rs["get_embedding"](
+                m,
+                spatial=spatial,
+                temporal=temporal,
+                output=rs["OutputSpec"].grid(),  # pool via nanmean (robust to fill/NaN)
+                backend="auto",
+            )
+            vec = H.pooled_vector(emb.data)
+            vecs.append(vec)
+            regions.append(
+                {
+                    "label": ["A", "B"][i],
+                    "dim": int(vec.shape[0]),
+                    "norm": float(np.linalg.norm(vec)),
+                }
+            )
+        a = H.l2_normalize(vecs[0])
+        b = H.l2_normalize(vecs[1])
+        cos = float(np.dot(a, b))
+        return {
+            "model": m,
+            "cosine": round(cos, 4),
+            "distance": round(1.0 - cos, 4),
+            "dim": int(vecs[0].shape[0]),
+            "regions": regions,
+        }
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return JSONResponse({"error": repr(e)}, status_code=500)
+
+
+@app.post("/api/segment")
+def api_segment(req: SegmentReq) -> Any:
+    """One ROI → grid embedding → k-means → a colourised land-cover mask.
+
+    Unsupervised segmentation: the grid embedding is clustered into ``k`` groups
+    and returned as an (H,W) RGB PNG, ready to drape over the ROI as a
+    semi-transparent overlay.
+    """
+    try:
+        _ensure_ee()
+        rs = _rs()
+        m = req.model
+        k = max(2, min(10, int(req.k)))
+        spatial = _spatial(rs, req.geometry, req.buffer_m)
+        emb = rs["get_embedding"](
+            m,
+            spatial=spatial,
+            temporal=_temporal(rs, m, req.start, req.end),
+            output=rs["OutputSpec"].grid(),
+            backend="auto",
+        )
+        grid = H.to_dhw(emb.data)
+        labels, rgb = H.kmeans_landcover(grid, k=k)
+        gh, gw = int(labels.shape[0]), int(labels.shape[1])
+        # per-cluster pixel share (largest first) for a readable legend
+        uniq, counts = np.unique(labels, return_counts=True)
+        total = int(labels.size) or 1
+        pal = (np.asarray(H.LANDCOVER_PALETTE) * 255).astype(int)
+        legend = [
+            {
+                "cluster": int(c),
+                "rgb": [int(v) for v in pal[int(c) % len(pal)]],
+                "frac": round(int(cnt) / total, 3),
+            }
+            for c, cnt in sorted(
+                zip(uniq.tolist(), counts.tolist(), strict=True), key=lambda t: -t[1]
+            )
+        ]
+        return {
+            "model": m,
+            "k": k,
+            "grid_hw": [gh, gw],
+            "image": _png_b64(rgb),
+            "legend": legend,
+        }
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return JSONResponse({"error": repr(e)}, status_code=500)
+
+
+@app.post("/api/change")
+def api_change(req: ChangeReq) -> Any:
+    """One ROI across several years → pooled embedding per year → change curve.
+
+    Returns the cosine distance (``1 - cos``) of each year's pooled embedding from
+    the baseline (first) year; a spike marks the year the place changed.
+    """
+    try:
+        years = sorted({int(y) for y in req.years})
+        if len(years) < 2:
+            return JSONResponse({"error": "change needs at least two years"}, status_code=400)
+        _ensure_ee()
+        rs = _rs()
+        m = req.model
+        spatial = _spatial(rs, req.geometry, req.buffer_m)
+        vecs: list[np.ndarray] = []
+        used: list[int] = []
+        errors: list[dict[str, Any]] = []
+        for y in years:
+            try:
+                emb = rs["get_embedding"](
+                    m,
+                    spatial=spatial,
+                    temporal=_temporal(rs, m, f"{y}-01", f"{y}-12"),
+                    output=rs["OutputSpec"].grid(),  # pool via nanmean (robust to fill/NaN)
+                    backend="auto",
+                )
+                vecs.append(H.pooled_vector(emb.data))
+                used.append(y)
+            except Exception as e:  # noqa: BLE001
+                errors.append({"year": y, "error": repr(e)[:200]})
+        if len(vecs) < 2:
+            return JSONResponse(
+                {"error": "fewer than two years produced an embedding", "errors": errors},
+                status_code=502,
+            )
+        dist = H.change_curve(vecs, baseline_index=0, metric="cosine")
+        return {
+            "model": m,
+            "baseline": used[0],
+            "years": used,
+            "distances": [round(float(d), 4) for d in dist],
+            "errors": errors,
+        }
+    except Exception as e:  # noqa: BLE001
+        traceback.print_exc()
+        return JSONResponse({"error": repr(e)}, status_code=500)
+
+
+def _demo_yield(model: str, vec: np.ndarray) -> float:
+    """A deterministic, illustrative corn-yield (mt/ha) from a pooled embedding.
+
+    Not a trained model: a fixed per-model random projection of the L2-normalised
+    pooled vector, squashed into ~[8, 14] mt/ha. Same place+model → same value;
+    different models differ slightly; nearby places read similarly. Lets the
+    'Predict' app demo the *use* of embeddings before a real head exists.
+    """
+    v = H.l2_normalize(np.nan_to_num(np.asarray(vec, dtype=np.float32)))
+    seed = int.from_bytes(hashlib.md5(model.encode()).digest()[:4], "big")  # stable per model
+    w = np.random.default_rng(seed).standard_normal(v.shape[0]).astype(np.float32)
+    w /= np.linalg.norm(w) + 1e-8
+    raw = float(np.dot(w, v))  # ~[-1, 1] for unit vectors
+    return round(float(np.clip(11.0 + 3.0 * np.tanh(raw * 1.5), 6.0, 16.0)), 2)
+
+
+@app.post("/api/predict_example")
+def api_predict_example(req: PredictExampleReq) -> Any:
+    """Illustrative corn-yield demo: ROI → pooled embedding → a deterministic
+    demo head (no training), per selected model. For showcasing how embeddings
+    feed a downstream task before a real head is built."""
+    try:
+        _ensure_ee()
+        rs = _rs()
+        spatial = _spatial(rs, req.geometry, req.buffer_m)
+        results = []
+        for m in req.models or []:
+            try:
+                emb = rs["get_embedding"](
+                    m,
+                    spatial=spatial,
+                    temporal=_temporal(rs, m, req.start, req.end),
+                    output=rs["OutputSpec"].grid(),  # pool via nanmean (robust to fill/NaN)
+                    backend="auto",
+                )
+                vec = H.pooled_vector(emb.data)
+                results.append(
+                    {
+                        "model": m,
+                        "ok": True,
+                        "kind": "regression",
+                        "prediction": _demo_yield(m, vec),
+                        "demo": True,
+                    }
+                )
+            except Exception as e:  # noqa: BLE001
+                results.append({"model": m, "ok": False, "error": repr(e)[:200]})
+        return {
+            "task": "corn_yield_demo",
+            "kind": "regression",
+            "label": "corn yield",
+            "units": "mt/ha",
+            "region": "SPAM · Illinois",
+            "demo": True,
             "results": results,
         }
     except Exception as e:  # noqa: BLE001
