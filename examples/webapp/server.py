@@ -148,7 +148,28 @@ def _ensure_ee() -> None:
 
 
 def _rs():
-    return locals()
+    # Lazy access to the rs-embed API as a name->symbol dict. We resolve via
+    # getattr over string names (not `from rs_embed import ...; return locals()`)
+    # so ruff's F401 cannot flag the symbols as "unused" — the old form got its
+    # imports auto-stripped by `ruff --fix` (pre-commit), collapsing this to an
+    # empty dict and 500-ing every endpoint. Keep it getattr-based.
+    import rs_embed
+
+    names = (
+        "BBox",
+        "ExportConfig",
+        "ExportTarget",
+        "OutputSpec",
+        "PointBuffer",
+        "SensorSpec",
+        "TemporalSpec",
+        "export_batch",
+        "get_embedding",
+        "inspect_provider_patch",
+        "list_models",
+        "load_export",
+    )
+    return {n: getattr(rs_embed, n) for n in names}
 
 
 # --- request models ---------------------------------------------------------
