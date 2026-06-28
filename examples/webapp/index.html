@@ -606,6 +606,7 @@ function updateQuery(){
       const spB = spatialStr(simRegions[1] && simRegions[1].geometry);
       q.innerHTML =
 `<span class="k">import numpy as np</span>
+<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
 a = <span class="k">get_embedding</span>(<span class="k2">"${sm}"</span>, spatial=${spA},
                   temporal=${simT}, output=OutputSpec.pooled()).data
 b = <span class="k">get_embedding</span>(<span class="k2">"${sm}"</span>, spatial=${spB},
@@ -619,7 +620,8 @@ cos = a @ b / (np.linalg.norm(a) * np.linalg.norm(b))   <span style="color:#7f8c
       const isPc = (MODELS.find(x=>x.id===sm)||{}).type === 'precomputed';
       const segT = isPc ? `TemporalSpec.year(${mY(Math.max(tStart,tEnd))})` : rangeT;
       q.innerHTML =
-`<span class="k">from</span> iguide_demo_helpers <span class="k">import</span> kmeans_landcover
+`<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
+<span class="k">from</span> iguide_demo_helpers <span class="k">import</span> kmeans_landcover
 grid = <span class="k">get_embedding</span>(<span class="k2">"${sm}"</span>, spatial=${spatial},
                      temporal=${segT}, output=OutputSpec.grid()).data
 labels, rgb = <span class="k">kmeans_landcover</span>(grid, k=${segKVal()})   <span style="color:#7f8c99"># transparent mask</span>`;
@@ -629,7 +631,8 @@ labels, rgb = <span class="k">kmeans_landcover</span>(grid, k=${segKVal()})   <s
       // temporal change: pooled embedding per year → distance from the first year
       const cm = chgModelId(); const [y0, y1] = chgYears();
       q.innerHTML =
-`<span class="k">from</span> iguide_demo_helpers <span class="k">import</span> change_curve
+`<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
+<span class="k">from</span> iguide_demo_helpers <span class="k">import</span> change_curve
 grids = [<span class="k">get_embedding</span>(<span class="k2">"${cm}"</span>, spatial=${spatial},
                        temporal=TemporalSpec.year(y), output=OutputSpec.grid()).data
          <span class="k">for</span> y <span class="k">in</span> range(${y0}, ${y1 + 1})]
@@ -641,7 +644,8 @@ dist = <span class="k">change_curve</span>(grids, baseline_index=<span class="k2
     if (demoMode){
       const um = predictModels()[0] || 'gse';
       q.innerHTML =
-`emb = <span class="k">get_embedding</span>(<span class="k2">"${um}"</span>, spatial=${spatial},
+`<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
+emb = <span class="k">get_embedding</span>(<span class="k2">"${um}"</span>, spatial=${spatial},
                     temporal=${useT}, output=OutputSpec.pooled())
 yhat = head.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># corn yield (mt/ha) — plug in a trained head</span>`;
       return;
@@ -650,7 +654,8 @@ yhat = head.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># 
     const task = (HEADS && HEADS.task) || 'corn_presence';
     const lbl = (HEADS && HEADS.label) || 'prediction';
     q.innerHTML =
-`<span class="k">from joblib import load</span>
+`<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
+<span class="k">from joblib import load</span>
 reg = load(<span class="k2">"${task}__${um}.pkl"</span>)        <span style="color:#7f8c99"># pretrained head</span>
 emb = <span class="k">get_embedding</span>(<span class="k2">"${um}"</span>, spatial=${spatial},
                     temporal=${useT}, output=OutputSpec.pooled())
@@ -662,7 +667,8 @@ yhat = reg.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># $
     // multiple models → export_batch (matches the backend)
     const models = sel.map(s=>`<span class="k2">"${s}"</span>`).join(', ');
     q.innerHTML =
-`<span class="k">export_batch</span>(
+`<span class="k">from</span> rs_embed <span class="k">import</span> export_batch, OutputSpec, TemporalSpec, ExportTarget, BBox, PointBuffer
+<span class="k">export_batch</span>(
     spatials=[${spatial}],
     temporal=${rangeT},
     models=[${models}],
@@ -675,7 +681,8 @@ yhat = reg.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># $
     const isPc = (MODELS.find(x=>x.id===m)||{}).type === 'precomputed';
     const temporal = isPc ? `TemporalSpec.year(${mY(Math.max(tStart,tEnd))})` : rangeT;
     q.innerHTML =
-`<span class="k">get_embedding</span>(
+`<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
+<span class="k">get_embedding</span>(
     <span class="k2">"${m}"</span>,
     spatial=${spatial},
     temporal=${temporal},
