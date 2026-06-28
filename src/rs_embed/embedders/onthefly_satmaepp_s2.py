@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -28,6 +27,14 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.shape import (
+    crop_grid_and_pool,
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
@@ -574,6 +581,11 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
       - forward_encoder(mask_ratio=0.0) for embedding extraction
     """
 
+    # ViT-grid model needs a square input → base.fetch_input (and the direct/batch
+    # fetch paths) enlarge a rectangular ROI to a square of real imagery; the token
+    # grid is then cropped back to the ROI window.
+    _requires_square_input = True
+
     input_spec = ModelInputSpec(
         collection="COPERNICUS/S2_SR_HARMONIZED",
         bands=tuple(_S2_SR_10_BANDS),
@@ -671,12 +683,18 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         device: str = "auto",
         input_chw: np.ndarray | None = None,
         model_config: dict[str, Any] | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmaepp_s2_10b expects a provider backend (or 'auto').")
 
         if sensor is None:
             sensor = self._default_sensor()
+
+        # Fetch-square ROI window: set on the direct fetch below, or carried in
+        # fetch_meta when the API/batch prefetched a square. The token grid is
+        # cropped back to it (full frame → no-op, behavior unchanged).
+        geo_roi = geo_roi_from_meta(fetch_meta)
 
         if tuple(sensor.bands) != tuple(_S2_SR_10_BANDS):
             raise ModelError(
@@ -701,6 +719,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
         if input_chw is None:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             raw_chw = _fetch_s2_sr_10_raw_chw(
                 provider=self._get_provider(backend),
                 spatial=spatial,
@@ -762,19 +781,41 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
             },
         )
 
+        # Build the spatial grid for grid output, or to crop+pool the ROI when the
+        # input was enlarged to a square at fetch time.
+        cropped_to_roi = not roi_is_full(geo_roi)
+
         if output.mode == "pooled":
-            vec, cls_removed = _satmaepp_s2_pool(tokens, output.pooling)
-            meta.update(
-                {
-                    "pooling": f"group_tokens_{output.pooling}",
-                    "cls_removed": bool(cls_removed),
-                }
-            )
+            if cropped_to_roi:
+                # Pool only the ROI tokens (the model's group-token pool would
+                # include the real-neighborhood context fetched only to square the
+                # input). Build the grid, crop to ROI, then pool.
+                group_reduce = self._resolve_group_reduce()
+                grid, _, cls_removed, _ = _satmaepp_s2_grid(tokens, group_reduce=group_reduce)
+                _, vec = crop_grid_and_pool(grid, geo_roi, pooling=output.pooling)
+                assert vec is not None
+                meta.update(
+                    {
+                        "pooling": f"roi_grid_{output.pooling}",
+                        "cls_removed": bool(cls_removed),
+                    }
+                )
+            else:
+                vec, cls_removed = _satmaepp_s2_pool(tokens, output.pooling)
+                meta.update(
+                    {
+                        "pooling": f"group_tokens_{output.pooling}",
+                        "cls_removed": bool(cls_removed),
+                    }
+                )
             return Embedding(data=vec.astype(np.float32), meta=meta)
 
         if output.mode == "grid":
             group_reduce = self._resolve_group_reduce()
             grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(tokens, group_reduce=group_reduce)
+            if cropped_to_roi:
+                grid = crop_grid_to_roi(grid, geo_roi)
+                h, w = int(grid.shape[1]), int(grid.shape[2])
             meta.update(
                 {
                     "grid_hw": (h, w),
@@ -846,35 +887,22 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         provider = self._get_provider(backend)
         n = len(spatials)
-        raws: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            raw = _fetch_s2_sr_10_raw_chw(
+        # Square-fetch each ROI (enlarge rectangle to a square of real imagery),
+        # collecting the ROI window per item so each token grid is cropped back.
+        raws, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: _fetch_s2_sr_10_raw_chw(
                 provider=provider,
-                spatial=sp,
+                spatial=sq,
                 temporal=t,
                 scale_m=int(getattr(sensor, "scale_m", 10)),
                 cloudy_pct=int(getattr(sensor, "cloudy_pct", 30)),
                 composite=str(getattr(sensor, "composite", "median")),
                 fill_value=float(getattr(sensor, "fill_value", 0.0)),
-            )
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                _, raw = _fetch_one(i, sp)
-                raws[i] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    raws[i] = raw
-
-        for i, x in enumerate(raws):
-            if x is None:
-                raise ModelError(f"Missing fetched patch at index={i}; batch fetch failed.")
+            ),
+            max_workers=self._resolve_fetch_workers(n),
+        )
 
         model, wmeta = _load_satmaepp_s2(
             ckpt_repo=ckpt_repo,
@@ -890,8 +918,11 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         out: list[Embedding | None] = [None] * n
         want_grid = output.mode == "grid"
+        any_cropped = any(not roi_is_full(gr) for gr in geo_rois)
         xr_mod = None
-        group_reduce = self._resolve_group_reduce() if want_grid else "mean"
+        # group_reduce is needed for grid output, and also for pooled output when an
+        # ROI was enlarged to a square (pooled then derives from the cropped grid).
+        group_reduce = self._resolve_group_reduce() if (want_grid or any_cropped) else "mean"
         if want_grid:
             try:
                 import xarray as xr  # type: ignore
@@ -902,7 +933,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)
-            raw_batch = [x for x in raws[s0:s1] if x is not None]
+            raw_batch = list(raws[s0:s1])
             toks_batch = _satmaepp_s2_forward_tokens_batch(
                 model,
                 raw_batch,
@@ -936,20 +967,38 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                     },
                 )
 
+                cropped_to_roi = not roi_is_full(geo_rois[i])
+
                 if output.mode == "pooled":
-                    vec, cls_removed = _satmaepp_s2_pool(tokens, output.pooling)
-                    meta.update(
-                        {
-                            "pooling": f"group_tokens_{output.pooling}",
-                            "cls_removed": bool(cls_removed),
-                        }
-                    )
+                    if cropped_to_roi:
+                        grid, _, cls_removed, _ = _satmaepp_s2_grid(
+                            tokens, group_reduce=group_reduce
+                        )
+                        _, vec = crop_grid_and_pool(grid, geo_rois[i], pooling=output.pooling)
+                        assert vec is not None
+                        meta.update(
+                            {
+                                "pooling": f"roi_grid_{output.pooling}",
+                                "cls_removed": bool(cls_removed),
+                            }
+                        )
+                    else:
+                        vec, cls_removed = _satmaepp_s2_pool(tokens, output.pooling)
+                        meta.update(
+                            {
+                                "pooling": f"group_tokens_{output.pooling}",
+                                "cls_removed": bool(cls_removed),
+                            }
+                        )
                     out[i] = Embedding(data=vec.astype(np.float32), meta=meta)
                 elif output.mode == "grid":
                     assert xr_mod is not None
                     grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(
                         tokens, group_reduce=group_reduce
                     )
+                    if cropped_to_roi:
+                        grid = crop_grid_to_roi(grid, geo_rois[i])
+                        h, w = int(grid.shape[1]), int(grid.shape[2])
                     meta.update(
                         {
                             "grid_hw": (h, w),

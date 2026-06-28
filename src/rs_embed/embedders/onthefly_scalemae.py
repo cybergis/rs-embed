@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -23,6 +22,13 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -105,6 +111,90 @@ def tokens_to_grid_dhw(tokens):
     if hw * hw != p:
         raise ModelError(f"Patch token count {p} is not a perfect square.")
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
+
+
+def build_scalemae_embedding(out, *, geo_roi, output, meta):
+    """Turn a ScaleMAE forward output into an Embedding, cropping to the ROI.
+
+    ``out`` is either a token sequence ``[N,D]`` (ndim==2) or a model-pooled
+    vector ``[D]`` (ndim==1). When the input was enlarged to a square at fetch
+    time (``geo_roi`` is a sub-window) the patch-token grid is cropped back to the
+    ROI before pooling / emitting, so neighbourhood context fetched only to square
+    the input does not leak into the result. When ``geo_roi`` is the full frame
+    this reproduces the legacy pooling / full-grid behaviour exactly. A model
+    pooled vector (ndim==1) has no spatial tokens to crop, so it is always emitted
+    unchanged. ``meta`` is mutated in place with the chosen pooling / grid
+    provenance.
+    """
+    cropped = not roi_is_full(geo_roi)
+
+    if output.mode == "pooled":
+        if out.ndim == 2:
+            if cropped:
+                grid, _hw, cls_removed = tokens_to_grid_dhw(out)
+                g = crop_grid_to_roi(grid, geo_roi)
+                reduce = g.max if output.pooling == "max" else g.mean
+                vec = reduce(axis=(1, 2)).astype("float32")
+                meta.update(
+                    {
+                        "pooling": f"roi_grid_{output.pooling}",
+                        "cls_removed": bool(cls_removed),
+                    }
+                )
+            else:
+                vec, cls_removed = pool_from_tokens(out, output.pooling)
+                meta.update(
+                    {
+                        "pooling": f"patch_{output.pooling}",
+                        "cls_removed": bool(cls_removed),
+                    }
+                )
+            return Embedding(data=vec, meta=meta)
+
+        if out.ndim == 1:
+            meta.update({"pooling": "model_pooled", "cls_removed": False})
+            return Embedding(data=out.astype(np.float32), meta=meta)
+
+        raise ModelError(f"Unexpected shape for pooled: {out.shape}")
+
+    if output.mode == "grid":
+        if out.ndim != 2:
+            raise ModelError(
+                "grid output requires token sequence [N,D]. "
+                f"Got {out.shape} (tokens_kind={meta.get('tokens_kind')})."
+            )
+
+        grid, (h, w), cls_removed = tokens_to_grid_dhw(out)
+        if cropped:
+            grid = crop_grid_to_roi(grid, geo_roi)
+            h, w = int(grid.shape[1]), int(grid.shape[2])
+        meta.update(
+            {
+                "grid_hw": (h, w),
+                "grid_kind": "patch_tokens",
+                "cls_removed": bool(cls_removed),
+            }
+        )
+
+        try:
+            import xarray as xr
+        except Exception as e:
+            raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+
+        da = xr.DataArray(
+            grid,
+            dims=("d", "y", "x"),
+            coords={
+                "d": np.arange(grid.shape[0]),
+                "y": np.arange(h),
+                "x": np.arange(w),
+            },
+            name="embedding",
+            attrs=meta,
+        )
+        return Embedding(data=da, meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
 
 
 _SCALEMAE_IMAGENET_MEAN = (0.485, 0.456, 0.406)
@@ -526,6 +616,9 @@ class ScaleMAERGBEmbedder(EmbedderBase):
       - scale: derives effective input_res_m after preprocessing from sensor.scale_m
     """
 
+    # ScaleMAE needs a square token grid → base.fetch_input enlarges a rectangular
+    # ROI to a square of real imagery; the output is cropped back to the ROI.
+    _requires_square_input = True
     DEFAULT_MODEL_ID = "MVRL/scalemae-vitlarge-800"
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
@@ -593,6 +686,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("scalemae_rgb expects a provider backend (or 'auto').")
@@ -604,8 +698,12 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         image_size = int(os.environ.get("RS_EMBED_SCALEMAE_IMG", str(self.DEFAULT_IMAGE_SIZE)))
 
         t = temporal_to_range(temporal)
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. The output grid is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
         # Fetch RGB patch (optionally reuse pre-fetched raw patch)
         if input_chw is None:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             rgb_u8 = fetch_s2_rgb_u8_from_provider(
                 spatial=spatial,
                 temporal=t,
@@ -658,58 +756,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             },
         )
 
-        if output.mode == "pooled":
-            if out.ndim == 2:
-                vec, cls_removed = pool_from_tokens(out, output.pooling)
-                meta.update(
-                    {
-                        "pooling": f"patch_{output.pooling}",
-                        "cls_removed": bool(cls_removed),
-                    }
-                )
-                return Embedding(data=vec, meta=meta)
-
-            if out.ndim == 1:
-                meta.update({"pooling": "model_pooled", "cls_removed": False})
-                return Embedding(data=out.astype(np.float32), meta=meta)
-
-            raise ModelError(f"Unexpected shape for pooled: {out.shape}")
-
-        if output.mode == "grid":
-            if out.ndim != 2:
-                raise ModelError(
-                    "grid output requires token sequence [N,D]. "
-                    f"Got {out.shape} (tokens_kind={meta.get('tokens_kind')})."
-                )
-
-            grid, (h, w), cls_removed = tokens_to_grid_dhw(out)
-            meta.update(
-                {
-                    "grid_hw": (h, w),
-                    "grid_kind": "patch_tokens",
-                    "cls_removed": bool(cls_removed),
-                }
-            )
-
-            try:
-                import xarray as xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(h),
-                    "x": np.arange(w),
-                },
-                name="embedding",
-                attrs=meta,
-            )
-            return Embedding(data=da, meta=meta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return build_scalemae_embedding(out, geo_roi=geo_roi, output=output, meta=meta)
 
     def get_embeddings_batch(
         self,
@@ -735,75 +782,41 @@ class ScaleMAERGBEmbedder(EmbedderBase):
 
         provider = self._get_provider(backend)
         n = len(spatials)
-        rgb_u8_all: list[np.ndarray | None] = [None] * n
-        input_res_all: list[float | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            rgb_u8 = fetch_s2_rgb_u8_from_provider(
-                spatial=sp,
+        # Square-fetch each ROI; geo_rois[i] is the ROI window within the square so
+        # each item's token grid is cropped back to its ROI after the forward.
+        rgb_u8_all, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: fetch_s2_rgb_u8_from_provider(
+                spatial=sq,
                 temporal=t,
                 sensor=sensor,
                 out_size=None,
                 provider=provider,
+            ),
+            max_workers=self._resolve_fetch_workers(n),
+        )
+        input_res_all: list[float] = [
+            _scalemae_effective_input_res_m(
+                rgb,
+                image_size=image_size,
+                source_res_m=float(sensor.scale_m),
+                preprocess_mode="imagenet_eval",
             )
-            return i, rgb_u8
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, rgb = _fetch_one(i, sp)
-                rgb_u8_all[ii] = rgb
-                input_res_all[ii] = _scalemae_effective_input_res_m(
-                    rgb,
-                    image_size=image_size,
-                    source_res_m=float(sensor.scale_m),
-                    preprocess_mode="imagenet_eval",
-                )
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, rgb = fut.result()
-                    rgb_u8_all[i] = rgb
-                    input_res_all[i] = _scalemae_effective_input_res_m(
-                        rgb,
-                        image_size=image_size,
-                        source_res_m=float(sensor.scale_m),
-                        preprocess_mode="imagenet_eval",
-                    )
+            for rgb in rgb_u8_all
+        ]
 
         model, wmeta = _load_scalemae(model_id=model_id, device=device)
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
         out: list[Embedding | None] = [None] * len(spatials)
-        xr_mod = None
-        if output.mode == "grid":
-            try:
-                import xarray as xr  # type: ignore
-
-                xr_mod = xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)
-            chunk_rgb = []
-            chunk_idx = []
-            chunk_res = []
-            for i in range(s0, s1):
-                rgb_u8 = rgb_u8_all[i]
-                if rgb_u8 is None:
-                    raise ModelError(f"Missing prefetched patch at index={i} for scalemae_rgb.")
-                input_res_m = input_res_all[i]
-                if input_res_m is None:
-                    raise ModelError(
-                        f"Missing prefetched effective input resolution at index={i} for scalemae_rgb."
-                    )
-                chunk_idx.append(i)
-                chunk_rgb.append(rgb_u8)
-                chunk_res.append(float(input_res_m))
+            chunk_idx = list(range(s0, s1))
+            chunk_rgb = [rgb_u8_all[i] for i in chunk_idx]
+            chunk_res = [float(input_res_all[i]) for i in chunk_idx]
 
             try:
                 chunk_outs, chunk_extra = _scalemae_forward_tokens_or_vec_batch(
@@ -852,54 +865,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                         "batch_infer": True,
                     },
                 )
-
-                if output.mode == "pooled":
-                    if o.ndim == 2:
-                        vec, cls_removed = pool_from_tokens(o, output.pooling)
-                        meta.update(
-                            {
-                                "pooling": f"patch_{output.pooling}",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                        out[i] = Embedding(data=vec, meta=meta)
-                    elif o.ndim == 1:
-                        meta.update({"pooling": "model_pooled", "cls_removed": False})
-                        out[i] = Embedding(data=o.astype(np.float32), meta=meta)
-                    else:
-                        raise ModelError(f"Unexpected shape for pooled: {o.shape}")
-                    continue
-
-                if output.mode == "grid":
-                    if o.ndim != 2:
-                        raise ModelError(
-                            "grid output requires token sequence [N,D]. "
-                            f"Got {o.shape} (tokens_kind={meta.get('tokens_kind')})."
-                        )
-                    grid, (h, w), cls_removed = tokens_to_grid_dhw(o)
-                    meta.update(
-                        {
-                            "grid_hw": (h, w),
-                            "grid_kind": "patch_tokens",
-                            "cls_removed": bool(cls_removed),
-                        }
-                    )
-                    assert xr_mod is not None
-                    da = xr_mod.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(h),
-                            "x": np.arange(w),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
-                    out[i] = Embedding(data=da, meta=meta)
-                    continue
-
-                raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = build_scalemae_embedding(o, geo_roi=geo_rois[i], output=output, meta=meta)
 
         if any(e is None for e in out):
             raise ModelError("scalemae_rgb batch inference produced incomplete outputs.")
@@ -956,14 +922,9 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             )
 
         out: list[Embedding | None] = [None] * len(spatials)
-        xr_mod = None
-        if output.mode == "grid":
-            try:
-                import xarray as xr  # type: ignore
-
-                xr_mod = xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+        # User-supplied inputs carry no fetch-square ROI, so each output covers the
+        # whole frame (build_scalemae_embedding reproduces the legacy token path).
+        geo_roi = geo_roi_from_meta(None)
 
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
@@ -1003,54 +964,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                         "input_override": True,
                     },
                 )
-
-                if output.mode == "pooled":
-                    if o.ndim == 2:
-                        vec, cls_removed = pool_from_tokens(o, output.pooling)
-                        meta.update(
-                            {
-                                "pooling": f"patch_{output.pooling}",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                        out[i] = Embedding(data=vec, meta=meta)
-                    elif o.ndim == 1:
-                        meta.update({"pooling": "model_pooled", "cls_removed": False})
-                        out[i] = Embedding(data=o.astype(np.float32), meta=meta)
-                    else:
-                        raise ModelError(f"Unexpected shape for pooled: {o.shape}")
-                    continue
-
-                if output.mode == "grid":
-                    if o.ndim != 2:
-                        raise ModelError(
-                            "grid output requires token sequence [N,D]. "
-                            f"Got {o.shape} (tokens_kind={meta.get('tokens_kind')})."
-                        )
-                    grid, (h, w), cls_removed = tokens_to_grid_dhw(o)
-                    meta.update(
-                        {
-                            "grid_hw": (h, w),
-                            "grid_kind": "patch_tokens",
-                            "cls_removed": bool(cls_removed),
-                        }
-                    )
-                    assert xr_mod is not None
-                    da = xr_mod.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(h),
-                            "x": np.arange(w),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
-                    out[i] = Embedding(data=da, meta=meta)
-                    continue
-
-                raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = build_scalemae_embedding(o, geo_roi=geo_roi, output=output, meta=meta)
 
         if any(e is None for e in out):
             raise ModelError("scalemae_rgb prefetched batch inference produced incomplete outputs.")

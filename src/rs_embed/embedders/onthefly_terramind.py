@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -32,6 +31,13 @@ from ..tools.runtime import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -553,6 +559,10 @@ def _prepare_terramind_input_chw(
 
 @register("terramind")
 class TerraMindEmbedder(EmbedderBase):
+    # ViT grid needs a square input → base.fetch_input enlarges a rectangular
+    # ROI to a square of real imagery; the output grid is cropped back to the ROI.
+    _requires_square_input = True
+
     input_spec = ModelInputSpec(
         collection="COPERNICUS/S2_SR_HARMONIZED",
         bands=tuple(_S2_SR_12_BANDS),
@@ -625,8 +635,12 @@ class TerraMindEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
+        # Fetch-square ROI window: from the direct fetch below, or carried in
+        # fetch_meta when the API prefetched a square. Output is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
 
         model_key = os.environ.get("RS_EMBED_TERRAMIND_MODEL_KEY", self.DEFAULT_MODEL_KEY).strip()
         modality = str(
@@ -675,6 +689,7 @@ class TerraMindEmbedder(EmbedderBase):
             fill_value = float(getattr(ss, "fill_value", 0.0))
 
             if input_chw is None:
+                spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
                 raw_chw = _fetch_s2_sr_12_raw_chw(
                     provider,
                     spatial,
@@ -763,17 +778,46 @@ class TerraMindEmbedder(EmbedderBase):
             },
         )
 
+        return self._build_embedding(tokens, geo_roi=geo_roi, output=output, meta=meta)
+
+    @staticmethod
+    def _build_embedding(
+        tokens: np.ndarray,
+        *,
+        geo_roi: tuple[float, float, float, float],
+        output: OutputSpec,
+        meta: dict[str, Any],
+    ) -> Embedding:
+        # Build the patch grid whenever we crop (ROI sub-window) or grid is asked.
+        # When the ROI is full this reproduces the legacy token-pool / full-grid
+        # behaviour exactly (data and metadata identical).
+        cropped = not roi_is_full(geo_roi)
+
         if output.mode == "pooled":
-            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-            ometa = {
-                **meta,
-                "pooling": output.pooling,
-                "cls_removed": bool(cls_removed),
-            }
+            if cropped:
+                grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
+                g = crop_grid_to_roi(grid, geo_roi)
+                reduce = g.max if output.pooling == "max" else g.mean
+                vec = reduce(axis=(1, 2)).astype(np.float32)
+                ometa = {
+                    **meta,
+                    "pooling": f"roi_grid_{output.pooling}",
+                    "cls_removed": bool(cls_removed),
+                }
+            else:
+                vec, cls_removed = pool_from_tokens(tokens, output.pooling)
+                ometa = {
+                    **meta,
+                    "pooling": output.pooling,
+                    "cls_removed": bool(cls_removed),
+                }
             return Embedding(data=vec.astype(np.float32), meta=ometa)
 
         if output.mode == "grid":
             grid, (gh, gw), cls_removed = tokens_to_grid_dhw(tokens)
+            if cropped:
+                grid = crop_grid_to_roi(grid, geo_roi)
+                gh, gw = int(grid.shape[1]), int(grid.shape[2])
             gmeta = {
                 **meta,
                 "grid_type": "vit_patch_tokens",
@@ -824,47 +868,30 @@ class TerraMindEmbedder(EmbedderBase):
         composite = str(getattr(ss, "composite", "median"))
         fill_value = float(getattr(ss, "fill_value", 0.0))
 
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            raw = _fetch_s2_sr_12_raw_chw(
+        # Square-fetch each ROI; the per-item ROI window rides in geo_rois and is
+        # forwarded as _roi_windows_geo so each item's grid is cropped back to it.
+        raw_inputs, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: _fetch_s2_sr_12_raw_chw(
                 provider,
-                sp,
+                sq,
                 t,
                 scale_m=scale_m,
                 cloudy_pct=cloudy_pct,
                 composite=composite,
                 fill_value=fill_value,
-            )
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        raw_inputs: list[np.ndarray] = []
-        for i, raw in enumerate(prefetched_raw):
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for terramind.")
-            raw_inputs.append(raw)
-
+            ),
+            max_workers=self._resolve_fetch_workers(len(spatials)),
+        )
         return self.get_embeddings_batch_from_inputs(
             spatials=spatials,
             input_chws=raw_inputs,
             temporal=temporal,
-            sensor=ss,
+            sensor=sensor,
             output=output,
             backend=backend,
             device=device,
+            _roi_windows_geo=geo_rois,
         )
 
     def get_embeddings_batch_from_inputs(
@@ -877,6 +904,7 @@ class TerraMindEmbedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        _roi_windows_geo: list[tuple[float, float, float, float] | None] | None = None,
     ) -> list[Embedding]:
         if len(spatials) != len(input_chws):
             raise ModelError(
@@ -958,6 +986,14 @@ class TerraMindEmbedder(EmbedderBase):
             device=dev,
         )
 
+        # Direct user-supplied inputs carry no fetch-square ROI (full frame);
+        # the prefetch batch path forwards each item's ROI window via
+        # _roi_windows_geo so the output is cropped back to it.
+        def _roi_at(i: int) -> tuple[float, float, float, float]:
+            if _roi_windows_geo is None:
+                return geo_roi_from_meta(None)
+            return geo_roi_from_meta({"roi_window_geo": _roi_windows_geo[i]})
+
         out: list[Embedding] = []
         for i, _spatial in enumerate(spatials):
             meta = build_meta(
@@ -986,44 +1022,8 @@ class TerraMindEmbedder(EmbedderBase):
                     **tmeta,
                 },
             )
-            tokens = tokens_bnd[i]
-            if output.mode == "pooled":
-                vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-                out.append(
-                    Embedding(
-                        data=vec.astype(np.float32),
-                        meta={
-                            **meta,
-                            "pooling": output.pooling,
-                            "cls_removed": bool(cls_removed),
-                        },
-                    )
-                )
-                continue
-
-            if output.mode == "grid":
-                grid, (gh, gw), cls_removed = tokens_to_grid_dhw(tokens)
-                gmeta = {
-                    **meta,
-                    "grid_type": "vit_patch_tokens",
-                    "grid_hw": (int(gh), int(gw)),
-                    "grid_shape": tuple(grid.shape),
-                    "cls_removed": bool(cls_removed),
-                }
-                da = xr.DataArray(
-                    grid.astype(np.float32),
-                    dims=("d", "y", "x"),
-                    coords={
-                        "d": np.arange(grid.shape[0]),
-                        "y": np.arange(grid.shape[1]),
-                        "x": np.arange(grid.shape[2]),
-                    },
-                    name="embedding",
-                    attrs=gmeta,
-                )
-                out.append(Embedding(data=da, meta=gmeta))
-                continue
-
-            raise ModelError(f"Unknown output mode: {output.mode}")
+            out.append(
+                self._build_embedding(tokens_bnd[i], geo_roi=_roi_at(i), output=output, meta=meta)
+            )
 
         return out

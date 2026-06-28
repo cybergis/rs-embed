@@ -8,7 +8,6 @@ import sys
 import types
 import urllib.request
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -39,6 +38,15 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    prepare_square,
+    roi_fetch_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -149,15 +157,15 @@ def _download_agrifm_ckpt(
 
 
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
-    ensure_torch()
-    import torch
-    import torch.nn.functional as F
+    """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
 
+    A rectangular ROI is reflect-padded to square before resizing (see
+    :mod:`rs_embed.tools.shape`) rather than stretched.
+    """
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
-    x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
-    y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y.detach().cpu().numpy().astype(np.float32)
+    out, _ = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
+    return out
 
 
 def _normalize_s2_for_agrifm(raw_tchw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -582,6 +590,9 @@ def _agrifm_forward_grid(
 
 @register("agrifm")
 class AgriFMEmbedder(EmbedderBase):
+    # AgriFM needs a square token grid → base.fetch_input enlarges a rectangular
+    # ROI to a square of real imagery; the output is cropped back to the ROI.
+    _requires_square_input = True
     DEFAULT_FETCH_WORKERS = 8
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FRAMES = 8
@@ -645,6 +656,7 @@ class AgriFMEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("agrifm expects a provider backend (or 'auto').")
@@ -653,6 +665,9 @@ class AgriFMEmbedder(EmbedderBase):
             sensor = self._default_sensor()
 
         t = temporal_to_range(temporal)
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. The output grid is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
         n_frames = max(1, int(os.environ.get("RS_EMBED_AGRIFM_FRAMES", str(self.DEFAULT_FRAMES))))
         image_size = max(
             16, int(os.environ.get("RS_EMBED_AGRIFM_IMG", str(self.DEFAULT_IMAGE_SIZE)))
@@ -664,6 +679,7 @@ class AgriFMEmbedder(EmbedderBase):
         input_original_frames: int | None = None
         input_repeated_to_t = False
         if input_chw is None:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             raw_tchw = _fetch_s2_10_raw_tchw(
                 self._get_provider(backend),
                 spatial,
@@ -754,6 +770,10 @@ class AgriFMEmbedder(EmbedderBase):
         )
 
         grid, fmeta = _agrifm_forward_grid(model, x_tchw, device=dev)
+        # Crop the token grid back to the ROI when the fetch enlarged a rectangle
+        # to a square (no-op when full). grid is (D, H', W'); pooled follows.
+        if not roi_is_full(geo_roi):
+            grid = crop_grid_to_roi(grid, geo_roi)
         meta = build_meta(
             model=self.model_name,
             kind="on_the_fly",
@@ -822,48 +842,32 @@ class AgriFMEmbedder(EmbedderBase):
         t = temporal_to_range(temporal)
         n_frames = max(1, int(os.environ.get("RS_EMBED_AGRIFM_FRAMES", str(self.DEFAULT_FRAMES))))
         provider = self._get_provider(backend)
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            raw_tchw = _fetch_s2_10_raw_tchw(
+        # Square-fetch each ROI, then re-feed get_embedding with the ROI window so
+        # the output is cropped back. square_fetch_batch handles square + parallel.
+        raws, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: _fetch_s2_10_raw_tchw(
                 provider,
-                sp,
+                sq,
                 t,
                 n_frames=n_frames,
                 scale_m=int(sensor.scale_m),
                 cloudy_pct=int(sensor.cloudy_pct),
                 composite=str(sensor.composite),
                 fill_value=float(sensor.fill_value),
+            ),
+            max_workers=self._resolve_fetch_workers(len(spatials)),
+        )
+        return [
+            self.get_embedding(
+                spatial=sp,
+                temporal=t,
+                sensor=sensor,
+                output=output,
+                backend=backend,
+                device=device,
+                input_chw=raw,
+                fetch_meta=roi_fetch_meta(gr),
             )
-            return i, raw_tchw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        out: list[Embedding] = []
-        for i, sp in enumerate(spatials):
-            raw = prefetched_raw[i]
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for agrifm.")
-            out.append(
-                self.get_embedding(
-                    spatial=sp,
-                    temporal=t,
-                    sensor=sensor,
-                    output=output,
-                    backend=backend,
-                    device=device,
-                    input_chw=raw,
-                )
-            )
-        return out
+            for sp, raw, gr in zip(spatials, raws, geo_rois, strict=True)
+        ]

@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import math
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -40,6 +39,15 @@ from ..tools.runtime import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
+from ..tools.shape import (
+    crop_grid_and_pool,
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_fetch_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
@@ -959,6 +967,10 @@ def _thor_forward_single(
 
 @register("thor")
 class THORBaseEmbedder(EmbedderBase):
+    # Square-input model: its own fetch_input enlarges a rectangular ROI to a
+    # square of real imagery (in addition to the native_snap per-input squaring)
+    # and emits roi_window_geo; the output grid is cropped back to the ROI.
+    _requires_square_input = True
     DEFAULT_MODEL_KEY = "thor_v1_base"
     DEFAULT_IMAGE_SIZE = 288
     DEFAULT_FETCH_WORKERS = 8
@@ -1079,9 +1091,17 @@ class THORBaseEmbedder(EmbedderBase):
         spatial: SpatialSpec,
         temporal: TemporalSpec | None,
         sensor: SensorSpec,
+        square_input: bool = True,
     ) -> FetchResult | None:
         t = temporal_to_range(temporal)
         modality = _normalize_thor_modality(getattr(sensor, "modality", "s2"))
+        # Fetch-square: enlarge a rectangular ROI to a square of real imagery so the
+        # encoder sees a square input with real spatial context; the ROI window
+        # rides in meta['roi_window_geo'] and the output is cropped back to it.
+        # Skipped when the API tiles the input (square_input=False).
+        geo_roi = FULL_WINDOW
+        if square_input:
+            spatial, geo_roi = square_spatial(spatial)
         if modality == "s1":
             raw, meta = _fetch_s1_vvvh_raw_chw_with_meta(
                 provider,
@@ -1095,7 +1115,7 @@ class THORBaseEmbedder(EmbedderBase):
                 require_iw=bool(getattr(sensor, "s1_require_iw", True)),
                 relax_iw_on_empty=bool(getattr(sensor, "s1_relax_iw_on_empty", True)),
             )
-            return FetchResult(data=raw, meta=meta)
+            return FetchResult(data=raw, meta={**meta, **(roi_fetch_meta(geo_roi) or {})})
 
         raw = _fetch_s2_sr_10_raw_chw(
             provider,
@@ -1106,7 +1126,7 @@ class THORBaseEmbedder(EmbedderBase):
             composite=str(getattr(sensor, "composite", "median")),
             fill_value=float(getattr(sensor, "fill_value", 0.0)),
         )
-        return FetchResult(data=raw, meta={})
+        return FetchResult(data=raw, meta=roi_fetch_meta(geo_roi) or {})
 
     def get_embedding(
         self,
@@ -1119,6 +1139,7 @@ class THORBaseEmbedder(EmbedderBase):
         device: str = "auto",
         input_chw: np.ndarray | None = None,
         model_config: dict[str, Any] | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("thor expects a provider backend (or 'auto').")
@@ -1126,6 +1147,9 @@ class THORBaseEmbedder(EmbedderBase):
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
         modality = _normalize_thor_modality(getattr(ss, "modality", "s2"))
+        # Fetch-square ROI window: carried in fetch_meta when the API prefetched a
+        # square, or read from our own fetch_input below. Output cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
         runtime_cfg = _resolve_thor_runtime_config(
             model_config=model_config,
             default_model_key=self.DEFAULT_MODEL_KEY,
@@ -1158,7 +1182,11 @@ class THORBaseEmbedder(EmbedderBase):
         sensor_bands = _THOR_MODALITY_SENSOR_BANDS[modality]
         model_bands = _THOR_MODALITY_MODEL_BANDS[modality]
 
-        fetch_meta: dict[str, Any] = {}
+        # Provenance spread into output meta (e.g. S1 IW-mode decisions). Seeded
+        # from any prefetch fetch_meta, minus the transport-only ROI window.
+        fetch_meta_out: dict[str, Any] = {
+            k: v for k, v in (fetch_meta or {}).items() if k != "roi_window_geo"
+        }
         if input_chw is None:
             result = self.fetch_input(
                 self._get_provider(backend),
@@ -1168,7 +1196,9 @@ class THORBaseEmbedder(EmbedderBase):
             )
             assert result is not None
             raw_chw = result.data
-            fetch_meta = result.meta
+            # fetch_input squared the ROI: take its window, keep the rest as provenance.
+            geo_roi = geo_roi_from_meta(result.meta)
+            fetch_meta_out = {k: v for k, v in (result.meta or {}).items() if k != "roi_window_geo"}
         else:
             if input_chw.ndim != 3 or int(input_chw.shape[0]) != len(sensor_bands):
                 raise ModelError(
@@ -1290,7 +1320,7 @@ class THORBaseEmbedder(EmbedderBase):
                 "s1_require_iw": s1_require_iw if modality == "s1" else None,
                 "s1_relax_iw_on_empty": s1_relax_iw_on_empty if modality == "s1" else None,
                 "orbit": orbit if modality == "s1" else None,
-                **fetch_meta,
+                **fetch_meta_out,
                 **check_meta,
                 **prep_meta,
                 **wmeta,
@@ -1298,7 +1328,17 @@ class THORBaseEmbedder(EmbedderBase):
             },
         )
 
+        cropped_to_roi = not roi_is_full(geo_roi)
+
         if output.mode == "pooled":
+            if cropped_to_roi and grid is not None:
+                # Pool only the ROI tokens (the global pool would include the
+                # real-neighborhood context fetched only to square the input).
+                _, vec = crop_grid_and_pool(
+                    grid, geo_roi, pooling=output.pooling, pooled_fallback=None
+                )
+                out_meta = {**meta, "pooling": f"roi_grid_{output.pooling}", "cls_removed": False}
+                return Embedding(data=vec.astype(np.float32), meta=out_meta)
             vec, cls_removed = _pool_thor_tokens(
                 tokens,
                 pooling=output.pooling,
@@ -1317,6 +1357,8 @@ class THORBaseEmbedder(EmbedderBase):
                     "THOR grid output is unavailable for this configuration. "
                     "Try pooled output, or use default model/input settings."
                 )
+            if cropped_to_roi:
+                grid = crop_grid_to_roi(grid, geo_roi)
             gmeta = {
                 **meta,
                 "grid_shape": tuple(grid.shape),
@@ -1368,14 +1410,11 @@ class THORBaseEmbedder(EmbedderBase):
         s1_relax_iw_on_empty = bool(getattr(ss, "s1_relax_iw_on_empty", True))
         orbit = getattr(ss, "orbit", None)
 
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
+        def _fetch_raw(sq: SpatialSpec) -> np.ndarray:
             if modality == "s1":
                 raw, _meta = _fetch_s1_vvvh_raw_chw_with_meta(
                     provider,
-                    spatial=sp,
+                    spatial=sq,
                     temporal=t,
                     scale_m=scale_m,
                     orbit=orbit,
@@ -1385,45 +1424,33 @@ class THORBaseEmbedder(EmbedderBase):
                     require_iw=s1_require_iw,
                     relax_iw_on_empty=s1_relax_iw_on_empty,
                 )
-            else:
-                raw = _fetch_s2_sr_10_raw_chw(
-                    provider,
-                    sp,
-                    t,
-                    scale_m=scale_m,
-                    cloudy_pct=cloudy_pct,
-                    composite=composite,
-                    fill_value=fill_value,
-                )
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        out: list[Embedding] = []
-        for i, sp in enumerate(spatials):
-            raw = prefetched_raw[i]
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for thor.")
-            out.append(
-                self.get_embedding(
-                    spatial=sp,
-                    temporal=temporal,
-                    sensor=ss,
-                    output=output,
-                    backend=backend,
-                    device=device,
-                    input_chw=raw,
-                    model_config=model_config,
-                )
+                return raw
+            return _fetch_s2_sr_10_raw_chw(
+                provider,
+                sq,
+                t,
+                scale_m=scale_m,
+                cloudy_pct=cloudy_pct,
+                composite=composite,
+                fill_value=fill_value,
             )
-        return out
+
+        # Square-fetch each ROI, then re-feed get_embedding with the ROI window so
+        # each item's output grid is cropped back to its ROI.
+        raws, geo_rois = square_fetch_batch(
+            spatials, _fetch_raw, max_workers=self._resolve_fetch_workers(len(spatials))
+        )
+        return [
+            self.get_embedding(
+                spatial=sp,
+                temporal=temporal,
+                sensor=ss,
+                output=output,
+                backend=backend,
+                device=device,
+                input_chw=raw,
+                model_config=model_config,
+                fetch_meta=roi_fetch_meta(gr),
+            )
+            for sp, raw, gr in zip(spatials, raws, geo_rois, strict=True)
+        ]
