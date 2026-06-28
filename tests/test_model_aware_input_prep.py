@@ -47,7 +47,7 @@ def _restore_registered_model(model_id, previous):
 
 @pytest.mark.parametrize(
     "model_id",
-    ["remoteclip", "satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
+    ["satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
 )
 @pytest.mark.parametrize(
     ("input_prep", "requested_mode"),
@@ -86,7 +86,7 @@ def test_image_level_vit_grid_default_input_prep_resolves_to_resize_with_metadat
 
 @pytest.mark.parametrize(
     "model_id",
-    ["remoteclip", "satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
+    ["satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
 )
 def test_image_level_vit_grid_explicit_tile_is_allowed_but_marked_experimental(model_id):
     previous = _with_registered_fake_model(model_id)

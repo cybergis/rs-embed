@@ -86,7 +86,6 @@ class _EmbeddingRequestContext:
 
 _IMAGE_LEVEL_VIT_GRID_MODELS = frozenset(
     {
-        "remoteclip",
         "satmae",
         "satmaepp",
         "satmaepp_s2_10b",
