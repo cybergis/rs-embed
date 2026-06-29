@@ -396,11 +396,6 @@ def _load_satmaepp_s2(
     return loaded
 
 
-def _satmaepp_s2_resize_short_side(image_size: int) -> int:
-    crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
-    return int(float(image_size) / crop_pct)
-
-
 def _sentinel_to_uint8_hwc(raw_chw_10: np.ndarray) -> np.ndarray:
     if raw_chw_10.ndim != 3 or int(raw_chw_10.shape[0]) != len(_S2_SR_10_BANDS):
         raise ModelError(
@@ -419,12 +414,20 @@ def _satmaepp_s2_preprocess_tensor_batch(raw_chw_batch: list[np.ndarray], *, ima
     import torch
     from torchvision import transforms
 
-    resize_short = _satmaepp_s2_resize_short_side(image_size)
+    # No center crop: resize the (square) input straight to image_size so the ViT
+    # token grid covers the whole fetched square, keeping the ROI crop-back and
+    # tile stitcher aligned. The source repo's eval used Resize(short→256/0.875)+
+    # CenterCrop, which makes the grid cover only the central ~87.5% of the input
+    # — dropping FOV and misaligning per-tile grids. Matches the RGB SatMAE++ /
+    # ScaleMAE direct-resize preprocessing. (SentinelNormalize is already folded
+    # into the uint8 conversion above, so the transform only resizes + scales.)
     preprocess = transforms.Compose(
         [
             transforms.ToTensor(),
-            transforms.Resize(resize_short, interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.CenterCrop(image_size),
+            transforms.Resize(
+                (int(image_size), int(image_size)),
+                interpolation=transforms.InterpolationMode.BICUBIC,
+            ),
         ]
     )
 
