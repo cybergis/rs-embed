@@ -201,36 +201,17 @@ _SCALEMAE_IMAGENET_MEAN = (0.485, 0.456, 0.406)
 _SCALEMAE_IMAGENET_STD = (0.229, 0.224, 0.225)
 
 
-def _scalemae_resize_short_side(image_size: int) -> int:
-    crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
-    return int(float(image_size) / crop_pct)
-
-
-def _scalemae_preprocess_info(image_size: int, *, mode: str = "imagenet_eval") -> dict[str, Any]:
-    mode_l = str(mode).strip().lower()
-    meta: dict[str, Any] = {
-        "preprocess_name": mode_l,
+def _scalemae_preprocess_info(image_size: int) -> dict[str, Any]:
+    # Single path: resize the (square) input to image_size + ImageNet normalization.
+    # No center crop, so the token grid covers the whole fetched square and the ROI
+    # crop stays aligned. ImageNet normalization matches pretraining (not optional).
+    return {
+        "preprocess_name": "direct",
         "norm_mean": tuple(float(x) for x in _SCALEMAE_IMAGENET_MEAN),
         "norm_std": tuple(float(x) for x in _SCALEMAE_IMAGENET_STD),
+        "resize_to": int(image_size),
+        "center_crop": None,
     }
-    if mode_l == "imagenet_eval":
-        resize_short = _scalemae_resize_short_side(image_size)
-        meta.update(
-            {
-                "resize_short_side": int(resize_short),
-                "center_crop": int(image_size),
-            }
-        )
-        return meta
-    if mode_l == "direct":
-        meta.update(
-            {
-                "resize_to": int(image_size),
-                "center_crop": None,
-            }
-        )
-        return meta
-    raise ModelError(f"Unknown ScaleMAE preprocess mode {mode!r}.")
 
 
 def _scalemae_effective_input_res_m(
@@ -238,7 +219,6 @@ def _scalemae_effective_input_res_m(
     *,
     image_size: int,
     source_res_m: float,
-    preprocess_mode: str = "imagenet_eval",
 ) -> float:
     if not isinstance(rgb_u8, np.ndarray) or rgb_u8.ndim != 3 or int(rgb_u8.shape[2]) != 3:
         raise ModelError(
@@ -248,58 +228,34 @@ def _scalemae_effective_input_res_m(
     h, w = int(rgb_u8.shape[0]), int(rgb_u8.shape[1])
     if h <= 0 or w <= 0:
         raise ModelError(f"ScaleMAE effective resolution got invalid shape={rgb_u8.shape}.")
-    mode_l = str(preprocess_mode).strip().lower()
-    if mode_l == "imagenet_eval":
-        resize_short = _scalemae_resize_short_side(image_size)
-    elif mode_l == "direct":
-        resize_short = int(image_size)
-    else:
-        raise ModelError(f"Unknown ScaleMAE preprocess mode {preprocess_mode!r}.")
+    # The input is resized to image_size, so the effective GSD scales by short_side/image_size.
     short_side = min(h, w)
-    return float(source_res_m) * (float(short_side) / float(resize_short))
+    return float(source_res_m) * (float(short_side) / float(image_size))
 
 
 def _scalemae_preprocess_tensor_batch(
     rgb_u8_batch: list[np.ndarray],
     *,
     image_size: int,
-    preprocess_mode: str = "imagenet_eval",
 ):
     ensure_torch()
     import torch
     from PIL import Image
     from torchvision import transforms
 
-    mode_l = str(preprocess_mode).strip().lower()
-    if mode_l == "imagenet_eval":
-        resize_short = _scalemae_resize_short_side(image_size)
-        preprocess = transforms.Compose(
-            [
-                transforms.Resize(resize_short, interpolation=transforms.InterpolationMode.BICUBIC),
-                transforms.CenterCrop(image_size),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=_SCALEMAE_IMAGENET_MEAN,
-                    std=_SCALEMAE_IMAGENET_STD,
-                ),
-            ]
-        )
-    elif mode_l == "direct":
-        preprocess = transforms.Compose(
-            [
-                transforms.Resize(
-                    (int(image_size), int(image_size)),
-                    interpolation=transforms.InterpolationMode.BICUBIC,
-                ),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=_SCALEMAE_IMAGENET_MEAN,
-                    std=_SCALEMAE_IMAGENET_STD,
-                ),
-            ]
-        )
-    else:
-        raise ModelError(f"Unknown ScaleMAE preprocess mode {preprocess_mode!r}.")
+    preprocess = transforms.Compose(
+        [
+            transforms.Resize(
+                (int(image_size), int(image_size)),
+                interpolation=transforms.InterpolationMode.BICUBIC,
+            ),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=_SCALEMAE_IMAGENET_MEAN,
+                std=_SCALEMAE_IMAGENET_STD,
+            ),
+        ]
+    )
 
     xs = []
     for i, rgb_u8 in enumerate(rgb_u8_batch):
@@ -451,7 +407,6 @@ def _scalemae_forward_tokens_or_vec(
     image_size: int,
     device: str,
     input_res_m: float,
-    preprocess_mode: str = "imagenet_eval",
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """
     Your rshf ScaleMAE requires:
@@ -469,11 +424,10 @@ def _scalemae_forward_tokens_or_vec(
     x = _scalemae_preprocess_tensor_batch(
         [rgb_u8],
         image_size=image_size,
-        preprocess_mode=preprocess_mode,
     ).to(device)  # [B,3,H,W]
     input_res = torch.tensor([float(input_res_m)], dtype=torch.float32, device=device)  # 1D
     patch_size = _infer_patch_size(core_model)
-    prep = _scalemae_preprocess_info(image_size, mode=preprocess_mode)
+    prep = _scalemae_preprocess_info(image_size)
 
     with torch.no_grad():
         out = _call_with_patch_size(ff, x, patch_size=patch_size, input_res=input_res)
@@ -526,7 +480,6 @@ def _scalemae_forward_tokens_or_vec_batch(
     image_size: int,
     device: str,
     input_res_m: float | list[float] | np.ndarray,
-    preprocess_mode: str = "imagenet_eval",
 ) -> tuple[list[np.ndarray], dict[str, Any]]:
     """Batch variant that returns one output array per input item."""
     if not rgb_u8_batch:
@@ -540,7 +493,6 @@ def _scalemae_forward_tokens_or_vec_batch(
     xb = _scalemae_preprocess_tensor_batch(
         rgb_u8_batch,
         image_size=image_size,
-        preprocess_mode=preprocess_mode,
     ).to(device)  # [B,3,H,W]
     if np.isscalar(input_res_m):
         input_res_values = [float(input_res_m)] * len(rgb_u8_batch)
@@ -553,7 +505,7 @@ def _scalemae_forward_tokens_or_vec_batch(
             )
     input_res = torch.tensor(input_res_values, dtype=torch.float32, device=device)
     patch_size = _infer_patch_size(core_model)
-    prep = _scalemae_preprocess_info(image_size, mode=preprocess_mode)
+    prep = _scalemae_preprocess_info(image_size)
 
     def _to_list(arr: np.ndarray) -> list[np.ndarray]:
         return [arr[i].astype(np.float32, copy=False) for i in range(arr.shape[0])]
@@ -618,6 +570,10 @@ class ScaleMAERGBEmbedder(EmbedderBase):
 
     # ScaleMAE needs a square token grid → base.fetch_input enlarges a rectangular
     # ROI to a square of real imagery; the output is cropped back to the ROI.
+    # Preprocessing is "direct" (resize the square to image_size + ImageNet norm,
+    # no center crop) so the token grid covers the full fetched square and the ROI
+    # crop stays geometrically aligned. ImageNet normalization is kept — it matches
+    # pretraining and is not optional.
     _requires_square_input = True
     DEFAULT_MODEL_ID = "MVRL/scalemae-vitlarge-800"
     DEFAULT_IMAGE_SIZE = 224
@@ -643,7 +599,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             "inputs": {
                 "collection": self.input_spec.collection,
                 "bands": list(self.input_spec.bands),
-                "model_preprocess": "s2_sr_raw_then_imagenet_eval",
+                "model_preprocess": "s2_sr_raw_then_resize224_imagenet_norm",
             },
             "temporal": {"mode": "range"},
             "output": ["pooled", "grid"],
@@ -711,7 +667,6 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                 out_size=None,
                 provider=self._get_provider(backend),
             )
-            preprocess_mode = "imagenet_eval"
         else:
             # input_chw expected to be raw S2 SR values in band order (B4,B3,B2)
             if input_chw.ndim != 3 or input_chw.shape[0] != 3:
@@ -722,12 +677,10 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                 )
             s2_chw = np.clip(input_chw.astype(np.float32) / 10000.0, 0.0, 1.0)
             rgb_u8 = (s2_chw.transpose(1, 2, 0) * 255.0).astype(np.uint8)
-            preprocess_mode = "direct"
         input_res_m = _scalemae_effective_input_res_m(
             rgb_u8,
             image_size=image_size,
             source_res_m=float(sensor.scale_m),
-            preprocess_mode=preprocess_mode,
         )
 
         model, wmeta = _load_scalemae(model_id=model_id, device=device)
@@ -738,7 +691,6 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             image_size=image_size,
             device=dev,
             input_res_m=float(input_res_m),
-            preprocess_mode=preprocess_mode,
         )
 
         meta = base_meta(
@@ -800,7 +752,6 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                 rgb,
                 image_size=image_size,
                 source_res_m=float(sensor.scale_m),
-                preprocess_mode="imagenet_eval",
             )
             for rgb in rgb_u8_all
         ]
@@ -825,7 +776,6 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                     image_size=image_size,
                     device=dev,
                     input_res_m=chunk_res,
-                    preprocess_mode="imagenet_eval",
                 )
             except Exception as _e:
                 chunk_outs = []
@@ -837,7 +787,6 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                         image_size=image_size,
                         device=dev,
                         input_res_m=float(input_res_m),
-                        preprocess_mode="imagenet_eval",
                     )
                     chunk_outs.append(o1)
                     chunk_extra = e1
@@ -917,7 +866,6 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                     rgb_u8,
                     image_size=image_size,
                     source_res_m=float(sensor.scale_m),
-                    preprocess_mode="direct",
                 )
             )
 
@@ -938,7 +886,6 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                 image_size=image_size,
                 device=dev,
                 input_res_m=chunk_res,
-                preprocess_mode="direct",
             )
             if len(chunk_outs) != len(chunk_idx):
                 raise ModelError(
