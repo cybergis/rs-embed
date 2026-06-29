@@ -41,6 +41,8 @@ This is often the first and most impactful quality-versus-runtime decision.
 | Output with `grid()` | Single grid | Stitched spatial field |
 | Runtime | Fastest path | Scales with tile count |
 
+`input_prep=None` (the default) and `input_prep="auto"` resolve to `tile`, so large ROIs preserve native resolution out of the box; pass `input_prep="resize"` to compress the whole ROI into a single model-sized image instead.
+
 !!! warning "Patch-token grids are not always tile-friendly"
     For image-level ViT patch-token grid models (`scalemae`, `satmae`, and `satmaepp`), `OutputSpec.grid()` is not a seamless dense geospatial field. These models tile by default like every other model: `input_prep=None` or `input_prep="auto"` resolves to `input_prep="tile"`. Because tiled patch-token mosaics can show stitching seams at tile boundaries, the default/auto path and an explicit `input_prep="tile"` both emit a warning on `grid` output. Pass `input_prep="resize"` for a seamless (downsampled) grid — the recommended seamless opt-in, which does not warn.
 

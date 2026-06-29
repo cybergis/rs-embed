@@ -44,8 +44,8 @@
 
 ## Preprocessing Pipeline
 
-!!! tip "Resize is the default — tiling is also available"
-    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
+!!! tip "Tiling is the default — resize is also available"
+    `input_prep=None`/`"auto"` tiles large ROIs by default to preserve spatial detail; pass `input_prep="resize"` to downsample the whole ROI to the model's input size in a single forward pass instead. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
 
 !!! note "What the original TerraFM model assumes for S1"
     TerraFM treats Sentinel-1 as a 2-channel input branch (`VV`, `VH`). The official model code routes the S1 path by channel count (`C == 2`). The TerraFM paper describes S1 pretraining data as Sentinel-1 RTC patches, so the strongest original assumption is dual-pol `VV/VH` plus an analysis-ready S1 product, not a hard-coded `IW` rule.
