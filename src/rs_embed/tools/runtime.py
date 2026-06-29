@@ -86,7 +86,6 @@ class _EmbeddingRequestContext:
 
 _IMAGE_LEVEL_VIT_GRID_MODELS = frozenset(
     {
-        "remoteclip",
         "satmae",
         "satmaepp",
         "satmaepp_s2_10b",
@@ -501,6 +500,7 @@ def fetch_api_side_inputs(
     input_prep_resolved: Any,
     embedder: Any,
     model_n: str,
+    model_config: dict[str, Any] | None = None,
 ) -> list[FetchResult] | None:
     """Prefetch provider inputs for API-side input prep.
 
@@ -536,6 +536,18 @@ def fetch_api_side_inputs(
     if callable(ensure_ready):
         run_with_retry(lambda: ensure_ready(), retries=0, backoff_s=0.0)
 
+    # Forward fetch-affecting model_config (e.g. temporal_mode) so the prefetch
+    # path fetches the SAME input as the direct get_embedding path. Without this
+    # the prefetch used fetch_input's defaults and silently ignored the user's
+    # config (e.g. temporal_mode="single" became multi via the env/auto default).
+    fetch_extra: dict[str, Any] = {}
+    if model_config and _embedder_method_accepts_parameter(
+        type(embedder), "fetch_input", "temporal_mode"
+    ):
+        tm = model_config.get("temporal_mode")
+        if tm is not None:
+            fetch_extra["temporal_mode"] = tm
+
     # Use the embedder's fetch_input() when available; fall back to generic.
     results: list[FetchResult] = []
     for idx, spatial in enumerate(spatials):
@@ -545,6 +557,7 @@ def fetch_api_side_inputs(
                 spatial=spatial,
                 temporal=temporal,
                 sensor=sensor_eff,
+                **fetch_extra,
             )
             if fr is not None:
                 results.append(fr)
@@ -561,6 +574,29 @@ def fetch_api_side_inputs(
                 f"Failed to fetch API-side input for spatial[{idx}] ({spatial}): {exc}"
             ) from exc
     return results
+
+
+# Transport-only fetch_meta keys consumed by the embedder (a crop target etc.),
+# not meant to surface in the output embedding's metadata.
+_INTERNAL_FETCH_META_KEYS = frozenset({"roi_window_geo"})
+
+
+def stamp_prefetch_fetch_meta(emb: Embedding, fetch_meta: dict[str, Any] | None) -> Embedding:
+    """Preserve fetch_input meta on the prefetch path so it is never silently lost.
+
+    On the direct ``get_embedding`` path the embedder keeps its own fetch meta; on
+    the API prefetch path the input is handed back as ``input_chw`` and that meta
+    would otherwise vanish. This stamps it (diagnostic only) under
+    ``meta['prefetch_fetch_meta']`` without overwriting anything the embedder set,
+    so every model behaves the same regardless of which path ran. Transport-only
+    keys (e.g. the fetch-square crop window) are excluded.
+    """
+    if not fetch_meta or not isinstance(getattr(emb, "meta", None), dict):
+        return emb
+    diag = {k: v for k, v in fetch_meta.items() if k not in _INTERNAL_FETCH_META_KEYS}
+    if diag:
+        emb.meta.setdefault("prefetch_fetch_meta", diag)
+    return emb
 
 
 def run_embedding_request(
@@ -581,6 +617,7 @@ def run_embedding_request(
         input_prep_resolved=ctx.input_prep_resolved,
         embedder=ctx.embedder,
         model_n=ctx.model_n,
+        model_config=ctx.model_config,
     )
     if prefetched_inputs is not None:
         out: list[Embedding] = []
@@ -599,7 +636,7 @@ def run_embedding_request(
                     input_prep=ctx.input_prep,
                     fetch_meta=fr.meta if fr.meta else None,
                 )
-            out.append(emb)
+            out.append(stamp_prefetch_fetch_meta(emb, fr.meta))
         return _annotate_embedding_list(embs=out, ctx=ctx, output=output)
 
     if len(spatials) == 1:

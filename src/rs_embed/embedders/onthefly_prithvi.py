@@ -4,7 +4,6 @@ import json
 import math
 import os
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -38,6 +37,15 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    prepare_square,
+    roi_fetch_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import FULL_WINDOW, square_spatial
 from ..tools.temporal import temporal_frame_midpoints as _temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
@@ -537,16 +545,17 @@ def _pad_chw_to_multiple(x_chw: np.ndarray, mult: int = 16, value: float = 0.0) 
 
 
 def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
-    """Resize CHW to square (size,size) using bilinear interpolation."""
-    ensure_torch()
-    import torch
-    import torch.nn.functional as F
+    """Make CHW square ``(size,size)`` without aspect-ratio distortion.
 
+    A rectangular ROI is reflect-padded to square before resizing (see
+    :mod:`rs_embed.tools.shape`) rather than stretched. This is the ``resize``
+    prep mode; the separate ``pad`` mode (:func:`_pad_chw_to_multiple`) is
+    unchanged.
+    """
     if x_chw.ndim != 3:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
-    x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
-    y = F.interpolate(x, size=(int(size), int(size)), mode="bilinear", align_corners=False)
-    return y[0].detach().cpu().numpy().astype(np.float32)
+    out, _ = prepare_square(x_chw, size=int(size), shape_adjust="pad")
+    return out
 
 
 def _prepare_prithvi_chw(
@@ -971,6 +980,10 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
       - grid: token map [D,H,W] (exclude CLS if present)
     """
 
+    # Prithvi's grid reshape needs a square token grid → enlarge a rectangular
+    # ROI to a square of real imagery (base.fetch_input for the single-frame
+    # path; the multi-frame fetch_input below for multi) and crop back to the ROI.
+    _requires_square_input = True
     DEFAULT_MODEL_KEY = "prithvi_eo_v2_100_tl"
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_IMAGE_SCALE_M = 30  # notebook used 30m
@@ -1055,6 +1068,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         temporal: TemporalSpec | None,
         sensor: SensorSpec,
         temporal_mode: str | None = None,
+        square_input: bool = True,
     ) -> FetchResult | None:
         """Prefetch the raw S2 6-band input for API-side tiling / export.
 
@@ -1076,6 +1090,11 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         cfg = {"temporal_mode": temporal_mode} if temporal_mode is not None else None
         if _effective_temporal_mode(cfg, t) != "multi":
             return None  # single-frame window: defer to the generic composite prefetch
+        # Skip the whole-ROI square fetch when the API tiles the input (it squares
+        # per tile); fetch the rectangular ROI directly instead.
+        geo_roi = FULL_WINDOW
+        if square_input:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
         n_frames = _auto_num_frames(
             t,
             max_frames=_resolve_max_frames(cfg),
@@ -1091,9 +1110,12 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             composite=str(sensor.composite),
             fill_value=float(sensor.fill_value),
         )
-        return FetchResult(
-            data=raw_tchw, meta={"temporal_mode": "multi", "n_frames": int(n_frames)}
-        )
+        meta: dict[str, Any] = {
+            "temporal_mode": "multi",
+            "n_frames": int(n_frames),
+            **(roi_fetch_meta(geo_roi) or {}),
+        }
+        return FetchResult(data=raw_tchw, meta=meta)
 
     @staticmethod
     def _resolve_fetch_workers(n_items: int) -> int:
@@ -1126,6 +1148,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         device: str = "auto",
         input_chw: np.ndarray | None = None,
         model_config: dict[str, Any] | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("prithvi_eo_v2_s2_6b expects a provider backend (or 'auto').")
@@ -1146,7 +1169,12 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 device=device,
                 input_chw=input_chw,
                 model_config=model_config,
+                fetch_meta=fetch_meta,
             )
+
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. The output is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
 
         # Load model
         model_key, variant = _resolve_prithvi_model_key(
@@ -1175,6 +1203,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         # Fetch S2 6-band patch from provider (optionally reuse pre-fetched raw patch)
         if input_chw is None:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             x_chw = _fetch_s2_prithvi6_chw(
                 provider,
                 spatial=spatial,
@@ -1281,13 +1310,29 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             },
         )
 
+        cropped_to_roi = not roi_is_full(geo_roi)
+
         if output.mode == "pooled":
-            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-            meta.update({"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)})
+            if cropped_to_roi:
+                # Pool only the ROI's tokens (exclude the real-neighborhood context
+                # fetched to make the input square).
+                grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
+                grid = crop_grid_to_roi(grid, geo_roi)
+                vec = (
+                    grid.max(axis=(1, 2)) if output.pooling == "max" else grid.mean(axis=(1, 2))
+                ).astype("float32")
+                pooling = f"roi_grid_{output.pooling}"
+            else:
+                vec, cls_removed = pool_from_tokens(tokens, output.pooling)
+                pooling = f"patch_{output.pooling}"
+            meta.update({"pooling": pooling, "cls_removed": bool(cls_removed)})
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
             grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
+            if cropped_to_roi:
+                grid = crop_grid_to_roi(grid, geo_roi)
+                h, w = int(grid.shape[1]), int(grid.shape[2])
             meta.update(
                 {
                     "grid_hw": (h, w),
@@ -1327,10 +1372,14 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         device: str,
         input_chw: np.ndarray | None,
         model_config: dict[str, Any] | None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         """Multi-frame Prithvi path: T derived from the window (≤ max_frames),
         provider-duplicated frames collapsed, then a true [B,6,T,H,W] forward."""
         t = temporal
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. Output is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
         model_key, variant = _resolve_prithvi_model_key(
             model_config=model_config,
             default_model_key=self.DEFAULT_MODEL_KEY,
@@ -1349,6 +1398,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         # Obtain a raw [T,6,H,W] series (provider fetch, or shape-driven override).
         if input_chw is None:
             provider = self._get_provider(backend)
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             raw_tchw = _fetch_s2_prithvi6_tchw(
                 provider,
                 spatial=spatial,
@@ -1431,11 +1481,23 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             },
         )
 
+        cropped_to_roi = not roi_is_full(geo_roi)
+
         if output.mode == "pooled":
-            vec, cls_removed = pool_from_tokens_tchw(tokens, n_frames, output.pooling)
+            if cropped_to_roi:
+                # Pool only the ROI's tokens (time-collapsed grid, then ROI crop).
+                grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
+                grid = crop_grid_to_roi(grid, geo_roi)
+                vec = (
+                    grid.max(axis=(1, 2)) if output.pooling == "max" else grid.mean(axis=(1, 2))
+                ).astype("float32")
+                pooling = f"roi_grid_temporal_{output.pooling}"
+            else:
+                vec, cls_removed = pool_from_tokens_tchw(tokens, n_frames, output.pooling)
+                pooling = f"patch_temporal_{output.pooling}"
             meta.update(
                 {
-                    "pooling": f"patch_temporal_{output.pooling}",
+                    "pooling": pooling,
                     "temporal_pooling": output.pooling,
                     "cls_removed": bool(cls_removed),
                 }
@@ -1444,6 +1506,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         if output.mode == "grid":
             grid, (h, w), cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
+            if cropped_to_roi:
+                grid = crop_grid_to_roi(grid, geo_roi)
+                h, w = int(grid.shape[1]), int(grid.shape[2])
             meta.update(
                 {
                     "grid_hw": (h, w),
@@ -1503,15 +1568,13 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             else 1
         )
         provider = self._get_provider(backend)
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
+        def _fetch_raw(sq: SpatialSpec) -> np.ndarray:
             if multi:
                 # Raw [T,6,H,W] in 0..10000; from_inputs detects the 4D shape.
                 raw = _fetch_s2_prithvi6_tchw(
                     provider,
-                    spatial=sp,
+                    spatial=sq,
                     temporal=t,
                     n_frames=n_frames_req,
                     scale_m=int(sensor.scale_m),
@@ -1519,10 +1582,10 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                     composite=str(sensor.composite),
                     fill_value=float(sensor.fill_value),
                 )
-                return i, np.clip(raw, 0.0, 10000.0).astype(np.float32)
+                return np.clip(raw, 0.0, 10000.0).astype(np.float32)
             x_chw = _fetch_s2_prithvi6_chw(
                 provider,
-                spatial=sp,
+                spatial=sq,
                 temporal=t,
                 scale_m=int(sensor.scale_m),
                 cloudy_pct=int(sensor.cloudy_pct),
@@ -1530,26 +1593,13 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 fill_value=float(sensor.fill_value),
             )
             # get_embedding(input_chw=...) expects raw SR in [0..10000]
-            raw = np.clip(x_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
-            return i, raw
+            return np.clip(x_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
 
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        raw_inputs: list[np.ndarray] = []
-        for i, raw in enumerate(prefetched_raw):
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for prithvi_eo_v2_s2_6b.")
-            raw_inputs.append(raw)
+        # Square-fetch each ROI; the per-item ROI window rides in geo_rois and is
+        # forwarded as _roi_windows_geo so each item's output is cropped back.
+        raw_inputs, geo_rois = square_fetch_batch(
+            spatials, _fetch_raw, max_workers=self._resolve_fetch_workers(len(spatials))
+        )
         return self.get_embeddings_batch_from_inputs(
             spatials=spatials,
             input_chws=raw_inputs,
@@ -1559,6 +1609,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             output=output,
             backend=backend,
             device=device,
+            _roi_windows_geo=geo_rois,
         )
 
     def get_embeddings_batch_from_inputs(
@@ -1572,6 +1623,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        _roi_windows_geo: list[tuple[float, float, float, float] | None] | None = None,
     ) -> list[Embedding]:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("prithvi_eo_v2_s2_6b expects a provider backend (or 'auto').")
@@ -1587,6 +1639,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         t = temporal_to_range(temporal)
 
+        def _roi_at(i: int) -> tuple[float, float, float, float]:
+            return tuple((_roi_windows_geo[i] if _roi_windows_geo else None) or FULL_WINDOW)  # type: ignore[return-value]
+
         if _effective_temporal_mode(model_config, t) == "multi" or any(
             np.asarray(x).ndim == 4 for x in input_chws
         ):
@@ -1599,6 +1654,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 output=output,
                 backend=backend,
                 device=device,
+                _roi_windows_geo=_roi_windows_geo,
             )
 
         model_key, variant = _resolve_prithvi_model_key(
@@ -1706,19 +1762,31 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         },
                     )
 
+                    geo_roi_i = _roi_at(i)
+                    cropped_i = not roi_is_full(geo_roi_i)
+
                     if output.mode == "pooled":
-                        vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-                        meta.update(
-                            {
-                                "pooling": f"patch_{output.pooling}",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
+                        if cropped_i:
+                            grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
+                            grid = crop_grid_to_roi(grid, geo_roi_i)
+                            vec = (
+                                grid.max(axis=(1, 2))
+                                if output.pooling == "max"
+                                else grid.mean(axis=(1, 2))
+                            ).astype("float32")
+                            pooling = f"roi_grid_{output.pooling}"
+                        else:
+                            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
+                            pooling = f"patch_{output.pooling}"
+                        meta.update({"pooling": pooling, "cls_removed": bool(cls_removed)})
                         out[i] = Embedding(data=vec, meta=meta)
                         continue
 
                     if output.mode == "grid":
                         grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
+                        if cropped_i:
+                            grid = crop_grid_to_roi(grid, geo_roi_i)
+                            h, w = int(grid.shape[1]), int(grid.shape[2])
                         meta.update(
                             {
                                 "grid_hw": (h, w),
@@ -1758,11 +1826,16 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         output: OutputSpec,
         backend: str,
         device: str,
+        _roi_windows_geo: list[tuple[float, float, float, float] | None] | None = None,
     ) -> list[Embedding]:
         """Batch multi-frame path. Per item: 3D→single frame, 4D→binned series;
         identical frames collapsed, then grouped by prepared (T,H,W) shape so a
         model with matching ``num_frames`` runs each group as [B,6,T,H,W]."""
         t = temporal
+
+        def _roi_at(i: int) -> tuple[float, float, float, float]:
+            return tuple((_roi_windows_geo[i] if _roi_windows_geo else None) or FULL_WINDOW)  # type: ignore[return-value]
+
         model_key, variant = _resolve_prithvi_model_key(
             model_config=model_config,
             default_model_key=self.DEFAULT_MODEL_KEY,
@@ -1876,11 +1949,29 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         },
                     )
 
+                    geo_roi_i = _roi_at(i)
+                    cropped_i = not roi_is_full(geo_roi_i)
+
                     if output.mode == "pooled":
-                        vec, cls_removed = pool_from_tokens_tchw(tokens, n_frames, output.pooling)
+                        if cropped_i:
+                            grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(
+                                tokens, n_frames, output.pooling
+                            )
+                            grid = crop_grid_to_roi(grid, geo_roi_i)
+                            vec = (
+                                grid.max(axis=(1, 2))
+                                if output.pooling == "max"
+                                else grid.mean(axis=(1, 2))
+                            ).astype("float32")
+                            pooling = f"roi_grid_temporal_{output.pooling}"
+                        else:
+                            vec, cls_removed = pool_from_tokens_tchw(
+                                tokens, n_frames, output.pooling
+                            )
+                            pooling = f"patch_temporal_{output.pooling}"
                         meta.update(
                             {
-                                "pooling": f"patch_temporal_{output.pooling}",
+                                "pooling": pooling,
                                 "temporal_pooling": output.pooling,
                                 "cls_removed": bool(cls_removed),
                             }
@@ -1892,6 +1983,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         grid, (h, w), cls_removed = tokens_to_grid_dhw_tchw(
                             tokens, n_frames, output.pooling
                         )
+                        if cropped_i:
+                            grid = crop_grid_to_roi(grid, geo_roi_i)
+                            h, w = int(grid.shape[1]), int(grid.shape[2])
                         meta.update(
                             {
                                 "grid_hw": (h, w),

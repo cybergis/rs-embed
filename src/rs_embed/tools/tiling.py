@@ -39,6 +39,7 @@ from .runtime import (
     supports_prefetched_batch_api as _supports_prefetched_batch_api,
 )
 from .serialization import embedding_to_numpy as _embedding_to_numpy
+from .shape import geo_roi_from_meta, roi_is_full, roi_token_box
 
 # ---------------------------------------------------------------------------
 # Preprocessing contract version
@@ -505,6 +506,32 @@ def _map_input_subrange_to_feature(
     return (fs, fe)
 
 
+def _roi_tile_overlap_weights(
+    tile_meta: list[dict[str, int]],
+    *,
+    roi_window: tuple[float, float, float, float],
+    input_hw: tuple[int, int],
+) -> np.ndarray:
+    """Per-tile area (in px²) of the tile's valid region that falls inside the ROI.
+
+    Tiles fully outside the fetch-square ROI window get weight 0 so a pooled
+    merge averages only the requested region, not the enlarged square.
+    """
+    ih, iw = int(input_hw[0]), int(input_hw[1])
+    ry0, ry1 = roi_window[0] * ih, roi_window[1] * ih
+    rx0, rx1 = roi_window[2] * iw, roi_window[3] * iw
+    out = []
+    for m in tile_meta:
+        ty0 = int(m["y0"])
+        tx0 = int(m["x0"])
+        ty1 = ty0 + max(1, int(m["valid_h"]))
+        tx1 = tx0 + max(1, int(m["valid_w"]))
+        oh = max(0.0, min(ty1, ry1) - max(ty0, ry0))
+        ow = max(0.0, min(tx1, rx1) - max(tx0, rx0))
+        out.append(oh * ow)
+    return np.asarray(out, dtype=np.float32)
+
+
 def _aggregate_tiled_embeddings(
     *,
     embs: list[Embedding],
@@ -513,11 +540,15 @@ def _aggregate_tiled_embeddings(
     tile_size: int,
     stride: int,
     prep_meta: dict[str, Any],
+    roi_window: tuple[float, float, float, float] | None = None,
 ) -> Embedding:
     if not embs:
         raise ModelError("No tile embeddings produced.")
     base_meta = dict(getattr(embs[0], "meta", {}) or {})
     base_meta["input_prep"] = dict(prep_meta)
+    # Fetch-square ROI: the tiled input covers an enlarged square; restrict the
+    # merged output to the ROI window so only the requested region is returned.
+    roi_crop = roi_window is not None and not roi_is_full(roi_window)
 
     if output.mode == "pooled":
         vecs = [np.asarray(_embedding_to_numpy(e), dtype=np.float32).reshape(-1) for e in embs]
@@ -527,16 +558,30 @@ def _aggregate_tiled_embeddings(
                 f"Tiled pooled merge requires consistent vector shapes, got {sorted(dims)}"
             )
         mat = np.stack(vecs, axis=0)
+        roi_w = (
+            _roi_tile_overlap_weights(
+                tile_meta, roi_window=roi_window, input_hw=prep_meta["input_hw"]
+            )
+            if roi_crop
+            else None
+        )
+        if roi_w is not None and float(roi_w.sum()) <= 0.0:
+            roi_w = None  # ROI smaller than a tile gap — fall back to all tiles
         if str(output.pooling).lower() == "max":
-            out_vec = np.max(mat, axis=0).astype(np.float32, copy=False)
+            sel = mat if roi_w is None else mat[roi_w > 0.0]
+            out_vec = np.max(sel if len(sel) else mat, axis=0).astype(np.float32, copy=False)
         else:
             ws = np.asarray(
                 [max(1, int(m["valid_h"])) * max(1, int(m["valid_w"])) for m in tile_meta],
                 dtype=np.float32,
             )
+            if roi_w is not None:
+                ws = roi_w  # weight by ROI-overlap area only
             out_vec = (mat * ws[:, None]).sum(axis=0) / max(1.0, float(ws.sum()))
             out_vec = out_vec.astype(np.float32, copy=False)
         base_meta["input_prep"]["merged_output"] = "pooled_reduce"
+        if roi_crop:
+            base_meta["input_prep"]["roi_cropped"] = True
         return Embedding(data=out_vec, meta=base_meta)
 
     arrays = [np.asarray(_embedding_to_numpy(e), dtype=np.float32) for e in embs]
@@ -655,6 +700,17 @@ def _aggregate_tiled_embeddings(
     base_meta["input_prep"]["merged_output"] = "grid_stitch"
     base_meta["input_prep"]["stitched_grid_shape"] = (int(out_h), int(out_w))
     base_meta["input_prep"]["stitch_policy"] = "midpoint_cut"
+
+    # Fetch-square crop-back: the stitched grid covers the enlarged square; slice
+    # it to the ROI window so the output is exactly the requested (rectangular)
+    # region at native tiled resolution.
+    if roi_crop:
+        y0c, y1c, x0c, x1c = roi_token_box(roi_window, grid_h=out_h, grid_w=out_w)
+        out_arr = np.ascontiguousarray(out_arr[..., y0c:y1c, x0c:x1c])
+        out_h, out_w = int(out_arr.shape[-2]), int(out_arr.shape[-1])
+        base_meta["input_prep"]["roi_cropped"] = True
+        base_meta["input_prep"]["roi_grid_shape"] = (out_h, out_w)
+
     # Keep model-reported grid metadata consistent with stitched output.
     if "grid_hw" in base_meta:
         base_meta["grid_hw"] = (int(out_h), int(out_w))
@@ -723,6 +779,7 @@ def _call_embedder_get_embedding_tiled(
     input_chw: np.ndarray,
     input_prep: _ResolvedInputPrepSpec,
     model_config: dict[str, Any] | None = None,
+    fetch_meta: dict[str, Any] | None = None,
 ) -> Embedding:
     x = np.asarray(input_chw, dtype=np.float32)
     params = _resolve_tile_params(embedder, input_prep)
@@ -751,6 +808,7 @@ def _call_embedder_get_embedding_tiled(
             backend=backend,
             device=device,
             input_chw=x,
+            fetch_meta=fetch_meta,
         )
     stride = params.stride
     if stride <= 0:
@@ -846,6 +904,8 @@ def _call_embedder_get_embedding_tiled(
     )
 
     if len(tiles) <= 1:
+        # Single tile = the whole ROI is one input; the embedder squares + crops it
+        # back to the ROI via fetch_meta['roi_window_geo'] (set by the prefetch).
         return _call_embedder_get_embedding(
             embedder=embedder,
             spatial=spatial,
@@ -856,6 +916,7 @@ def _call_embedder_get_embedding_tiled(
             backend=backend,
             device=device,
             input_chw=x,
+            fetch_meta=fetch_meta,
         )
 
     can_batch_tiles = _supports_prefetched_batch_api(embedder) and (
@@ -934,6 +995,9 @@ def _call_embedder_get_embedding_tiled(
         tile_size=tile_size,
         stride=stride,
         prep_meta=prep_meta,
+        # Fetch-square ROI window (set by the prefetch for square-input models);
+        # the stitched square is cropped back to it so only the ROI is returned.
+        roi_window=geo_roi_from_meta(fetch_meta),
     )
 
 
@@ -1030,6 +1094,7 @@ def _call_embedder_get_embedding_with_input_prep(
         device=device,
         input_chw=np.asarray(input_chw, dtype=np.float32),
         input_prep=spec,
+        fetch_meta=fetch_meta,
     )
     # Tiled path stamps a rich block when it actually tiles; this only backfills
     # the single-tile / sub-threshold fall-through where it returned plain.

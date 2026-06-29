@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import math
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -33,9 +32,17 @@ from ..tools.runtime import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device_auto,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    prepare_square,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import FULL_WINDOW, square_spatial
 from ._vendor.dofa_vit import vit_base_patch16, vit_large_patch16
 from .base import EmbedderBase
-from .meta import build_meta
+from .meta import build_meta, temporal_to_range
 
 # -----------------------------
 # Defaults: Sentinel-2 SR (official DOFA 9-band order)
@@ -176,24 +183,22 @@ def _resize_chw(
     *,
     size: int = 224,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """
-    CHW float32 -> CHW float32 resized to (size,size) (bilinear), no crop/pad.
-    """
-    import torch
-    import torch.nn.functional as F
+    """CHW float32 -> square (size,size), padding a rectangular ROI before resize.
 
+    A non-square ROI is reflect-padded to square first (see
+    :mod:`rs_embed.tools.shape`) rather than stretched, which would distort the
+    geometry. ``info`` carries the original/target H,W plus ``shape_prep`` detail.
+    """
     if x_chw.ndim != 3:
         raise ModelError(f"Expected CHW, got shape={x_chw.shape}")
-    c, h, w = x_chw.shape
+    _, h, w = x_chw.shape
+    y, shape_meta = prepare_square(x_chw, size=int(size), shape_adjust="pad")
     info = {
         "orig_hw": (int(h), int(w)),
         "target_hw": (int(size), int(size)),
         "mode": "bilinear",
+        **shape_meta,
     }
-
-    x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)  # [1,C,H,W]
-    x = F.interpolate(x, size=(size, size), mode="bilinear", align_corners=False)
-    y = x[0].cpu().numpy().astype(np.float32)
     return y, info
 
 
@@ -636,6 +641,9 @@ class DOFAEmbedder(EmbedderBase):
       - OutputSpec.grid():   (D, Ht, Wt) token grid, usually 14x14 for 224/patch16
     """
 
+    # DOFA needs a square token grid → base.fetch_input enlarges a rectangular
+    # ROI to a square of real imagery; the output is cropped back to the ROI.
+    _requires_square_input = True
     DEFAULT_FETCH_WORKERS = 8
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 64
@@ -711,10 +719,14 @@ class DOFAEmbedder(EmbedderBase):
         device: str = "auto",
         input_chw: np.ndarray | None = None,
         model_config: dict[str, Any] | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
         variant = _resolve_dofa_variant(model_config=model_config)
         image_size = 224
+        # Fetch-square ROI window: from the direct provider fetch, or carried in
+        # fetch_meta when the API prefetched a square. Output cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
 
         # For optional on-the-fly input inspection
         check_meta: dict[str, Any] = {}
@@ -761,11 +773,7 @@ class DOFAEmbedder(EmbedderBase):
 
         else:
             provider = self._get_provider(backend)
-            if temporal is None:
-                raise ModelError("dofa provider backend requires TemporalSpec.range(start,end).")
-            temporal.validate()
-            if temporal.mode != "range":
-                raise ModelError("dofa provider backend requires TemporalSpec.range in v0.1.")
+            t = temporal_to_range(temporal)
 
             # overrides
             collection = (
@@ -790,10 +798,11 @@ class DOFAEmbedder(EmbedderBase):
             wavelengths_um = [float(v) for v in wavelengths_um]
 
             if input_chw is None:
+                spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
                 raw_chw, provider_meta = _fetch_gee_multiband_sr_chw(
                     provider,
                     spatial,
-                    temporal,
+                    t,
                     collection=str(collection),
                     bands=bands,
                     scale_m=scale_m,
@@ -882,22 +891,37 @@ class DOFAEmbedder(EmbedderBase):
             },
         )
 
-        if output.mode == "pooled":
-            base_meta["pooled_shape"] = tuple(pooled.shape)
-            return Embedding(data=pooled.astype(np.float32), meta=base_meta)
-
-        if output.mode == "grid":
+        # Build the token grid when we need it (grid output, or pooled that must be
+        # restricted to the ROI after a fetch-square enlargement). The enlarged
+        # input is square, so the token count is a perfect square.
+        cropped_to_roi = not roi_is_full(geo_roi)
+        grid = None
+        if output.mode == "grid" or cropped_to_roi:
             n, d = tokens.shape
             side = int(round(math.sqrt(n)))
             if side * side != n:
                 raise ModelError(f"DOFA tokens N={n} not square; cannot reshape to grid.")
             grid = tokens.reshape(side, side, d).transpose(2, 0, 1).astype(np.float32)
+            if cropped_to_roi:
+                grid = crop_grid_to_roi(grid, geo_roi)
 
+        if output.mode == "pooled":
+            # Pool only the ROI's tokens when the input was enlarged to a square;
+            # otherwise use DOFA's own pooled vector.
+            vec = grid.mean(axis=(1, 2)).astype(np.float32) if cropped_to_roi else pooled
+            vec = vec.astype(np.float32)
+            base_meta["pooled_shape"] = tuple(vec.shape)
+            if cropped_to_roi:
+                base_meta["pooling"] = "roi_grid_mean"
+            return Embedding(data=vec, meta=base_meta)
+
+        if output.mode == "grid":
+            assert grid is not None
             meta = {
                 **base_meta,
                 "grid_type": "vit_patch_tokens",
                 "grid_shape": tuple(grid.shape),
-                "grid_hw_tokens": (int(side), int(side)),
+                "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
                 "patch_size": int(getattr(model, "patch_size", 16)),
             }
 
@@ -936,11 +960,7 @@ class DOFAEmbedder(EmbedderBase):
                 "backend='tensor' batch inference requires get_embeddings_batch_from_inputs(...)."
             )
         provider = self._get_provider(backend)
-        if temporal is None:
-            raise ModelError("dofa provider backend requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("dofa provider backend requires TemporalSpec.range in v0.1.")
+        t = temporal_to_range(temporal)
 
         ss = sensor or self._default_sensor()
         collection = str(getattr(ss, "collection", "COPERNICUS/S2_SR_HARMONIZED"))
@@ -949,41 +969,27 @@ class DOFAEmbedder(EmbedderBase):
         cloudy_pct = int(getattr(ss, "cloudy_pct", 30))
         composite = str(getattr(ss, "composite", "median"))
 
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            raw_chw, _ = _fetch_gee_multiband_sr_chw(
-                provider,
-                sp,
-                temporal,
-                collection=collection,
-                bands=bands,
-                scale_m=scale_m,
-                cloudy_pct=cloudy_pct,
-                composite=composite,
-                default_value=0.0,
-            )
-            raw = np.clip(raw_chw, 0.0, 10000.0).astype(np.float32)
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        raw_inputs: list[np.ndarray] = []
-        for i, raw in enumerate(prefetched_raw):
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for dofa.")
-            raw_inputs.append(raw)
+        # Square-fetch each ROI; the per-item ROI window rides in geo_rois and is
+        # forwarded as _roi_windows_geo so the per-item output is cropped back.
+        raw_inputs, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: np.clip(
+                _fetch_gee_multiband_sr_chw(
+                    provider,
+                    sq,
+                    t,
+                    collection=collection,
+                    bands=bands,
+                    scale_m=scale_m,
+                    cloudy_pct=cloudy_pct,
+                    composite=composite,
+                    default_value=0.0,
+                )[0],
+                0.0,
+                10000.0,
+            ).astype(np.float32),
+            max_workers=self._resolve_fetch_workers(len(spatials)),
+        )
         return self.get_embeddings_batch_from_inputs(
             spatials=spatials,
             input_chws=raw_inputs,
@@ -991,6 +997,7 @@ class DOFAEmbedder(EmbedderBase):
             sensor=ss,
             model_config=model_config,
             output=output,
+            _roi_windows_geo=geo_rois,
             backend=backend,
             device=device,
         )
@@ -1006,6 +1013,7 @@ class DOFAEmbedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        _roi_windows_geo: list[tuple[float, float, float, float] | None] | None = None,
     ) -> list[Embedding]:
         if len(spatials) != len(input_chws):
             raise ModelError(
@@ -1027,11 +1035,7 @@ class DOFAEmbedder(EmbedderBase):
                 device=device,
             )
         self._get_provider(backend)
-        if temporal is None:
-            raise ModelError("dofa provider backend requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("dofa provider backend requires TemporalSpec.range in v0.1.")
+        t = temporal_to_range(temporal)
 
         ss = sensor or self._default_sensor()
         variant = _resolve_dofa_variant(model_config=model_config)
@@ -1087,7 +1091,7 @@ class DOFAEmbedder(EmbedderBase):
                     backend=backend_l,
                     source="tensor_input" if backend_l == "tensor" else self.input_spec.collection,
                     sensor=sensor,
-                    temporal=temporal,
+                    temporal=t,
                     image_size=224,
                     extra={
                         "variant": str(variant),
@@ -1114,12 +1118,10 @@ class DOFAEmbedder(EmbedderBase):
                     },
                 )
 
-                if output.mode == "pooled":
-                    base_meta["pooled_shape"] = tuple(pooled.shape)
-                    out[i] = Embedding(data=pooled.astype(np.float32), meta=base_meta)
-                    continue
-
-                if output.mode == "grid":
+                geo_roi = tuple((_roi_windows_geo[i] if _roi_windows_geo else None) or FULL_WINDOW)
+                cropped = not roi_is_full(geo_roi)
+                grid = None
+                if output.mode == "grid" or cropped:
                     n_tok, d_tok = tokens.shape
                     side = int(round(math.sqrt(n_tok)))
                     if side * side != n_tok:
@@ -1127,11 +1129,25 @@ class DOFAEmbedder(EmbedderBase):
                             f"DOFA tokens N={n_tok} not square; cannot reshape to grid."
                         )
                     grid = tokens.reshape(side, side, d_tok).transpose(2, 0, 1).astype(np.float32)
+                    if cropped:
+                        grid = crop_grid_to_roi(grid, geo_roi)
+
+                if output.mode == "pooled":
+                    vec = grid.mean(axis=(1, 2)).astype(np.float32) if cropped else pooled
+                    vec = vec.astype(np.float32)
+                    base_meta["pooled_shape"] = tuple(vec.shape)
+                    if cropped:
+                        base_meta["pooling"] = "roi_grid_mean"
+                    out[i] = Embedding(data=vec, meta=base_meta)
+                    continue
+
+                if output.mode == "grid":
+                    assert grid is not None
                     meta = {
                         **base_meta,
                         "grid_type": "vit_patch_tokens",
                         "grid_shape": tuple(grid.shape),
-                        "grid_hw_tokens": (int(side), int(side)),
+                        "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
                         "patch_size": int(getattr(model, "patch_size", 16)),
                     }
                     da = xr.DataArray(

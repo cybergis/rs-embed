@@ -80,7 +80,6 @@ def test_scalemae_batch_prefetch_and_single_model_load(monkeypatch):
         image_size,
         device,
         input_res_m,
-        preprocess_mode,
     ):
         vals = [float(rgb_u8[0, 0, 0]) for rgb_u8 in rgb_u8_batch]
         assert len(vals) == len(input_res_m)

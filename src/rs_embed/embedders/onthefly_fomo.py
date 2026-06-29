@@ -4,7 +4,6 @@ import importlib
 import importlib.util
 import os
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -30,6 +29,15 @@ from ..tools.runtime import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
+from ..tools.shape import (
+    crop_grid_and_pool,
+    geo_roi_from_meta,
+    prepare_square,
+    roi_fetch_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 from .onthefly_terramind import _fetch_s2_sr_12_raw_chw
@@ -361,15 +369,15 @@ def _load_fomo(
 
 
 def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
-    ensure_torch()
-    import torch
-    import torch.nn.functional as F
+    """Make a CHW patch square ``out_hw`` without aspect-ratio distortion.
 
+    A rectangular ROI is reflect-padded to square before resizing (see
+    :mod:`rs_embed.tools.shape`) rather than stretched.
+    """
     if x_chw.ndim != 3:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
-    x = torch.from_numpy(x_chw.astype(np.float32, copy=False)).unsqueeze(0)
-    y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y[0].detach().cpu().numpy().astype(np.float32)
+    out, _ = prepare_square(x_chw, size=int(out_hw), shape_adjust="pad")
+    return out
 
 
 def _normalize_s2(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -523,6 +531,9 @@ def _tokens_to_grid(
 
 @register("fomo")
 class FoMoEmbedder(EmbedderBase):
+    # FoMo needs a square token grid → base.fetch_input enlarges a rectangular
+    # ROI to a square of real imagery; the output is cropped back to the ROI.
+    _requires_square_input = True
     DEFAULT_IMAGE_SIZE = 64
     DEFAULT_PATCH = 16
     DEFAULT_DIM = 768
@@ -593,6 +604,7 @@ class FoMoEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
         if not is_provider_backend(backend_l, allow_auto=True):
@@ -600,6 +612,9 @@ class FoMoEmbedder(EmbedderBase):
 
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. Output is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
 
         image_size = int(os.environ.get("RS_EMBED_FOMO_IMG", str(self.DEFAULT_IMAGE_SIZE)))
         patch_size = int(os.environ.get("RS_EMBED_FOMO_PATCH", str(self.DEFAULT_PATCH)))
@@ -616,6 +631,7 @@ class FoMoEmbedder(EmbedderBase):
         spectral_keys = _resolve_s2_modality_keys()
 
         if input_chw is None:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             raw = _fetch_s2_sr_12_raw_chw(
                 self._get_provider(backend_l),
                 spatial,
@@ -668,12 +684,16 @@ class FoMoEmbedder(EmbedderBase):
             image_size=image_size,
         )
 
-        if output.pooling == "max":
-            vec = np.max(tokens, axis=0).astype(np.float32)
-            pooling = "token_max"
-        else:
-            vec = np.mean(tokens, axis=0).astype(np.float32)
-            pooling = "token_mean"
+        # Crop the grid back to the ROI and pool: ROI tokens when enlarged to a
+        # square, else the model's own token pool. (grid output uses cropped grid.)
+        token_pooled = (np.max if output.pooling == "max" else np.mean)(tokens, axis=0).astype(
+            np.float32
+        )
+        grid, vec = crop_grid_and_pool(
+            grid, geo_roi, pooling=output.pooling, pooled_fallback=token_pooled
+        )
+        cropped_to_roi = not roi_is_full(geo_roi)
+        pooling = f"roi_grid_{output.pooling}" if cropped_to_roi else f"token_{output.pooling}"
 
         meta = build_meta(
             model=self.model_name,
@@ -896,47 +916,29 @@ class FoMoEmbedder(EmbedderBase):
         ss = sensor or self._default_sensor()
         provider = self._get_provider(backend_l)
 
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            raw = _fetch_s2_sr_12_raw_chw(
+        raws, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: _fetch_s2_sr_12_raw_chw(
                 provider,
-                sp,
+                sq,
                 t,
                 scale_m=int(ss.scale_m),
                 cloudy_pct=int(ss.cloudy_pct),
                 composite=str(ss.composite),
                 fill_value=float(ss.fill_value),
+            ),
+            max_workers=self._resolve_fetch_workers(len(spatials)),
+        )
+        return [
+            self.get_embedding(
+                spatial=sp,
+                temporal=t,
+                sensor=ss,
+                output=output,
+                backend=backend,
+                device=device,
+                input_chw=raw,
+                fetch_meta=roi_fetch_meta(gr),
             )
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        out: list[Embedding] = []
-        for i, sp in enumerate(spatials):
-            raw = prefetched_raw[i]
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for fomo.")
-            out.append(
-                self.get_embedding(
-                    spatial=sp,
-                    temporal=t,
-                    sensor=ss,
-                    output=output,
-                    backend=backend,
-                    device=device,
-                    input_chw=raw,
-                )
-            )
-        return out
+            for sp, raw, gr in zip(spatials, raws, geo_rois, strict=True)
+        ]

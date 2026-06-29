@@ -9,6 +9,8 @@ from ..core.embedding import Embedding
 from ..core.specs import ModelInputSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import FetchResult
 from ..providers.base import ProviderBase
+from ..tools.shape import roi_is_full
+from ..tools.spatial import FULL_WINDOW, square_spatial
 
 
 def _method_accepts_parameter(obj: Any, method_name: str, param_name: str) -> bool:
@@ -78,6 +80,7 @@ class EmbedderBase:
         spatial: SpatialSpec,
         temporal: TemporalSpec | None,
         sensor: SensorSpec,
+        square_input: bool = True,
     ) -> FetchResult | None:
         """Fetch model input with model-specific or spec-driven logic.
 
@@ -103,6 +106,13 @@ class EmbedderBase:
             Optional temporal filter.
         sensor : SensorSpec
             Sensor/source definition.
+        square_input : bool
+            Whether a ``_requires_square_input`` model should enlarge a
+            rectangular ROI to a square fetch. The fetch-square strategy only
+            makes sense when the whole ROI is fed to the encoder as a single
+            square input; when the API tiles the input it cuts square tiles
+            from any-aspect imagery itself, so the caller passes ``False`` to
+            fetch the rectangular ROI directly (no extra imagery, no crop-back).
 
         Returns
         -------
@@ -113,6 +123,15 @@ class EmbedderBase:
         spec = self.input_spec
         if spec is None:
             return None
+
+        # Square-input models (``_requires_square_input``) enlarge a rectangular
+        # ROI to a square of real imagery so the encoder gets a square,
+        # in-distribution input. The ROI's window within that square travels in
+        # meta['roi_window_geo'] for the embedder to crop the output back to.
+        # Skipped when ``square_input=False`` (the tiling path squares per tile).
+        geo_roi = FULL_WINDOW
+        if square_input and getattr(self, "_requires_square_input", False):
+            spatial, geo_roi = square_spatial(spatial)
 
         # API-side prefetch must honor the resolved SensorSpec so tile/auto
         # input prep uses the same fetch overrides as the direct embedder path.
@@ -155,7 +174,8 @@ class EmbedderBase:
                 fill_value=fetch_sensor.fill_value,
             )
 
-        return FetchResult(data=raw, meta={})
+        meta: dict[str, Any] = {} if roi_is_full(geo_roi) else {"roi_window_geo": geo_roi}
+        return FetchResult(data=raw, meta=meta)
 
     def get_embedding(
         self,

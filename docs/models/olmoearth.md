@@ -7,7 +7,7 @@
 | Model ID             | `olmoearth`                                                                                               |
 | Family / Backbone    | OlmoEarth v1/v1.1 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset                       |
 | Adapter type         | `on-the-fly`                                                                                              |
-| Model config keys    | `variant` (default: `tiny_v1_1`), `patch_size` (default: `4`), `image_size` (default: `256`)                  |
+| Model config keys    | `variant` (default: `tiny_v1_1`), `patch_size` (default: `4`), `image_size` (default: `256`), `shape_adjust` (default: `pad`) |
 | Training alignment   | High (S2 L2A 12-band; native 10 m resolution; per-band mean±2σ normalization matches training pipeline)   |
 
 !!! success "OlmoEarth In 30 Seconds"
@@ -60,7 +60,8 @@ flowchart LR
     BINS --> FETCH["Fetch one S2 composite\nper bin\nraw DN, C=12"]
     FETCH --> DROP["Drop empty-bin frames\nkeep aligned timestamps"]
     DROP --> NORM["Per-frame per-band mean±2σ\nnormalization"]
-    NORM --> RESIZE["Resize each frame to image_size\n(default 256×256)"]
+    NORM --> SQUARE["Pad/crop each frame to square\n(shape_adjust, no aspect stretch)"]
+    SQUARE --> RESIZE["Resize each frame to image_size\n(default 256×256)"]
     RESIZE --> STACK["Stack frames\n(T, C, H, W)"]
     STACK --> TS["Frame timestamps\n(day, month, year)"]
     STACK --> SAMPLE["Build MaskedOlmoEarthSample\n(B=1, H, W, T, C=12)"]
@@ -128,6 +129,31 @@ Controls the spatial patch size for the FlexiViT encoder. Smaller values produce
 Target pixel size for the resize step. The fetched patch is always resized to `(image_size, image_size)` before encoding. Must be divisible by `patch_size`.
 
 Default: `256` (matching the OlmoEarth training tile size).
+
+### `shape_adjust`
+
+OlmoEarth's positional encoding is generated from a single `grid_size` scalar, so
+the encoder requires a **square** token grid — a non-square ROI cannot be fed as
+`H != W`. Rather than stretch a rectangular ROI to a square (which distorts the
+geometry: a 1.8:1 field collapses into striped, smeared embeddings), the adapter
+makes the ROI square *before* resizing to `image_size`.
+
+| Value          | Behavior                                                                                  |
+| -------------- | ----------------------------------------------------------------------------------------- |
+| `pad` (default) | Reflect-pad the short side up to the long side — keeps the **whole ROI**, no data discarded |
+| `crop`          | Center-crop the long side down to the short side — discards the ROI margins                |
+
+This is the shared, reusable strategy in `rs_embed.tools.shape` (also used by the
+other square-input embedders). If the ROI is **extremely** rectangular (aspect
+ratio ≥ 2.0), padding would inject too much synthetic border and cropping would
+throw away too much real data, so the adapter falls back to a plain stretch — a
+known, bounded behavior. The outcome is recorded in `meta["shape_prep"]`
+(`applied` ∈ `none`/`pad_to_square`/`crop_to_square`/`fixed_resize`, plus
+`orig_hw`, `square_hw`, `aspect`).
+
+The real fix for tiny ROIs is still to request a **larger, roughly square** BBox
+(~2.56 km at 10 m → native 256×256) so no upsampling is needed at all; `shape_adjust`
+removes the distortion but cannot invent spatial detail the ROI never had.
 
 ### `temporal_mode`
 
@@ -219,6 +245,7 @@ For defaults (256, patch_size=4): `64 × 64` grid.
 | `RS_EMBED_OLMOEARTH_VARIANT`     | `tiny_v1_1`   | Default model variant when `model_config` not given |
 | `RS_EMBED_OLMOEARTH_PATCH_SIZE`  | `4`      | Default patch size when `model_config` not given    |
 | `RS_EMBED_OLMOEARTH_IMAGE_SIZE`  | `256`    | Default image resize target                         |
+| `RS_EMBED_OLMOEARTH_SHAPE_ADJUST` | `pad`   | How non-square ROIs are made square (`pad` / `crop`) |
 | `RS_EMBED_OLMOEARTH_TEMPORAL_MODE` | `auto` | Default temporal mode (`auto` / `single` / `multi`) |
 | `RS_EMBED_OLMOEARTH_FETCH_WORKERS` | `8`    | Parallel GEE fetch workers for batch calls          |
 | `RS_EMBED_OLMOEARTH_BATCH_SIZE`  | `4` (CPU) / `16` (CUDA) | Inference batch size for `get_embeddings_batch_from_inputs` |

@@ -40,8 +40,8 @@
 
 ## Preprocessing Pipeline
 
-!!! warning "Resize is the default for `grid`"
-    RemoteCLIP `grid` output is an image-level CLIP ViT patch-token grid, not a seamless dense geospatial field. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit `input_prep="resize"` is the recommended no-warning path.
+!!! note "`tile` is the default `input_prep`"
+    RemoteCLIP follows the package-wide default: `input_prep=None` resolves to `"tile"` (large inputs are tiled + stitched to preserve native resolution). Note that RemoteCLIP `grid` output is an image-level CLIP ViT patch-token grid rather than a seamless dense geospatial field, so tiled grids can show stitching seams; pass `input_prep="resize"` if you prefer a single resized forward pass.
 
 ```mermaid
 flowchart LR
@@ -154,4 +154,4 @@ emb = get_embedding(
 - The `rshf` wrapper exposes no `model.transform`, so the adapter always applies the open_clip-equivalent CLIP preprocess — there is no second, divergent preprocessing path.
 - `pooled` uses `encode_image` (projected CLIP embedding) on every path (single / batch / tiled); it is not a token-mean and its dimensionality does not change with ROI size.
 - `grid` tokens come from open_clip's `forward_intermediates` patch grid; if a wrapper exposes no dense features the adapter falls back to a vision-transformer forward hook (batch-first / sequence-first safe).
-- Default/auto `grid` requests resolve to resize because tiled RemoteCLIP patch-token grids can show stitching seams.
+- `input_prep` defaults to `tile` (the package-wide default); tiled RemoteCLIP patch-token grids can show stitching seams, so pass `input_prep="resize"` for a single resized forward pass when that matters.

@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import logging
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from contextlib import contextmanager
 from typing import Any
 
@@ -34,6 +33,13 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     resolve_device_auto_torch,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -346,7 +352,9 @@ def _remoteclip_encode_tokens(
 
     # --- preprocess to tensor ---
     if hasattr(model, "transform") and callable(model.transform):
-        x = model.transform(rgb_u8.astype(np.float32), image_size).unsqueeze(0)
+        # Pass uint8: a transform built on ToTensor() only scales uint8 to [0,1];
+        # a float32 array skips that /255 and Normalize() then runs ~255x OOD.
+        x = model.transform(rgb_u8, image_size).unsqueeze(0)
     else:
         preprocess = transforms.Compose(
             [
@@ -477,7 +485,9 @@ def _remoteclip_encode_pooled_batch(
     xs = []
     if hasattr(model, "transform") and callable(model.transform):
         for rgb_u8 in rgb_u8_batch:
-            x = model.transform(rgb_u8.astype(np.float32), image_size)
+            # uint8 in: ToTensor()-based transforms only divide by 255 for uint8;
+            # float32 skips it and Normalize() then runs ~255x out of distribution.
+            x = model.transform(rgb_u8, image_size)
             if not torch.is_tensor(x):
                 raise ModelError("RemoteCLIP transform did not return torch.Tensor.")
             if x.ndim != 3:
@@ -533,6 +543,10 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
     - OutputSpec.grid(): returns token grid [D, Ht, Wt] (ViT patch grid, NOT pixel grid)
     """
 
+    # RemoteCLIP needs a square input (Resize+CenterCrop would otherwise drop the
+    # long edge of a rectangular ROI) → base.fetch_input enlarges the ROI to a
+    # square of real imagery; the token grid is cropped back to the ROI.
+    _requires_square_input = True
     DEFAULT_FETCH_WORKERS = 8
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 64
@@ -628,14 +642,10 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("remoteclip_s2rgb expects a provider backend (or 'auto').")
-        if temporal is None:
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range in v0.1.")
         t = temporal_to_range(temporal)
 
         provider = self._get_provider(backend)
@@ -652,8 +662,13 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
 
         image_size = 224
 
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. The token grid is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
+
         # fetch image (optionally reuse pre-fetched raw patch)
         if input_chw is None:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             s2_rgb_chw = _fetch_s2_rgb_chw(
                 provider,
                 spatial,
@@ -768,8 +783,28 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 extra=extra,
             )
 
+        cropped_to_roi = not roi_is_full(geo_roi)
+
         # ---- pooled output ----
         if output.mode == "pooled":
+            if cropped_to_roi:
+                # The fetch enlarged a rectangle to a square; pool ONLY the ROI's
+                # patch tokens instead of the global CLIP image embedding (which
+                # would include the real-neighborhood context fetched to square it).
+                tokens_or_vec, tmeta = _remoteclip_encode_tokens(
+                    model, rgb_u8, image_size=image_size, device=dev
+                )
+                if tokens_or_vec.ndim == 2:
+                    grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
+                    g = crop_grid_to_roi(grid_dhw, geo_roi)
+                    reduce = g.max if output.pooling == "max" else g.mean
+                    vec = reduce(axis=(1, 2)).astype(np.float32)
+                    base_meta = _build_base_meta(
+                        {**tmeta, **gmeta, "pooling": f"roi_grid_{output.pooling}"}
+                    )
+                    return Embedding(data=vec, meta=base_meta)
+                # No token grid available (wrapper only exposes pooled vectors):
+                # fall back to the global CLIP embedding (cannot crop a 1-D vector).
             # Use the projected CLIP image embedding (encode_image), identical to the
             # batch path, so pooled output is the canonical RemoteCLIP representation
             # with a consistent dimensionality regardless of the single/batch/tiled path.
@@ -792,6 +827,9 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 )
 
             grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
+            if cropped_to_roi:
+                grid_dhw = crop_grid_to_roi(grid_dhw, geo_roi)
+                gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
             meta = {
                 **base_meta,
                 **gmeta,
@@ -827,11 +865,6 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             return []
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("remoteclip_s2rgb expects a provider backend (or 'auto').")
-        if temporal is None:
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range in v0.1.")
 
         t = temporal_to_range(temporal)
         provider = self._get_provider(backend)
@@ -839,38 +872,24 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         cloudy_pct = sensor.cloudy_pct if sensor else 30
         composite = sensor.composite if sensor else "median"
 
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            s2_rgb_chw = _fetch_s2_rgb_chw(
-                provider,
-                sp,
-                t,
-                scale_m=scale_m,
-                cloudy_pct=cloudy_pct,
-                composite=composite,
-            )
-            raw = np.clip(s2_rgb_chw, 0.0, 10000.0).astype(np.float32)
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        raw_inputs: list[np.ndarray] = []
-        for i, raw in enumerate(prefetched_raw):
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for remoteclip_s2rgb.")
-            raw_inputs.append(raw)
+        # Square-fetch each ROI; the per-item ROI window rides in geo_rois and is
+        # forwarded as _roi_windows_geo so each output is cropped back to it.
+        raw_inputs, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: np.clip(
+                _fetch_s2_rgb_chw(
+                    provider,
+                    sq,
+                    t,
+                    scale_m=scale_m,
+                    cloudy_pct=cloudy_pct,
+                    composite=composite,
+                ),
+                0.0,
+                10000.0,
+            ).astype(np.float32),
+            max_workers=self._resolve_fetch_workers(len(spatials)),
+        )
         return self.get_embeddings_batch_from_inputs(
             spatials=spatials,
             input_chws=raw_inputs,
@@ -879,6 +898,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             output=output,
             backend=backend,
             device=device,
+            _roi_windows_geo=geo_rois,
         )
 
     def get_embeddings_batch_from_inputs(
@@ -891,14 +911,10 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        _roi_windows_geo: list[tuple[float, float, float, float] | None] | None = None,
     ) -> list[Embedding]:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("remoteclip_s2rgb expects a provider backend (or 'auto').")
-        if temporal is None:
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range in v0.1.")
         if len(spatials) != len(input_chws):
             raise ModelError(
                 f"spatials/input_chws length mismatch: {len(spatials)} != {len(input_chws)}"
@@ -945,6 +961,39 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         out: list[Embedding | None] = [None] * len(spatials)
         n = len(spatials)
 
+        def _roi_at(i: int) -> tuple[float, float, float, float]:
+            if _roi_windows_geo is None:
+                return geo_roi_from_meta(None)
+            return geo_roi_from_meta({"roi_window_geo": _roi_windows_geo[i]})
+
+        def _base_meta_for(extra_kind: dict[str, Any]) -> dict[str, Any]:
+            extra = {
+                "bands": sensor_meta["bands"],
+                "scale_m": scale_m,
+                "cloudy_pct": cloudy_pct,
+                "composite": composite,
+                "start": t.start,
+                "end": t.end,
+                "ckpt": ckpt,
+                "device": dev,
+                "pretrained_required": True,
+                "auto_download": True,
+                "hf_cache_dir": cache_dir,
+                "input_override": True,
+                **wmeta,
+                **extra_kind,
+            }
+            return build_meta(
+                model=self.model_name,
+                kind="on_the_fly",
+                backend=str(backend).lower(),
+                source="COPERNICUS/S2_SR_HARMONIZED",
+                sensor=sensor_meta,
+                temporal=t,
+                image_size=image_size,
+                extra=extra,
+            )
+
         if output.mode == "pooled":
             for s0 in range(0, n, infer_bs):
                 s1 = min(n, s0 + infer_bs)
@@ -956,68 +1005,38 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 )  # [B,D]
                 for j in range(s1 - s0):
                     i = s0 + j
-                    extra = {
-                        "bands": sensor_meta["bands"],
-                        "scale_m": scale_m,
-                        "cloudy_pct": cloudy_pct,
-                        "composite": composite,
-                        "start": t.start,
-                        "end": t.end,
-                        "ckpt": ckpt,
-                        "device": dev,
-                        "pretrained_required": True,
-                        "auto_download": True,
-                        "hf_cache_dir": cache_dir,
-                        "tokens_kind": "pooled_batch",
-                        "batch_infer": True,
-                        "input_override": True,
-                        **wmeta,
-                    }
-                    meta = build_meta(
-                        model=self.model_name,
-                        kind="on_the_fly",
-                        backend=str(backend).lower(),
-                        source="COPERNICUS/S2_SR_HARMONIZED",
-                        sensor=sensor_meta,
-                        temporal=t,
-                        image_size=image_size,
-                        extra=extra,
-                    )
+                    geo_roi = _roi_at(i)
+                    if not roi_is_full(geo_roi):
+                        # Pool only the ROI's patch tokens (see get_embedding).
+                        tokens_or_vec, tmeta = _remoteclip_encode_tokens(
+                            model, rgb_u8_all[i], image_size=image_size, device=dev
+                        )
+                        if tokens_or_vec.ndim == 2:
+                            grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
+                            g = crop_grid_to_roi(grid_dhw, geo_roi)
+                            reduce = g.max if output.pooling == "max" else g.mean
+                            vec = reduce(axis=(1, 2)).astype(np.float32)
+                            meta = _base_meta_for(
+                                {
+                                    **tmeta,
+                                    **gmeta,
+                                    "pooling": f"roi_grid_{output.pooling}",
+                                    "batch_infer": False,
+                                }
+                            )
+                            out[i] = Embedding(data=vec, meta=meta)
+                            continue
+                        # No token grid: fall back to the global pooled vector below.
+                    meta = _base_meta_for({"tokens_kind": "pooled_batch", "batch_infer": True})
                     out[i] = Embedding(data=vecs[j].astype(np.float32), meta=meta)
         elif output.mode == "grid":
             for i in range(n):
+                geo_roi = _roi_at(i)
                 tokens_or_vec, tmeta = _remoteclip_encode_tokens(
                     model,
                     rgb_u8_all[i],
                     image_size=image_size,
                     device=dev,
-                )
-                extra = {
-                    "bands": sensor_meta["bands"],
-                    "scale_m": scale_m,
-                    "cloudy_pct": cloudy_pct,
-                    "composite": composite,
-                    "start": t.start,
-                    "end": t.end,
-                    "ckpt": ckpt,
-                    "device": dev,
-                    "pretrained_required": True,
-                    "auto_download": True,
-                    "hf_cache_dir": cache_dir,
-                    "batch_infer": False,
-                    "input_override": True,
-                    **wmeta,
-                    **tmeta,
-                }
-                base_meta = build_meta(
-                    model=self.model_name,
-                    kind="on_the_fly",
-                    backend=str(backend).lower(),
-                    source="COPERNICUS/S2_SR_HARMONIZED",
-                    sensor=sensor_meta,
-                    temporal=t,
-                    image_size=image_size,
-                    extra=extra,
                 )
                 if tokens_or_vec.ndim != 2:
                     raise ModelError(
@@ -1025,7 +1044,12 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                         "Your RemoteCLIP wrapper only provides pooled vectors (no forward_encoder tokens)."
                     )
                 grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                meta = {**base_meta, **gmeta, "grid_type": "vit_tokens"}
+                if not roi_is_full(geo_roi):
+                    grid_dhw = crop_grid_to_roi(grid_dhw, geo_roi)
+                    gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
+                meta = _base_meta_for(
+                    {**tmeta, **gmeta, "batch_infer": False, "grid_type": "vit_tokens"}
+                )
                 da = xr.DataArray(
                     grid_dhw,
                     dims=("d", "y", "x"),

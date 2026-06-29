@@ -5,7 +5,6 @@ import os
 import re
 import urllib.parse
 import urllib.request
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -34,6 +33,15 @@ from ..tools.runtime import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
+from ..tools.shape import (
+    crop_grid_and_pool,
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_fetch_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
@@ -902,6 +910,10 @@ def _wildsat_forward_batch(
 
 @register("wildsat")
 class WildSATEmbedder(EmbedderBase):
+    # WildSAT (ViT/CNN) needs a square input → base.fetch_input enlarges a
+    # rectangular ROI to a square of real imagery; the ViT token grid (when
+    # available) is cropped back to the ROI.
+    _requires_square_input = True
     input_spec = ModelInputSpec(
         collection="COPERNICUS/S2_SR_HARMONIZED",
         bands=("B4", "B3", "B2"),
@@ -973,6 +985,7 @@ class WildSATEmbedder(EmbedderBase):
         device: str = "auto",
         input_chw: np.ndarray | None = None,
         model_config: dict[str, Any] | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
         if not is_provider_backend(backend_l, allow_auto=True):
@@ -980,6 +993,9 @@ class WildSATEmbedder(EmbedderBase):
 
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. The token grid is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
 
         variant = _resolve_wildsat_variant(model_config=model_config)
         ckpt_path = _resolve_wildsat_ckpt_path_for_variant(variant)
@@ -1001,6 +1017,7 @@ class WildSATEmbedder(EmbedderBase):
         }
 
         if input_chw is None:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             s2_rgb_chw = _fetch_s2_rgb_chw(
                 self._get_provider(backend_l),
                 spatial=spatial,
@@ -1030,6 +1047,9 @@ class WildSATEmbedder(EmbedderBase):
             device=device,
         )
 
+        # Need the token grid for grid output, or to crop+pool the ROI when the
+        # input was enlarged to a square at fetch time.
+        cropped_to_roi = not roi_is_full(geo_roi)
         vec, grid, fmeta = _wildsat_forward(
             backbone,
             image_head,
@@ -1038,7 +1058,7 @@ class WildSATEmbedder(EmbedderBase):
             feature_source=feature_source,
             pooled_from_tokens=pooled_from_tokens,
             pooling=output.pooling,
-            make_grid=(output.mode == "grid"),
+            make_grid=(output.mode == "grid" or cropped_to_roi),
             grid_from_tokens=grid_from_tokens,
             device=dev,
         )
@@ -1068,13 +1088,16 @@ class WildSATEmbedder(EmbedderBase):
         )
 
         if output.mode == "pooled":
-            ometa = {
-                **meta,
-                "pooling": (
-                    output.pooling if fmeta.get("pooled_from_tokens", False) else "identity"
-                ),
-                "pooled_shape": tuple(vec.shape),
-            }
+            if cropped_to_roi and grid is not None:
+                # Pool only the ROI tokens (the model's global vector would include
+                # the real-neighborhood context fetched only to square the input).
+                _, vec = crop_grid_and_pool(
+                    grid, geo_roi, pooling=output.pooling, pooled_fallback=vec
+                )
+                pooling = f"roi_grid_{output.pooling}"
+            else:
+                pooling = output.pooling if fmeta.get("pooled_from_tokens", False) else "identity"
+            ometa = {**meta, "pooling": pooling, "pooled_shape": tuple(vec.shape)}
             return Embedding(data=vec.astype(np.float32), meta=ometa)
 
         if output.mode == "grid":
@@ -1082,6 +1105,8 @@ class WildSATEmbedder(EmbedderBase):
                 raise ModelError(
                     "Internal error: grid output requested but grid tensor is missing."
                 )
+            if cropped_to_roi:
+                grid = crop_grid_to_roi(grid, geo_roi)
             gmeta = {
                 **meta,
                 "grid_shape": tuple(grid.shape),
@@ -1123,56 +1148,43 @@ class WildSATEmbedder(EmbedderBase):
         t = temporal_to_range(temporal)
         ss = sensor or self._default_sensor()
         provider = self._get_provider(backend_l)
-        n = len(spatials)
 
         scale_m = int(ss.scale_m)
         cloudy_pct = int(ss.cloudy_pct)
         composite = str(ss.composite)
 
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            s2_rgb_chw = _fetch_s2_rgb_chw(
-                provider,
+        # Square-fetch each ROI, then re-feed get_embedding with the ROI window so
+        # each item's token grid is cropped back to its ROI.
+        raws, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: np.clip(
+                _fetch_s2_rgb_chw(
+                    provider,
+                    spatial=sq,
+                    temporal=t,
+                    scale_m=scale_m,
+                    cloudy_pct=cloudy_pct,
+                    composite=composite,
+                ),
+                0.0,
+                10000.0,
+            ).astype(np.float32),
+            max_workers=self._resolve_fetch_workers(len(spatials)),
+        )
+        return [
+            self.get_embedding(
                 spatial=sp,
                 temporal=t,
-                scale_m=scale_m,
-                cloudy_pct=cloudy_pct,
-                composite=composite,
+                sensor=ss,
+                output=output,
+                backend=backend,
+                device=device,
+                input_chw=raw,
+                model_config=model_config,
+                fetch_meta=roi_fetch_meta(gr),
             )
-            raw = np.clip(s2_rgb_chw, 0.0, 10000.0).astype(np.float32)
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        out: list[Embedding] = []
-        for i, sp in enumerate(spatials):
-            raw = prefetched_raw[i]
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for wildsat.")
-            out.append(
-                self.get_embedding(
-                    spatial=sp,
-                    temporal=t,
-                    sensor=ss,
-                    output=output,
-                    backend=backend,
-                    device=device,
-                    input_chw=raw,
-                    model_config=model_config,
-                )
-            )
-        return out
+            for sp, raw, gr in zip(spatials, raws, geo_rois, strict=True)
+        ]
 
     def get_embeddings_batch_from_inputs(
         self,
