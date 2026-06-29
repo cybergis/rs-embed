@@ -208,14 +208,6 @@ def test_get_embedder_cls_accepts_satmaepp_aliases():
     assert cls_pp is cls_new
 
 
-def test_get_embedder_cls_accepts_satmaepp_s2_aliases():
-    cls_new = registry.get_embedder_cls("satmaepp_s2_10b")
-    cls_old = registry.get_embedder_cls("satmaepp_sentinel10")
-    cls_alt = registry.get_embedder_cls("satmaepp_s2")
-    assert cls_old is cls_new
-    assert cls_alt is cls_new
-
-
 def test_get_embedder_cls_can_reregister_when_registry_was_cleared(monkeypatch):
     _, cls_expected = _install_fake_lazy_model(
         monkeypatch,

@@ -47,7 +47,7 @@ def _restore_registered_model(model_id, previous):
 
 @pytest.mark.parametrize(
     "model_id",
-    ["satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
+    ["satmae", "satmaepp", "scalemae"],
 )
 @pytest.mark.parametrize(
     ("input_prep", "requested_mode"),
@@ -86,7 +86,7 @@ def test_image_level_vit_grid_default_input_prep_resolves_to_tile_with_metadata(
 
 @pytest.mark.parametrize(
     "model_id",
-    ["satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
+    ["satmae", "satmaepp", "scalemae"],
 )
 def test_image_level_vit_grid_explicit_tile_is_allowed_and_warns_about_seams(model_id):
     previous = _with_registered_fake_model(model_id)

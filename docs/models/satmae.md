@@ -40,7 +40,7 @@ The adapter converts raw SR `0..10000` to `uint8` RGB before model preprocessing
 
 ## Preprocessing Pipeline
 
-!!! warning "Resize is the default for `grid`"
+!!! warning "`grid` tiles by default and can show seams"
     SatMAE `grid` output is an image-level ViT patch-token grid, not a seamless dense geospatial field. Like every other model, SatMAE tiles by default: `input_prep=None` or `input_prep="auto"` resolves to `input_prep="tile"`. Because tiled patch-token mosaics can show stitching seams at tile boundaries, the default/auto path and an explicit `input_prep="tile"` both emit a warning on `grid` output. Pass `input_prep="resize"` for a seamless (downsampled) grid — that is the recommended seamless opt-in and emits no warning.
 
 ```mermaid

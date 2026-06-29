@@ -30,7 +30,7 @@ from rs_embed.embedders.base import EmbedderBase
 from rs_embed.pipelines.inference import InferenceEngine
 from rs_embed.pipelines.point_payload import build_one_point_payload
 
-_VIT_GRID_MODELS = ["satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"]
+_VIT_GRID_MODELS = ["satmae", "satmaepp", "scalemae"]
 _NON_VIT_MODELS = ["remoteclip", "dofa", "terramind", "galileo"]
 
 

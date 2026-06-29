@@ -88,7 +88,6 @@ _IMAGE_LEVEL_VIT_GRID_MODELS = frozenset(
     {
         "satmae",
         "satmaepp",
-        "satmaepp_s2_10b",
         "scalemae",
     }
 )
