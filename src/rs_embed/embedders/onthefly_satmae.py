@@ -69,34 +69,69 @@ def resize_rgb_u8(rgb_u8, out_size):
     return np.array(im.resize((out_size, out_size), resample=Image.BICUBIC), dtype=np.uint8)
 
 
-def maybe_use_model_transform(model, rgb_u8, image_size):
+# fMoW RGB normalization — the rshf SatMAE config defaults. Used as a fallback
+# when a checkpoint does not carry img_mean/img_std on its config.
+_SATMAE_RGB_MEAN = (0.4182007312774658, 0.4214799106121063, 0.3991275727748871)
+_SATMAE_RGB_STD = (0.28774282336235046, 0.27541765570640564, 0.2764017581939697)
+
+
+def _satmae_norm_from_model(model) -> tuple[tuple[float, ...], tuple[float, ...]]:
+    cfg = getattr(model, "config", None)
+    mean = getattr(cfg, "img_mean", None)
+    std = getattr(cfg, "img_std", None)
+    if mean is None or std is None:
+        return _SATMAE_RGB_MEAN, _SATMAE_RGB_STD
+    return tuple(float(x) for x in mean), tuple(float(x) for x in std)
+
+
+def _satmae_preprocess_info(model, image_size: int) -> dict[str, Any]:
+    mean, std = _satmae_norm_from_model(model)
+    # Resize the (square) input straight to image_size with NO center crop, so the
+    # token grid covers the whole fetched square and the ROI crop / tile stitch stay
+    # aligned. This intentionally diverges from the wrapper's transform(), which does
+    # Resize(256)+CenterCrop(224) and would drop ~12.5% of the FOV per tile/ROI.
+    return {
+        "preprocess_name": "direct",
+        "norm_mean": mean,
+        "norm_std": std,
+        "resize_to": int(image_size),
+        "center_crop": None,
+    }
+
+
+def _satmae_preprocess_tensor_batch(model, rgb_u8_batch: list[np.ndarray], *, image_size: int):
     ensure_torch()
     import torch
-
-    if hasattr(model, "transform") and callable(model.transform):
-        x = model.transform(rgb_u8.astype(np.float32), image_size)
-        if isinstance(x, torch.Tensor) and x.ndim == 3:
-            return x.unsqueeze(0)
-    return None
-
-
-def rgb_u8_to_tensor_clipnorm(rgb_u8, image_size):
-    ensure_torch()
     from PIL import Image
     from torchvision import transforms
 
+    mean, std = _satmae_norm_from_model(model)
     preprocess = transforms.Compose(
         [
-            transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.CenterCrop(image_size),
-            transforms.ToTensor(),
-            transforms.Normalize(
-                mean=(0.48145466, 0.4578275, 0.40821073),
-                std=(0.26862954, 0.26130258, 0.27577711),
+            transforms.Resize(
+                (int(image_size), int(image_size)),
+                interpolation=transforms.InterpolationMode.BICUBIC,
             ),
+            transforms.ToTensor(),
+            transforms.Normalize(mean=mean, std=std),
         ]
     )
-    return preprocess(Image.fromarray(rgb_u8, mode="RGB")).unsqueeze(0)
+    xs = []
+    for i, rgb_u8 in enumerate(rgb_u8_batch):
+        if not isinstance(rgb_u8, np.ndarray) or rgb_u8.ndim != 3 or int(rgb_u8.shape[2]) != 3:
+            raise ModelError(
+                "SatMAE preprocessing expects uint8 HWC RGB arrays; "
+                f"got shape={getattr(rgb_u8, 'shape', None)} at index={i}."
+            )
+        if rgb_u8.dtype != np.uint8:
+            raise ModelError(
+                "SatMAE preprocessing expects dtype=uint8; "
+                f"got dtype={getattr(rgb_u8, 'dtype', None)} at index={i}."
+            )
+        xs.append(preprocess(Image.fromarray(rgb_u8, mode="RGB")))
+    if not xs:
+        return torch.empty((0, 3, int(image_size), int(image_size)))
+    return torch.stack(xs, dim=0)
 
 
 def base_meta(
@@ -255,20 +290,7 @@ def _satmae_forward_tokens_batch(
     ensure_torch()
     import torch
 
-    xs = []
-    for rgb_u8 in rgb_u8_batch:
-        # prefer wrapper transform()
-        x = maybe_use_model_transform(model, rgb_u8, image_size)
-        if x is None:
-            # fallback: generic preprocessing (CLIP norm)
-            x = rgb_u8_to_tensor_clipnorm(rgb_u8, image_size)
-        if x.ndim != 4 or x.shape[0] != 1:
-            raise ModelError(
-                f"SatMAE transform returned shape={tuple(x.shape)}; expected [1,C,H,W]."
-            )
-        xs.append(x[0])
-
-    xb = torch.stack(xs, dim=0).to(device)
+    xb = _satmae_preprocess_tensor_batch(model, rgb_u8_batch, image_size=image_size).to(device)
 
     fe = getattr(model, "forward_encoder", None)
     if not callable(fe):
@@ -395,6 +417,7 @@ class SatMAERGBEmbedder(EmbedderBase):
 
         model, wmeta = _load_satmae(model_id=model_id, device=device)
         dev = wmeta.get("device", device)
+        pp_info = _satmae_preprocess_info(model, image_size)
         tokens = _satmae_forward_tokens(model, rgb_u8, image_size=image_size, device=dev)  # [N,D]
 
         meta = base_meta(
@@ -408,6 +431,7 @@ class SatMAERGBEmbedder(EmbedderBase):
             extra={
                 "tokens_kind": "tokens_forward_encoder",
                 "tokens_shape": tuple(tokens.shape),
+                **pp_info,
             },
         )
 
@@ -454,6 +478,7 @@ class SatMAERGBEmbedder(EmbedderBase):
         model, wmeta = _load_satmae(model_id=model_id, device=device)
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
+        pp_info = _satmae_preprocess_info(model, image_size)
 
         out: list[Embedding | None] = [None] * n
         for s0 in range(0, n, infer_bs):
@@ -477,6 +502,7 @@ class SatMAERGBEmbedder(EmbedderBase):
                     extra={
                         "tokens_kind": "tokens_forward_encoder",
                         "tokens_shape": tuple(tokens.shape),
+                        **pp_info,
                     },
                 )
                 out[i] = build_token_embedding(
@@ -528,6 +554,7 @@ class SatMAERGBEmbedder(EmbedderBase):
         model, wmeta = _load_satmae(model_id=model_id, device=device)
         dev = wmeta.get("device", device)
         infer_bs = self._resolve_infer_batch(str(dev))
+        pp_info = _satmae_preprocess_info(model, image_size)
 
         out: list[Embedding | None] = [None] * len(spatials)
         # User-supplied inputs carry no fetch-square ROI, so each output covers the
@@ -558,6 +585,7 @@ class SatMAERGBEmbedder(EmbedderBase):
                         "tokens_shape": tuple(tokens.shape),
                         "batch_infer": True,
                         "input_override": True,
+                        **pp_info,
                     },
                 )
                 out[i] = build_token_embedding(tokens, geo_roi=geo_roi, output=output, meta=meta)

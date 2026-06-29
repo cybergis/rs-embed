@@ -201,21 +201,15 @@ def _resolve_satmaepp_channel_order(model_id: str) -> str:
     return "rgb"
 
 
-def _satmaepp_resize_short_side(image_size: int) -> int:
-    crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
-    return int(float(image_size) / crop_pct)
-
-
 def _satmaepp_preprocess_info(model_id: str, image_size: int) -> dict[str, Any]:
     channel_order = _resolve_satmaepp_channel_order(model_id)
-    resize_short = _satmaepp_resize_short_side(image_size)
     return {
-        "preprocess_name": "satmaepp_fmow_rgb_eval",
+        "preprocess_name": "satmaepp_fmow_rgb_direct",
         "channel_order": channel_order,
         "norm_mean": tuple(float(x) for x in _SATMAEPP_RGB_MEAN),
         "norm_std": tuple(float(x) for x in _SATMAEPP_RGB_STD),
-        "resize_short_side": int(resize_short),
-        "center_crop": int(image_size),
+        "resize_to": int(image_size),
+        "center_crop": None,
     }
 
 
@@ -226,8 +220,15 @@ def _satmaepp_preprocess_tensor_batch(
     channel_order: str,
 ):
     """
-    SatMAE++ preprocessing aligned to official fmow-rgb eval transform:
-      ToTensor -> Normalize(fmow mean/std) -> Resize(short side) -> CenterCrop
+    SatMAE++ preprocessing:
+      ToTensor -> Normalize(fmow mean/std) -> Resize(image_size, image_size)
+
+    NOTE: no center crop. The official fmow-rgb eval transform does
+    Resize(short=256)+CenterCrop(224), but that makes the ViT token grid cover
+    only the central ~87.5% of the input, which breaks the "token grid == full
+    input" invariant the ROI crop-back and tile stitcher rely on (silently
+    dropping FOV and misaligning per-tile grids). Resizing the square input
+    straight to image_size keeps the grid aligned, matching ScaleMAE.
     """
     ensure_torch()
     import torch
@@ -239,13 +240,14 @@ def _satmaepp_preprocess_tensor_batch(
             f"Invalid SatMAE++ channel_order={channel_order!r}; expected 'rgb' or 'bgr'."
         )
 
-    resize_short = _satmaepp_resize_short_side(image_size)
     preprocess = transforms.Compose(
         [
             transforms.ToTensor(),
             transforms.Normalize(mean=_SATMAEPP_RGB_MEAN, std=_SATMAEPP_RGB_STD),
-            transforms.Resize(resize_short, interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.CenterCrop(image_size),
+            transforms.Resize(
+                (int(image_size), int(image_size)),
+                interpolation=transforms.InterpolationMode.BICUBIC,
+            ),
         ]
     )
 

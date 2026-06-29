@@ -352,7 +352,9 @@ def _remoteclip_encode_tokens(
 
     # --- preprocess to tensor ---
     if hasattr(model, "transform") and callable(model.transform):
-        x = model.transform(rgb_u8.astype(np.float32), image_size).unsqueeze(0)
+        # Pass uint8: a transform built on ToTensor() only scales uint8 to [0,1];
+        # a float32 array skips that /255 and Normalize() then runs ~255x OOD.
+        x = model.transform(rgb_u8, image_size).unsqueeze(0)
     else:
         preprocess = transforms.Compose(
             [
@@ -483,7 +485,9 @@ def _remoteclip_encode_pooled_batch(
     xs = []
     if hasattr(model, "transform") and callable(model.transform):
         for rgb_u8 in rgb_u8_batch:
-            x = model.transform(rgb_u8.astype(np.float32), image_size)
+            # uint8 in: ToTensor()-based transforms only divide by 255 for uint8;
+            # float32 skips it and Normalize() then runs ~255x out of distribution.
+            x = model.transform(rgb_u8, image_size)
             if not torch.is_tensor(x):
                 raise ModelError("RemoteCLIP transform did not return torch.Tensor.")
             if x.ndim != 3:
