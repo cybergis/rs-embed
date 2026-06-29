@@ -1,10 +1,12 @@
 """Regression tests: export_batch input_prep matches get_embedding.
 
-Image-level ViT grid models (satmae, scalemae, ...) downgrade an unset/auto
-``input_prep`` to ``resize`` in :func:`get_embedding` to avoid tiled stitching
-seams. The export pipeline must apply the same *model-aware* resolution per
-model; otherwise the same models silently tile under ``export_batch`` and
-produce edge seams ("坏带"). These tests lock that parity.
+Image-level ViT grid models (satmae, scalemae, ...) tile an unset/auto
+``input_prep`` by default, exactly like every other model. The export pipeline
+must apply the same *model-aware* resolution per model so the same point yields
+identical embeddings via :func:`get_embedding` and ``export_batch``. Tiled
+grids can show stitching seams, but that is an inherent property of patch-token
+mosaicking (surfaced via a warning), not something the resolver overrides.
+These tests lock that parity.
 """
 
 from __future__ import annotations
@@ -28,7 +30,7 @@ from rs_embed.embedders.base import EmbedderBase
 from rs_embed.pipelines.inference import InferenceEngine
 from rs_embed.pipelines.point_payload import build_one_point_payload
 
-_VIT_GRID_MODELS = ["satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"]
+_VIT_GRID_MODELS = ["satmae", "satmaepp", "scalemae"]
 _NON_VIT_MODELS = ["remoteclip", "dofa", "terramind", "galileo"]
 
 
@@ -43,12 +45,13 @@ def _engine(output: OutputSpec, input_prep=None) -> InferenceEngine:
 
 
 @pytest.mark.parametrize("model_id", _VIT_GRID_MODELS)
-def test_engine_default_resolves_vit_grid_to_resize(model_id):
-    # Pooled output downgrades silently (the seam warning is grid-only).
+def test_engine_default_resolves_vit_grid_to_tile(model_id):
+    # Unset input_prep tiles by default, like every other model (pooled output
+    # resolves silently; the seam warning is grid-only).
     engine = _engine(OutputSpec.pooled())
     _eff, resolved, explicit_nonresize = engine._model_input_prep(model_id)
-    assert resolved.mode == "resize"
-    assert explicit_nonresize is False
+    assert resolved.mode == "tile"
+    assert explicit_nonresize is True
 
 
 @pytest.mark.parametrize("model_id", _NON_VIT_MODELS)
@@ -76,12 +79,12 @@ def test_engine_grid_output_warns_once_per_model():
         warnings.simplefilter("always")
         engine._model_input_prep("satmae")
         engine._model_input_prep("satmae")
-    seam = [w for w in caught if "resolves to resize" in str(w.message)]
+    seam = [w for w in caught if "can show seams" in str(w.message)]
     assert len(seam) == 1
 
 
 # ---------------------------------------------------------------------------
-# End-to-end (per-item CPU path): ViT model is NOT tiled, non-ViT IS tiled
+# End-to-end (per-item CPU path): both ViT-grid and non-ViT models tile
 # ---------------------------------------------------------------------------
 
 
@@ -145,8 +148,8 @@ def _run_one_point(monkeypatch, model_name: str) -> tuple[_FakeEmbedder, dict]:
         input_reports={},
         prefetch_errors={},
         pass_input_into_embedder=True,
-        # Real ExportConfig => input_prep defaults to None (the case that
-        # exposed the bug: None used to resolve to tile for every model).
+        # Real ExportConfig => input_prep defaults to None, which resolves to
+        # the tile default for every model (ViT-grid included).
         config=ExportConfig(save_inputs=False, save_embeddings=True, max_retries=0),
         provider_factory=_DummyProvider,
         inspect_fn=lambda x_chw, *, sensor, name: {"ok": True, "name": name},
@@ -154,11 +157,12 @@ def _run_one_point(monkeypatch, model_name: str) -> tuple[_FakeEmbedder, dict]:
     return embedder, manifest
 
 
-def test_per_item_vit_grid_model_is_not_tiled(monkeypatch):
+def test_per_item_vit_grid_model_is_tiled(monkeypatch):
     embedder, manifest = _run_one_point(monkeypatch, "satmae")
-    # Resize: embedder called once with the FULL 8x8 input (no tiling, no seams).
-    assert embedder.input_shapes == [(3, 8, 8)]
-    assert manifest["models"][0]["meta"]["input_prep"]["resolved_mode"] == "resize"
+    # Tile (the default): 8x8 split into 4 tiles of 4x4, like every other model.
+    assert len(embedder.input_shapes) == 4
+    assert all(shp == (3, 4, 4) for shp in embedder.input_shapes)
+    assert manifest["models"][0]["meta"]["input_prep"]["resolved_mode"] == "tile"
 
 
 def test_per_item_non_vit_model_is_tiled(monkeypatch):

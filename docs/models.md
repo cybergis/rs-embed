@@ -24,7 +24,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 | Fast baseline / simple pipeline           | `tessera`, `gse`, `copernicus`                              | Precomputed embeddings, fewer runtime dependencies |
 | Simple S2 RGB on-the-fly experiments      | `remoteclip`, `satmae`, `satmaepp`, `scalemae`              | Straightforward RGB input paths                    |
 | Time-series temporal modeling             | `prithvi`, `olmoearth`, `galileo`, `anysat`, `agrifm`       | Native multi-frame temporal packaging — see [Temporal Sampling](temporal_sampling.md) |
-| Multispectral / strict spectral semantics | `satmaepp_s2_10b`, `dofa`, `terramind`, `thor`, `satvision` | Strong channel/schema assumptions                  |
+| Multispectral / strict spectral semantics | `satmaepp` (`modality="s2_10b"`), `dofa`, `terramind`, `thor`, `satvision` | Strong channel/schema assumptions                  |
 | Mixed-modality experiments (S1/S2)        | `terrafm`, `thor`                                           | Supports S2 or S1 path (per call)                  |
 
 ## Model Catalog Snapshot
@@ -56,8 +56,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 | `remoteclip`      | S2 RGB (`B4,B3,B2`)             | 512  | 10m                | single composite        | CLIP projection; RGB preprocessing                      | [detail](models/remoteclip.md) |
 | `scalemae`        | S2 RGB + scale                  | 1024 | 10m                | single composite        | `sensor.scale_m` is a model input                       | [detail](models/scalemae.md)   |
 | `satmae`          | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | single composite        | ViT-L; MAE token/grid                                   | [detail](models/satmae.md)     |
-| `satmaepp`        | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | single composite        | ViT-L; fMoW eval preprocessing                          | [detail](models/satmaepp.md)   |
-| `satmaepp_s2_10b` | S2 10-band                      | 1024 | 10m                | single composite        | strict band order; grouped-channel tokens               | [detail](models/satmaepp.md)   |
+| `satmaepp`        | S2 RGB (`B4,B3,B2`) or S2 10-band | 1024 | 10m              | single composite        | `modality=rgb` (default) or `s2_10b`; ViT-L; fMoW eval preprocessing; 10-band uses strict band order + grouped-channel tokens | [detail](models/satmaepp.md)   |
 
 ---
 

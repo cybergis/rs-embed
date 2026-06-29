@@ -91,7 +91,7 @@ class InferenceEngine:
         # Global (model-agnostic) resolution of the configured input_prep. Kept
         # only as the fallback for ``_run_batch_tiled``; per-model gating and
         # dispatch go through ``_model_input_prep`` so the export path matches
-        # get_embedding (some ViT-grid models downgrade tile -> resize).
+        # get_embedding (ViT-grid models warn on tiled grids but still tile).
         self.input_prep_resolved = _resolve_input_prep_spec(config.input_prep)
         self.prefer_batch = _device_has_gpu(device)
         # Per-model model-aware input_prep cache: ``model_name -> (effective
@@ -105,9 +105,9 @@ class InferenceEngine:
         Returns ``(effective_input_prep, resolved_spec, explicit_nonresize)``:
         *effective_input_prep* is the value forwarded to the embedder,
         *resolved_spec* drives tile geometry/gating, and *explicit_nonresize*
-        gates batch tiling. Image-level ViT grid models downgrade an unset/auto
-        input_prep to ``resize`` to avoid tiled stitching seams, exactly as the
-        single-embedding API does. Cached (and warned) once per model name.
+        gates batch tiling. Image-level ViT grid models resolve an unset/auto
+        input_prep to the same ``tile`` default as every other model, exactly as
+        the single-embedding API does. Cached (and warned) once per model name.
         """
         from ..tools.normalization import normalize_model_name
 
