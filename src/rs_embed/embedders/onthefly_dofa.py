@@ -42,7 +42,7 @@ from ..tools.shape import (
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from ._vendor.dofa_vit import vit_base_patch16, vit_large_patch16
 from .base import EmbedderBase
-from .meta import build_meta
+from .meta import build_meta, temporal_to_range
 
 # -----------------------------
 # Defaults: Sentinel-2 SR (official DOFA 9-band order)
@@ -773,11 +773,7 @@ class DOFAEmbedder(EmbedderBase):
 
         else:
             provider = self._get_provider(backend)
-            if temporal is None:
-                raise ModelError("dofa provider backend requires TemporalSpec.range(start,end).")
-            temporal.validate()
-            if temporal.mode != "range":
-                raise ModelError("dofa provider backend requires TemporalSpec.range in v0.1.")
+            t = temporal_to_range(temporal)
 
             # overrides
             collection = (
@@ -806,7 +802,7 @@ class DOFAEmbedder(EmbedderBase):
                 raw_chw, provider_meta = _fetch_gee_multiband_sr_chw(
                     provider,
                     spatial,
-                    temporal,
+                    t,
                     collection=str(collection),
                     bands=bands,
                     scale_m=scale_m,
@@ -964,11 +960,7 @@ class DOFAEmbedder(EmbedderBase):
                 "backend='tensor' batch inference requires get_embeddings_batch_from_inputs(...)."
             )
         provider = self._get_provider(backend)
-        if temporal is None:
-            raise ModelError("dofa provider backend requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("dofa provider backend requires TemporalSpec.range in v0.1.")
+        t = temporal_to_range(temporal)
 
         ss = sensor or self._default_sensor()
         collection = str(getattr(ss, "collection", "COPERNICUS/S2_SR_HARMONIZED"))
@@ -985,7 +977,7 @@ class DOFAEmbedder(EmbedderBase):
                 _fetch_gee_multiband_sr_chw(
                     provider,
                     sq,
-                    temporal,
+                    t,
                     collection=collection,
                     bands=bands,
                     scale_m=scale_m,
@@ -1043,11 +1035,7 @@ class DOFAEmbedder(EmbedderBase):
                 device=device,
             )
         self._get_provider(backend)
-        if temporal is None:
-            raise ModelError("dofa provider backend requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("dofa provider backend requires TemporalSpec.range in v0.1.")
+        t = temporal_to_range(temporal)
 
         ss = sensor or self._default_sensor()
         variant = _resolve_dofa_variant(model_config=model_config)
@@ -1103,7 +1091,7 @@ class DOFAEmbedder(EmbedderBase):
                     backend=backend_l,
                     source="tensor_input" if backend_l == "tensor" else self.input_spec.collection,
                     sensor=sensor,
-                    temporal=temporal,
+                    temporal=t,
                     image_size=224,
                     extra={
                         "variant": str(variant),

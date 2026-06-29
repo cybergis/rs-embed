@@ -646,11 +646,6 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("remoteclip_s2rgb expects a provider backend (or 'auto').")
-        if temporal is None:
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range in v0.1.")
         t = temporal_to_range(temporal)
 
         provider = self._get_provider(backend)
@@ -870,11 +865,6 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             return []
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("remoteclip_s2rgb expects a provider backend (or 'auto').")
-        if temporal is None:
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range in v0.1.")
 
         t = temporal_to_range(temporal)
         provider = self._get_provider(backend)
@@ -925,11 +915,6 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
     ) -> list[Embedding]:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("remoteclip_s2rgb expects a provider backend (or 'auto').")
-        if temporal is None:
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("remoteclip_s2rgb requires TemporalSpec.range in v0.1.")
         if len(spatials) != len(input_chws):
             raise ModelError(
                 f"spatials/input_chws length mismatch: {len(spatials)} != {len(input_chws)}"
