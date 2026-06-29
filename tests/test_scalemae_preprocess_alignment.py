@@ -8,19 +8,19 @@ from rs_embed.embedders.onthefly_scalemae import (
     _resolve_scalemae_forward_features,
     _scalemae_effective_input_res_m,
     _scalemae_forward_tokens_or_vec,
-    _scalemae_resize_short_side,
 )
 
 
-def test_scalemae_effective_input_res_tracks_resize_short_side():
+def test_scalemae_effective_input_res_tracks_resize():
+    # Single preprocessing path: the square input is resized to image_size (no
+    # center crop), so the effective GSD scales by short_side / image_size.
     rgb_u8 = np.zeros((11, 13, 3), dtype=np.uint8)
 
-    assert _scalemae_resize_short_side(224) == 256
     assert _scalemae_effective_input_res_m(
         rgb_u8,
         image_size=224,
         source_res_m=10.0,
-    ) == pytest.approx(10.0 * (11.0 / 256.0))
+    ) == pytest.approx(10.0 * (11.0 / 224.0))
 
 
 def test_scalemae_input_override_skips_pre_resize_and_adjusts_input_res(monkeypatch):
@@ -32,10 +32,9 @@ def test_scalemae_input_override_skips_pre_resize_and_adjusts_input_res(monkeypa
     def _fake_load(*, model_id, device):
         return object(), {"device": "cpu"}
 
-    def _fake_forward(model, rgb_u8, *, image_size, device, input_res_m, preprocess_mode):
+    def _fake_forward(model, rgb_u8, *, image_size, device, input_res_m):
         seen["shape"] = tuple(rgb_u8.shape)
         seen["input_res_m"] = float(input_res_m)
-        seen["preprocess_mode"] = preprocess_mode
         return np.full((4, 2), 1.0, dtype=np.float32), {"tokens_kind": "tokens_forward"}
 
     monkeypatch.setattr(sm, "_load_scalemae", _fake_load)
@@ -54,7 +53,6 @@ def test_scalemae_input_override_skips_pre_resize_and_adjusts_input_res(monkeypa
 
     assert seen["shape"] == (11, 13, 3)
     assert seen["input_res_m"] == pytest.approx(10.0 * (11.0 / 224.0))
-    assert seen["preprocess_mode"] == "direct"
 
 
 def test_scalemae_resolves_nested_forward_features():

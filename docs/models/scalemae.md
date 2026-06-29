@@ -17,7 +17,7 @@
 
     - `sensor.scale_m` is a **model input**, not just a fetch resolution — a wrong value silently drifts embeddings across runs: see [Input Contract](#input-contract)
     - `grid` requires a token sequence and raises a clear error when the wrapper only exposes pooled output: see [Output Semantics](#output-semantics)
-    - Default provider fetches use ImageNet-style eval preprocessing (`Resize(short side) -> CenterCrop -> Normalize`), while prefetched/tiled inputs use direct resize + normalization to preserve tile coverage: see [Preprocessing Pipeline](#preprocessing-pipeline)
+    - All inputs use a single direct-resize preprocessing (`Resize(image_size) -> Normalize`, no center crop) so the patch-token grid covers the full image and the square-fetch ROI crop stays aligned; ImageNet normalization is kept because it matches pretraining: see [Preprocessing Pipeline](#preprocessing-pipeline)
 
 ---
 
@@ -45,7 +45,7 @@
 
 ```mermaid
 flowchart LR
-    INPUT["S2 RGB → uint8"] --> PREP["Preprocess\nprovider: ImageNet eval\ntile/input_chw: direct resize + normalize\n→ derive input_res_m"]
+    INPUT["S2 RGB → uint8"] --> PREP["Preprocess\ndirect resize to image_size + ImageNet normalize\n(no center crop)\n→ derive input_res_m"]
     PREP --> FWD["ScaleMAE forward\n(image + input_res)"]
     FWD --> POOL["pooled: vector"]
     FWD --> GRID["grid: token grid (D,H,W)"]
