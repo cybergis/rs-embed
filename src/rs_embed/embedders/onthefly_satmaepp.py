@@ -34,7 +34,6 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 from .onthefly_satmaepp_s2 import (
-    _S2_SR_10_BANDS,
     SatMAEPPSentinel10Embedder,
 )
 
