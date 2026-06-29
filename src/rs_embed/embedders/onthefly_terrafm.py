@@ -49,7 +49,7 @@ from ..tools.shape import (
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
-from .meta import build_meta
+from .meta import build_meta, temporal_to_range
 
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"
@@ -525,11 +525,7 @@ class TerraFMBEmbedder(EmbedderBase):
             Raw CHW array and fetch-time metadata.
         """
         modality = str(getattr(sensor, "modality", "s2") or "s2").lower()
-        if temporal is None:
-            raise ModelError("terrafm_b_gee requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("terrafm_b_gee requires TemporalSpec.range in v0.1.")
+        t = temporal_to_range(temporal)
 
         # Fetch-square: enlarge a rectangular ROI to a square of real imagery so the
         # encoder sees a square, in-distribution input; the ROI window rides in
@@ -544,7 +540,7 @@ class TerraFMBEmbedder(EmbedderBase):
             raw = _fetch_collection_patch_chw(
                 provider,
                 spatial=spatial,
-                temporal=temporal,
+                temporal=t,
                 collection="COPERNICUS/S2_SR_HARMONIZED",
                 bands=tuple(_S2_SR_12_BANDS),
                 scale_m=int(getattr(sensor, "scale_m", 10)),
@@ -557,7 +553,7 @@ class TerraFMBEmbedder(EmbedderBase):
             raw, meta = _fetch_s1_vvvh_raw_chw_with_meta(
                 provider,
                 spatial,
-                temporal,
+                t,
                 scale_m=int(getattr(sensor, "scale_m", 10)),
                 use_float_linear=bool(getattr(sensor, "use_float_linear", True)),
                 composite=str(getattr(sensor, "composite", "median")),
@@ -711,7 +707,7 @@ class TerraFMBEmbedder(EmbedderBase):
             want_grid=(output.mode == "grid" or cropped_to_roi),
         )
 
-        temporal_used = temporal if uses_provider else None
+        temporal_used = temporal_to_range(temporal) if uses_provider else None
         sensor_meta = None
         source = None
         if uses_provider:
@@ -828,11 +824,7 @@ class TerraFMBEmbedder(EmbedderBase):
             )
         provider = self._get_provider(backend)
 
-        if temporal is None:
-            raise ModelError("terrafm_b_gee requires TemporalSpec.range(start,end).")
-        temporal.validate()
-        if temporal.mode != "range":
-            raise ModelError("terrafm_b_gee requires TemporalSpec.range in v0.1.")
+        t = temporal_to_range(temporal)
 
         modality = str(getattr(sensor, "modality", "s2") if sensor else "s2").lower()
         scale_m = int(getattr(sensor, "scale_m", 10) if sensor else 10)
@@ -856,7 +848,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 x_chw = _fetch_s2_sr_12_chw(
                     provider,
                     sq,
-                    temporal,
+                    t,
                     scale_m=scale_m,
                     cloudy_pct=cloudy_pct,
                     composite=composite,
@@ -868,7 +860,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 raw, fetch_meta = _fetch_s1_vvvh_raw_chw_with_meta(
                     provider,
                     sq,
-                    temporal,
+                    t,
                     scale_m=scale_m,
                     use_float_linear=use_float_linear,
                     composite=composite,
@@ -936,11 +928,6 @@ class TerraFMBEmbedder(EmbedderBase):
         uses_provider = backend_l != "tensor"
         if uses_provider:
             self._get_provider(backend)
-            if temporal is None:
-                raise ModelError("terrafm_b_gee requires TemporalSpec.range(start,end).")
-            temporal.validate()
-            if temporal.mode != "range":
-                raise ModelError("terrafm_b_gee requires TemporalSpec.range in v0.1.")
 
         modality = str(getattr(sensor, "modality", "s2") if sensor else "s2").lower()
         scale_m = int(getattr(sensor, "scale_m", 10) if sensor else 10)
@@ -976,7 +963,7 @@ class TerraFMBEmbedder(EmbedderBase):
         dev = str(wmeta.get("device", _auto_device(device)))
         infer_bs = self._resolve_infer_batch(dev)
 
-        temporal_used = temporal if uses_provider else None
+        temporal_used = temporal_to_range(temporal) if uses_provider else None
         sensor_meta = None
         source = None
         if uses_provider and modality == "s2":
