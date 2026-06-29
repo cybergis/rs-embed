@@ -2454,7 +2454,7 @@ Treat every setting change as part of experiment design, not just performance tu
 </table>
 <div class="admonition warning">
 <p class="admonition-title">Patch-token grids are not always tile-friendly</p>
-<p>For image-level ViT patch-token grid models (<code>remoteclip</code>, <code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>, and <code>satmaepp_s2_10b</code>), <code>OutputSpec.grid()</code> is not a seamless dense geospatial field. With <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed but emits a warning and metadata marks the tiled grid as seam-prone. Explicit <code>input_prep="resize"</code> is the recommended path and does not warn.</p>
+<p>For image-level ViT patch-token grid models (<code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>, and <code>satmaepp_s2_10b</code>), <code>OutputSpec.grid()</code> is not a seamless dense geospatial field. With <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed but emits a warning and metadata marks the tiled grid as seam-prone. Explicit <code>input_prep="resize"</code> is the recommended path and does not warn.</p>
 </div>
 <p>See also <a href="../api_specs/#inputprepspec">API Specs — InputPrepSpec</a> and <a href="../workflows/">Common Workflows</a>.</p>
 <h3 id="output-mode-pooled-vs-grid">Output mode: <code>pooled</code> vs <code>grid</code><a class="headerlink" href="#output-mode-pooled-vs-grid" title="Permanent link">&para;</a></h3>

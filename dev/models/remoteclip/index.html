@@ -2296,9 +2296,9 @@
 </div>
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
-<div class="admonition warning">
-<p class="admonition-title">Resize is the default for <code>grid</code></p>
-<p>RemoteCLIP <code>grid</code> output is an image-level CLIP ViT patch-token grid, not a seamless dense geospatial field. For <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> by default and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
+<div class="admonition note">
+<p class="admonition-title"><code>tile</code> is the default <code>input_prep</code></p>
+<p>RemoteCLIP follows the package-wide default: <code>input_prep=None</code> resolves to <code>"tile"</code> (large inputs are tiled + stitched to preserve native resolution). Note that RemoteCLIP <code>grid</code> output is an image-level CLIP ViT patch-token grid rather than a seamless dense geospatial field, so tiled grids can show stitching seams; pass <code>input_prep="resize"</code> if you prefer a single resized forward pass.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
     INPUT["S2 RGB"] --&gt; PREP["Normalize → uint8\n→ CLIP preprocess (Resize 224 + CenterCrop + normalize)"]
@@ -2410,7 +2410,7 @@ wrapper transform).</p>
 <li>The <code>rshf</code> wrapper exposes no <code>model.transform</code>, so the adapter always applies the open_clip-equivalent CLIP preprocess — there is no second, divergent preprocessing path.</li>
 <li><code>pooled</code> uses <code>encode_image</code> (projected CLIP embedding) on every path (single / batch / tiled); it is not a token-mean and its dimensionality does not change with ROI size.</li>
 <li><code>grid</code> tokens come from open_clip's <code>forward_intermediates</code> patch grid; if a wrapper exposes no dense features the adapter falls back to a vision-transformer forward hook (batch-first / sequence-first safe).</li>
-<li>Default/auto <code>grid</code> requests resolve to resize because tiled RemoteCLIP patch-token grids can show stitching seams.</li>
+<li><code>input_prep</code> defaults to <code>tile</code> (the package-wide default); tiled RemoteCLIP patch-token grids can show stitching seams, so pass <code>input_prep="resize"</code> for a single resized forward pass when that matters.</li>
 </ul>
 
 

@@ -2247,7 +2247,7 @@
 <ul>
 <li><code>sensor.scale_m</code> is a <strong>model input</strong>, not just a fetch resolution — a wrong value silently drifts embeddings across runs: see <a href="#input-contract">Input Contract</a></li>
 <li><code>grid</code> requires a token sequence and raises a clear error when the wrapper only exposes pooled output: see <a href="#output-semantics">Output Semantics</a></li>
-<li>Default provider fetches use ImageNet-style eval preprocessing (<code>Resize(short side) -&gt; CenterCrop -&gt; Normalize</code>), while prefetched/tiled inputs use direct resize + normalization to preserve tile coverage: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
+<li>All inputs use a single direct-resize preprocessing (<code>Resize(image_size) -&gt; Normalize</code>, no center crop) so the patch-token grid covers the full image and the square-fetch ROI crop stays aligned; ImageNet normalization is kept because it matches pretraining: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
 </ul>
 </div>
 <hr />
@@ -2301,7 +2301,7 @@
 <p>ScaleMAE <code>grid</code> output is an image-level ViT patch-token grid, not a seamless dense geospatial field. For <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> by default and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
-    INPUT["S2 RGB → uint8"] --&gt; PREP["Preprocess\nprovider: ImageNet eval\ntile/input_chw: direct resize + normalize\n→ derive input_res_m"]
+    INPUT["S2 RGB → uint8"] --&gt; PREP["Preprocess\ndirect resize to image_size + ImageNet normalize\n(no center crop)\n→ derive input_res_m"]
     PREP --&gt; FWD["ScaleMAE forward\n(image + input_res)"]
     FWD --&gt; POOL["pooled: vector"]
     FWD --&gt; GRID["grid: token grid (D,H,W)"]</code></pre>

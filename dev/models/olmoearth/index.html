@@ -1063,6 +1063,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#shape_adjust" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shape_adjust
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#temporal_mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2290,6 +2301,17 @@
 </li>
         
           <li class="md-nav__item">
+  <a href="#shape_adjust" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        shape_adjust
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
   <a href="#temporal_mode" class="md-nav__link">
     <span class="md-ellipsis">
       
@@ -2510,7 +2532,7 @@
 </tr>
 <tr>
 <td>Model config keys</td>
-<td><code>variant</code> (default: <code>tiny_v1_1</code>), <code>patch_size</code> (default: <code>4</code>), <code>image_size</code> (default: <code>256</code>)</td>
+<td><code>variant</code> (default: <code>tiny_v1_1</code>), <code>patch_size</code> (default: <code>4</code>), <code>image_size</code> (default: <code>256</code>), <code>shape_adjust</code> (default: <code>pad</code>)</td>
 </tr>
 <tr>
 <td>Training alignment</td>
@@ -2604,7 +2626,8 @@ converts to dB via <code>10·log10</code> before normalization. <code>input_chw<
     BINS --&gt; FETCH["Fetch one S2 composite\nper bin\nraw DN, C=12"]
     FETCH --&gt; DROP["Drop empty-bin frames\nkeep aligned timestamps"]
     DROP --&gt; NORM["Per-frame per-band mean±2σ\nnormalization"]
-    NORM --&gt; RESIZE["Resize each frame to image_size\n(default 256×256)"]
+    NORM --&gt; SQUARE["Pad/crop each frame to square\n(shape_adjust, no aspect stretch)"]
+    SQUARE --&gt; RESIZE["Resize each frame to image_size\n(default 256×256)"]
     RESIZE --&gt; STACK["Stack frames\n(T, C, H, W)"]
     STACK --&gt; TS["Frame timestamps\n(day, month, year)"]
     STACK --&gt; SAMPLE["Build MaskedOlmoEarthSample\n(B=1, H, W, T, C=12)"]
@@ -2728,6 +2751,40 @@ v1.1 uses a linear patch embedding (<code>use_linear_patch_embed=True</code>) th
 <h3 id="image_size"><code>image_size</code><a class="headerlink" href="#image_size" title="Permanent link">&para;</a></h3>
 <p>Target pixel size for the resize step. The fetched patch is always resized to <code>(image_size, image_size)</code> before encoding. Must be divisible by <code>patch_size</code>.</p>
 <p>Default: <code>256</code> (matching the OlmoEarth training tile size).</p>
+<h3 id="shape_adjust"><code>shape_adjust</code><a class="headerlink" href="#shape_adjust" title="Permanent link">&para;</a></h3>
+<p>OlmoEarth's positional encoding is generated from a single <code>grid_size</code> scalar, so
+the encoder requires a <strong>square</strong> token grid — a non-square ROI cannot be fed as
+<code>H != W</code>. Rather than stretch a rectangular ROI to a square (which distorts the
+geometry: a 1.8:1 field collapses into striped, smeared embeddings), the adapter
+makes the ROI square <em>before</em> resizing to <code>image_size</code>.</p>
+<table>
+<thead>
+<tr>
+<th>Value</th>
+<th>Behavior</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>pad</code> (default)</td>
+<td>Reflect-pad the short side up to the long side — keeps the <strong>whole ROI</strong>, no data discarded</td>
+</tr>
+<tr>
+<td><code>crop</code></td>
+<td>Center-crop the long side down to the short side — discards the ROI margins</td>
+</tr>
+</tbody>
+</table>
+<p>This is the shared, reusable strategy in <code>rs_embed.tools.shape</code> (also used by the
+other square-input embedders). If the ROI is <strong>extremely</strong> rectangular (aspect
+ratio ≥ 2.0), padding would inject too much synthetic border and cropping would
+throw away too much real data, so the adapter falls back to a plain stretch — a
+known, bounded behavior. The outcome is recorded in <code>meta["shape_prep"]</code>
+(<code>applied</code> ∈ <code>none</code>/<code>pad_to_square</code>/<code>crop_to_square</code>/<code>fixed_resize</code>, plus
+<code>orig_hw</code>, <code>square_hw</code>, <code>aspect</code>).</p>
+<p>The real fix for tiny ROIs is still to request a <strong>larger, roughly square</strong> BBox
+(~2.56 km at 10 m → native 256×256) so no upsampling is needed at all; <code>shape_adjust</code>
+removes the distortion but cannot invent spatial detail the ROI never had.</p>
 <h3 id="temporal_mode"><code>temporal_mode</code><a class="headerlink" href="#temporal_mode" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2840,6 +2897,11 @@ For defaults (256, patch_size=4): <code>64 × 64</code> grid.</p>
 <td><code>RS_EMBED_OLMOEARTH_IMAGE_SIZE</code></td>
 <td><code>256</code></td>
 <td>Default image resize target</td>
+</tr>
+<tr>
+<td><code>RS_EMBED_OLMOEARTH_SHAPE_ADJUST</code></td>
+<td><code>pad</code></td>
+<td>How non-square ROIs are made square (<code>pad</code> / <code>crop</code>)</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_OLMOEARTH_TEMPORAL_MODE</code></td>
