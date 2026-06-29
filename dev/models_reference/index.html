@@ -2194,7 +2194,7 @@
 <h3 id="temporal-handling">Temporal Handling<a class="headerlink" href="#temporal-handling" title="Permanent link">&para;</a></h3>
 <p>Read this section before comparing any model that accepts <code>TemporalSpec.range(...)</code>.</p>
 <p>For most on-the-fly adapters, <code>TemporalSpec.range(start, end)</code> means "filter imagery in <code>[start, end)</code> and build one composite patch for model input," usually with <code>median</code> and optionally <code>mosaic</code> through <code>SensorSpec.composite</code>.</p>
-<p>The multi-frame adapters <code>agrifm</code>, <code>anysat</code>, and <code>galileo</code> instead split the requested range into sub-windows and composite one frame per bin. Current single-composite adapters include <code>remoteclip</code>, <code>satmae</code>, <code>satmaepp</code>, <code>satmaepp_s2_10b</code>, <code>scalemae</code>, <code>wildsat</code>, <code>prithvi</code>, <code>terrafm</code>, <code>terramind</code>, <code>dofa</code>, <code>fomo</code>, <code>thor</code>, <code>satvision</code>, and <code>olmoearth</code>.</p>
+<p>The multi-frame adapters <code>agrifm</code>, <code>anysat</code>, and <code>galileo</code> instead split the requested range into sub-windows and composite one frame per bin. Current single-composite adapters include <code>remoteclip</code>, <code>satmae</code>, <code>satmaepp</code>, <code>scalemae</code>, <code>wildsat</code>, <code>prithvi</code>, <code>terrafm</code>, <code>terramind</code>, <code>dofa</code>, <code>fomo</code>, <code>thor</code>, <code>satvision</code>, and <code>olmoearth</code>.</p>
 <h3 id="multi-frame-semantics">Multi-frame Semantics<a class="headerlink" href="#multi-frame-semantics" title="Permanent link">&para;</a></h3>
 <p>This section only matters for adapters that construct multi-frame inputs from one requested time window.</p>
 <p>Shared behavior for current multi-frame adapters (<code>agrifm</code>, <code>anysat</code>, <code>galileo</code>):</p>
@@ -2264,16 +2264,9 @@
 <tr>
 <td><code>satmaepp</code></td>
 <td>No</td>
+<td>Yes (select one modality per call: <code>rgb</code> default or <code>s2_10b</code>)</td>
 <td>No</td>
-<td>No</td>
-<td>No</td>
-</tr>
-<tr>
-<td><code>satmaepp_s2_10b</code></td>
-<td>No (this adapter path)</td>
-<td>No</td>
-<td>No</td>
-<td>No (but strict 10-band order is required)</td>
+<td>No (but <code>s2_10b</code> requires strict 10-band order)</td>
 </tr>
 <tr>
 <td><code>scalemae</code></td>
@@ -2388,11 +2381,11 @@
 <td><code>RS_EMBED_SATMAE_IMG</code></td>
 </tr>
 <tr>
-<td><code>satmaepp</code></td>
+<td><code>satmaepp</code> (<code>rgb</code>)</td>
 <td><code>RS_EMBED_SATMAEPP_ID</code>, <code>RS_EMBED_SATMAEPP_IMG</code>, <code>RS_EMBED_SATMAEPP_CHANNEL_ORDER</code>, <code>RS_EMBED_SATMAEPP_BGR</code></td>
 </tr>
 <tr>
-<td><code>satmaepp_s2_10b</code></td>
+<td><code>satmaepp</code> (<code>s2_10b</code>)</td>
 <td><code>RS_EMBED_SATMAEPP_S2_CKPT_REPO</code>, <code>RS_EMBED_SATMAEPP_S2_CKPT_FILE</code>, <code>RS_EMBED_SATMAEPP_S2_MODEL_FN</code>, <code>RS_EMBED_SATMAEPP_S2_IMG</code>, <code>RS_EMBED_SATMAEPP_S2_PATCH</code>, <code>RS_EMBED_SATMAEPP_S2_GRID_REDUCE</code>, <code>RS_EMBED_SATMAEPP_S2_WEIGHTS_ONLY</code></td>
 </tr>
 <tr>

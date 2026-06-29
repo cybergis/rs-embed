@@ -2158,7 +2158,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 </tr>
 <tr>
 <td>Multispectral / strict spectral semantics</td>
-<td><code>satmaepp_s2_10b</code>, <code>dofa</code>, <code>terramind</code>, <code>thor</code>, <code>satvision</code></td>
+<td><code>satmaepp</code> (<code>modality="s2_10b"</code>), <code>dofa</code>, <code>terramind</code>, <code>thor</code>, <code>satvision</code></td>
 <td>Strong channel/schema assumptions</td>
 </tr>
 <tr>
@@ -2367,20 +2367,11 @@ Some detail-page filenames still use older names for compatibility, but the cano
 </tr>
 <tr>
 <td><code>satmaepp</code></td>
-<td>S2 RGB (<code>B4,B3,B2</code>)</td>
+<td>S2 RGB (<code>B4,B3,B2</code>) or S2 10-band</td>
 <td>1024</td>
 <td>10m</td>
 <td>single composite</td>
-<td>ViT-L; fMoW eval preprocessing</td>
-<td><a href="satmaepp/">detail</a></td>
-</tr>
-<tr>
-<td><code>satmaepp_s2_10b</code></td>
-<td>S2 10-band</td>
-<td>1024</td>
-<td>10m</td>
-<td>single composite</td>
-<td>strict band order; grouped-channel tokens</td>
+<td><code>modality=rgb</code> (default) or <code>s2_10b</code>; ViT-L; fMoW eval preprocessing; 10-band uses strict band order + grouped-channel tokens</td>
 <td><a href="satmaepp/">detail</a></td>
 </tr>
 </tbody>

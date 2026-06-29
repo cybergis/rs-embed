@@ -2371,8 +2371,8 @@
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
 <div class="admonition tip">
-<p class="admonition-title">Resize is the default — tiling is also available</p>
-<p>The pipeline below shows the default <code>input_prep="resize"</code> path. For large ROIs, use <code>input_prep="tile"</code> to split the input into tiles and preserve spatial detail. See <a href="../../choosing_settings/#input-preparation-resize-vs-tile">Choosing Settings</a>.</p>
+<p class="admonition-title">Tiling is the default — resize is also available</p>
+<p><code>input_prep=None</code>/<code>"auto"</code> tiles large ROIs by default to preserve spatial detail; pass <code>input_prep="resize"</code> to downsample the whole ROI to the model's input size in a single forward pass instead. See <a href="../../choosing_settings/#input-preparation-resize-vs-tile">Choosing Settings</a>.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
     INPUT["S2 12-band"] --&gt; PREP["Normalize → resize 64×64"]

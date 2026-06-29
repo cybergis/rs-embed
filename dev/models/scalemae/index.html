@@ -2297,8 +2297,8 @@
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
 <div class="admonition warning">
-<p class="admonition-title">Resize is the default for <code>grid</code></p>
-<p>ScaleMAE <code>grid</code> output is an image-level ViT patch-token grid, not a seamless dense geospatial field. For <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> by default and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
+<p class="admonition-title"><code>grid</code> tiles by default and can show seams</p>
+<p>ScaleMAE <code>grid</code> output is an image-level ViT patch-token grid, not a seamless dense geospatial field. Like every other model, ScaleMAE tiles by default: <code>input_prep=None</code> or <code>input_prep="auto"</code> resolves to <code>input_prep="tile"</code>. Because tiled patch-token mosaics can show stitching seams at tile boundaries, the default/auto path and an explicit <code>input_prep="tile"</code> both emit a warning on <code>grid</code> output. Pass <code>input_prep="resize"</code> for a seamless (downsampled) grid — that is the recommended seamless opt-in and emits no warning.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
     INPUT["S2 RGB → uint8"] --&gt; PREP["Preprocess\ndirect resize to image_size + ImageNet normalize\n(no center crop)\n→ derive input_res_m"]
@@ -2365,7 +2365,7 @@
 <hr />
 <h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
 <p><strong><code>pooled</code></strong>: if <code>[N,D]</code> token sequence → pools with <code>mean</code>/<code>max</code>; if already <code>[D]</code> → returned as <code>model_pooled</code>; metadata records <code>tokens_kind</code>, <code>used_patch_size</code>, and <code>used_scale_m</code>.</p>
-<p><strong><code>grid</code></strong>: requires a token sequence; raises a clear error when the wrapper only exposes pooled output. Default/auto input preparation resolves to resize, and metadata records <code>input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"</code>, <code>grid_semantics="vit_patch_tokens"</code>, and <code>grid_tile_recommended=false</code>.</p>
+<p><strong><code>grid</code></strong>: requires a token sequence; raises a clear error when the wrapper only exposes pooled output. Default/auto input preparation resolves to tile (and warns about seams on grid output), and metadata records <code>input_prep.model_policy="tile_default_for_image_level_vit_patch_grid"</code>, <code>grid_semantics="vit_patch_tokens"</code>, and <code>grid_tile_recommended=false</code>.</p>
 <hr />
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <h3 id="minimal-provider-backed-example">Minimal provider-backed example<a class="headerlink" href="#minimal-provider-backed-example" title="Permanent link">&para;</a></h3>
@@ -2396,7 +2396,7 @@
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
 <li><code>sensor.scale_m</code> directly affects the positional encoding via <code>input_res_m</code> — a wrong value silently drifts embeddings.</li>
-<li>Default/auto <code>grid</code> requests resolve to resize because tiled ScaleMAE patch-token grids can show stitching seams.</li>
+<li>Default/auto <code>grid</code> requests tile (like every model) and warn because tiled ScaleMAE patch-token grids can show stitching seams; pass <code>input_prep="resize"</code> for a seamless (downsampled) grid.</li>
 <li>Grid output requires a token sequence; if the <code>rshf</code> wrapper returns only a pooled vector, <code>OutputSpec.grid()</code> raises an error.</li>
 <li>Older <code>rshf</code> versions may wrap ScaleMAE in a way that hides <code>forward_features()</code> — the adapter tries common nested attributes (<code>.model</code>) but may fail.</li>
 </ul>

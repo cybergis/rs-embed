@@ -2408,7 +2408,7 @@
 </tr>
 <tr>
 <td><code>input_prep</code></td>
-<td><code>"resize"</code>, <code>"tile"</code>, <code>"auto"</code>, <code>InputPrepSpec(...)</code>, or <code>None</code> (default). For image-level ViT patch-token grid models (<code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>, <code>satmaepp_s2_10b</code>), <code>None</code>/<code>"auto"</code> with <code>OutputSpec.grid()</code> resolves to <code>"resize"</code> and warns; explicit <code>"tile"</code> also warns. Explicit <code>"resize"</code> does not warn.</td>
+<td><code>"resize"</code>, <code>"tile"</code>, <code>"auto"</code>, <code>InputPrepSpec(...)</code>, or <code>None</code> (default). For image-level ViT patch-token grid models (<code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>), <code>None</code>/<code>"auto"</code> with <code>OutputSpec.grid()</code> resolves to <code>"resize"</code> and warns; explicit <code>"tile"</code> also warns. Explicit <code>"resize"</code> does not warn.</td>
 </tr>
 </tbody>
 </table>
@@ -2439,7 +2439,7 @@
 <p><code>input_prep</code></p>
 <p>String values must be one of <code>"resize"</code>, <code>"auto"</code>, or <code>"tile"</code>. <code>tile</code> is stricter than <code>auto</code>: it requires a provider-backed fetch path, a resolvable sensor, and model support for <code>input_chw</code>. If <code>tile</code> is requested and no <code>sensor</code> is passed, the API tries to fill in the model's default sensor automatically.</p>
 <p><code>**model_kwargs</code></p>
-<p>Model-specific settings are optional and vary by model. Pass them as direct keyword arguments rather than as a dict. Variant-aware models currently documented include <code>dofa</code>, <code>anysat</code>, <code>thor</code>, <code>satmaepp_s2_10b</code>, and <code>prithvi</code>; accepted values are documented on the corresponding model pages. If a model does not accept keyword settings, passing unknown keys raises <code>ModelError</code>. <code>describe_model(model_id)["model_config"]</code> is the machine-readable schema for supported keys and values.</p>
+<p>Model-specific settings are optional and vary by model. Pass them as direct keyword arguments rather than as a dict. Variant-aware models currently documented include <code>dofa</code>, <code>anysat</code>, <code>thor</code>, <code>satmaepp</code> (the <code>s2_10b</code> modality), and <code>prithvi</code>; accepted values are documented on the corresponding model pages. If a model does not accept keyword settings, passing unknown keys raises <code>ModelError</code>. <code>describe_model(model_id)["model_config"]</code> is the machine-readable schema for supported keys and values.</p>
 <h4 id="returns">Returns<a class="headerlink" href="#returns" title="Permanent link">&para;</a></h4>
 <p>Returns one <code>Embedding</code>.</p>
 <h4 id="example">Example<a class="headerlink" href="#example" title="Permanent link">&para;</a></h4>
@@ -2537,7 +2537,7 @@
 </tr>
 <tr>
 <td><code>input_prep</code></td>
-<td><code>"resize"</code>, <code>"tile"</code>, <code>"auto"</code>, <code>InputPrepSpec(...)</code>, or <code>None</code> (default). For image-level ViT patch-token grid models (<code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>, <code>satmaepp_s2_10b</code>), <code>None</code>/<code>"auto"</code> with <code>OutputSpec.grid()</code> resolves to <code>"resize"</code> and warns; explicit <code>"tile"</code> also warns. Explicit <code>"resize"</code> does not warn.</td>
+<td><code>"resize"</code>, <code>"tile"</code>, <code>"auto"</code>, <code>InputPrepSpec(...)</code>, or <code>None</code> (default). For image-level ViT patch-token grid models (<code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>), <code>None</code>/<code>"auto"</code> with <code>OutputSpec.grid()</code> resolves to <code>"resize"</code> and warns; explicit <code>"tile"</code> also warns. Explicit <code>"resize"</code> does not warn.</td>
 </tr>
 </tbody>
 </table>
@@ -2568,7 +2568,7 @@
 <p><code>input_prep</code></p>
 <p>String values must be one of <code>"resize"</code>, <code>"auto"</code>, or <code>"tile"</code>. <code>tile</code> is stricter than <code>auto</code>: it requires a provider-backed fetch path, a resolvable sensor, and model support for <code>input_chw</code>. If <code>tile</code> is requested and no <code>sensor</code> is passed, the API tries to fill in the model's default sensor automatically.</p>
 <p><code>**model_kwargs</code></p>
-<p>Model-specific settings are optional and vary by model. Pass them as direct keyword arguments rather than as a dict. Variant-aware models currently documented include <code>dofa</code>, <code>anysat</code>, <code>thor</code>, <code>satmaepp_s2_10b</code>, and <code>prithvi</code>; accepted values are documented on the corresponding model pages. If a model does not accept keyword settings, passing unknown keys raises <code>ModelError</code>. <code>describe_model(model_id)["model_config"]</code> is the machine-readable schema for supported keys and values.</p>
+<p>Model-specific settings are optional and vary by model. Pass them as direct keyword arguments rather than as a dict. Variant-aware models currently documented include <code>dofa</code>, <code>anysat</code>, <code>thor</code>, <code>satmaepp</code> (the <code>s2_10b</code> modality), and <code>prithvi</code>; accepted values are documented on the corresponding model pages. If a model does not accept keyword settings, passing unknown keys raises <code>ModelError</code>. <code>describe_model(model_id)["model_config"]</code> is the machine-readable schema for supported keys and values.</p>
 <h4 id="typical-use">Typical Use<a class="headerlink" href="#typical-use" title="Permanent link">&para;</a></h4>
 <p>Use <code>fetch</code> here when you want to keep the model default collection and band contract, override only common knobs such as <code>scale_m</code> or <code>cloudy_pct</code>, or compare multiple models under one shared sampling policy.</p>
 <h4 id="returns_1">Returns<a class="headerlink" href="#returns_1" title="Permanent link">&para;</a></h4>

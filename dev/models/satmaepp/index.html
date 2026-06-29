@@ -84,7 +84,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#satmae-family-satmaepp-satmaepp_s2_10b" class="md-skip">
+        <a href="#satmae-satmaepp" class="md-skip">
           Skip to content
         </a>
       
@@ -1388,15 +1388,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#variant-a-satmaepp-rgb" class="md-nav__link">
+  <a href="#rgb-modality-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Variant A: satmaepp (RGB)
+        rgb modality (default)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Variant A: satmaepp (RGB)">
+    <nav class="md-nav" aria-label="rgb modality (default)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1460,15 +1460,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#variant-b-satmaepp_s2_10b-sentinel-2-10-band" class="md-nav__link">
+  <a href="#s2_10b-modality-sentinel-2-10-band" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Variant B: satmaepp_s2_10b (Sentinel-2 10-band)
+        s2_10b modality (Sentinel-2 10-band)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Variant B: satmaepp_s2_10b (Sentinel-2 10-band)">
+    <nav class="md-nav" aria-label="s2_10b modality (Sentinel-2 10-band)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -1566,10 +1566,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-with-variant-selection" class="md-nav__link">
+  <a href="#example-with-variant-selection-s2_10b-only" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example with variant selection
+        Example with variant selection (s2_10b only)
       
     </span>
   </a>
@@ -2195,15 +2195,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#variant-a-satmaepp-rgb" class="md-nav__link">
+  <a href="#rgb-modality-default" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Variant A: satmaepp (RGB)
+        rgb modality (default)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Variant A: satmaepp (RGB)">
+    <nav class="md-nav" aria-label="rgb modality (default)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2267,15 +2267,15 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#variant-b-satmaepp_s2_10b-sentinel-2-10-band" class="md-nav__link">
+  <a href="#s2_10b-modality-sentinel-2-10-band" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Variant B: satmaepp_s2_10b (Sentinel-2 10-band)
+        s2_10b modality (Sentinel-2 10-band)
       
     </span>
   </a>
   
-    <nav class="md-nav" aria-label="Variant B: satmaepp_s2_10b (Sentinel-2 10-band)">
+    <nav class="md-nav" aria-label="s2_10b modality (Sentinel-2 10-band)">
       <ul class="md-nav__list">
         
           <li class="md-nav__item">
@@ -2373,10 +2373,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#example-with-variant-selection" class="md-nav__link">
+  <a href="#example-with-variant-selection-s2_10b-only" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Example with variant selection
+        Example with variant selection (s2_10b only)
       
     </span>
   </a>
@@ -2430,26 +2430,31 @@
   
 
 
-<h1 id="satmae-family-satmaepp-satmaepp_s2_10b">SatMAE++ Family (<code>satmaepp</code>, <code>satmaepp_s2_10b</code>)<a class="headerlink" href="#satmae-family-satmaepp-satmaepp_s2_10b" title="Permanent link">&para;</a></h1>
+<h1 id="satmae-satmaepp">SatMAE++ (<code>satmaepp</code>)<a class="headerlink" href="#satmae-satmaepp" title="Permanent link">&para;</a></h1>
 <h2 id="quick-facts">Quick Facts<a class="headerlink" href="#quick-facts" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
 <th>Field</th>
-<th><code>satmaepp</code> (RGB)</th>
-<th><code>satmaepp_s2_10b</code> (S2-10B)</th>
+<th><code>rgb</code> modality (default)</th>
+<th><code>s2_10b</code> modality</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td>Canonical ID</td>
+<td>Model ID</td>
 <td><code>satmaepp</code></td>
-<td><code>satmaepp_s2_10b</code></td>
+<td><code>satmaepp</code></td>
+</tr>
+<tr>
+<td><code>modality</code></td>
+<td><code>rgb</code> (default)</td>
+<td><code>s2_10b</code></td>
 </tr>
 <tr>
 <td>Aliases</td>
 <td><code>satmaepp_rgb</code>, <code>satmae++</code></td>
-<td><code>satmaepp_sentinel10</code>, <code>satmaepp_s2</code></td>
+<td>—</td>
 </tr>
 <tr>
 <td>Adapter type</td>
@@ -2470,24 +2475,24 @@
 </table>
 <div class="admonition success">
 <p class="admonition-title">SatMAE++ In 30 Seconds</p>
-<p>SatMAE++ is a multi-scale improvement over SatMAE, and in <code>rs-embed</code> it ships as two <strong>non-interchangeable</strong> adapter paths: a plain RGB fMoW path (<code>satmaepp</code>) and a Sentinel-2 10-band grouped-channel path (<code>satmaepp_s2_10b</code>) that partitions channels into three fixed groups <code>((0,1,2,6),(3,4,5,7),(8,9))</code> and reduces grouped tokens at output time.</p>
+<p>SatMAE++ is a multi-scale improvement over SatMAE, and in <code>rs-embed</code> it ships as a single model <code>satmaepp</code> exposing two <strong>non-interchangeable</strong> modalities: a plain RGB fMoW path (<code>modality="rgb"</code>, the default) and a Sentinel-2 10-band grouped-channel path (<code>modality="s2_10b"</code>) that partitions channels into three fixed groups <code>((0,1,2,6),(3,4,5,7),(8,9))</code> and reduces grouped tokens at output time.</p>
 <p>In <code>rs-embed</code>, its most important characteristics are:</p>
 <ul>
-<li>two separate adapter paths with different preprocessing, runtime loaders, and output semantics: see <a href="#variant-a-satmaepp-rgb">Variant A: <code>satmaepp</code> (RGB)</a> and <a href="#variant-b-satmaepp_s2_10b-sentinel-2-10-band">Variant B: <code>satmaepp_s2_10b</code> (Sentinel-2 10-band)</a></li>
-<li>10-band path runs a <strong>grouped-channel</strong> runtime and needs <code>GRID_REDUCE</code> to control how grouped tokens collapse for the grid output: see <a href="#variant-b-satmaepp_s2_10b-sentinel-2-10-band">Variant B: <code>satmaepp_s2_10b</code> (Sentinel-2 10-band)</a></li>
-<li>RGB path is sensitive to <code>CHANNEL_ORDER</code> (<code>rgb</code>/<code>bgr</code>) because the original SatMAE++ eval preprocessing was BGR-based: see <a href="#variant-a-satmaepp-rgb">Variant A: <code>satmaepp</code> (RGB)</a></li>
+<li>two modalities under one model name, with different preprocessing, runtime loaders, and output semantics — switch via <code>modality="s2_10b"</code>: see <a href="#rgb-modality-default"><code>rgb</code> modality (default)</a> and <a href="#s2_10b-modality-sentinel-2-10-band"><code>s2_10b</code> modality (Sentinel-2 10-band)</a></li>
+<li>the <code>s2_10b</code> modality runs a <strong>grouped-channel</strong> runtime and needs <code>GRID_REDUCE</code> to control how grouped tokens collapse for the grid output: see <a href="#s2_10b-modality-sentinel-2-10-band"><code>s2_10b</code> modality (Sentinel-2 10-band)</a></li>
+<li>the <code>rgb</code> modality is sensitive to <code>CHANNEL_ORDER</code> (<code>rgb</code>/<code>bgr</code>) because the original SatMAE++ eval preprocessing was BGR-based: see <a href="#rgb-modality-default"><code>rgb</code> modality (default)</a></li>
 </ul>
 </div>
 <hr />
 <h2 id="shared-output-semantics">Shared Output Semantics<a class="headerlink" href="#shared-output-semantics" title="Permanent link">&para;</a></h2>
-<p><strong><code>pooled</code></strong>: RGB path records <code>patch_mean</code>/<code>patch_max</code>; S2-10B path records <code>group_tokens_mean</code>/<code>group_tokens_max</code> reflecting its grouped-token runtime.</p>
-<p><strong><code>grid</code></strong>: <code>satmaepp</code> returns a standard ViT patch-token grid <code>(D,H,W)</code>; <code>satmaepp_s2_10b</code> reduces grouped tokens across channel groups then reshapes to <code>(D,H,W)</code>. Default/auto input preparation resolves to resize, and metadata records <code>input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"</code>, <code>grid_semantics="vit_patch_tokens"</code>, and <code>grid_tile_recommended=false</code>.</p>
+<p><strong><code>pooled</code></strong>: the <code>rgb</code> modality records <code>patch_mean</code>/<code>patch_max</code>; the <code>s2_10b</code> modality records <code>group_tokens_mean</code>/<code>group_tokens_max</code> reflecting its grouped-token runtime.</p>
+<p><strong><code>grid</code></strong>: the <code>rgb</code> modality returns a standard ViT patch-token grid <code>(D,H,W)</code>; the <code>s2_10b</code> modality reduces grouped tokens across channel groups then reshapes to <code>(D,H,W)</code>. Default/auto input preparation resolves to tile (and warns about seams on grid output), and metadata records <code>input_prep.model_policy="tile_default_for_image_level_vit_patch_grid"</code>, <code>grid_semantics="vit_patch_tokens"</code>, and <code>grid_tile_recommended=false</code>.</p>
 <div class="admonition warning">
-<p class="admonition-title">Resize is the default for <code>grid</code></p>
-<p>SatMAE++ grid outputs are image-level ViT token grids, not seamless dense geospatial fields. For <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> by default and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
+<p class="admonition-title"><code>grid</code> tiles by default and can show seams</p>
+<p>SatMAE++ grid outputs are image-level ViT token grids, not seamless dense geospatial fields. Like every other model, SatMAE++ tiles by default: <code>input_prep=None</code> or <code>input_prep="auto"</code> resolves to <code>input_prep="tile"</code>. Because tiled patch-token mosaics can show stitching seams at tile boundaries, the default/auto path and an explicit <code>input_prep="tile"</code> both emit a warning on <code>grid</code> output. Pass <code>input_prep="resize"</code> for a seamless (downsampled) grid — that is the recommended seamless opt-in and emits no warning. Both modalities of <code>satmaepp</code> inherit this policy.</p>
 </div>
 <hr />
-<h2 id="variant-a-satmaepp-rgb">Variant A: <code>satmaepp</code> (RGB)<a class="headerlink" href="#variant-a-satmaepp-rgb" title="Permanent link">&para;</a></h2>
+<h2 id="rgb-modality-default"><code>rgb</code> modality (default)<a class="headerlink" href="#rgb-modality-default" title="Permanent link">&para;</a></h2>
 <h3 id="input-contract">Input Contract<a class="headerlink" href="#input-contract" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2536,8 +2541,8 @@
     A4 --&gt; A5G["grid:\nViT patch-token grid (D,H,W)"]</code></pre>
 <h3 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h3>
 <div class="admonition warning">
-<p class="admonition-title">Resize is the default for <code>grid</code></p>
-<p>The pipeline below shows the default <code>input_prep="resize"</code> path. Explicit <code>input_prep="tile"</code> can split large ROIs into independent image-level token grids, but those grids can show stitching seams and are marked as experimental in metadata.</p>
+<p class="admonition-title">Tiling is the default for <code>grid</code></p>
+<p>SatMAE++ tiles by default like every other model, so the pipeline below shows the default <code>input_prep="tile"</code> path. Tiled image-level token grids can show stitching seams at tile boundaries, so the default/auto and explicit-tile paths warn on <code>grid</code> output. Pass <code>input_prep="resize"</code> for a seamless (downsampled) grid; that path emits no warning.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
     INPUT["Provider fetch / input_chw"] --&gt; RGB["RGB uint8 patch"]
@@ -2546,6 +2551,7 @@
     FWD --&gt; OUT{Output}
     OUT -- pooled --&gt; POOL["Token pooling"]
     OUT -- grid --&gt; GRID["Patch-token\nreshape (D,H,W)"]</code></pre>
+<p>The <code>rgb</code> modality has no <code>variant</code> knob — it serves a single fMoW-RGB path.</p>
 <h3 id="key-environment-variables">Key Environment Variables<a class="headerlink" href="#key-environment-variables" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2590,7 +2596,8 @@
 <li>tiled <code>grid</code> output can show seams because each tile is an independent image-level token grid</li>
 </ul>
 <hr />
-<h2 id="variant-b-satmaepp_s2_10b-sentinel-2-10-band">Variant B: <code>satmaepp_s2_10b</code> (Sentinel-2 10-band)<a class="headerlink" href="#variant-b-satmaepp_s2_10b-sentinel-2-10-band" title="Permanent link">&para;</a></h2>
+<h2 id="s2_10b-modality-sentinel-2-10-band"><code>s2_10b</code> modality (Sentinel-2 10-band)<a class="headerlink" href="#s2_10b-modality-sentinel-2-10-band" title="Permanent link">&para;</a></h2>
+<p>Select this path with <code>modality="s2_10b"</code>. It is the grouped-channel Sentinel-2 SR runtime with <code>image_size=96</code> and a single published checkpoint (<code>variant="large"</code>).</p>
 <h3 id="input-contract_1">Input Contract<a class="headerlink" href="#input-contract_1" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2641,15 +2648,16 @@
     B5 --&gt; B6G["grid:\nreduced → (D,H,W)"]</code></pre>
 <h3 id="preprocessing-runtime-loading">Preprocessing + Runtime Loading<a class="headerlink" href="#preprocessing-runtime-loading" title="Permanent link">&para;</a></h3>
 <div class="admonition warning">
-<p class="admonition-title">Resize is the default for <code>grid</code></p>
-<p>The 10-band grouped-channel path has the same grid caveat: grouped tokens are reduced and reshaped after an image-level forward pass. Explicit <code>input_prep="tile"</code> is allowed, but tiled grid mosaics are not recommended for seamless spatial outputs. Explicit <code>input_prep="resize"</code> is the recommended no-warning path.</p>
+<p class="admonition-title"><code>grid</code> tiles by default and can show seams</p>
+<p>The 10-band grouped-channel path has the same grid caveat: grouped tokens are reduced and reshaped after an image-level forward pass. It tiles by default like every other model, and tiled grid mosaics can show stitching seams, so the default/auto and explicit-tile paths warn on <code>grid</code> output. Pass <code>input_prep="resize"</code> for a seamless (downsampled) grid; that path emits no warning.</p>
 </div>
 <pre class="mermaid"><code>flowchart LR
-    INPUT["10-band CHW"] --&gt; PREP["Sentinel stats → uint8\n→ eval transforms"]
+    INPUT["10-band CHW"] --&gt; PREP["SentinelNormalize → uint8\n→ eval transforms (image_size 96)"]
     PREP --&gt; GRP["Grouped-channel model\nG0=(0,1,2,6) G1=(3,4,5,7) G2=(8,9)"]
     GRP --&gt; FWD["forward_encoder\n(mask_ratio=0.0)"]
     FWD --&gt; POOL["pooled: reduce → vector"]
     FWD --&gt; GRID["grid: reduce → (D,H,W)"]</code></pre>
+<p>Metadata for the <code>s2_10b</code> grid records <code>grid_kind="spatial_tokens_aggregated_over_channel_groups"</code>, <code>channel_groups</code>, and <code>normalization="sentinel_normalize_source"</code>.</p>
 <h3 id="key-environment-variables_1">Key Environment Variables<a class="headerlink" href="#key-environment-variables_1" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2673,7 +2681,7 @@
 </tr>
 <tr>
 <td><code>RS_EMBED_SATMAEPP_S2_IMG</code></td>
-<td>Eval image size</td>
+<td>Eval image size (default <code>96</code>)</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_SATMAEPP_S2_PATCH</code></td>
@@ -2713,6 +2721,7 @@
 <span class="n">spatial</span> <span class="o">=</span> <span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
 <span class="n">temporal</span> <span class="o">=</span> <span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">)</span>
 
+<span class="c1"># Default RGB modality:</span>
 <span class="n">emb_rgb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
     <span class="s2">&quot;satmaepp&quot;</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">spatial</span><span class="p">,</span>
@@ -2721,8 +2730,10 @@
     <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 
+<span class="c1"># 10-band Sentinel-2 modality:</span>
 <span class="n">emb_s2</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;satmaepp_s2_10b&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;satmaepp&quot;</span><span class="p">,</span>
+    <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s2_10b&quot;</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">spatial</span><span class="p">,</span>
     <span class="n">temporal</span><span class="o">=</span><span class="n">temporal</span><span class="p">,</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
@@ -2730,22 +2741,23 @@
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="example-tuning-knobs-env-controlled">Example tuning knobs (env-controlled)<a class="headerlink" href="#example-tuning-knobs-env-controlled" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="c1"># RGB variant:</span>
+<div class="highlight"><pre><span></span><code><span class="c1"># RGB modality:</span>
 <span class="n">export</span> <span class="n">RS_EMBED_SATMAEPP_ID</span><span class="o">=...</span>
 <span class="n">export</span> <span class="n">RS_EMBED_SATMAEPP_CHANNEL_ORDER</span><span class="o">=</span><span class="n">rgb</span>
 <span class="c1">#</span>
-<span class="c1"># S2-10B variant:</span>
-<span class="n">export</span> <span class="n">RS_EMBED_SATMAEPP_S2_IMG</span><span class="o">=</span><span class="mi">224</span>
+<span class="c1"># s2_10b modality:</span>
+<span class="n">export</span> <span class="n">RS_EMBED_SATMAEPP_S2_IMG</span><span class="o">=</span><span class="mi">96</span>
 <span class="n">export</span> <span class="n">RS_EMBED_SATMAEPP_S2_GRID_REDUCE</span><span class="o">=</span><span class="n">mean</span>
 </code></pre></div>
-<h3 id="example-with-variant-selection">Example with variant selection<a class="headerlink" href="#example-with-variant-selection" title="Permanent link">&para;</a></h3>
+<h3 id="example-with-variant-selection-s2_10b-only">Example with variant selection (<code>s2_10b</code> only)<a class="headerlink" href="#example-with-variant-selection-s2_10b-only" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
 
 <span class="n">spatial</span> <span class="o">=</span> <span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">)</span>
 <span class="n">temporal</span> <span class="o">=</span> <span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">)</span>
 
 <span class="n">emb_s2</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;satmaepp_s2_10b&quot;</span><span class="p">,</span>
+    <span class="s2">&quot;satmaepp&quot;</span><span class="p">,</span>
+    <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s2_10b&quot;</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">spatial</span><span class="p">,</span>
     <span class="n">temporal</span><span class="o">=</span><span class="n">temporal</span><span class="p">,</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(),</span>
@@ -2753,8 +2765,8 @@
     <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;large&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
-<p>For export jobs, the same setting goes through
-<code>ExportModelRequest.configure("satmaepp_s2_10b", variant="large")</code>.</p>
+<p>The <code>variant</code> knob only applies to the <code>s2_10b</code> modality (single published checkpoint); the <code>rgb</code> modality has no variant. For export jobs, the same setting goes through
+<code>ExportModelRequest.configure("satmaepp", modality="s2_10b", variant="large")</code>.</p>
 <hr />
 <h2 id="paper-links">Paper &amp; Links<a class="headerlink" href="#paper-links" title="Permanent link">&para;</a></h2>
 <ul>
@@ -2764,10 +2776,10 @@
 <hr />
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
-<li>RGB variant is sensitive to <code>CHANNEL_ORDER</code> (<code>rgb</code>/<code>bgr</code>) — the original eval preprocessing was BGR-based.</li>
-<li>S2-10B variant's <code>GRID_REDUCE</code> changes the output semantics; <code>mean</code> and <code>max</code> are not interchangeable.</li>
-<li>Default/auto <code>grid</code> requests resolve to resize because tiled SatMAE++ patch-token grids can show stitching seams.</li>
-<li>The two variants (<code>satmaepp</code> and <code>satmaepp_s2_10b</code>) are separate model IDs with different preprocessing, not a config switch on the same model.</li>
+<li>The <code>rgb</code> modality is sensitive to <code>CHANNEL_ORDER</code> (<code>rgb</code>/<code>bgr</code>) — the original eval preprocessing was BGR-based.</li>
+<li>The <code>s2_10b</code> modality's <code>GRID_REDUCE</code> changes the output semantics; <code>mean</code> and <code>max</code> are not interchangeable.</li>
+<li>Default/auto <code>grid</code> requests tile (like every model) and warn because tiled SatMAE++ patch-token grids can show stitching seams; pass <code>input_prep="resize"</code> for a seamless (downsampled) grid.</li>
+<li>The two modalities (<code>rgb</code> and <code>s2_10b</code>) are different preprocessing/runtime paths under the one <code>satmaepp</code> model name, selected with <code>modality=</code>. The <code>variant</code> knob applies only to <code>s2_10b</code>.</li>
 </ul>
 
 

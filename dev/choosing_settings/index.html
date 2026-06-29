@@ -2452,9 +2452,10 @@ Treat every setting change as part of experiment design, not just performance tu
 </tr>
 </tbody>
 </table>
+<p><code>input_prep=None</code> (the default) and <code>input_prep="auto"</code> resolve to <code>tile</code>, so large ROIs preserve native resolution out of the box; pass <code>input_prep="resize"</code> to compress the whole ROI into a single model-sized image instead.</p>
 <div class="admonition warning">
 <p class="admonition-title">Patch-token grids are not always tile-friendly</p>
-<p>For image-level ViT patch-token grid models (<code>scalemae</code>, <code>satmae</code>, <code>satmaepp</code>, and <code>satmaepp_s2_10b</code>), <code>OutputSpec.grid()</code> is not a seamless dense geospatial field. With <code>input_prep=None</code> or <code>input_prep="auto"</code>, <code>rs-embed</code> resolves to <code>input_prep="resize"</code> and emits a warning. Explicit <code>input_prep="tile"</code> is still allowed but emits a warning and metadata marks the tiled grid as seam-prone. Explicit <code>input_prep="resize"</code> is the recommended path and does not warn.</p>
+<p>For image-level ViT patch-token grid models (<code>scalemae</code>, <code>satmae</code>, and <code>satmaepp</code>), <code>OutputSpec.grid()</code> is not a seamless dense geospatial field. These models tile by default like every other model: <code>input_prep=None</code> or <code>input_prep="auto"</code> resolves to <code>input_prep="tile"</code>. Because tiled patch-token mosaics can show stitching seams at tile boundaries, the default/auto path and an explicit <code>input_prep="tile"</code> both emit a warning on <code>grid</code> output. Pass <code>input_prep="resize"</code> for a seamless (downsampled) grid — the recommended seamless opt-in, which does not warn.</p>
 </div>
 <p>See also <a href="../api_specs/#inputprepspec">API Specs — InputPrepSpec</a> and <a href="../workflows/">Common Workflows</a>.</p>
 <h3 id="output-mode-pooled-vs-grid">Output mode: <code>pooled</code> vs <code>grid</code><a class="headerlink" href="#output-mode-pooled-vs-grid" title="Permanent link">&para;</a></h3>
