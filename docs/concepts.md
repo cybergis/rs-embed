@@ -98,7 +98,7 @@ For most precomputed models, `sensor` is often `None` or ignored.
 
 Use tiling when you want to preserve more spatial detail for large ROIs and the model's default resize would be too destructive.
 
-Some image-level ViT adapters expose `grid` as patch-token layout rather than a seamless dense geospatial field. For `remoteclip`, `scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`, `input_prep=None` or `"auto"` with `OutputSpec.grid()` resolves to `"resize"` and emits a warning; explicit `"tile"` is allowed but also warns. Explicit `"resize"` is the recommended no-warning path.
+Some image-level ViT adapters expose `grid` as patch-token layout rather than a seamless dense geospatial field. For `scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`, `input_prep=None` or `"auto"` with `OutputSpec.grid()` resolves to `"resize"` and emits a warning; explicit `"tile"` is allowed but also warns. Explicit `"resize"` is the recommended no-warning path.
 
 This is a runtime policy choice, not a model identity choice.
 Use it when the same model needs different large-ROI handling in different workflows.

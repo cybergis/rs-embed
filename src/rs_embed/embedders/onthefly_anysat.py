@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import importlib
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from functools import lru_cache
 from typing import Any
@@ -37,6 +36,15 @@ from ..tools.normalization import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    prepare_square,
+    roi_fetch_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
@@ -54,15 +62,15 @@ _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
 
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
-    ensure_torch()
-    import torch
-    import torch.nn.functional as F
+    """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
 
+    A rectangular ROI is reflect-padded to square before resizing (see
+    :mod:`rs_embed.tools.shape`) rather than stretched.
+    """
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
-    x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
-    y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y.detach().cpu().numpy().astype(np.float32)
+    out, _ = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
+    return out
 
 
 def _normalize_series(x_tchw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -515,6 +523,9 @@ def _anysat_tile_features(
 
 @register("anysat")
 class AnySatEmbedder(EmbedderBase):
+    # AnySat needs a square token grid → base.fetch_input enlarges a rectangular
+    # ROI to a square of real imagery; the output is cropped back to the ROI.
+    _requires_square_input = True
     DEFAULT_FETCH_WORKERS = 8
     DEFAULT_FRAMES = 8
     _allow_auto_backend = True
@@ -603,12 +614,16 @@ class AnySatEmbedder(EmbedderBase):
         device: str = "auto",
         input_chw: np.ndarray | None = None,
         model_config: dict[str, Any] | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("anysat expects a provider backend (or 'auto').")
 
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. The output grid is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
         runtime_cfg = _resolve_anysat_runtime_config(
             model_config=model_config,
             default_frames=self.DEFAULT_FRAMES,
@@ -624,6 +639,7 @@ class AnySatEmbedder(EmbedderBase):
 
         if input_chw is None:
             provider = self._get_provider(backend)
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             raw_tchw = _fetch_s2_10_raw_tchw(
                 provider,
                 spatial,
@@ -686,6 +702,11 @@ class AnySatEmbedder(EmbedderBase):
                 patch_size_m=patch_size_m,
                 feature_mode=feature_mode,
             )
+
+        # Crop the token grid back to the ROI when the fetch enlarged a rectangle
+        # to a square (no-op when full; tile-pooled output has no grid to crop).
+        if grid is not None and not roi_is_full(geo_roi):
+            grid = crop_grid_to_roi(grid, geo_roi)
 
         meta = build_meta(
             model=self.model_name,
@@ -789,49 +810,33 @@ class AnySatEmbedder(EmbedderBase):
         )
         n_frames = int(runtime_cfg["n_frames"])
 
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            raw = _fetch_s2_10_raw_tchw(
+        # Square-fetch each ROI, then re-feed get_embedding with the ROI window so
+        # the output is cropped back. square_fetch_batch handles square + parallel.
+        raws, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: _fetch_s2_10_raw_tchw(
                 provider,
-                sp,
+                sq,
                 t,
                 n_frames=n_frames,
                 scale_m=int(ss.scale_m),
                 cloudy_pct=int(ss.cloudy_pct),
                 composite=str(ss.composite),
                 fill_value=float(ss.fill_value),
+            ),
+            max_workers=self._resolve_fetch_workers(len(spatials)),
+        )
+        return [
+            self.get_embedding(
+                spatial=sp,
+                temporal=t,
+                sensor=ss,
+                output=output,
+                backend=backend,
+                device=device,
+                input_chw=raw,
+                model_config=model_config,
+                fetch_meta=roi_fetch_meta(gr),
             )
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        out: list[Embedding] = []
-        for i, sp in enumerate(spatials):
-            raw = prefetched_raw[i]
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for anysat.")
-            out.append(
-                self.get_embedding(
-                    spatial=sp,
-                    temporal=t,
-                    sensor=ss,
-                    output=output,
-                    backend=backend,
-                    device=device,
-                    input_chw=raw,
-                    model_config=model_config,
-                )
-            )
-        return out
+            for sp, raw, gr in zip(spatials, raws, geo_rois, strict=True)
+        ]

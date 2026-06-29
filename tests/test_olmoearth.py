@@ -7,7 +7,7 @@ import pytest
 
 from rs_embed.core.embedding import Embedding
 from rs_embed.core.errors import ModelError
-from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
+from rs_embed.core.specs import BBox, OutputSpec, PointBuffer, SensorSpec, TemporalSpec
 from rs_embed.embedders import onthefly_olmoearth as oe
 
 # ---------------------------------------------------------------------------
@@ -238,8 +238,28 @@ def test_normalize_chw_s1_shape_and_no_nans():
 
 def test_prepare_chw_resizes_to_image_size():
     raw = np.random.uniform(0, 3000, (12, 64, 64)).astype(np.float32)
-    out = oe._prepare_chw(raw, image_size=256, patch_size=4)
+    out, shape_meta = oe._prepare_chw(raw, image_size=256, patch_size=4)
     assert out.shape == (12, 256, 256)
+    # already square → no pad/crop, just resize
+    assert shape_meta["shape_prep"]["applied"] == "none"
+
+
+def test_prepare_chw_pads_non_square_to_square():
+    # 33×59 rectangular ROI (the reported field case) must be padded to square,
+    # not stretched: square_hw is (59, 59) before the final resize.
+    raw = np.random.uniform(0, 3000, (12, 33, 59)).astype(np.float32)
+    out, shape_meta = oe._prepare_chw(raw, image_size=256, patch_size=4)
+    assert out.shape == (12, 256, 256)
+    sp = shape_meta["shape_prep"]
+    assert sp["applied"] == "pad_to_square"
+    assert sp["square_hw"] == (59, 59)
+
+
+def test_prepare_chw_crop_mode():
+    raw = np.random.uniform(0, 3000, (12, 33, 59)).astype(np.float32)
+    out, shape_meta = oe._prepare_chw(raw, image_size=64, patch_size=4, shape_adjust="crop")
+    assert out.shape == (12, 64, 64)
+    assert shape_meta["shape_prep"]["applied"] == "crop_to_square"
 
 
 def test_prepare_chw_rejects_non_divisible_image_size():
@@ -256,7 +276,7 @@ def test_prepare_chw_wrong_channels_raises():
 
 def test_prepare_chw_s1_resizes_and_checks_channels():
     raw = np.random.uniform(-25.0, 0.0, (2, 64, 64)).astype(np.float32)
-    out = oe._prepare_chw(raw, image_size=256, patch_size=4, modality="s1")
+    out, _ = oe._prepare_chw(raw, image_size=256, patch_size=4, modality="s1")
     assert out.shape == (2, 256, 256)
     with pytest.raises(ModelError, match="2-band"):
         oe._prepare_chw(
@@ -409,6 +429,212 @@ def test_get_embedding_grid_returns_dataarray(monkeypatch):
     assert isinstance(out.data, xr.DataArray)
     assert set(out.data.dims) == {"d", "y", "x"}
     assert out.meta["grid_kind"] == "spatial_tokens"
+
+
+def test_grid_and_pooled_crop_back_to_roi(monkeypatch):
+    """A padded non-square ROI must be cropped out of both grid and pooled output."""
+    pytest.importorskip("xarray")
+    emb = oe.OlmoEarthEmbedder()
+    monkeypatch.setattr(
+        oe, "_encoder_forward", lambda model, sample, **kw: _fake_encoder_output(1, 8, 64)
+    )
+    monkeypatch.setattr(
+        oe, "_load_olmoearth", lambda variant, device: (object(), {"hf_repo": "x"}, "cpu")
+    )
+    rect = np.full((12, 33, 59), 1500.0, dtype=np.float32)  # padded vertically to square
+
+    grid = emb.get_embedding(
+        spatial=PointBuffer(lon=10.0, lat=20.0, buffer_m=256),
+        temporal=TemporalSpec.year(2022),
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        input_chw=rect,
+        model_config={"temporal_mode": "single"},
+    )
+    h, w = grid.meta["grid_hw"]
+    assert h < w  # vertical padding cropped out → grid no longer square
+    assert (grid.data.sizes["y"], grid.data.sizes["x"]) == (h, w)
+    assert grid.meta["shape_prep"]["applied"] == "pad_to_square"
+
+    pooled = emb.get_embedding(
+        spatial=PointBuffer(lon=10.0, lat=20.0, buffer_m=256),
+        temporal=TemporalSpec.year(2022),
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="gee",
+        input_chw=rect,
+        model_config={"temporal_mode": "single"},
+    )
+    assert pooled.data.shape == (64,)
+    assert pooled.meta["shape_prep"]["applied"] == "pad_to_square"
+
+
+def test_fetch_input_enlarges_bbox_to_square(monkeypatch):
+    """A rectangular BBox is enlarged to a square fetch window in EPSG:3857."""
+    from rs_embed.tools.spatial import _to_mercator
+
+    emb = oe.OlmoEarthEmbedder()
+    captured: dict = {}
+
+    def fake_fetch(provider, *, spatial, **kw):
+        captured["spatial"] = spatial
+        return np.full((12, 64, 64), 1500.0, dtype=np.float32)
+
+    monkeypatch.setattr(oe, "_fetch_collection_patch_chw", fake_fetch)
+    wide = BBox(minlon=-88.23131, minlat=40.09466, maxlon=-88.22436, maxlat=40.09767)
+    fr = emb.fetch_input(
+        object(),
+        spatial=wide,
+        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+        sensor=emb._default_sensor(),
+        temporal_mode="single",
+    )
+    sq = captured["spatial"]
+    x0, y0 = _to_mercator(sq.minlon, sq.minlat)
+    x1, y1 = _to_mercator(sq.maxlon, sq.maxlat)
+    assert abs(abs(x1 - x0) - abs(y1 - y0)) / abs(x1 - x0) < 1e-3  # square in 3857
+    rw = fr.meta["roi_window_geo"]
+    assert (rw[2], rw[3]) == (0.0, 1.0)  # width preserved
+    assert 0.0 < rw[0] < rw[1] < 1.0  # height is a centered sub-band
+
+
+def test_fetch_square_crops_grid_back_to_roi(monkeypatch):
+    """End-to-end: wide BBox → fetch-square → grid cropped back to the ROI band."""
+    pytest.importorskip("xarray")
+    emb = oe.OlmoEarthEmbedder()
+    monkeypatch.setattr(emb, "_get_provider", lambda _: object())
+    monkeypatch.setattr(
+        oe,
+        "_fetch_collection_patch_chw",
+        lambda *a, **kw: np.full((12, 64, 64), 1500.0, dtype=np.float32),
+    )
+    monkeypatch.setattr(
+        oe, "_encoder_forward", lambda model, sample, **kw: _fake_encoder_output(1, 8, 64)
+    )
+    monkeypatch.setattr(
+        oe, "_load_olmoearth", lambda variant, device: (object(), {"hf_repo": "x"}, "cpu")
+    )
+    wide = BBox(minlon=-88.23131, minlat=40.09466, maxlon=-88.22436, maxlat=40.09767)
+    out = emb.get_embedding(
+        spatial=wide,
+        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        model_config={"temporal_mode": "single"},
+    )
+    h, w = out.meta["grid_hw"]
+    assert h < w  # ROI is wider than tall → vertical crop back to ROI
+    assert out.meta["shape_prep"]["roi_source"] == "fetch_square"
+
+
+def test_fetch_square_multi_crops_grid(monkeypatch):
+    """The multi (binned) path must also fetch-square and crop the grid to the ROI."""
+    pytest.importorskip("xarray")
+    emb = oe.OlmoEarthEmbedder()
+    monkeypatch.setattr(emb, "_get_provider", lambda _: object())
+    monkeypatch.setattr(
+        oe,
+        "_fetch_collection_binned_raw_tchw",
+        lambda provider, *, spatial, bins, **kw: (
+            np.full((len(bins), 12, 64, 64), 1500.0, dtype=np.float32),
+            {},
+        ),
+    )
+    monkeypatch.setattr(
+        oe, "_encoder_forward", lambda model, sample, **kw: _fake_encoder_output(1, 8, 64)
+    )
+    monkeypatch.setattr(
+        oe, "_load_olmoearth", lambda variant, device: (object(), {"hf_repo": "x"}, "cpu")
+    )
+    out = emb.get_embedding(
+        spatial=BBox(minlon=-88.23131, minlat=40.09466, maxlon=-88.22436, maxlat=40.09767),
+        temporal=TemporalSpec.range("2022-06-01", "2022-10-01"),  # 4 months → auto → multi
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+    )
+    assert out.meta["temporal_mode"] == "multi"
+    h, w = out.meta["grid_hw"]
+    assert h < w  # wide ROI cropped back out of the fetched square
+    assert out.meta["shape_prep"]["roi_source"] == "fetch_square"
+
+
+def test_top_level_api_fetch_square_crops_grid(monkeypatch):
+    """The API prefetch + tiling path must carry the fetch-square ROI to cropping.
+
+    Regression guard: embedder-level tests pass spatial directly, but the public
+    ``rs_embed.get_embedding`` prefetches via fetch_input and feeds the embedder
+    input_chw — the ROI window must ride through fetch_meta so the grid is still
+    cropped back to the rectangular ROI.
+    """
+    pytest.importorskip("xarray")
+    import rs_embed
+    import rs_embed.tools.runtime as rt
+
+    monkeypatch.setattr(rt, "provider_factory_for_backend", lambda b: lambda: object())
+    monkeypatch.setattr(
+        oe,
+        "_fetch_collection_binned_raw_tchw",
+        lambda provider, *, spatial, bins, **kw: (
+            np.full((len(bins), 12, 77, 77), 1500.0, dtype=np.float32),
+            {},
+        ),
+    )
+    monkeypatch.setattr(
+        oe, "_encoder_forward", lambda model, sample, **kw: _fake_encoder_output(1, 8, 64)
+    )
+    monkeypatch.setattr(
+        oe, "_load_olmoearth", lambda variant, device: (object(), {"hf_repo": "x"}, "cpu")
+    )
+    emb = rs_embed.get_embedding(
+        "olmoearth",
+        spatial=BBox(minlon=-88.23131, minlat=40.09466, maxlon=-88.22436, maxlat=40.09767),
+        temporal=TemporalSpec.range("2022-06-01", "2022-10-01"),
+        output=OutputSpec.grid(),
+    )
+    h, w = emb.meta["grid_hw"]
+    assert h < w  # rectangular ROI cropped back, not a square grid
+    assert emb.meta["shape_prep"]["roi_source"] == "fetch_square"
+
+
+def test_api_path_honors_temporal_mode_single(monkeypatch):
+    """Prefetch path must forward temporal_mode to fetch_input (was ignored before).
+
+    A 4-month range defaults to auto→multi, but temporal_mode='single' must win on
+    the API path exactly as it does on the direct embedder path.
+    """
+    pytest.importorskip("xarray")
+    import rs_embed
+    import rs_embed.tools.runtime as rt
+
+    called = {"single": 0, "multi": 0}
+
+    def fsingle(provider, *, spatial, temporal, **kw):
+        called["single"] += 1
+        return np.full((12, 77, 77), 1500.0, dtype=np.float32)
+
+    def fmulti(provider, *, spatial, bins, **kw):
+        called["multi"] += 1
+        return np.full((len(bins), 12, 77, 77), 1500.0, dtype=np.float32), {}
+
+    monkeypatch.setattr(rt, "provider_factory_for_backend", lambda b: lambda: object())
+    monkeypatch.setattr(oe, "_fetch_collection_patch_chw", fsingle)
+    monkeypatch.setattr(oe, "_fetch_collection_binned_raw_tchw", fmulti)
+    monkeypatch.setattr(oe, "_encoder_forward", lambda m, s, **kw: _fake_encoder_output(1, 8, 64))
+    monkeypatch.setattr(
+        oe, "_load_olmoearth", lambda v, device: (object(), {"hf_repo": "x"}, "cpu")
+    )
+    emb = rs_embed.get_embedding(
+        "olmoearth",
+        spatial=BBox(minlon=-88.23, minlat=40.09, maxlon=-88.22, maxlat=40.10),
+        temporal=TemporalSpec.range("2022-06-01", "2022-10-01"),
+        output=OutputSpec.grid(),
+        temporal_mode="single",
+    )
+    assert emb.meta["temporal_mode"] == "single"
+    assert called["single"] == 1 and called["multi"] == 0
 
 
 def test_get_embedding_uses_model_config_variant(monkeypatch):
@@ -1006,10 +1232,13 @@ def test_prepare_frames_drops_nan_frames_and_aligns_timestamps():
     )
     x = np.random.uniform(0, 3000, (3, 12, 32, 32)).astype(np.float32)
     x[1] = np.nan  # empty-bin sentinel
-    out, ts, dropped = oe._prepare_frames(x, bins=bins, modality="s2", image_size=64, patch_size=4)
+    out, ts, dropped, shape_meta = oe._prepare_frames(
+        x, bins=bins, modality="s2", image_size=64, patch_size=4
+    )
     assert out.shape == (2, 12, 64, 64)
     assert ts == [(15, 5, 2022), (14, 7, 2022)]  # June and August bin starts
     assert dropped == [("2022-07-15", "2022-08-14")]  # the empty middle bin
+    assert shape_meta["shape_prep"]["applied"] == "none"  # 32×32 already square
 
 
 def test_warn_dropped_bins_emits_and_lists_ranges():

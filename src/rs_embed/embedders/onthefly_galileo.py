@@ -3,7 +3,6 @@ from __future__ import annotations
 import importlib
 import os
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import date
 from functools import lru_cache
 from pathlib import Path
@@ -43,6 +42,15 @@ from ..tools.runtime import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    prepare_square,
+    roi_fetch_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import FULL_WINDOW, square_spatial
 from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
@@ -201,15 +209,16 @@ def _is_galileo_official_stats_mode(mode: str) -> bool:
 
 
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
-    ensure_torch()
-    import torch
-    import torch.nn.functional as F
+    """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
 
+    A rectangular ROI is reflect-padded to square before resizing (see
+    :mod:`rs_embed.tools.shape`) rather than stretched, which would smear a
+    non-square ROI into distorted, striped embeddings.
+    """
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
-    x = torch.from_numpy(x_tchw.astype(np.float32, copy=False))
-    y = F.interpolate(x, size=(int(out_hw), int(out_hw)), mode="bilinear", align_corners=False)
-    return y.detach().cpu().numpy().astype(np.float32)
+    out, _ = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
+    return out
 
 
 def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -812,6 +821,9 @@ def _galileo_forward(
 
 @register("galileo")
 class GalileoEmbedder(EmbedderBase):
+    # Square-input model: marks it for the API tiling path (its own fetch_input
+    # squares the ROI for the single-input case and skips it when tiling).
+    _requires_square_input = True
     DEFAULT_MODEL_SIZE = "nano"
     DEFAULT_PATCH = 8
     DEFAULT_IMAGE_SIZE = 64
@@ -904,6 +916,7 @@ class GalileoEmbedder(EmbedderBase):
         temporal: TemporalSpec | None,
         sensor: SensorSpec,
         temporal_mode: str | None = None,
+        square_input: bool = True,
     ) -> FetchResult | None:
         """Fetch a window-adaptive S2 time series as ``[T,C,H,W]``.
 
@@ -915,6 +928,14 @@ class GalileoEmbedder(EmbedderBase):
         """
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
+        # Fetch-square: enlarge a rectangular ROI to a square of real imagery so
+        # the encoder sees a square, in-distribution input; the ROI window rides
+        # in meta['roi_window_geo'] and the output is cropped back to it. Skipped
+        # when the API tiles the input (square_input=False) — tiling squares per
+        # tile, so the whole-ROI square fetch would just pull in extra imagery.
+        geo_roi = FULL_WINDOW
+        if square_input:
+            spatial, geo_roi = square_spatial(spatial)
         if temporal_mode is not None:
             # Honor an explicit mode by routing it through the same resolver.
             cfg: dict[str, Any] | None = {"temporal_mode": _normalize_temporal_mode(temporal_mode)}
@@ -932,7 +953,8 @@ class GalileoEmbedder(EmbedderBase):
             composite=str(ss.composite),
             fill_value=float(ss.fill_value),
         )
-        return FetchResult(data=raw_tchw, meta=dict(sampling_meta))
+        meta = {**dict(sampling_meta), **(roi_fetch_meta(geo_roi) or {})}
+        return FetchResult(data=raw_tchw, meta=meta)
 
     def get_embedding(
         self,
@@ -945,12 +967,16 @@ class GalileoEmbedder(EmbedderBase):
         device: str = "auto",
         input_chw: np.ndarray | None = None,
         model_config: dict[str, Any] | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("galileo expects a provider backend (or 'auto').")
 
         ss = sensor or self._default_sensor()
         t = temporal_to_range(temporal)
+        # Fetch-square ROI window: from the fetch when we fetch here, or carried in
+        # fetch_meta when the API prefetched a square. Output is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
 
         model_size = os.environ.get("RS_EMBED_GALILEO_MODEL_SIZE", self.DEFAULT_MODEL_SIZE).strip()
         model_path = os.environ.get("RS_EMBED_GALILEO_MODEL_PATH")
@@ -982,6 +1008,7 @@ class GalileoEmbedder(EmbedderBase):
         if input_chw is None:
             provider = self._get_provider(backend)
             _warn_stretched_sampling(sampling_meta)  # warn only when we actually fetch
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             raw_tchw = _fetch_s2_10_raw_tchw(
                 provider,
                 spatial,
@@ -1046,6 +1073,12 @@ class GalileoEmbedder(EmbedderBase):
             device=dev,
         )
 
+        # Crop the token grid back to the ROI when the fetch enlarged a rectangle
+        # to a square (no-op when geo_roi is full). grid is (D, H', W').
+        cropped_to_roi = not roi_is_full(geo_roi)
+        if cropped_to_roi:
+            grid = crop_grid_to_roi(grid, geo_roi)
+
         meta = build_meta(
             model=self.model_name,
             kind="on_the_fly",
@@ -1082,6 +1115,11 @@ class GalileoEmbedder(EmbedderBase):
                 # keep pooled mode semantics with optional max over grid
                 vec_out = np.max(grid, axis=(1, 2)).astype(np.float32)
                 pooling = "grid_max"
+            elif cropped_to_roi:
+                # Pool only the ROI's tokens (the global token mean would include
+                # the real-neighborhood context fetched to make the input square).
+                vec_out = np.mean(grid, axis=(1, 2)).astype(np.float32)
+                pooling = "roi_grid_mean"
             else:
                 vec_out = vec.astype(np.float32)
                 pooling = "token_mean"
@@ -1134,49 +1172,33 @@ class GalileoEmbedder(EmbedderBase):
         n_frames, sampling_meta = _resolve_frame_plan(model_config, t)
         _warn_stretched_sampling(sampling_meta)
 
-        n = len(spatials)
-        prefetched_raw: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            raw = _fetch_s2_10_raw_tchw(
+        # Square-fetch each ROI, then re-feed get_embedding with the ROI window so
+        # the output is cropped back. square_fetch_batch handles square + parallel.
+        raws, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: _fetch_s2_10_raw_tchw(
                 provider,
-                sp,
+                sq,
                 t,
                 n_frames=n_frames,
                 scale_m=int(ss.scale_m),
                 cloudy_pct=int(ss.cloudy_pct),
                 composite=str(ss.composite),
                 fill_value=float(ss.fill_value),
+            ),
+            max_workers=self._resolve_fetch_workers(len(spatials)),
+        )
+        return [
+            self.get_embedding(
+                spatial=sp,
+                temporal=t,
+                sensor=ss,
+                output=output,
+                backend=backend,
+                device=device,
+                input_chw=raw,
+                model_config=model_config,
+                fetch_meta=roi_fetch_meta(gr),
             )
-            return i, raw
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw = fut.result()
-                    prefetched_raw[i] = raw
-
-        out: list[Embedding] = []
-        for i, sp in enumerate(spatials):
-            raw = prefetched_raw[i]
-            if raw is None:
-                raise ModelError(f"Missing prefetched input at index={i} for galileo.")
-            out.append(
-                self.get_embedding(
-                    spatial=sp,
-                    temporal=t,
-                    sensor=ss,
-                    output=output,
-                    backend=backend,
-                    device=device,
-                    input_chw=raw,
-                    model_config=model_config,
-                )
-            )
-        return out
+            for sp, raw, gr in zip(spatials, raws, geo_rois, strict=True)
+        ]

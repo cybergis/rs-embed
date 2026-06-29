@@ -33,6 +33,13 @@ from ..tools.runtime import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_fetch_meta,
+    roi_is_full,
+)
+from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -95,6 +102,77 @@ def tokens_to_grid_dhw(tokens):
     if hw * hw != p:
         raise ModelError(f"Patch token count {p} is not a perfect square.")
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
+
+
+def build_satvision_embedding(out_arr, *, geo_roi, output, meta):
+    """Turn a SatVision forward output into an Embedding, cropping to the ROI.
+
+    ``out_arr`` is either a ``[N,D]`` token / feature-map sequence or a ``[D]``
+    model-pooled vector. When the input was enlarged to a square at fetch time
+    (``geo_roi`` is a sub-window) and tokens are available, the patch grid is
+    cropped back to the ROI before pooling / emitting. When ``geo_roi`` is the
+    full frame this reproduces the legacy behaviour exactly. A 1-D model-pooled
+    vector has no spatial tokens, so it cannot be cropped and is returned as-is.
+    ``meta`` is mutated in place with the chosen pooling / grid provenance.
+    """
+    cropped = not roi_is_full(geo_roi)
+
+    if output.mode == "pooled":
+        if out_arr.ndim == 2:
+            if cropped:
+                grid, _hw, cls_removed = tokens_to_grid_dhw(out_arr)
+                g = crop_grid_to_roi(grid, geo_roi)
+                reduce = g.max if output.pooling == "max" else g.mean
+                vec = reduce(axis=(1, 2)).astype(np.float32)
+                meta.update(
+                    {"pooling": f"roi_grid_{output.pooling}", "cls_removed": bool(cls_removed)}
+                )
+            else:
+                vec, cls_removed = pool_from_tokens(out_arr, output.pooling)
+                meta.update(
+                    {"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)}
+                )
+            return Embedding(data=vec, meta=meta)
+        if out_arr.ndim == 1:
+            meta.update({"pooling": "model_pooled", "cls_removed": False})
+            return Embedding(data=out_arr.astype(np.float32), meta=meta)
+        raise ModelError(f"Unexpected SatVision output shape for pooled mode: {out_arr.shape}")
+
+    if output.mode == "grid":
+        if out_arr.ndim != 2:
+            raise ModelError(
+                "grid output requires token sequence [N,D]. "
+                f"Got {out_arr.shape} (tokens_kind={meta.get('tokens_kind')})."
+            )
+        grid, (h, w), cls_removed = tokens_to_grid_dhw(out_arr)
+        if cropped:
+            grid = crop_grid_to_roi(grid, geo_roi)
+            h, w = int(grid.shape[1]), int(grid.shape[2])
+        meta.update(
+            {
+                "grid_hw": (h, w),
+                "grid_kind": (
+                    "last_stage_feature_map"
+                    if str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
+                    else "patch_tokens"
+                ),
+                "cls_removed": bool(cls_removed),
+            }
+        )
+        try:
+            import xarray as xr
+        except Exception as e:
+            raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+        da = xr.DataArray(
+            grid,
+            dims=("d", "y", "x"),
+            coords={"d": np.arange(grid.shape[0]), "y": np.arange(h), "x": np.arange(w)},
+            name="embedding",
+            attrs=meta,
+        )
+        return Embedding(data=da, meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
 
 
 # SatVision-TOA model defaults from published config/model card.
@@ -980,6 +1058,10 @@ class SatVisionTOAEmbedder(EmbedderBase):
     - Provide `sensor.bands` in the exact order expected by your checkpoint.
     """
 
+    # Square-input model: marks it for the API tiling path (its own fetch_input
+    # squares the ROI for the single-input case and skips it when tiling).
+    _requires_square_input = True
+
     # Default MODIS input spec. SatVision-TOA's _default_sensor() allows env-var
     # overrides for collection/bands/scale; this spec documents the baseline.
     input_spec = ModelInputSpec(
@@ -1163,6 +1245,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
         spatial: SpatialSpec,
         temporal: TemporalSpec | None,
         sensor: SensorSpec,
+        square_input: bool = True,
     ) -> FetchResult | None:
         """Fetch SatVision input from GEE using the fixed MODIS proxy path.
 
@@ -1189,8 +1272,16 @@ class SatVisionTOAEmbedder(EmbedderBase):
             Raw CHW array and fetch-time proxy provenance metadata.
         """
         t = temporal_to_range(temporal)
+        # Fetch-square: enlarge a rectangular ROI to a square of real imagery so
+        # the encoder gets a square, in-distribution input; the ROI window rides in
+        # meta['roi_window_geo'] and get_embedding crops the output back to it.
+        # Skipped when the API tiles the input (square_input=False): tiling squares
+        # per tile, so the rectangular ROI is fetched directly (no extra imagery).
+        geo_roi = FULL_WINDOW
+        if square_input:
+            spatial, geo_roi = square_spatial(spatial)
         raw, meta = _coerce_fetch_result(_fetch_toa_chw_from_gee(provider, spatial, t, sensor))
-        return FetchResult(data=raw, meta=meta)
+        return FetchResult(data=raw, meta={**meta, **(roi_fetch_meta(geo_roi) or {})})
 
     def get_embedding(
         self,
@@ -1212,6 +1303,9 @@ class SatVisionTOAEmbedder(EmbedderBase):
         t = temporal_to_range(temporal)
         rt = self._resolve_runtime(sensor=sensor, device=device)
 
+        # Fetch-square ROI window: carried in fetch_meta when the API prefetched a
+        # square, or read from our own fetch_input below. Output cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
         if input_chw is None:
             result = self.fetch_input(
                 self._get_provider(backend),
@@ -1222,6 +1316,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
             assert result is not None
             raw = result.data
             fetch_meta = result.meta
+            geo_roi = geo_roi_from_meta(fetch_meta)
         else:
             raw = np.asarray(input_chw, dtype=np.float32)
             if fetch_meta is None:
@@ -1230,6 +1325,8 @@ class SatVisionTOAEmbedder(EmbedderBase):
                     "fallback_used": False,
                     "already_unit_scaled": False,
                 }
+        # Transport-only ROI window must not leak into the output metadata.
+        fetch_meta = {k: v for k, v in fetch_meta.items() if k != "roi_window_geo"}
 
         norm_mode_eff = str(rt["norm_mode"])
         if bool(fetch_meta.get("already_unit_scaled")):
@@ -1284,58 +1381,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
             },
         )
 
-        if output.mode == "pooled":
-            if out_arr.ndim == 2:
-                vec, cls_removed = pool_from_tokens(out_arr, output.pooling)
-                meta.update(
-                    {
-                        "pooling": f"patch_{output.pooling}",
-                        "cls_removed": bool(cls_removed),
-                    }
-                )
-                return Embedding(data=vec, meta=meta)
-            if out_arr.ndim == 1:
-                meta.update({"pooling": "model_pooled", "cls_removed": False})
-                return Embedding(data=out_arr.astype(np.float32), meta=meta)
-            raise ModelError(f"Unexpected SatVision output shape for pooled mode: {out_arr.shape}")
-
-        if output.mode == "grid":
-            if out_arr.ndim != 2:
-                raise ModelError(
-                    "grid output requires token sequence [N,D]. "
-                    f"Got {out_arr.shape} (tokens_kind={meta.get('tokens_kind')})."
-                )
-            grid, (h, w), cls_removed = tokens_to_grid_dhw(out_arr)
-            meta.update(
-                {
-                    "grid_hw": (h, w),
-                    "grid_kind": (
-                        "last_stage_feature_map"
-                        if str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
-                        else "patch_tokens"
-                    ),
-                    "cls_removed": bool(cls_removed),
-                }
-            )
-            try:
-                import xarray as xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(h),
-                    "x": np.arange(w),
-                },
-                name="embedding",
-                attrs=meta,
-            )
-            return Embedding(data=da, meta=meta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return build_satvision_embedding(out_arr, geo_roi=geo_roi, output=output, meta=meta)
 
     def get_embeddings_batch(
         self,
@@ -1362,10 +1408,13 @@ class SatVisionTOAEmbedder(EmbedderBase):
         prefetched_meta: list[dict[str, Any] | None] = [None] * n
 
         def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray, dict[str, Any]]:
+            # Fetch-square each ROI; the ROI window rides in the per-item meta
+            # (roi_window_geo) so the per-item output is cropped back to it.
+            sq, geo_roi = square_spatial(sp)
             raw, fetch_meta = _coerce_fetch_result(
-                _fetch_toa_chw_from_gee(self._get_provider(backend), sp, t, sensor)
+                _fetch_toa_chw_from_gee(self._get_provider(backend), sq, t, sensor)
             )
-            return i, raw, fetch_meta
+            return i, raw, {**fetch_meta, **(roi_fetch_meta(geo_roi) or {})}
 
         mw = self._resolve_fetch_workers(n)
         if mw == 1:
@@ -1431,6 +1480,9 @@ class SatVisionTOAEmbedder(EmbedderBase):
                 fetch_meta = prefetched_meta[i]
                 assert raw is not None
                 assert fetch_meta is not None
+                geo_roi = geo_roi_from_meta(fetch_meta)
+                # Transport-only ROI window must not leak into the output metadata.
+                fetch_meta = {k: v for k, v in fetch_meta.items() if k != "roi_window_geo"}
                 meta = base_meta(
                     model_name=self.model_name,
                     hf_id=rt["model_id"],
@@ -1461,66 +1513,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
                         **fmeta,
                     },
                 )
-
-                if output.mode == "pooled":
-                    if arr.ndim == 2:
-                        vec, cls_removed = pool_from_tokens(arr, output.pooling)
-                        meta.update(
-                            {
-                                "pooling": f"patch_{output.pooling}",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                        out[i] = Embedding(data=vec, meta=meta)
-                    elif arr.ndim == 1:
-                        meta.update({"pooling": "model_pooled", "cls_removed": False})
-                        out[i] = Embedding(data=arr.astype(np.float32), meta=meta)
-                    else:
-                        raise ModelError(
-                            f"Unexpected SatVision output shape for pooled mode: {arr.shape}"
-                        )
-                    continue
-
-                if output.mode == "grid":
-                    if arr.ndim != 2:
-                        raise ModelError(
-                            "grid output requires token sequence [N,D]. "
-                            f"Got {arr.shape} (tokens_kind={meta.get('tokens_kind')})."
-                        )
-                    grid, (h, w), cls_removed = tokens_to_grid_dhw(arr)
-                    meta.update(
-                        {
-                            "grid_hw": (h, w),
-                            "grid_kind": (
-                                "last_stage_feature_map"
-                                if str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
-                                else "patch_tokens"
-                            ),
-                            "cls_removed": bool(cls_removed),
-                        }
-                    )
-                    try:
-                        import xarray as xr
-                    except Exception as e:
-                        raise ModelError(
-                            "grid output requires xarray. Install: pip install xarray"
-                        ) from e
-
-                    da = xr.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(h),
-                            "x": np.arange(w),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
-                    out[i] = Embedding(data=da, meta=meta)
-                    continue
-
-                raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = build_satvision_embedding(arr, geo_roi=geo_roi, output=output, meta=meta)
 
         if any(e is None for e in out):
             raise ModelError("satvision_toa batch inference produced incomplete outputs.")
@@ -1551,6 +1544,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
         x_batch: list[np.ndarray] = []
         norm_modes_eff: list[str] = []
         unit_flags: list[bool] = []
+        geo_rois: list[tuple[float, float, float, float]] = []
         for k, inp in enumerate(input_chws):
             fm = fetch_metas[k] if (fetch_metas is not None and k < len(fetch_metas)) else None
             # Mirror get_embedding / get_embeddings_batch: provider inputs that
@@ -1561,6 +1555,8 @@ class SatVisionTOAEmbedder(EmbedderBase):
             norm_mode_eff = "unit" if already_unit else str(rt["norm_mode"])
             norm_modes_eff.append(norm_mode_eff)
             unit_flags.append(already_unit)
+            # Fetch-square ROI window (full frame for direct user inputs).
+            geo_rois.append(geo_roi_from_meta(fm))
             x_batch.append(
                 self._prepare_input(
                     np.asarray(inp, dtype=np.float32),
@@ -1617,57 +1613,8 @@ class SatVisionTOAEmbedder(EmbedderBase):
                 },
             )
 
-            if output.mode == "pooled":
-                if arr.ndim == 2:
-                    vec, cls_removed = pool_from_tokens(arr, output.pooling)
-                    meta.update(
-                        {"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)}
-                    )
-                    embeddings.append(Embedding(data=vec, meta=meta))
-                elif arr.ndim == 1:
-                    meta.update({"pooling": "model_pooled", "cls_removed": False})
-                    embeddings.append(Embedding(data=arr.astype(np.float32), meta=meta))
-                else:
-                    raise ModelError(
-                        f"Unexpected SatVision output shape for pooled mode: {arr.shape}"
-                    )
-            elif output.mode == "grid":
-                if arr.ndim != 2:
-                    raise ModelError(
-                        f"grid output requires token sequence [N,D]. Got {arr.shape} "
-                        f"(tokens_kind={meta.get('tokens_kind')})."
-                    )
-                grid, (h, w), cls_removed = tokens_to_grid_dhw(arr)
-                meta.update(
-                    {
-                        "grid_hw": (h, w),
-                        "grid_kind": (
-                            "last_stage_feature_map"
-                            if str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
-                            else "patch_tokens"
-                        ),
-                        "cls_removed": bool(cls_removed),
-                    }
-                )
-                try:
-                    import xarray as xr
-                except Exception as e:
-                    raise ModelError(
-                        "grid output requires xarray. Install: pip install xarray"
-                    ) from e
-                da = xr.DataArray(
-                    grid,
-                    dims=("d", "y", "x"),
-                    coords={
-                        "d": np.arange(grid.shape[0]),
-                        "y": np.arange(h),
-                        "x": np.arange(w),
-                    },
-                    name="embedding",
-                    attrs=meta,
-                )
-                embeddings.append(Embedding(data=da, meta=meta))
-            else:
-                raise ModelError(f"Unknown output mode: {output.mode}")
+            embeddings.append(
+                build_satvision_embedding(arr, geo_roi=geo_rois[j], output=output, meta=meta)
+            )
 
         return embeddings

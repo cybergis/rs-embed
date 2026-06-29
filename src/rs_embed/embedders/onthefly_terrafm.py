@@ -40,6 +40,14 @@ from ..tools.normalization import (
 from ..tools.runtime import (
     resolve_device_auto_torch as _auto_device,
 )
+from ..tools.shape import (
+    crop_grid_and_pool,
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_fetch_meta,
+    roi_is_full,
+)
+from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .meta import build_meta
 
@@ -403,6 +411,10 @@ class TerraFMBEmbedder(EmbedderBase):
     - OutputSpec.grid():  grid [D, Ht, Wt] (model-native feature map grid)
     """
 
+    # Square-input model: marks it for the API tiling path (its own fetch_input
+    # squares the ROI for the single-input case and skips it when tiling).
+    _requires_square_input = True
+
     # Primary modality spec (S2 12-band). TerraFM also supports S1 VV/VH via
     # its custom fetch_input() override; this spec documents the default path.
     input_spec = ModelInputSpec(
@@ -489,6 +501,7 @@ class TerraFMBEmbedder(EmbedderBase):
         spatial: SpatialSpec,
         temporal: TemporalSpec | None,
         sensor: SensorSpec,
+        square_input: bool = True,
     ) -> FetchResult | None:
         """Fetch raw TerraFM input with model-specific logic.
 
@@ -518,6 +531,15 @@ class TerraFMBEmbedder(EmbedderBase):
         if temporal.mode != "range":
             raise ModelError("terrafm_b_gee requires TemporalSpec.range in v0.1.")
 
+        # Fetch-square: enlarge a rectangular ROI to a square of real imagery so the
+        # encoder sees a square, in-distribution input; the ROI window rides in
+        # meta['roi_window_geo'] and get_embedding crops the output back to it.
+        # Skipped when the API tiles the input (square_input=False): tiling squares
+        # per tile, so the rectangular ROI is fetched directly (no extra imagery).
+        geo_roi = FULL_WINDOW
+        if square_input:
+            spatial, geo_roi = square_spatial(spatial)
+
         if modality == "s2":
             raw = _fetch_collection_patch_chw(
                 provider,
@@ -530,7 +552,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 composite=str(getattr(sensor, "composite", "median")),
                 fill_value=0.0,
             )
-            return FetchResult(data=raw, meta={})
+            return FetchResult(data=raw, meta=roi_fetch_meta(geo_roi) or {})
         elif modality == "s1":
             raw, meta = _fetch_s1_vvvh_raw_chw_with_meta(
                 provider,
@@ -542,7 +564,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 require_iw=bool(getattr(sensor, "s1_require_iw", True)),
                 relax_iw_on_empty=bool(getattr(sensor, "s1_relax_iw_on_empty", True)),
             )
-            return FetchResult(data=raw, meta=meta)
+            return FetchResult(data=raw, meta={**meta, **(roi_fetch_meta(geo_roi) or {})})
         else:
             raise ModelError("modality must be 's2' or 's1'.")
 
@@ -556,9 +578,13 @@ class TerraFMBEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
         uses_provider = backend_l != "tensor"
+        # Fetch-square ROI window: carried in fetch_meta when the API prefetched a
+        # square, or read from our own fetch_input below. Output cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
 
         # defaults / overrides (match your style: sensor carries overrides)
         modality = getattr(sensor, "modality", "s2") if sensor else "s2"
@@ -583,7 +609,11 @@ class TerraFMBEmbedder(EmbedderBase):
 
         # For optional on-the-fly input inspection
         check_meta: dict[str, Any] = {}
-        fetch_meta: dict[str, Any] = {}
+        # Provenance spread into output meta (e.g. S1 IW-mode decisions). Seeded
+        # from any prefetch fetch_meta, minus the transport-only ROI window.
+        fetch_provenance: dict[str, Any] = {
+            k: v for k, v in (fetch_meta or {}).items() if k != "roi_window_geo"
+        }
 
         # -----------------
         # Build input tensor
@@ -616,7 +646,12 @@ class TerraFMBEmbedder(EmbedderBase):
                 )
                 assert result is not None
                 input_chw = result.data
-                fetch_meta = result.meta
+                # fetch_input squared the ROI: take its window, keep the rest as
+                # provenance for the output meta.
+                geo_roi = geo_roi_from_meta(result.meta)
+                fetch_provenance = {
+                    k: v for k, v in (result.meta or {}).items() if k != "roi_window_geo"
+                }
 
             # input_chw is raw provider values in the order implied by `sensor.bands`
             if modality == "s2":
@@ -666,11 +701,14 @@ class TerraFMBEmbedder(EmbedderBase):
         # -----------------
         model, wmeta = _load_terrafm_b(auto_download=True, cache_dir=cache_dir)
 
+        # Need the feature-map grid for grid output, or to crop+pool the ROI when
+        # the input was enlarged to a square at fetch time.
+        cropped_to_roi = not roi_is_full(geo_roi)
         pooled, grid = _terrafm_pooled_and_grid(
             model,
             x_bchw.astype(np.float32),
             device=device,
-            want_grid=(output.mode == "grid"),
+            want_grid=(output.mode == "grid" or cropped_to_roi),
         )
 
         temporal_used = temporal if uses_provider else None
@@ -726,7 +764,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 "image_size": image_size,
                 "device": device,
                 "hf_cache_dir": cache_dir,
-                **fetch_meta,
+                **fetch_provenance,
                 **check_meta,
                 **wmeta,
             },
@@ -734,12 +772,21 @@ class TerraFMBEmbedder(EmbedderBase):
 
         # ---- pooled output ----
         if output.mode == "pooled":
+            if cropped_to_roi and grid is not None:
+                # Pool only the ROI tokens (the model's global vector would include
+                # the real-neighborhood context fetched only to square the input).
+                _, pooled = crop_grid_and_pool(
+                    grid, geo_roi, pooling=output.pooling, pooled_fallback=pooled
+                )
+                base_meta["pooling"] = f"roi_grid_{output.pooling}"
             return Embedding(data=pooled.astype(np.float32), meta=base_meta)
 
         # ---- grid output ----
         if output.mode == "grid":
             if grid is None:
                 raise ModelError("Grid output requested but TerraFM grid extraction returned None.")
+            if cropped_to_roi:
+                grid = crop_grid_to_roi(grid, geo_roi)
 
             meta = {
                 **base_meta,
@@ -802,10 +849,13 @@ class TerraFMBEmbedder(EmbedderBase):
         prefetched_meta: list[dict[str, Any] | None] = [None] * n
 
         def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray, dict[str, Any] | None]:
+            # Fetch-square each ROI; the ROI window rides in the per-item meta
+            # (roi_window_geo) so from_inputs crops each output back to it.
+            sq, geo_roi = square_spatial(sp)
             if modality == "s2":
                 x_chw = _fetch_s2_sr_12_chw(
                     provider,
-                    sp,
+                    sq,
                     temporal,
                     scale_m=scale_m,
                     cloudy_pct=cloudy_pct,
@@ -813,11 +863,11 @@ class TerraFMBEmbedder(EmbedderBase):
                 )
                 # get_embedding(input_chw=...) expects raw S2 SR in [0..10000]
                 raw = np.clip(x_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
-                return i, raw, None
+                return i, raw, roi_fetch_meta(geo_roi)
             if modality == "s1":
                 raw, fetch_meta = _fetch_s1_vvvh_raw_chw_with_meta(
                     provider,
-                    sp,
+                    sq,
                     temporal,
                     scale_m=scale_m,
                     use_float_linear=use_float_linear,
@@ -825,7 +875,7 @@ class TerraFMBEmbedder(EmbedderBase):
                     require_iw=s1_require_iw,
                     relax_iw_on_empty=s1_relax_iw_on_empty,
                 )
-                return i, raw, fetch_meta
+                return i, raw, {**fetch_meta, **(roi_fetch_meta(geo_roi) or {})}
             raise ModelError("modality must be 's2' or 's1'.")
 
         mw = self._resolve_fetch_workers(n)
@@ -953,6 +1003,19 @@ class TerraFMBEmbedder(EmbedderBase):
             }
             source = sensor_meta["collection"]
 
+        # Per-item fetch-square ROI windows (full frame when input_meta_list is
+        # absent — direct user inputs). The grid is needed whenever any item was
+        # enlarged to a square, so it can be cropped back to its ROI.
+        geo_rois = [
+            geo_roi_from_meta(
+                input_meta_list[i]
+                if (input_meta_list is not None and i < len(input_meta_list))
+                else None
+            )
+            for i in range(len(spatials))
+        ]
+        any_cropped = any(not roi_is_full(g) for g in geo_rois)
+
         out: list[Embedding | None] = [None] * len(spatials)
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
@@ -962,12 +1025,14 @@ class TerraFMBEmbedder(EmbedderBase):
                 model,
                 xb,
                 device=dev,
-                want_grid=(output.mode == "grid"),
+                want_grid=(output.mode == "grid" or any_cropped),
             )
             for j in range(s1 - s0):
                 i = s0 + j
+                geo_roi = geo_rois[i]
+                cropped_to_roi = not roi_is_full(geo_roi)
                 fetch_meta = (
-                    dict(input_meta_list[i] or {})
+                    {k: v for k, v in (input_meta_list[i] or {}).items() if k != "roi_window_geo"}
                     if input_meta_list is not None and i < len(input_meta_list)
                     else {}
                 )
@@ -1006,7 +1071,16 @@ class TerraFMBEmbedder(EmbedderBase):
                 )
 
                 if output.mode == "pooled":
-                    out[i] = Embedding(data=pooled_bd[j].astype(np.float32), meta=base_meta)
+                    pooled_vec = pooled_bd[j]
+                    if cropped_to_roi and grid_bdhw is not None:
+                        _, pooled_vec = crop_grid_and_pool(
+                            grid_bdhw[j],
+                            geo_roi,
+                            pooling=output.pooling,
+                            pooled_fallback=pooled_vec,
+                        )
+                        base_meta["pooling"] = f"roi_grid_{output.pooling}"
+                    out[i] = Embedding(data=pooled_vec.astype(np.float32), meta=base_meta)
                     continue
 
                 if output.mode == "grid":
@@ -1015,6 +1089,8 @@ class TerraFMBEmbedder(EmbedderBase):
                             "Grid output requested but TerraFM grid extraction returned None."
                         )
                     grid = grid_bdhw[j]
+                    if cropped_to_roi:
+                        grid = crop_grid_to_roi(grid, geo_roi)
                     meta = {
                         **base_meta,
                         "grid_type": "feature_map",

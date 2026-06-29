@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from pathlib import Path
 from typing import Any
@@ -25,6 +24,13 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.shape import (
+    crop_grid_to_roi,
+    geo_roi_from_meta,
+    roi_is_full,
+    square_fetch_batch,
+)
+from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -109,6 +115,54 @@ def tokens_to_grid_dhw(tokens):
     return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
 
+def build_token_embedding(tokens, *, geo_roi, output, meta):
+    """Turn ``[N,D]`` tokens into an Embedding, cropping the patch grid to the ROI.
+
+    When the input was enlarged to a square at fetch time (``geo_roi`` is a
+    sub-window) the patch-token grid is cropped back to the ROI before pooling /
+    emitting, so neighbourhood context fetched only to square the input does not
+    leak into the result. When ``geo_roi`` is the full frame this reproduces the
+    legacy token-pool / full-grid behaviour exactly. ``meta`` is mutated in place
+    with the chosen pooling / grid provenance.
+    """
+    cropped = not roi_is_full(geo_roi)
+
+    if output.mode == "pooled":
+        if cropped:
+            grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
+            g = crop_grid_to_roi(grid, geo_roi)
+            reduce = g.max if output.pooling == "max" else g.mean
+            vec = reduce(axis=(1, 2)).astype("float32")
+            meta.update({"pooling": f"roi_grid_{output.pooling}", "cls_removed": bool(cls_removed)})
+        else:
+            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
+            meta.update({"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)})
+        return Embedding(data=vec, meta=meta)
+
+    if output.mode == "grid":
+        grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
+        if cropped:
+            grid = crop_grid_to_roi(grid, geo_roi)
+            h, w = int(grid.shape[1]), int(grid.shape[2])
+        meta.update(
+            {"grid_hw": (h, w), "grid_kind": "patch_tokens", "cls_removed": bool(cls_removed)}
+        )
+        try:
+            import xarray as xr
+        except Exception as e:
+            raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+        da = xr.DataArray(
+            grid,
+            dims=("d", "y", "x"),
+            coords={"d": np.arange(grid.shape[0]), "y": np.arange(h), "x": np.arange(w)},
+            name="embedding",
+            attrs=meta,
+        )
+        return Embedding(data=da, meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
+
+
 _SATMAEPP_RGB_MEAN = (0.4182007312774658, 0.4214799106121063, 0.3991275727748871)
 _SATMAEPP_RGB_STD = (0.28774282336235046, 0.27541765570640564, 0.2764017581939697)
 
@@ -147,21 +201,15 @@ def _resolve_satmaepp_channel_order(model_id: str) -> str:
     return "rgb"
 
 
-def _satmaepp_resize_short_side(image_size: int) -> int:
-    crop_pct = (224.0 / 256.0) if int(image_size) <= 224 else 1.0
-    return int(float(image_size) / crop_pct)
-
-
 def _satmaepp_preprocess_info(model_id: str, image_size: int) -> dict[str, Any]:
     channel_order = _resolve_satmaepp_channel_order(model_id)
-    resize_short = _satmaepp_resize_short_side(image_size)
     return {
-        "preprocess_name": "satmaepp_fmow_rgb_eval",
+        "preprocess_name": "satmaepp_fmow_rgb_direct",
         "channel_order": channel_order,
         "norm_mean": tuple(float(x) for x in _SATMAEPP_RGB_MEAN),
         "norm_std": tuple(float(x) for x in _SATMAEPP_RGB_STD),
-        "resize_short_side": int(resize_short),
-        "center_crop": int(image_size),
+        "resize_to": int(image_size),
+        "center_crop": None,
     }
 
 
@@ -172,8 +220,15 @@ def _satmaepp_preprocess_tensor_batch(
     channel_order: str,
 ):
     """
-    SatMAE++ preprocessing aligned to official fmow-rgb eval transform:
-      ToTensor -> Normalize(fmow mean/std) -> Resize(short side) -> CenterCrop
+    SatMAE++ preprocessing:
+      ToTensor -> Normalize(fmow mean/std) -> Resize(image_size, image_size)
+
+    NOTE: no center crop. The official fmow-rgb eval transform does
+    Resize(short=256)+CenterCrop(224), but that makes the ViT token grid cover
+    only the central ~87.5% of the input, which breaks the "token grid == full
+    input" invariant the ROI crop-back and tile stitcher rely on (silently
+    dropping FOV and misaligning per-tile grids). Resizing the square input
+    straight to image_size keeps the grid aligned, matching ScaleMAE.
     """
     ensure_torch()
     import torch
@@ -185,13 +240,14 @@ def _satmaepp_preprocess_tensor_batch(
             f"Invalid SatMAE++ channel_order={channel_order!r}; expected 'rgb' or 'bgr'."
         )
 
-    resize_short = _satmaepp_resize_short_side(image_size)
     preprocess = transforms.Compose(
         [
             transforms.ToTensor(),
             transforms.Normalize(mean=_SATMAEPP_RGB_MEAN, std=_SATMAEPP_RGB_STD),
-            transforms.Resize(resize_short, interpolation=transforms.InterpolationMode.BICUBIC),
-            transforms.CenterCrop(image_size),
+            transforms.Resize(
+                (int(image_size), int(image_size)),
+                interpolation=transforms.InterpolationMode.BICUBIC,
+            ),
         ]
     )
 
@@ -433,6 +489,9 @@ class SatMAEPPEmbedder(EmbedderBase):
       - grid: patch token grid (exclude CLS if present)
     """
 
+    # SatMAE++ needs a square token grid → base.fetch_input enlarges a rectangular
+    # ROI to a square of real imagery; the output is cropped back to the ROI.
+    _requires_square_input = True
     DEFAULT_MODEL_ID = "MVRL/satmaepp_ViT-L_pretrain_fmow_rgb"
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
@@ -491,6 +550,7 @@ class SatMAEPPEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmaepp_rgb expects a provider backend (or 'auto').")
@@ -502,8 +562,12 @@ class SatMAEPPEmbedder(EmbedderBase):
         image_size = int(os.environ.get("RS_EMBED_SATMAEPP_IMG", str(self.DEFAULT_IMAGE_SIZE)))
 
         t = temporal_to_range(temporal)
+        # Fetch-square ROI window: from the direct fetch, or carried in fetch_meta
+        # when the API prefetched a square. The output grid is cropped back to it.
+        geo_roi = geo_roi_from_meta(fetch_meta)
         # Fetch RGB patch (optionally reuse pre-fetched raw patch)
         if input_chw is None:
+            spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             rgb_u8 = fetch_s2_rgb_u8_from_provider(
                 spatial=spatial,
                 temporal=t,
@@ -548,40 +612,7 @@ class SatMAEPPEmbedder(EmbedderBase):
             },
         )
 
-        if output.mode == "pooled":
-            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-            meta.update({"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)})
-            return Embedding(data=vec, meta=meta)
-
-        if output.mode == "grid":
-            grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
-            meta.update(
-                {
-                    "grid_hw": (h, w),
-                    "grid_kind": "patch_tokens",
-                    "cls_removed": bool(cls_removed),
-                }
-            )
-
-            try:
-                import xarray as xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(h),
-                    "x": np.arange(w),
-                },
-                name="embedding",
-                attrs=meta,
-            )
-            return Embedding(data=da, meta=meta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return build_token_embedding(tokens, geo_roi=geo_roi, output=output, meta=meta)
 
     def get_embeddings_batch(
         self,
@@ -607,33 +638,19 @@ class SatMAEPPEmbedder(EmbedderBase):
 
         provider = self._get_provider(backend)
         n = len(spatials)
-        rgb_u8_all: list[np.ndarray | None] = [None] * n
-
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray]:
-            rgb = fetch_s2_rgb_u8_from_provider(
-                spatial=sp,
+        # Square-fetch each ROI; geo_rois[i] is the ROI window within the square so
+        # each item's token grid is cropped back to its ROI after the forward.
+        rgb_u8_all, geo_rois = square_fetch_batch(
+            spatials,
+            lambda sq: fetch_s2_rgb_u8_from_provider(
+                spatial=sq,
                 temporal=t,
                 sensor=sensor,
                 out_size=None,
                 provider=provider,
-            )
-            return i, rgb
-
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                _, rgb = _fetch_one(i, sp)
-                rgb_u8_all[i] = rgb
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, rgb = fut.result()
-                    rgb_u8_all[i] = rgb
-
-        for i, x in enumerate(rgb_u8_all):
-            if x is None:
-                raise ModelError(f"Missing fetched patch at index={i}; batch fetch failed.")
+            ),
+            max_workers=self._resolve_fetch_workers(n),
+        )
 
         model, wmeta = _load_satmaepp(model_id=model_id, device=device)
         dev = wmeta.get("device", device)
@@ -641,15 +658,6 @@ class SatMAEPPEmbedder(EmbedderBase):
         pp_info = _satmaepp_preprocess_info(model_id=model_id, image_size=image_size)
 
         out: list[Embedding | None] = [None] * n
-        want_grid = output.mode == "grid"
-        xr_mod = None
-        if want_grid:
-            try:
-                import xarray as xr  # type: ignore
-
-                xr_mod = xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
 
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)
@@ -677,39 +685,9 @@ class SatMAEPPEmbedder(EmbedderBase):
                         **pp_info,
                     },
                 )
-                if output.mode == "pooled":
-                    vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-                    meta.update(
-                        {
-                            "pooling": f"patch_{output.pooling}",
-                            "cls_removed": bool(cls_removed),
-                        }
-                    )
-                    out[i] = Embedding(data=vec, meta=meta)
-                elif output.mode == "grid":
-                    assert xr_mod is not None
-                    grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
-                    meta.update(
-                        {
-                            "grid_hw": (h, w),
-                            "grid_kind": "patch_tokens",
-                            "cls_removed": bool(cls_removed),
-                        }
-                    )
-                    da = xr_mod.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(h),
-                            "x": np.arange(w),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
-                    out[i] = Embedding(data=da, meta=meta)
-                else:
-                    raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = build_token_embedding(
+                    tokens, geo_roi=geo_rois[i], output=output, meta=meta
+                )
 
         if any(e is None for e in out):
             raise ModelError("satmaepp_rgb batch inference produced incomplete outputs.")
@@ -759,15 +737,9 @@ class SatMAEPPEmbedder(EmbedderBase):
         pp_info = _satmaepp_preprocess_info(model_id=model_id, image_size=image_size)
 
         out: list[Embedding | None] = [None] * len(spatials)
-        want_grid = output.mode == "grid"
-        xr_mod = None
-        if want_grid:
-            try:
-                import xarray as xr  # type: ignore
-
-                xr_mod = xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+        # User-supplied inputs carry no fetch-square ROI, so each output covers the
+        # whole frame (build_token_embedding reproduces the legacy token path).
+        geo_roi = geo_roi_from_meta(None)
 
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
@@ -797,39 +769,7 @@ class SatMAEPPEmbedder(EmbedderBase):
                         **pp_info,
                     },
                 )
-                if output.mode == "pooled":
-                    vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-                    meta.update(
-                        {
-                            "pooling": f"patch_{output.pooling}",
-                            "cls_removed": bool(cls_removed),
-                        }
-                    )
-                    out[i] = Embedding(data=vec, meta=meta)
-                elif output.mode == "grid":
-                    assert xr_mod is not None
-                    grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
-                    meta.update(
-                        {
-                            "grid_hw": (h, w),
-                            "grid_kind": "patch_tokens",
-                            "cls_removed": bool(cls_removed),
-                        }
-                    )
-                    da = xr_mod.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(h),
-                            "x": np.arange(w),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
-                    out[i] = Embedding(data=da, meta=meta)
-                else:
-                    raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = build_token_embedding(tokens, geo_roi=geo_roi, output=output, meta=meta)
 
         if any(e is None for e in out):
             raise ModelError("satmaepp_rgb batch inference produced incomplete outputs.")
