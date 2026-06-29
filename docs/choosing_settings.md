@@ -42,7 +42,7 @@ This is often the first and most impactful quality-versus-runtime decision.
 | Runtime | Fastest path | Scales with tile count |
 
 !!! warning "Patch-token grids are not always tile-friendly"
-    For image-level ViT patch-token grid models (`scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`), `OutputSpec.grid()` is not a seamless dense geospatial field. With `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` and emits a warning. Explicit `input_prep="tile"` is still allowed but emits a warning and metadata marks the tiled grid as seam-prone. Explicit `input_prep="resize"` is the recommended path and does not warn.
+    For image-level ViT patch-token grid models (`scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`), `OutputSpec.grid()` is not a seamless dense geospatial field. These models tile by default like every other model: `input_prep=None` or `input_prep="auto"` resolves to `input_prep="tile"`. Because tiled patch-token mosaics can show stitching seams at tile boundaries, the default/auto path and an explicit `input_prep="tile"` both emit a warning on `grid` output. Pass `input_prep="resize"` for a seamless (downsampled) grid — the recommended seamless opt-in, which does not warn.
 
 See also [API Specs — InputPrepSpec](api_specs.md#inputprepspec) and [Common Workflows](workflows.md).
 

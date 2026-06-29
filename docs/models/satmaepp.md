@@ -25,10 +25,10 @@
 
 **`pooled`**: RGB path records `patch_mean`/`patch_max`; S2-10B path records `group_tokens_mean`/`group_tokens_max` reflecting its grouped-token runtime.
 
-**`grid`**: `satmaepp` returns a standard ViT patch-token grid `(D,H,W)`; `satmaepp_s2_10b` reduces grouped tokens across channel groups then reshapes to `(D,H,W)`. Default/auto input preparation resolves to resize, and metadata records `input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
+**`grid`**: `satmaepp` returns a standard ViT patch-token grid `(D,H,W)`; `satmaepp_s2_10b` reduces grouped tokens across channel groups then reshapes to `(D,H,W)`. Default/auto input preparation resolves to tile (and warns about seams on grid output), and metadata records `input_prep.model_policy="tile_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
 
 !!! warning "Resize is the default for `grid`"
-    SatMAE++ grid outputs are image-level ViT token grids, not seamless dense geospatial fields. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit `input_prep="resize"` is the recommended no-warning path.
+    SatMAE++ grid outputs are image-level ViT token grids, not seamless dense geospatial fields. Like every other model, SatMAE++ tiles by default: `input_prep=None` or `input_prep="auto"` resolves to `input_prep="tile"`. Because tiled patch-token mosaics can show stitching seams at tile boundaries, the default/auto path and an explicit `input_prep="tile"` both emit a warning on `grid` output. Pass `input_prep="resize"` for a seamless (downsampled) grid — that is the recommended seamless opt-in and emits no warning.
 
 ---
 
@@ -59,8 +59,8 @@ flowchart LR
 
 ### Preprocessing Pipeline
 
-!!! warning "Resize is the default for `grid`"
-    The pipeline below shows the default `input_prep="resize"` path. Explicit `input_prep="tile"` can split large ROIs into independent image-level token grids, but those grids can show stitching seams and are marked as experimental in metadata.
+!!! warning "Tiling is the default for `grid`"
+    SatMAE++ tiles by default like every other model, so the pipeline below shows the default `input_prep="tile"` path. Tiled image-level token grids can show stitching seams at tile boundaries, so the default/auto and explicit-tile paths warn on `grid` output. Pass `input_prep="resize"` for a seamless (downsampled) grid; that path emits no warning.
 
 ```mermaid
 flowchart LR
@@ -123,7 +123,7 @@ flowchart LR
 ### Preprocessing + Runtime Loading
 
 !!! warning "Resize is the default for `grid`"
-    The 10-band grouped-channel path has the same grid caveat: grouped tokens are reduced and reshaped after an image-level forward pass. Explicit `input_prep="tile"` is allowed, but tiled grid mosaics are not recommended for seamless spatial outputs. Explicit `input_prep="resize"` is the recommended no-warning path.
+    The 10-band grouped-channel path has the same grid caveat: grouped tokens are reduced and reshaped after an image-level forward pass. It tiles by default like every other model, and tiled grid mosaics can show stitching seams, so the default/auto and explicit-tile paths warn on `grid` output. Pass `input_prep="resize"` for a seamless (downsampled) grid; that path emits no warning.
 
 ```mermaid
 flowchart LR
@@ -231,5 +231,5 @@ For export jobs, the same setting goes through
 
 - RGB variant is sensitive to `CHANNEL_ORDER` (`rgb`/`bgr`) — the original eval preprocessing was BGR-based.
 - S2-10B variant's `GRID_REDUCE` changes the output semantics; `mean` and `max` are not interchangeable.
-- Default/auto `grid` requests resolve to resize because tiled SatMAE++ patch-token grids can show stitching seams.
+- Default/auto `grid` requests tile (like every model) and warn because tiled SatMAE++ patch-token grids can show stitching seams; pass `input_prep="resize"` for a seamless (downsampled) grid.
 - The two variants (`satmaepp` and `satmaepp_s2_10b`) are separate model IDs with different preprocessing, not a config switch on the same model.

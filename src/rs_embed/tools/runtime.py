@@ -98,18 +98,31 @@ def _is_image_level_vit_grid_model(model_n: str) -> bool:
     return str(model_n).strip().lower() in _IMAGE_LEVEL_VIT_GRID_MODELS
 
 
+def _warn_image_level_vit_tiled_grid_seam(model_l: str) -> None:
+    warnings.warn(
+        f"{model_l} grid output stitches image-level ViT patch tokens into a tiled "
+        "mosaic, which can show seams at tile boundaries. Pass input_prep='resize' for "
+        "a seamless (downsampled) grid.",
+        UserWarning,
+        stacklevel=4,
+    )
+
+
 def resolve_model_aware_input_prep(
     *,
     model_n: str,
     input_prep: Any | None,
     output: OutputSpec,
 ) -> tuple[Any | None, Any, str, str | None]:
-    """Resolve input prep with model-specific safety defaults.
+    """Resolve input prep with a uniform tile default.
 
-    Some image-level ViT adapters expose patch-token grids. Their tiled grid
-    output is useful for experiments but is not a reliable seamless spatial
-    mosaic, so unset/auto input prep resolves to resize for those models.
-    Explicit tile requests still run, but callers get a warning.
+    Image-level ViT adapters expose patch-token grids. Like every other model,
+    they tile by default so on-the-fly inputs keep native resolution. Tiled
+    grids can show stitching seams at tile boundaries, but that is an inherent
+    property of mosaicking independent patch-token tiles rather than a bug in a
+    particular adapter, so we surface a lightweight heads-up (pointing at
+    ``resize`` for a seamless, downsampled grid) instead of overriding the
+    caller's prep. ``resize`` is the only seam-free path and stays silent.
     """
     from .tiling import _resolve_input_prep_spec
 
@@ -120,29 +133,19 @@ def resolve_model_aware_input_prep(
         return input_prep, resolved, requested_mode, None
 
     if input_prep is None or str(resolved.mode) == "auto":
-        effective = InputPrepSpec.resize()
+        # Resolve the unset/auto default to an explicit tile so this model
+        # behaves like the package-wide default rather than running auto's
+        # long-axis-tile/short-axis-resize heuristic.
+        effective = InputPrepSpec.tile()
         effective_resolved = _resolve_input_prep_spec(effective)
-        policy = "resize_default_for_image_level_vit_patch_grid"
+        policy = "tile_default_for_image_level_vit_patch_grid"
         if output.mode == "grid":
-            warnings.warn(
-                f"{model_l} grid output uses image-level ViT patch tokens; "
-                "input_prep unset/auto resolves to resize by default because tiled grids "
-                "can show stitching seams. Pass input_prep='tile' explicitly for "
-                "experimental tiled visualization.",
-                UserWarning,
-                stacklevel=3,
-            )
+            _warn_image_level_vit_tiled_grid_seam(model_l)
         return effective, effective_resolved, requested_mode, policy
 
     if str(resolved.mode) == "tile" and output.mode == "grid":
-        warnings.warn(
-            f"{model_l} tiled grid output is experimental: image-level ViT patch tokens "
-            "can show stitching seams. Prefer pooled output or resize-mode grid unless "
-            "you explicitly need tiled visualization.",
-            UserWarning,
-            stacklevel=3,
-        )
-        return input_prep, resolved, requested_mode, "explicit_tile_not_recommended_for_grid"
+        _warn_image_level_vit_tiled_grid_seam(model_l)
+        return input_prep, resolved, requested_mode, "explicit_tile_for_image_level_vit_patch_grid"
 
     return input_prep, resolved, requested_mode, None
 
@@ -457,17 +460,17 @@ def _annotate_image_level_vit_grid_embedding(
         {
             "prep_version": INPUT_PREP_VERSION,
             "requested_mode": str(ctx.input_prep_requested_mode),
-            "resolved_mode": str(getattr(ctx.input_prep_resolved, "mode", "resize")),
+            "resolved_mode": str(getattr(ctx.input_prep_resolved, "mode", "tile")),
         },
     )
     if isinstance(prep, dict):
         prep.setdefault("prep_version", INPUT_PREP_VERSION)
         prep.setdefault("requested_mode", str(ctx.input_prep_requested_mode))
-        prep.setdefault("resolved_mode", str(getattr(ctx.input_prep_resolved, "mode", "resize")))
+        prep.setdefault("resolved_mode", str(getattr(ctx.input_prep_resolved, "mode", "tile")))
         if ctx.input_prep_model_policy is not None:
             prep["model_policy"] = str(ctx.input_prep_model_policy)
             prep["resolved_by_model_policy"] = (
-                str(ctx.input_prep_model_policy) == "resize_default_for_image_level_vit_patch_grid"
+                str(ctx.input_prep_model_policy) == "tile_default_for_image_level_vit_patch_grid"
             )
         if output.mode == "grid":
             prep["tiled_grid_seam_risk"] = "high"

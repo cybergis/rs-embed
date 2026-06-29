@@ -41,7 +41,7 @@ The adapter converts raw SR `0..10000` to `uint8` RGB before model preprocessing
 ## Preprocessing Pipeline
 
 !!! warning "Resize is the default for `grid`"
-    SatMAE `grid` output is an image-level ViT patch-token grid, not a seamless dense geospatial field. For `input_prep=None` or `input_prep="auto"`, `rs-embed` resolves to `input_prep="resize"` by default and emits a warning. Explicit `input_prep="tile"` is still allowed for experimental visualization, but metadata marks it as seam-prone and not recommended for grid mosaics. Explicit `input_prep="resize"` is the recommended no-warning path.
+    SatMAE `grid` output is an image-level ViT patch-token grid, not a seamless dense geospatial field. Like every other model, SatMAE tiles by default: `input_prep=None` or `input_prep="auto"` resolves to `input_prep="tile"`. Because tiled patch-token mosaics can show stitching seams at tile boundaries, the default/auto path and an explicit `input_prep="tile"` both emit a warning on `grid` output. Pass `input_prep="resize"` for a seamless (downsampled) grid — that is the recommended seamless opt-in and emits no warning.
 
 ```mermaid
 flowchart LR
@@ -60,7 +60,7 @@ flowchart LR
 
 **`pooled`**: pools SatMAE patch tokens with `mean` or `max`, after removing a CLS token when present.
 
-**`grid`**: reshapes SatMAE patch tokens to `(D,H,W)`. Default/auto input preparation resolves to resize, and metadata records `input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
+**`grid`**: reshapes SatMAE patch tokens to `(D,H,W)`. Default/auto input preparation resolves to tile (and warns about seams on grid output), and metadata records `input_prep.model_policy="tile_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
 
 ---
 
@@ -132,5 +132,5 @@ export RS_EMBED_SATMAE_IMG=224
 
 - Provider-only — `backend="tensor"` is not supported.
 - Requires `rshf` with a compatible `SatMAE` wrapper exposing `forward_encoder`.
-- Default/auto `grid` requests resolve to resize because tiled SatMAE patch-token grids can show stitching seams.
+- Default/auto `grid` requests tile (like every model) and warn because tiled SatMAE patch-token grids can show stitching seams; pass `input_prep="resize"` for a seamless (downsampled) grid.
 - The adapter auto-removes the CLS token; if `rshf` changes its output format, grid reshape may break.

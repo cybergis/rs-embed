@@ -98,7 +98,7 @@ flowchart LR
 
 **`pooled`**: returns the projected CLIP image embedding from `encode_image` (e.g. 512-d for the default ViT-B/32 checkpoint) — the canonical RemoteCLIP visual representation that lives in the shared image/text space, suitable for similarity search and retrieval. This is computed identically across the single (`get_embedding`), batch, and tiled paths, so the output dimensionality and values do not depend on ROI size or which API you call.
 
-**`grid`**: exposes the ViT patch-token layout, extracted from open_clip's `forward_intermediates` as the deepest dense feature map (`[D, Ht, Wt]`, e.g. `768×7×7` for ViT-B/32 @ 224; `tokens_kind="tokens_intermediates"`). The single and batch paths produce identical grids. Default/auto input preparation resolves to resize, and metadata records `input_prep.model_policy="resize_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
+**`grid`**: exposes the ViT patch-token layout, extracted from open_clip's `forward_intermediates` as the deepest dense feature map (`[D, Ht, Wt]`, e.g. `768×7×7` for ViT-B/32 @ 224; `tokens_kind="tokens_intermediates"`). The single and batch paths produce identical grids. RemoteCLIP follows the package-wide default, so `input_prep=None`/`"auto"` resolves to `"tile"`; unlike the dedicated image-level ViT grid adapters (`satmae`, `scalemae`, ...) it is not in the seam-warning set, so it tiles silently. Its grid is nonetheless an image-level CLIP ViT patch-token layout rather than a seamless dense field, so pass `input_prep="resize"` for a single resized forward pass when a seamless grid matters.
 
 ---
 
