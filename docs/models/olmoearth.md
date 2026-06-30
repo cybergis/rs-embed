@@ -5,9 +5,9 @@
 | Field                | Value                                                                                                     |
 | -------------------- | --------------------------------------------------------------------------------------------------------- |
 | Model ID             | `olmoearth`                                                                                               |
-| Family / Backbone    | OlmoEarth v1/v1.1 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset                       |
+| Family / Backbone    | OlmoEarth v1/v1.1/v1.2 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset                  |
 | Adapter type         | `on-the-fly`                                                                                              |
-| Model config keys    | `variant` (default: `tiny_v1_1`), `patch_size` (default: `4`), `image_size` (default: `256`), `shape_adjust` (default: `pad`) |
+| Model config keys    | `variant` (default: `base_v1_2`), `patch_size` (default: `4`), `image_size` (default: `256`), `shape_adjust` (default: `pad`) |
 | Training alignment   | High (S2 L2A 12-band; native 10 m resolution; per-band mean±2σ normalization matches training pipeline)   |
 
 !!! success "OlmoEarth In 30 Seconds"
@@ -98,12 +98,18 @@ Selects the model size and version. Weights are automatically downloaded from Hu
 | `nano_v1_1`  | v1.1    | 128         | 4     | `allenai/OlmoEarth-v1_1-Nano`      |
 | `tiny_v1_1`  | v1.1    | 192         | 12    | `allenai/OlmoEarth-v1_1-Tiny`      |
 | `base_v1_1`  | v1.1    | 768         | 12    | `allenai/OlmoEarth-v1_1-Base`      |
+| `nano_v1_2`  | v1.2    | 128         | 4     | `allenai/OlmoEarth-v1_2-Nano`      |
+| `tiny_v1_2`  | v1.2    | 192         | 12    | `allenai/OlmoEarth-v1_2-Tiny`      |
+| `small_v1_2` | v1.2    | 384         | 12    | `allenai/OlmoEarth-v1_2-Small`     |
+| `base_v1_2`  | v1.2    | 768         | 12    | `allenai/OlmoEarth-v1_2-Base`      |
 
-!!! note "v1 vs v1.1 architecture difference"
+The default variant is **`base_v1_2`**. v1.2 requires `olmoearth-pretrain-minimal>=0.0.6`.
+
+!!! note "v1 vs v1.1/v1.2 architecture difference"
     v1 uses a Conv2D-based patch embedding, producing 3 separate band-set token groups per spatial location.
-    v1.1 uses a linear patch embedding (`use_linear_patch_embed=True`) that merges band sets into a single token stream. Both versions produce the same output dimensionality after pooling.
+    v1.1 and v1.2 use a linear patch embedding (`use_linear_patch_embed=True`) that merges band sets into a single token stream. All versions produce the same output dimensionality after pooling. v1.2 adds a new `small` size (384-d) and is not released in a `large` size.
 
-Short aliases are accepted: `nano_11`, `tiny_11`, `base_11` for v1.1 variants; `nano_v1`, `tiny_v1`, `base_v1`, `large_v1` for v1 variants.
+Short aliases are accepted: `nano_12`, `tiny_12`, `small_12`, `base_12` (and the bare `small`, which is v1.2-only) for v1.2 variants; `nano_11`, `tiny_11`, `base_11` for v1.1 variants; `nano_v1`, `tiny_v1`, `base_v1`, `large_v1` for v1 variants.
 
 ### `patch_size`
 
@@ -218,7 +224,7 @@ For defaults (256, patch_size=4): `64 × 64` grid.
 
 | Variable                         | Default  | Effect                                              |
 | -------------------------------- | -------- | --------------------------------------------------- |
-| `RS_EMBED_OLMOEARTH_VARIANT`     | `tiny_v1_1`   | Default model variant when `model_config` not given |
+| `RS_EMBED_OLMOEARTH_VARIANT`     | `base_v1_2`   | Default model variant when `model_config` not given |
 | `RS_EMBED_OLMOEARTH_PATCH_SIZE`  | `4`      | Default patch size when `model_config` not given    |
 | `RS_EMBED_OLMOEARTH_IMAGE_SIZE`  | `256`    | Default image resize target                         |
 | `RS_EMBED_OLMOEARTH_SHAPE_ADJUST` | `pad`   | How non-square ROIs are made square (`pad` / `crop`) |
@@ -267,7 +273,7 @@ emb = get_embedding(
     temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
     output=OutputSpec.grid(),
     backend="gee",
-    variant="tiny_v1_1",
+    variant="tiny_v1_2",
     modality="s1",
 )
 ```

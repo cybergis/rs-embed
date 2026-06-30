@@ -33,6 +33,15 @@ from rs_embed.embedders import onthefly_olmoearth as oe
         ("tiny_11", "tiny_v1_1"),
         ("base_v1_1", "base_v1_1"),
         ("base_11", "base_v1_1"),
+        ("nano_v1_2", "nano_v1_2"),
+        ("tiny_v1_2", "tiny_v1_2"),
+        ("small_v1_2", "small_v1_2"),
+        ("base_v1_2", "base_v1_2"),
+        ("BASE_V1_2", "base_v1_2"),
+        ("base_12", "base_v1_2"),
+        ("small_12", "small_v1_2"),
+        ("small", "small_v1_2"),  # "small" is v1.2-only
+        ("base-v1.2", "base_v1_2"),  # dashes/dots normalized to underscores
     ],
 )
 def test_normalize_variant_valid(raw, expected):
@@ -54,9 +63,9 @@ def test_resolve_variant_from_model_config():
     assert oe._resolve_variant({"variant": "nano_v1_1"}) == "nano_v1_1"
 
 
-def test_resolve_variant_defaults_to_tiny_v1_1():
-    assert oe._resolve_variant(None) == "tiny_v1_1"
-    assert oe._resolve_variant({}) == "tiny_v1_1"
+def test_resolve_variant_defaults_to_base_v1_2():
+    assert oe._resolve_variant(None) == "base_v1_2"
+    assert oe._resolve_variant({}) == "base_v1_2"
 
 
 def test_resolve_variant_env_fallback(monkeypatch):
@@ -71,7 +80,7 @@ def test_resolve_variant_model_config_overrides_env(monkeypatch):
 
 def test_resolve_variant_env_auto_gives_default(monkeypatch):
     monkeypatch.setenv("RS_EMBED_OLMOEARTH_VARIANT", "auto")
-    assert oe._resolve_variant(None) == "tiny_v1_1"
+    assert oe._resolve_variant(None) == "base_v1_2"
 
 
 # ---------------------------------------------------------------------------
@@ -1125,9 +1134,9 @@ def test_embedding_meta_has_required_fields(monkeypatch):
     assert meta["model"] == "olmoearth"
     assert meta["type"] == "on_the_fly"
     assert meta["backend"] == "gee"
-    assert meta["variant"] == "tiny_v1_1"
-    assert meta["model_size"] == "tiny"
-    assert meta["model_version"] == "v1.1"
+    assert meta["variant"] == "base_v1_2"
+    assert meta["model_size"] == "base"
+    assert meta["model_version"] == "v1.2"
     assert meta["patch_size"] == oe._DEFAULT_PATCH_SIZE
     assert meta["hf_repo"] is not None
     assert "temporal_range" in meta
