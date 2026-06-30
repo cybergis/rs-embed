@@ -17,7 +17,7 @@
 
     In `rs-embed`, its most important characteristics are:
 
-    - **strict** `TemporalSpec.year(...)` temporal mode; `range` is explicitly not supported in v0.1: see [Retrieval Contract](#retrieval-contract)
+    - `TemporalSpec.year(...)` is the intended temporal mode; `range(...)` is also accepted and resolves to its **start year** (with a `UserWarning`): see [Retrieval Contract](#retrieval-contract)
     - `fetch.scale_m` / `sensor.scale_m` still controls provider *sampling* resolution even though the underlying product is precomputed: see [Environment Variables / Tuning Knobs](#environment-variables-tuning-knobs)
     - product fill value `-9999` is automatically converted to `NaN` in the returned grid: see [Retrieval Pipeline](#retrieval-pipeline)
 
@@ -29,7 +29,7 @@
 | ------------------- | ------------------------------------------------------------------------ |
 | Backend             | provider (`auto` recommended) — provider-sampled, not local              |
 | `SpatialSpec`       | `BBox` or `PointBuffer` via standard provider sampling                   |
-| `TemporalSpec`      | **strict** `TemporalSpec.year(...)` — `range` not supported in v0.1      |
+| `TemporalSpec`      | `TemporalSpec.year(...)` (preferred); `range(...)` accepted → uses start year + `UserWarning` |
 | Collection          | `GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL` (fixed)                           |
 | Sampling resolution | `fetch.scale_m` or `sensor.scale_m` (default `10 m`)                     |
 | Composite           | `mosaic` (fixed)                                                         |
@@ -46,6 +46,9 @@ flowchart LR
     FETCH --> POOL["pooled: spatial pooling"]
     FETCH --> GRID["grid: (D,H,W)\nwith band-name coords"]
 ```
+
+!!! note "Large requests tile automatically"
+    When a `BBox`'s estimated pixel footprint exceeds the GEE `sampleRectangle` limit, the region is split into a sub-`BBox` grid, fetched tile-by-tile, and concatenated — so there is no hard cap on request size, and the result matches a single large fetch. `gse` manages this tiling itself; passing `input_prep="tile"` only emits a `UserWarning` clarifying that.
 
 ---
 
@@ -125,6 +128,6 @@ fetch = FetchSpec(scale_m=30)
 
 ## Reference
 
-- Only `TemporalSpec.year(...)` is supported — `range(...)` raises an error.
+- `TemporalSpec.year(...)` is the intended input; `range(...)` is accepted and resolves to its start year (emitting a `UserWarning`).
 - Fill regions in the source product use `-9999`, which the adapter converts to `NaN` — downstream code must handle NaN values.
 - Resolution is controlled by `fetch.scale_m` (or `sensor.scale_m`) at the provider level, not by the adapter.

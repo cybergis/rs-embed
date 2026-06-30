@@ -28,7 +28,7 @@
 | ------------------ | ---------------------------------------------------------------------------------- |
 | Backend            | `auto` (legacy `local` still accepted)                                             |
 | `SpatialSpec`      | `BBox` direct, or `PointBuffer` converted to EPSG:4326 bbox                        |
-| `TemporalSpec`     | **strict** `TemporalSpec.year(2021)` — only year 2021 supported                    |
+| `TemporalSpec`     | `TemporalSpec.year(2021)`; `range(...)` accepted → uses start year (+`UserWarning`), which must be `2021` else raises |
 | Source             | `torchgeo/copernicus_embed` local GeoTIFF                                          |
 | Product CRS        | fixed `EPSG:4326` 0.25° grid                                                       |
 | Product resolution | 0.25° (~28 km at equator)                                                          |

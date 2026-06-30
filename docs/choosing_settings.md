@@ -21,7 +21,7 @@ This page helps you decide **which knobs to turn and when**.
 | Use a larger backbone | `variant="large"` (if available) | More GPU memory and latency |
 | Increase image resolution | Model-specific `..._IMG` env vars | Compute grows quickly with image size |
 | Get denser spatial tokens | Model-specific `..._PATCH` env vars (smaller value) | Higher token count and memory |
-| Capture finer temporal detail | `RS_EMBED_ANYSAT_FRAMES`; for `galileo`, widen the temporal window (frames auto-scale, ≤12) or pin `RS_EMBED_GALILEO_FRAMES` | More frames = more runtime |
+| Capture finer temporal detail | Widen the temporal window (window-adaptive models auto-scale frames) or raise the fixed frame count — see [Temporal Sampling](temporal_sampling.md) | More frames = more runtime |
 | Keep spatial structure in output | `OutputSpec.grid()` instead of `.pooled()` | Larger outputs, heavier downstream processing |
 
 ---
@@ -111,16 +111,6 @@ THOR exposes several user-facing knobs: `variant`, `input_prep`, `RS_EMBED_THOR_
 
 For exact constraints, see [THOR](models/thor.md).
 
-### AnySat and Galileo
-
-For multi-frame models, frame count is part of the model design.
-
-- `anysat` uses a fixed frame count: increase `RS_EMBED_ANYSAT_FRAMES` for a finer temporal summary.
-- `galileo` derives its frame count from the window (`temporal_mode="auto"`, ~30-day frames, ≤12) to match its monthly cadence — widen the temporal window for more frames, or pin `RS_EMBED_GALILEO_FRAMES` / `n_frames=` for a manual count. Windows beyond ~1 year are equal-divided with an out-of-distribution warning. See [Galileo › Temporal Sampling](models/galileo.md#temporal-sampling).
-- Increasing `..._IMG` preserves more per-frame detail.
-- Changing `..._PATCH` alters grid density and often has divisibility constraints.
-
-For exact details, see [AnySat](models/anysat.md) and [Galileo](models/galileo.md).
 
 ---
 
@@ -136,27 +126,25 @@ emb = get_embedding(
     spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
     temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
     output=OutputSpec.pooled(),
-    backend="gee",
 )
 ```
 
 ### 2. Spend extra compute where it helps
 
 ```python
-from rs_embed import InputPrepSpec, OutputSpec, PointBuffer, TemporalSpec, get_embedding
+from rs_embed import OutputSpec, PointBuffer, TemporalSpec, get_embedding
 
 emb = get_embedding(
     "thor",
-    spatial=spatial_point,
-    temporal=temporal_range,
+    spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=2048),
+    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
     output=OutputSpec.grid(),
-    modality="s2",
-    input_prep=InputPrepSpec("tile", max_tiles=300),
+    variant= "small",  # select model backbone size
+    modality="s2",  # select input data modality
+    input_prep="tile",  # select preprocess method
 )
 ```
 
-This second call is not just "the same run but more expensive".
-It changes output structure, ROI handling, and spatial detail together — document it as a different setting profile.
 
 ### 3. Inspect what actually ran
 
