@@ -470,7 +470,19 @@ def inspect_fetch_result(
     from ..tools.serialization import jsonable as _jsonable
 
     x = normalize_input_array(x_chw, expected_channels=len(sensor.bands), name=name)
-    x_inspect = x[0] if x.ndim == 4 else x
+    inspected_frame: int | None = None
+    if x.ndim == 4:
+        # Multi-frame (TCHW): empty temporal bins are NaN-sentinel frames that the
+        # embedder drops downstream. Inspect the first frame that carries any finite
+        # data instead of a blind x[0], so an all-NaN sentinel doesn't trigger
+        # spurious "All-NaN slice" / "Mean of empty slice" warnings in inspect_chw.
+        inspected_frame = next(
+            (i for i in range(int(x.shape[0])) if np.isfinite(x[i]).any()),
+            0,  # all frames empty -> fall back to frame 0 so inspect_chw flags it
+        )
+        x_inspect = x[inspected_frame]
+    else:
+        x_inspect = x
     rep = inspect_chw(
         x_inspect,
         name=name,
@@ -484,4 +496,5 @@ def inspect_fetch_result(
         "sensor": _jsonable(sensor),
         "input_ndim": int(x.ndim),
         "n_frames": (int(x.shape[0]) if x.ndim == 4 else None),
+        "inspected_frame": inspected_frame,
     }

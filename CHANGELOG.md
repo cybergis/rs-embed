@@ -12,7 +12,7 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 - **`satmaepp_s2_10b` is no longer a standalone model; the Sentinel-2 10-band path is now the `"s2_10b"` modality of `satmaepp`.** SatMAE++'s two sensor configurations live under one model name, selected with `modality=` (the codebase's mechanism for same-model/different-sensor, like `terrafm`'s s2/s1): `get_embedding("satmaepp")` is the default fMoW-RGB 3-band path and `get_embedding("satmaepp", modality="s2_10b")` is the grouped-channel 10-band path; for exports use `export_batch(..., per_model_modalities={"satmaepp": "s2_10b"})`. The `satmaepp_s2_10b`, `satmaepp_s2`, and `satmaepp_sentinel10` model names (and their `variant`/env knobs) are removed — **migrate to `modality="s2_10b"`.** Embeddings and metadata for the 10-band path are unchanged (now labelled under `model="satmaepp"`); the model catalog drops from 20 to 19 entries.
 
-## [0.2.0] — 2026-06-29
+## [0.2.0] — 2026-06-30
 
 This release adds the OlmoEarth model family, makes the temporal models (`prithvi`, `galileo`, `olmoearth`) sample window-adaptively by default, and fixes several `export_batch` correctness issues where a point's embedding differed between the single and batch/tiled paths. Some defaults that change embedding behavior are noted below; pin explicit options where strict reproducibility across versions is required.
 
@@ -43,6 +43,7 @@ This release adds the OlmoEarth model family, makes the temporal models (`prithv
 - **Multi-temporal models no longer silently hide how many distinct frames a window actually had.** All five temporal adapters (`olmoearth`, `galileo`, `prithvi`, `anysat`, `agrifm`) now record frame-diversity metadata (`n_distinct_frames`/`n_backfilled_frames`, or `n_bins`/`dropped_bins` for `olmoearth`) and emit a `UserWarning` when real frames are sparser than requested — across the single, tiled, batch, and `export_batch` paths.
 - **`prithvi` no longer silently degrades to a single composite on the `tile`/`auto`/`export_batch` paths.** It now overrides `fetch_input` to prefetch the same window-adaptive `[T,6,H,W]` raw-DN series as the direct path (single-frame windows defer to the generic composite fetch), so `num_frames` is identical across all APIs.
 - **`olmoearth` `temporal_mode="multi"` silently dropped everything beyond the first ~12 months.** Windows over ~1 year are now equal-divided into 12 frames covering the whole period, surfaced via `temporal_sampling="equal_divided"` and a `UserWarning`; ≤12-month windows keep the in-distribution 30-day cadence.
+- **`export_batch` emitted spurious `All-NaN slice` RuntimeWarnings for multi-temporal models with an empty leading temporal bin.** Input inspection now stats the first frame with finite data instead of a blind frame 0.
 - **`remoteclip` `pooled` output was inconsistent between single and batch/tiled paths** (768-d raw token mean vs 512-d projected CLIP). The single path now also uses `encode_image`, so `pooled` is the canonical 512-d CLIP embedding everywhere, and `grid` extraction was unified across paths.
 - **Combined `export_batch` manifest lost all but the first model entry.** `combined_write_checkpoint` returned a copy instead of the caller's mutated dict, dropping every model after the first; it now merges the writer's path keys back into the original manifest. Per-item exports were unaffected.
 - **`tessera` no longer re-fetches every tile twice per point.** `_mosaic_and_crop_strict_roi` invoked its `tiles_rows_factory` twice (re-downloading on a cold cache); the factory is now materialized once and shared, roughly halving first-chunk I/O at the cost of holding the point's tile blocks in memory simultaneously.
@@ -52,6 +53,7 @@ This release adds the OlmoEarth model family, makes the temporal models (`prithv
 - **`gse` batch inference now runs concurrently on CPU in `export_batch`** instead of only when a GPU was detected, benefiting precomputed models that do their own remote IO.
 - **`get_embedding`/`get_embeddings_batch` no longer raise on `input_prep='tile'` with `model='gse'`, and `export_batch` no longer ignores `input_prep` for GSE.** All now emit a `UserWarning` clarifying that GSE manages its own tiling.
 - **`input_prep='tile'` no longer disables `get_embeddings_batch` for precomputed models in `export_batch`.** The `allow_nonresize` guard now applies only to prefetched-input batch APIs; no-input batch APIs are unaffected.
+
 
 ## [0.1.3] — 2026-04-12
 
