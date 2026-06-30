@@ -101,13 +101,16 @@ nav:
           - SatMAE: models/satmae.md
           - SatMAE++: models/satmaepp.md
   - API:
-      - Overview: api.md
-      - Specs & Data Structures: api_specs.md
-      - Temporal Sampling: temporal_sampling.md
-      - Embedding API: api_embedding.md
-      - Export API: api_export.md
-      - Load API: api_load.md
-      - Inspect API: api_inspect.md
+      - Reference:
+          - Overview: api.md
+          - Specs & Data Structures: api_specs.md
+          - Embedding API: api_embedding.md
+          - Export API: api_export.md
+          - Load API: api_load.md
+          - Inspect API: api_inspect.md
+      - Concept:
+          - Temporal Sampling: temporal_sampling.md
+          - Spatial ROI Handling: spatial_roi.md
   - Extending:
       - Architecture: architecture.md
       - Overview: extending.md

@@ -18,6 +18,9 @@ pip install rs-embed
 
 # add [terratorch] only if you use terramind
 pip install "rs-embed[terratorch]"
+
+# add [olmoearth] only if you use olmoearth
+pip install "rs-embed[olmoearth]"
 ```
 
 For local development:
@@ -51,8 +54,7 @@ emb = get_embedding(
     "tessera",
     spatial=PointBuffer(lon=121.5, lat=31.2, buffer_m=1024),
     temporal=TemporalSpec.year(2024),
-    output=OutputSpec.pooled(pooling="mean"),
-    backend="auto",
+    output=OutputSpec.pooled(pooling="mean")
 )
 
 vec = emb.data   # numpy ndarray, shape (D,) — e.g. (128,) for tessera
@@ -79,8 +81,7 @@ embs = get_embeddings_batch(
     "tessera",
     spatials=spatials,
     temporal=TemporalSpec.year(2024),
-    output=OutputSpec.pooled(),
-    backend="auto",
+    output=OutputSpec.pooled()
 )
 ```
 
@@ -105,9 +106,8 @@ spatials = [
 export_batch(
     spatials=spatials,
     temporal=TemporalSpec.year(2024),
-    models=["tessera"],
+    models=["tessera","gse"],
     target=ExportTarget.per_item("exports", names=["p1", "p2"]),
-    backend="auto",
     config=ExportConfig(
         save_inputs=False,
         save_embeddings=True,

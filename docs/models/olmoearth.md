@@ -56,21 +56,12 @@ three band sets (10 m, 20 m, 60 m) totaling 12 channels. The S1 order matches
 
 ```mermaid
 flowchart LR
-    TEMP["Temporal range"] --> BINS["Build bins:\n30-day fixed (≤12 mo)\nor equal-divide into 12\n(longer windows, flagged)"]
-    BINS --> FETCH["Fetch one S2 composite\nper bin\nraw DN, C=12"]
-    FETCH --> DROP["Drop empty-bin frames\nkeep aligned timestamps"]
-    DROP --> NORM["Per-frame per-band mean±2σ\nnormalization"]
-    NORM --> SQUARE["Pad/crop each frame to square\n(shape_adjust, no aspect stretch)"]
-    SQUARE --> RESIZE["Resize each frame to image_size\n(default 256×256)"]
-    RESIZE --> STACK["Stack frames\n(T, C, H, W)"]
-    STACK --> TS["Frame timestamps\n(day, month, year)"]
-    STACK --> SAMPLE["Build MaskedOlmoEarthSample\n(B=1, H, W, T, C=12)"]
-    TS --> SAMPLE
-    SAMPLE --> ENC["FlexiViT encoder\npatch_size=4 (default)"]
-    ENC --> POOL["Pool over T×BandSets\n→ (B, H', W', D)"]
-    POOL --> OUTPUT{Output mode}
-    OUTPUT -- pooled --> VEC["Global mean/max\n→ (D,) vector"]
-    OUTPUT -- grid --> GRID["Spatial token map\n(D, H', W')"]
+    INPUT["S2 L2A 12-band\ntemporal range"] --> BINS["Bin into ≤12 frames\n(30-day or equal-divide)\nfetch composite/bin, drop empty"]
+    BINS --> PREP["Per-frame: mean±2σ normalize\n→ square + resize 256×256\n→ stack (T,C,H,W) + timestamps"]
+    PREP --> ENC["FlexiViT encoder\n(patch_size=4)"]
+    ENC --> OUT{Output mode}
+    OUT -- pooled --> VEC["Global mean/max → (D,)"]
+    OUT -- grid --> GRID["Spatial token map (D,H',W')"]
 ```
 
 ---
@@ -133,27 +124,20 @@ Default: `256` (matching the OlmoEarth training tile size).
 ### `shape_adjust`
 
 OlmoEarth's positional encoding is generated from a single `grid_size` scalar, so
-the encoder requires a **square** token grid — a non-square ROI cannot be fed as
-`H != W`. Rather than stretch a rectangular ROI to a square (which distorts the
-geometry: a 1.8:1 field collapses into striped, smeared embeddings), the adapter
-makes the ROI square *before* resizing to `image_size`.
+the encoder requires a **square** token grid. Like every on-the-fly model it follows
+the shared [Spatial ROI Handling](../spatial_roi.md) contract (enlarge to a square of
+real imagery → encode → crop back to the ROI). OlmoEarth additionally exposes the
+**fallback** squaring mode as a knob (most models keep it fixed to `pad`):
 
-| Value          | Behavior                                                                                  |
-| -------------- | ----------------------------------------------------------------------------------------- |
-| `pad` (default) | Reflect-pad the short side up to the long side — keeps the **whole ROI**, no data discarded |
-| `crop`          | Center-crop the long side down to the short side — discards the ROI margins                |
+| `shape_adjust` | Behavior |
+| -------------- | -------- |
+| `pad` (default) | Reflect-pad the short side — keeps the **whole ROI** |
+| `crop`          | Center-crop the long side — discards ROI margins |
 
-This is the shared, reusable strategy in `rs_embed.tools.shape` (also used by the
-other square-input embedders). If the ROI is **extremely** rectangular (aspect
-ratio ≥ 2.0), padding would inject too much synthetic border and cropping would
-throw away too much real data, so the adapter falls back to a plain stretch — a
-known, bounded behavior. The outcome is recorded in `meta["shape_prep"]`
-(`applied` ∈ `none`/`pad_to_square`/`crop_to_square`/`fixed_resize`, plus
-`orig_hw`, `square_hw`, `aspect`).
-
-The real fix for tiny ROIs is still to request a **larger, roughly square** BBox
-(~2.56 km at 10 m → native 256×256) so no upsampling is needed at all; `shape_adjust`
-removes the distortion but cannot invent spatial detail the ROI never had.
+See [Spatial ROI Handling](../spatial_roi.md) for when this fallback applies, the
+aspect-ratio stretch limit, the `meta` fields, and why requesting a **larger,
+roughly square** BBox (~2.56 km at 10 m → native 256×256) is the real fix for tiny
+ROIs — `shape_adjust` removes distortion but cannot invent detail the ROI never had.
 
 ### `temporal_mode`
 
@@ -174,30 +158,22 @@ sample's year window into fixed 30-day bins (`duration=30d` strides in the
 rslearn config — *not* calendar months), and feeds each frame's start date as
 its `(day, month, year)` timestamp. The adapter reproduces exactly that:
 
-- Bins: `[start, start+30d), [start+30d, start+60d), …`, last bin truncated at
-  the range end, up to 12 frames.
-- **Windows longer than ~12 months are not truncated.** Earlier behavior kept
-  only the first 12 monthly bins and silently dropped the rest; the adapter now
-  detects this (when capping would drop ≥ one full 30-day bin) and instead
-  **equal-divides the whole window into 12 frames** so the entire period is
-  represented. Because the frames are then wider apart than OlmoEarth's monthly
-  training cadence, this is flagged: `meta["temporal_sampling"] == "equal_divided"`,
-  `meta["temporal_spacing_stretched"] == True`, `meta["effective_stride_days"]`
-  records the cadence, and a `UserWarning` is emitted. Embeddings from such
-  windows are extrapolated — narrow the window to stay in-distribution. The
-  fixed-stride vs. equal-division decision lives in
+- **Bins:** `[start, start+30d), [start+30d, …)`, last bin truncated at the range
+  end, up to 12 frames. Per-frame timestamp = bin start date.
+- **Long windows (>~12 months) are not truncated.** When capping would drop ≥ one
+  full 30-day bin, the adapter **equal-divides the whole window into 12 frames**
+  instead of keeping only the first 12. The wider-than-monthly spacing is flagged
+  (`meta["temporal_sampling"]="equal_divided"`, `meta["temporal_spacing_stretched"]=True`,
+  `meta["effective_stride_days"]`) with a `UserWarning`. Such embeddings are
+  extrapolated, so narrow the window to stay in-distribution. Decision logic:
   `rs_embed.tools.temporal.fixed_or_equal_bins`.
-- Per-frame timestamp = bin start date (matching the official pipeline).
-- Bins with no imagery are **dropped from the sequence** (the encoder runs with
-  `fast_pass=True`, which ignores attention masks, so empty frames cannot be
-  masked out — they are excluded instead). At least one bin must have data. This
-  drop is **not silent**: `meta["n_bins"]` records the bins the window produced,
-  `meta["n_frames"]` the frames actually encoded, and `meta["dropped_bins"]`
-  lists the `[start, end]` ranges that had no usable imagery, alongside a
-  `UserWarning`. So `n_frames` < `n_bins` simply means some bins had no
-  cloud-free scene — raise `cloudy_pct`, widen/shift the window, or use
-  `temporal_mode="single"`.
-- Works for both `s2` and `s1`. S1 reuses the single-frame S1 fetch per bin, so
+- **Empty bins are dropped, not masked** (the encoder runs `fast_pass=True`, which
+  ignores attention masks); at least one bin must have data. Not silent:
+  `meta["n_bins"]` (bins produced), `meta["n_frames"]` (frames encoded), and
+  `meta["dropped_bins"]` (the empty `[start, end]` ranges) plus a `UserWarning`.
+  `n_frames < n_bins` means some bins had no cloud-free scene — raise `cloudy_pct`,
+  widen/shift the window, or use `temporal_mode="single"`.
+- **`s2` and `s1`** both supported; S1 reuses the single-frame S1 fetch per bin, so
   IW filtering and dB handling apply within each bin.
 
 ```python
