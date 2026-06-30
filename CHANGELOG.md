@@ -8,22 +8,17 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
-### Added
-
-- **OlmoEarth v1.2 variants (`nano_v1_2`/`tiny_v1_2`/`small_v1_2`/`base_v1_2`, incl. a new 384-d `small`).** Requires `olmoearth-pretrain-minimal>=0.0.6`.
-
 ### Changed
 
 - **`satmaepp_s2_10b` is no longer a standalone model; the Sentinel-2 10-band path is now the `"s2_10b"` modality of `satmaepp`.** SatMAE++'s two sensor configurations live under one model name, selected with `modality=` (the codebase's mechanism for same-model/different-sensor, like `terrafm`'s s2/s1): `get_embedding("satmaepp")` is the default fMoW-RGB 3-band path and `get_embedding("satmaepp", modality="s2_10b")` is the grouped-channel 10-band path; for exports use `export_batch(..., per_model_modalities={"satmaepp": "s2_10b"})`. The `satmaepp_s2_10b`, `satmaepp_s2`, and `satmaepp_sentinel10` model names (and their `variant`/env knobs) are removed — **migrate to `modality="s2_10b"`.** Embeddings and metadata for the 10-band path are unchanged (now labelled under `model="satmaepp"`); the model catalog drops from 20 to 19 entries.
-- **`olmoearth` default variant is now `base_v1_2` (was `tiny_v1_1`).** Pin `variant="tiny_v1_1"` to keep the old default.
 
-## [0.2.0] — 2026-06-29
+## [0.2.0] — 2026-06-30
 
 This release adds the OlmoEarth model family, makes the temporal models (`prithvi`, `galileo`, `olmoearth`) sample window-adaptively by default, and fixes several `export_batch` correctness issues where a point's embedding differed between the single and batch/tiled paths. Some defaults that change embedding behavior are noted below; pin explicit options where strict reproducibility across versions is required.
 
 ### Added
 
-- **OlmoEarth v1/v1.1 embedder (`olmoearth`).** Adds the [OlmoEarth](https://huggingface.co/collections/allenai/olmoearth) foundation model family (Allen AI), all 7 variants (`nano`/`tiny`/`base`/`large` v1, `nano_v1_1`/`tiny_v1_1`/`base_v1_1` v1.1; dims 128/192/768/1024), encoding 12 Sentinel-2 L2A bands with the FlexiViT encoder. Both `pooled` and `grid` outputs are supported; requires `pip install rs-embed[olmoearth]`.
+- **OlmoEarth v1/v1.1/v1.2 embedder (`olmoearth`).** Adds the [OlmoEarth](https://huggingface.co/collections/allenai/olmoearth) foundation model family (Allen AI): v1 `nano`/`tiny`/`base`/`large`, v1.1 `nano_v1_1`/`tiny_v1_1`/`base_v1_1`, and v1.2 `nano_v1_2`/`tiny_v1_2`/`small_v1_2`/`base_v1_2` (default `base_v1_2`; dims 128/192/384/768/1024), encoding 12 Sentinel-2 L2A bands with the FlexiViT encoder. Both `pooled` and `grid` outputs are supported; requires `pip install rs-embed[olmoearth]` (`olmoearth-pretrain-minimal>=0.0.6`).
 - **Multi-frame temporal mode for Prithvi (`temporal_mode="multi"`).** A new `temporal_mode` key (default `"auto"`) feeds Prithvi-EO 2.0 a real multi-timestep HLS series instead of always collapsing the window into a single median composite; the frame count is derived from the window (`T = clamp(window_days // 28, 1, max_frames)`, default `max_frames=4`) and output shapes are unchanged. Configurable via `model_config` or `RS_EMBED_PRITHVI_*` env vars.
 - **`gse` now automatically tiles large spatial requests.** When a `BBox`'s estimated pixel footprint exceeds the GEE `sampleRectangle` limit, the region is split into a sub-BBox grid, each tile fetched and concatenated — removing the previous hard cap on request size while matching a single large fetch.
 - **GEE fetch statistics reporting in `export_batch`.** With `show_progress=True`, a thread-safe `[gee_fetch]` summary line (planned / completed / failed / cache-hit counts) is printed to stderr after each prefetch chunk, giving visibility into GEE quota use and cache reuse.
