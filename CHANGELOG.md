@@ -12,6 +12,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 - **`satmaepp_s2_10b` is no longer a standalone model; the Sentinel-2 10-band path is now the `"s2_10b"` modality of `satmaepp`.** SatMAE++'s two sensor configurations live under one model name, selected with `modality=` (the codebase's mechanism for same-model/different-sensor, like `terrafm`'s s2/s1): `get_embedding("satmaepp")` is the default fMoW-RGB 3-band path and `get_embedding("satmaepp", modality="s2_10b")` is the grouped-channel 10-band path; for exports use `export_batch(..., per_model_modalities={"satmaepp": "s2_10b"})`. The `satmaepp_s2_10b`, `satmaepp_s2`, and `satmaepp_sentinel10` model names (and their `variant`/env knobs) are removed — **migrate to `modality="s2_10b"`.** Embeddings and metadata for the 10-band path are unchanged (now labelled under `model="satmaepp"`); the model catalog drops from 20 to 19 entries.
 
+### Fixed
+
+- **`export_batch` emitted spurious `All-NaN slice` / `Mean of empty slice` RuntimeWarnings for multi-temporal models with an empty leading temporal bin.** The prefetch input inspection (`inspect_fetch_result`) inspected frame 0 of a multi-frame `[T,C,H,W]` stack unconditionally; when that bin had no usable imagery (a NaN-sentinel frame that the embedder drops downstream), the per-band nan-reductions warned over an all-NaN frame. It now inspects the first frame carrying finite data, falling back to frame 0 only when every frame is empty (still flagged `ok=False`), and reports the chosen frame via a new `inspected_frame` field. Only the prefetch/export path runs this inspection, so `get_embedding`/`get_embeddings_batch` were never affected.
+
 ## [0.2.0] — 2026-06-29
 
 This release adds the OlmoEarth model family, makes the temporal models (`prithvi`, `galileo`, `olmoearth`) sample window-adaptively by default, and fixes several `export_batch` correctness issues where a point's embedding differed between the single and batch/tiled paths. Some defaults that change embedding behavior are noted below; pin explicit options where strict reproducibility across versions is required.
