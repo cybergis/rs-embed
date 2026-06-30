@@ -14,7 +14,7 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ### Fixed
 
-- **`export_batch` emitted spurious `All-NaN slice` / `Mean of empty slice` RuntimeWarnings for multi-temporal models with an empty leading temporal bin.** The prefetch input inspection (`inspect_fetch_result`) inspected frame 0 of a multi-frame `[T,C,H,W]` stack unconditionally; when that bin had no usable imagery (a NaN-sentinel frame that the embedder drops downstream), the per-band nan-reductions warned over an all-NaN frame. It now inspects the first frame carrying finite data, falling back to frame 0 only when every frame is empty (still flagged `ok=False`), and reports the chosen frame via a new `inspected_frame` field. Only the prefetch/export path runs this inspection, so `get_embedding`/`get_embeddings_batch` were never affected.
+- **`export_batch` emitted spurious `All-NaN slice` RuntimeWarnings for multi-temporal models with an empty leading temporal bin.** Input inspection now stats the first frame with finite data instead of a blind frame 0.
 
 ## [0.2.0] — 2026-06-29
 
