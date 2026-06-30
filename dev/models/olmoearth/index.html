@@ -2696,7 +2696,7 @@
 </tr>
 <tr>
 <td>Family / Backbone</td>
-<td>OlmoEarth v1/v1.1 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset</td>
+<td>OlmoEarth v1/v1.1/v1.2 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset</td>
 </tr>
 <tr>
 <td>Adapter type</td>
@@ -2704,7 +2704,7 @@
 </tr>
 <tr>
 <td>Model config keys</td>
-<td><code>variant</code> (default: <code>tiny_v1_1</code>), <code>patch_size</code> (default: <code>4</code>), <code>image_size</code> (default: <code>256</code>), <code>shape_adjust</code> (default: <code>pad</code>)</td>
+<td><code>variant</code> (default: <code>base_v1_2</code>), <code>patch_size</code> (default: <code>4</code>), <code>image_size</code> (default: <code>256</code>), <code>shape_adjust</code> (default: <code>pad</code>)</td>
 </tr>
 <tr>
 <td>Training alignment</td>
@@ -2875,14 +2875,43 @@ converts to dB via <code>10·log10</code> before normalization. <code>input_chw<
 <td>12</td>
 <td><code>allenai/OlmoEarth-v1_1-Base</code></td>
 </tr>
+<tr>
+<td><code>nano_v1_2</code></td>
+<td>v1.2</td>
+<td>128</td>
+<td>4</td>
+<td><code>allenai/OlmoEarth-v1_2-Nano</code></td>
+</tr>
+<tr>
+<td><code>tiny_v1_2</code></td>
+<td>v1.2</td>
+<td>192</td>
+<td>12</td>
+<td><code>allenai/OlmoEarth-v1_2-Tiny</code></td>
+</tr>
+<tr>
+<td><code>small_v1_2</code></td>
+<td>v1.2</td>
+<td>384</td>
+<td>12</td>
+<td><code>allenai/OlmoEarth-v1_2-Small</code></td>
+</tr>
+<tr>
+<td><code>base_v1_2</code></td>
+<td>v1.2</td>
+<td>768</td>
+<td>12</td>
+<td><code>allenai/OlmoEarth-v1_2-Base</code></td>
+</tr>
 </tbody>
 </table>
+<p>The default variant is <strong><code>base_v1_2</code></strong>. v1.2 requires <code>olmoearth-pretrain-minimal&gt;=0.0.6</code>.</p>
 <div class="admonition note">
-<p class="admonition-title">v1 vs v1.1 architecture difference</p>
+<p class="admonition-title">v1 vs v1.1/v1.2 architecture difference</p>
 <p>v1 uses a Conv2D-based patch embedding, producing 3 separate band-set token groups per spatial location.
-v1.1 uses a linear patch embedding (<code>use_linear_patch_embed=True</code>) that merges band sets into a single token stream. Both versions produce the same output dimensionality after pooling.</p>
+v1.1 and v1.2 use a linear patch embedding (<code>use_linear_patch_embed=True</code>) that merges band sets into a single token stream. All versions produce the same output dimensionality after pooling. v1.2 adds a new <code>small</code> size (384-d) and is not released in a <code>large</code> size.</p>
 </div>
-<p>Short aliases are accepted: <code>nano_11</code>, <code>tiny_11</code>, <code>base_11</code> for v1.1 variants; <code>nano_v1</code>, <code>tiny_v1</code>, <code>base_v1</code>, <code>large_v1</code> for v1 variants.</p>
+<p>Short aliases are accepted: <code>nano_12</code>, <code>tiny_12</code>, <code>small_12</code>, <code>base_12</code> (and the bare <code>small</code>, which is v1.2-only) for v1.2 variants; <code>nano_11</code>, <code>tiny_11</code>, <code>base_11</code> for v1.1 variants; <code>nano_v1</code>, <code>tiny_v1</code>, <code>base_v1</code>, <code>large_v1</code> for v1 variants.</p>
 <h3 id="patch_size"><code>patch_size</code><a class="headerlink" href="#patch_size" title="Permanent link">&para;</a></h3>
 <p>Controls the spatial patch size for the FlexiViT encoder. Smaller values produce more spatial tokens (higher resolution) at the cost of longer inference time.</p>
 <table>
@@ -3034,7 +3063,7 @@ For defaults (256, patch_size=4): <code>64 × 64</code> grid.</p>
 <tbody>
 <tr>
 <td><code>RS_EMBED_OLMOEARTH_VARIANT</code></td>
-<td><code>tiny_v1_1</code></td>
+<td><code>base_v1_2</code></td>
 <td>Default model variant when <code>model_config</code> not given</td>
 </tr>
 <tr>
@@ -3098,7 +3127,7 @@ uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </s
     <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(),</span>
     <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;tiny_v1_1&quot;</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;tiny_v1_2&quot;</span><span class="p">,</span>
     <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s1&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
