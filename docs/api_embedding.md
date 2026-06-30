@@ -116,7 +116,7 @@ emb = get_embedding(
     fetch=FetchSpec(scale_m=10),
     backend="auto",
     device="auto",
-    input_prep="resize",  # default
+    input_prep="tile",  # default; pass "resize" to downsample instead
 )
 vec = emb.data  # (D,)
 ```

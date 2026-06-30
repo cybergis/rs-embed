@@ -143,7 +143,7 @@ class InferenceEngine:
 
         ``input_prep`` defaults to the configured value; callers that have
         resolved a model-aware override (see :meth:`_model_input_prep`) pass it
-        explicitly so ViT-grid models match get_embedding's resize default.
+        explicitly so ViT-grid models match get_embedding's resolved default.
         """
         cfg = self.config
         prep = cfg.input_prep if input_prep is _UNSET else input_prep
