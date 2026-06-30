@@ -20,7 +20,7 @@
     - 4 size variants in v1 (`nano`/`tiny`/`base`/`large`) and 3 in v1.1 (`nano_v1_1`/`tiny_v1_1`/`base_v1_1`)
     - `patch_size` controls the spatial token density (1–8); default `4` matches the official inference example
     - Input image resized to `image_size` (default 256) before encoding
-    - Requires `olmoearth-pretrain-minimal` (`pip install rs-embed[olmoearth]`)
+    - Uses `olmoearth-pretrain-minimal`, included in the base `pip install rs-embed`
 
 ---
 
@@ -236,12 +236,11 @@ For defaults (256, patch_size=4): `64 × 64` grid.
 
 ## Installation
 
-OlmoEarth requires an additional package not included in the base `rs-embed` install:
+OlmoEarth works out of the box — its `olmoearth-pretrain-minimal` dependency is part
+of the base install:
 
 ```bash
-pip install rs-embed[olmoearth]
-# or
-uv pip install olmoearth-pretrain-minimal
+pip install rs-embed
 ```
 
 ---
@@ -332,6 +331,6 @@ are provided "as is" with no warranty (Section 6).
 
 !!! info "How this affects `rs-embed`"
     `rs-embed` does **not** bundle or redistribute the OlmoEarth weights or code — it declares
-    `olmoearth-pretrain-minimal` as an *optional* dependency and downloads the weights from
+    `olmoearth-pretrain-minimal` as a runtime dependency and downloads the weights from
     Hugging Face at runtime. The license therefore binds **you, the end user**, directly; the
     `rs-embed` package stays Apache 2.0. Just make sure your own use complies with Section 2 above.

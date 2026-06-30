@@ -18,9 +18,6 @@ pip install rs-embed
 
 # add [terratorch] only if you use terramind
 pip install "rs-embed[terratorch]"
-
-# add [olmoearth] only if you use olmoearth
-pip install "rs-embed[olmoearth]"
 ```
 
 For local development:

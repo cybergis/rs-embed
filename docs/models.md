@@ -42,7 +42,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 | Model ID          | Primary Input                    | Dim  | Default Resolution | Temporal style          | Notable requirements                                    | Detail                         |
 | ----------------- | -------------------------------- | ---- | ------------------ | ----------------------- | ------------------------------------------------------- | ------------------------------ |
 | `prithvi`         | S2 6-band                       | 768  | 30m                | multi-frame (auto, ≤4)  | required temporal + location side inputs                 | [detail](models/prithvi.md)    |
-| `olmoearth`       | S2 L2A 12-band / S1 VV/VH       | 128–1024 | 10m            | multi-frame (auto, ≤12) | FlexiViT; 4 sizes (nano/tiny/base/large); requires `[olmoearth]` extra | [detail](models/olmoearth.md) |
+| `olmoearth`       | S2 L2A 12-band / S1 VV/VH       | 128–1024 | 10m            | multi-frame (auto, ≤12) | FlexiViT; 4 sizes (nano/tiny/base/large) | [detail](models/olmoearth.md) |
 | `dofa`            | Multispectral + wavelengths     | 768  | 10m                | single composite        | wavelength vector required                              | [detail](models/dofa.md)       |
 | `terramind`       | S2 12-band                      | 384  | 10m                | single composite        | ViT-S class; strict z-score normalization               | [detail](models/terramind.md)  |
 | `terrafm`         | S2 12-band or S1 VV/VH          | 768  | 10m                | single composite        | dual-modality by channel count                          | [detail](models/terrafm.md)    |
