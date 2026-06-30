@@ -268,6 +268,13 @@
   
     
     
+      
+  
+  
+  
+  
+    
+    
       <li class="md-tabs__item">
         <a href="../api/" class="md-tabs__link">
           
@@ -279,6 +286,9 @@
 
         </a>
       </li>
+    
+  
+
     
   
 
@@ -653,17 +663,6 @@
     <span class="md-ellipsis">
       
         THOR
-      
-    </span>
-  </a>
-  
-</li>
-        
-          <li class="md-nav__item">
-  <a href="#anysat-and-galileo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AnySat and Galileo
       
     </span>
   </a>
@@ -1601,16 +1600,6 @@
       
         
       
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
     
     
     
@@ -1664,6 +1653,74 @@
   
   
   
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="../api/" class="md-nav__link">
         
@@ -1701,34 +1758,6 @@
     
   
     Specs & Data Structures
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../temporal_sampling/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Temporal Sampling
   
 
     
@@ -1849,6 +1878,138 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concept
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concept
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../temporal_sampling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal Sampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spatial_roi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spatial ROI Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -2250,17 +2411,6 @@
   
 </li>
         
-          <li class="md-nav__item">
-  <a href="#anysat-and-galileo" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        AnySat and Galileo
-      
-    </span>
-  </a>
-  
-</li>
-        
       </ul>
     </nav>
   
@@ -2406,7 +2556,7 @@ Treat every setting change as part of experiment design, not just performance tu
 </tr>
 <tr>
 <td>Capture finer temporal detail</td>
-<td><code>RS_EMBED_ANYSAT_FRAMES</code>; for <code>galileo</code>, widen the temporal window (frames auto-scale, ≤12) or pin <code>RS_EMBED_GALILEO_FRAMES</code></td>
+<td>Widen the temporal window (window-adaptive models auto-scale frames) or raise the fixed frame count — see <a href="../temporal_sampling/">Temporal Sampling</a></td>
 <td>More frames = more runtime</td>
 </tr>
 <tr>
@@ -2529,15 +2679,6 @@ For example, THOR and DOFA expose explicit size choices, while some models only 
 <li>If <code>patch_size</code> changes, re-check whether <code>RS_EMBED_THOR_IMG</code> still divides cleanly.</li>
 </ul>
 <p>For exact constraints, see <a href="../models/thor/">THOR</a>.</p>
-<h3 id="anysat-and-galileo">AnySat and Galileo<a class="headerlink" href="#anysat-and-galileo" title="Permanent link">&para;</a></h3>
-<p>For multi-frame models, frame count is part of the model design.</p>
-<ul>
-<li><code>anysat</code> uses a fixed frame count: increase <code>RS_EMBED_ANYSAT_FRAMES</code> for a finer temporal summary.</li>
-<li><code>galileo</code> derives its frame count from the window (<code>temporal_mode="auto"</code>, ~30-day frames, ≤12) to match its monthly cadence — widen the temporal window for more frames, or pin <code>RS_EMBED_GALILEO_FRAMES</code> / <code>n_frames=</code> for a manual count. Windows beyond ~1 year are equal-divided with an out-of-distribution warning. See <a href="../models/galileo/#temporal-sampling">Galileo › Temporal Sampling</a>.</li>
-<li>Increasing <code>..._IMG</code> preserves more per-frame detail.</li>
-<li>Changing <code>..._PATCH</code> alters grid density and often has divisibility constraints.</li>
-</ul>
-<p>For exact details, see <a href="../models/anysat/">AnySat</a> and <a href="../models/galileo/">Galileo</a>.</p>
 <hr />
 <h2 id="practical-workflow">Practical Workflow<a class="headerlink" href="#practical-workflow" title="Permanent link">&para;</a></h2>
 <h3 id="1-start-with-defaults">1. Start with defaults<a class="headerlink" href="#1-start-with-defaults" title="Permanent link">&para;</a></h3>
@@ -2548,23 +2689,21 @@ For example, THOR and DOFA expose explicit size choices, while some models only 
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
     <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="2-spend-extra-compute-where-it-helps">2. Spend extra compute where it helps<a class="headerlink" href="#2-spend-extra-compute-where-it-helps" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">InputPrepSpec</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
     <span class="s2">&quot;thor&quot;</span><span class="p">,</span>
-    <span class="n">spatial</span><span class="o">=</span><span class="n">spatial_point</span><span class="p">,</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">temporal_range</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(),</span>
-    <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s2&quot;</span><span class="p">,</span>
-    <span class="n">input_prep</span><span class="o">=</span><span class="n">InputPrepSpec</span><span class="p">(</span><span class="s2">&quot;tile&quot;</span><span class="p">,</span> <span class="n">max_tiles</span><span class="o">=</span><span class="mi">300</span><span class="p">),</span>
+    <span class="n">variant</span><span class="o">=</span> <span class="s2">&quot;small&quot;</span><span class="p">,</span>  <span class="c1"># select model backbone size</span>
+    <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s2&quot;</span><span class="p">,</span>  <span class="c1"># select input data modality</span>
+    <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;tile&quot;</span><span class="p">,</span>  <span class="c1"># select preprocess method</span>
 <span class="p">)</span>
 </code></pre></div>
-<p>This second call is not just "the same run but more expensive".
-It changes output structure, ROI handling, and spatial detail together — document it as a different setting profile.</p>
 <h3 id="3-inspect-what-actually-ran">3. Inspect what actually ran<a class="headerlink" href="#3-inspect-what-actually-ran" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">describe_model</span>
 

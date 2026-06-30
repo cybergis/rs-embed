@@ -268,6 +268,13 @@
   
     
     
+      
+  
+  
+  
+  
+    
+    
       <li class="md-tabs__item">
         <a href="../api/" class="md-tabs__link">
           
@@ -279,6 +286,9 @@
 
         </a>
       </li>
+    
+  
+
     
   
 
@@ -1490,16 +1500,6 @@
       
         
       
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
     
     
     
@@ -1553,6 +1553,74 @@
   
   
   
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="../api/" class="md-nav__link">
         
@@ -1590,34 +1658,6 @@
     
   
     Specs & Data Structures
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../temporal_sampling/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Temporal Sampling
   
 
     
@@ -1738,6 +1778,138 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concept
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concept
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../temporal_sampling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal Sampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../spatial_roi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spatial ROI Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -2149,6 +2321,9 @@ pip<span class="w"> </span>install<span class="w"> </span>rs-embed
 
 <span class="c1"># add [terratorch] only if you use terramind</span>
 pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;rs-embed[terratorch]&quot;</span>
+
+<span class="c1"># add [olmoearth] only if you use olmoearth</span>
+pip<span class="w"> </span>install<span class="w"> </span><span class="s2">&quot;rs-embed[olmoearth]&quot;</span>
 </code></pre></div>
 <p>For local development:</p>
 <div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/cybergis/rs-embed.git
@@ -2169,8 +2344,7 @@ pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </s
     <span class="s2">&quot;tessera&quot;</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">1024</span><span class="p">),</span>
     <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">year</span><span class="p">(</span><span class="mi">2024</span><span class="p">),</span>
-    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">&quot;mean&quot;</span><span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">&quot;mean&quot;</span><span class="p">)</span>
 <span class="p">)</span>
 
 <span class="n">vec</span> <span class="o">=</span> <span class="n">emb</span><span class="o">.</span><span class="n">data</span>   <span class="c1"># numpy ndarray, shape (D,) — e.g. (128,) for tessera</span>
@@ -2191,8 +2365,7 @@ pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </s
     <span class="s2">&quot;tessera&quot;</span><span class="p">,</span>
     <span class="n">spatials</span><span class="o">=</span><span class="n">spatials</span><span class="p">,</span>
     <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">year</span><span class="p">(</span><span class="mi">2024</span><span class="p">),</span>
-    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">()</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="3-dataset-export-export_batch">3. Dataset export: <code>export_batch(...)</code><a class="headerlink" href="#3-dataset-export-export_batch" title="Permanent link">&para;</a></h3>
@@ -2213,9 +2386,8 @@ pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </s
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="n">spatials</span><span class="p">,</span>
     <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">year</span><span class="p">(</span><span class="mi">2024</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;tessera&quot;</span><span class="p">],</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;tessera&quot;</span><span class="p">,</span><span class="s2">&quot;gse&quot;</span><span class="p">],</span>
     <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">&quot;exports&quot;</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;p1&quot;</span><span class="p">,</span> <span class="s2">&quot;p2&quot;</span><span class="p">]),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
     <span class="n">config</span><span class="o">=</span><span class="n">ExportConfig</span><span class="p">(</span>
         <span class="n">save_inputs</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
         <span class="n">save_embeddings</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>

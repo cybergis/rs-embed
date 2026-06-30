@@ -268,6 +268,13 @@
   
     
     
+      
+  
+  
+  
+  
+    
+    
       <li class="md-tabs__item">
         <a href="../../api/" class="md-tabs__link">
           
@@ -279,6 +286,9 @@
 
         </a>
       </li>
+    
+  
+
     
   
 
@@ -1529,16 +1539,6 @@
       
         
       
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
     
     
     
@@ -1592,6 +1592,74 @@
   
   
   
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
@@ -1629,34 +1697,6 @@
     
   
     Specs & Data Structures
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../temporal_sampling/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Temporal Sampling
   
 
     
@@ -1777,6 +1817,138 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concept
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concept
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../temporal_sampling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal Sampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../spatial_roi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spatial ROI Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -2245,7 +2417,7 @@
 <p>GSE is Google's precomputed annual Satellite Embedding product (<code>GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL</code>) — no model inference happens locally; the adapter just provider-samples the already-computed embedding image at your ROI, so the "embedding" is a Google-produced global annual feature map rather than anything <code>rs-embed</code> runs a forward pass for.</p>
 <p>In <code>rs-embed</code>, its most important characteristics are:</p>
 <ul>
-<li><strong>strict</strong> <code>TemporalSpec.year(...)</code> temporal mode; <code>range</code> is explicitly not supported in v0.1: see <a href="#retrieval-contract">Retrieval Contract</a></li>
+<li><code>TemporalSpec.year(...)</code> is the intended temporal mode; <code>range(...)</code> is also accepted and resolves to its <strong>start year</strong> (with a <code>UserWarning</code>): see <a href="#retrieval-contract">Retrieval Contract</a></li>
 <li><code>fetch.scale_m</code> / <code>sensor.scale_m</code> still controls provider <em>sampling</em> resolution even though the underlying product is precomputed: see <a href="#environment-variables-tuning-knobs">Environment Variables / Tuning Knobs</a></li>
 <li>product fill value <code>-9999</code> is automatically converted to <code>NaN</code> in the returned grid: see <a href="#retrieval-pipeline">Retrieval Pipeline</a></li>
 </ul>
@@ -2270,7 +2442,7 @@
 </tr>
 <tr>
 <td><code>TemporalSpec</code></td>
-<td><strong>strict</strong> <code>TemporalSpec.year(...)</code> — <code>range</code> not supported in v0.1</td>
+<td><code>TemporalSpec.year(...)</code> (preferred); <code>range(...)</code> accepted → uses start year + <code>UserWarning</code></td>
 </tr>
 <tr>
 <td>Collection</td>
@@ -2300,6 +2472,10 @@
     INPUT["TemporalSpec.year(...)"] --&gt; FETCH["Fetch annual embedding\n→ replace -9999 with NaN"]
     FETCH --&gt; POOL["pooled: spatial pooling"]
     FETCH --&gt; GRID["grid: (D,H,W)\nwith band-name coords"]</code></pre>
+<div class="admonition note">
+<p class="admonition-title">Large requests tile automatically</p>
+<p>When a <code>BBox</code>'s estimated pixel footprint exceeds the GEE <code>sampleRectangle</code> limit, the region is split into a sub-<code>BBox</code> grid, fetched tile-by-tile, and concatenated — so there is no hard cap on request size, and the result matches a single large fetch. <code>gse</code> manages this tiling itself; passing <code>input_prep="tile"</code> only emits a <code>UserWarning</code> clarifying that.</p>
+</div>
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
@@ -2370,7 +2546,7 @@
 <hr />
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Only <code>TemporalSpec.year(...)</code> is supported — <code>range(...)</code> raises an error.</li>
+<li><code>TemporalSpec.year(...)</code> is the intended input; <code>range(...)</code> is accepted and resolves to its start year (emitting a <code>UserWarning</code>).</li>
 <li>Fill regions in the source product use <code>-9999</code>, which the adapter converts to <code>NaN</code> — downstream code must handle NaN values.</li>
 <li>Resolution is controlled by <code>fetch.scale_m</code> (or <code>sensor.scale_m</code>) at the provider level, not by the adapter.</li>
 </ul>

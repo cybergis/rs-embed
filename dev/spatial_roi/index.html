@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../api_inspect/">
+        <link rel="prev" href="../temporal_sampling/">
       
       
-        <link rel="next" href="../spatial_roi/">
+        <link rel="next" href="../architecture/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Temporal Sampling - rs-embed</title>
+        <title>Spatial ROI Handling - rs-embed</title>
       
     
     
@@ -84,7 +84,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#temporal-sampling" class="md-skip">
+        <a href="#spatial-roi-handling-from-region-to-embedding" class="md-skip">
           Skip to content
         </a>
       
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Temporal Sampling
+              Spatial ROI Handling
             
           </span>
         </div>
@@ -1722,6 +1722,34 @@
                 
   
   
+  
+  
+    <li class="md-nav__item">
+      <a href="../temporal_sampling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal Sampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
     
   
   
@@ -1741,7 +1769,7 @@
   <span class="md-ellipsis">
     
   
-    Temporal Sampling
+    Spatial ROI Handling
   
 
     
@@ -1759,7 +1787,7 @@
   <span class="md-ellipsis">
     
   
-    Temporal Sampling
+    Spatial ROI Handling
   
 
     
@@ -1785,10 +1813,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-the-frame-count-is-derived-from-the-window" class="md-nav__link">
+  <a href="#the-contract-in-three-stages" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why the frame count is derived from the window
+        The contract, in three stages
       
     </span>
   </a>
@@ -1796,10 +1824,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#temporal_mode-auto-single-multi" class="md-nav__link">
+  <a href="#by-roi-shape" class="md-nav__link">
     <span class="md-ellipsis">
       
-        temporal_mode: auto / single / multi
+        By ROI shape
       
     </span>
   </a>
@@ -1807,10 +1835,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#decision-table" class="md-nav__link">
+  <a href="#scope-which-models" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Decision table
+        Scope: which models
       
     </span>
   </a>
@@ -1818,10 +1846,38 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#worked-examples" class="md-nav__link">
+  <a href="#fallback-when-the-request-cant-be-fetch-squared" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Worked examples
+        Fallback: when the request can't be fetch-squared
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fallback: when the request can&#39;t be fetch-squared">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-shape_adjust-knob" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The shape_adjust knob
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-gets-recorded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets recorded
       
     </span>
   </a>
@@ -1829,54 +1885,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#out-of-distribution-windows" class="md-nav__link">
+  <a href="#practical-advice" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Out-of-distribution windows
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#data-availability-empty-sub-windows-are-never-silent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data availability: empty sub-windows are never silent
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#frame-order" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Frame order
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cost" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cost
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        See also
+        Practical advice
       
     </span>
   </a>
@@ -1887,34 +1899,6 @@
   
 </nav>
       
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../spatial_roi/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Spatial ROI Handling
-  
-
-    
-  </span>
-  
-  
-
-      </a>
     </li>
   
 
@@ -2208,10 +2192,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#why-the-frame-count-is-derived-from-the-window" class="md-nav__link">
+  <a href="#the-contract-in-three-stages" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Why the frame count is derived from the window
+        The contract, in three stages
       
     </span>
   </a>
@@ -2219,10 +2203,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#temporal_mode-auto-single-multi" class="md-nav__link">
+  <a href="#by-roi-shape" class="md-nav__link">
     <span class="md-ellipsis">
       
-        temporal_mode: auto / single / multi
+        By ROI shape
       
     </span>
   </a>
@@ -2230,10 +2214,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#decision-table" class="md-nav__link">
+  <a href="#scope-which-models" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Decision table
+        Scope: which models
       
     </span>
   </a>
@@ -2241,10 +2225,38 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#worked-examples" class="md-nav__link">
+  <a href="#fallback-when-the-request-cant-be-fetch-squared" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Worked examples
+        Fallback: when the request can't be fetch-squared
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Fallback: when the request can&#39;t be fetch-squared">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#the-shape_adjust-knob" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The shape_adjust knob
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#what-gets-recorded" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        What gets recorded
       
     </span>
   </a>
@@ -2252,54 +2264,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#out-of-distribution-windows" class="md-nav__link">
+  <a href="#practical-advice" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Out-of-distribution windows
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#data-availability-empty-sub-windows-are-never-silent" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Data availability: empty sub-windows are never silent
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#frame-order" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Frame order
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#cost" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Cost
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#see-also" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        See also
+        Practical advice
       
     </span>
   </a>
@@ -2326,189 +2294,190 @@
   
 
 
-<h1 id="temporal-sampling">Temporal Sampling<a class="headerlink" href="#temporal-sampling" title="Permanent link">&para;</a></h1>
-<p>Several on-the-fly models are <strong>multi-temporal</strong>: they were pretrained on a <em>series</em> of images over time, not a single scene. In <code>rs-embed</code> you only ever pass a <code>TemporalSpec.range(start, end)</code> — the adapter decides how many frames <code>T</code> to sample from that window and how to space them. This page explains how that decision is made, model by model.</p>
+<h1 id="spatial-roi-handling-from-region-to-embedding">Spatial ROI Handling: From Region to Embedding<a class="headerlink" href="#spatial-roi-handling-from-region-to-embedding" title="Permanent link">&para;</a></h1>
+<p>You pass <code>rs-embed</code> a geographic <strong>region</strong> and get back an embedding <strong>of that
+region</strong>. But most on-the-fly model encodes a <strong>fixed-size square</strong> input (e.g.
+256×256 tokens). This page explains the contract that bridges the two — how an
+arbitrary ROI (a thin rectangle, a near-square box, or a large non-square area)
+becomes the square the encoder wants, and how the output is mapped back to your
+ROI so the embedding still describes the region you asked for.</p>
+<p>This is the spatial counterpart to <a href="../temporal_sampling/">Temporal Sampling</a>: the
+same way a <code>TemporalSpec.range</code> window is turned into the frames each model wants,
+a spatial ROI is turned into the square frame each encoder wants — and then mapped
+back.</p>
 <div class="admonition abstract">
 <p class="admonition-title">The one idea</p>
-<p>A <code>TemporalSpec.range</code> is a <strong>window</strong>, not a single date. For multi-temporal models the window is turned into <code>T</code> frames whose count and spacing are chosen to match how each model was trained. Wider window → more frames (up to a model-specific cap); a sub-month window collapses to a single composite (<code>T=1</code>).</p>
+<p>A rectangular ROI is <strong>enlarged to a square of real imagery</strong> (not stretched),
+encoded, and the output is <strong>cropped back to the ROI</strong>. So a 1.8:1 field is
+never smeared into striped embeddings, and the returned vector/grid describes
+your region, not the enlarged square.</p>
 </div>
 <hr />
-<h2 id="why-the-frame-count-is-derived-from-the-window">Why the frame count is derived from the window<a class="headerlink" href="#why-the-frame-count-is-derived-from-the-window" title="Permanent link">&para;</a></h2>
-<p>The temporal models choose <code>T</code> from the <strong>window length</strong>, matched to their training cadence, and fall back gracefully when the window is too short (collapse to <code>T=1</code>) or too long (cover the whole window but flag it as out-of-distribution). Monthly-cadence models (<code>olmoearth</code>, <code>galileo</code>) share a single policy helper, <code>rs_embed.tools.temporal.fixed_or_equal_bins</code>.</p>
+<h2 id="the-contract-in-three-stages">The contract, in three stages<a class="headerlink" href="#the-contract-in-three-stages" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    ROI["Your ROI\n(BBox / PointBuffer)"] --&gt; SQ["1. Square the request\nenlarge rectangle → centered\nsquare of real imagery\n(record roi_window)"]
+    SQ --&gt; ENC["2. Encode the square\nresize to model size,\nor tile at native res"]
+    ENC --&gt; CROP["3. Crop output back\ngrid → crop to roi_window\npooled → pool ROI tokens only"]
+    CROP --&gt; OUT["Embedding of your ROI"]</code></pre>
+<p><strong>1. Square the request — fetch real pixels, don't stretch.</strong>
+If the ROI is a rectangle, <code>rs_embed.tools.spatial.square_spatial</code> enlarges it to a
+<strong>centered square in EPSG:3857</strong>, so the model sees the <em>real</em> surrounding imagery
+instead of a stretched rectangle. It returns the ROI's normalized position inside
+that square (<code>roi_window = (y0, y1, x0, x1)</code>). A <code>PointBuffer</code> or an already-square
+<code>BBox</code> is left unchanged (<code>roi_window</code> = the full frame).</p>
+<p><strong>2. Encode the square.</strong>
+The undistorted square is run through the encoder — resized to the model's fixed
+input size on the resize path, or split into native-resolution tiles on the tile
+path (<code>input_prep="tile"</code>, the package default for most models).</p>
+<p><strong>3. Crop the output back to the ROI.</strong>
+The encoder's token grid / feature map is cropped to <code>roi_window</code>
+(<code>crop_grid_to_roi</code> / <code>roi_token_box</code>); for <code>pooled</code> output only the ROI tokens are
+pooled (<code>crop_grid_and_pool</code>). The stitched grid from the tile path is cropped the
+same way, and tiled <code>pooled</code> embeddings are weighted by each tile's ROI-overlap
+area. The result describes <strong>your</strong> ROI, not the enlarged square.</p>
 <hr />
-<h2 id="temporal_mode-auto-single-multi"><code>temporal_mode</code>: <code>auto</code> / <code>single</code> / <code>multi</code><a class="headerlink" href="#temporal_mode-auto-single-multi" title="Permanent link">&para;</a></h2>
-<p>Models that support adaptive sampling expose a <code>temporal_mode</code> knob (default <code>auto</code>):</p>
+<h2 id="by-roi-shape">By ROI shape<a class="headerlink" href="#by-roi-shape" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th><code>temporal_mode</code></th>
-<th>Meaning</th>
+<th>Your ROI</th>
+<th>What happens</th>
+<th>Output</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>auto</code> (default)</td>
-<td>Pick from the window: <code>single</code> when the window is too short to yield ≥2 frames, else <code>multi</code>.</td>
+<td><strong>Small rectangle</strong> (e.g. 1.8:1)</td>
+<td>Enlarge to the bounding square, encode, crop the grid back to the rectangle</td>
+<td>Rectangular token grid / ROI-only pooled vector</td>
 </tr>
 <tr>
-<td><code>single</code></td>
-<td>One composite over the whole range (<code>T=1</code>) — cheapest; ignores temporal structure.</td>
+<td><strong>Near-square</strong> (≈ model input)</td>
+<td>No enlargement; straight resize + encode</td>
+<td>Full square grid</td>
 </tr>
 <tr>
-<td><code>multi</code></td>
-<td>Force the multi-frame series even for a short window.</td>
+<td><strong>Large non-square</strong></td>
+<td>Tiled at native resolution; stitched grid cropped back, pooled weighted by ROI overlap</td>
+<td>ROI-shaped stitched field / ROI-weighted vector</td>
+</tr>
+<tr>
+<td><strong>Point</strong> (<code>PointBuffer</code>)</td>
+<td>Already square; encode directly</td>
+<td>Full square grid</td>
 </tr>
 </tbody>
 </table>
-<p>Set it as a keyword argument (<code>get_embedding(..., temporal_mode="single")</code>) or via the model's environment variable.</p>
 <hr />
-<h2 id="decision-table">Decision table<a class="headerlink" href="#decision-table" title="Permanent link">&para;</a></h2>
-<p>How each model turns <code>TemporalSpec.range(start, end)</code> (length = <code>window_days</code>) into frames:</p>
+<h2 id="scope-which-models">Scope: which models<a class="headerlink" href="#scope-which-models" title="Permanent link">&para;</a></h2>
+<p>This contract applies to <strong>all on-the-fly models</strong> — anything that runs a
+fixed-input-size encoder (<code>prithvi</code>, <code>olmoearth</code>, <code>galileo</code>, <code>anysat</code>, <code>agrifm</code>,
+<code>dofa</code>, <code>fomo</code>, <code>terramind</code>, <code>terrafm</code>, <code>thor</code>, <code>satmae</code>, <code>satmaepp</code>, <code>scalemae</code>,
+<code>remoteclip</code>, <code>wildsat</code>, <code>satvision</code>).</p>
+<p><strong>Precomputed products (<code>tessera</code>, <code>gse</code>, <code>copernicus</code>) are exempt.</strong> They sample
+your ROI directly from a precomputed global grid — there is no fixed model input to
+square against, so no enlarge/crop step is needed (<code>gse</code> does its own large-request
+tiling; see its page).</p>
+<div class="admonition note">
+<p class="admonition-title">Token granularity limits the crop</p>
+<p>Cropping back is only as fine as the model's token grid. A coarse grid (e.g.
+<code>satvision</code>'s 4×4 SwinV2-Giant output) cannot isolate a sub-2:1 ROI — that is a
+token-granularity limit, not a bug. Finer-grid models crop cleanly.</p>
+</div>
+<hr />
+<h2 id="fallback-when-the-request-cant-be-fetch-squared">Fallback: when the request can't be fetch-squared<a class="headerlink" href="#fallback-when-the-request-cant-be-fetch-squared" title="Permanent link">&para;</a></h2>
+<p><code>square_spatial</code> cannot always enlarge — the square might run past valid lat/lon at
+the poles or antimeridian, or you may pass a non-square array directly via
+<code>input_chw</code> (bypassing the fetch). In those cases the array itself is squared by
+<code>rs_embed.tools.shape.prepare_square</code>:</p>
+<table>
+<thead>
+<tr>
+<th>Case</th>
+<th>What happens</th>
+<th><code>meta["shape_prep"]["applied"]</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Already square</td>
+<td>Resize to <code>image_size</code></td>
+<td><code>none</code></td>
+</tr>
+<tr>
+<td>Within aspect tolerance (<code>aspect &lt; 2.0</code>)</td>
+<td>Make square (pad <strong>or</strong> crop), then resize</td>
+<td><code>pad_to_square</code> / <code>crop_to_square</code></td>
+</tr>
+<tr>
+<td>Extremely rectangular (<code>aspect ≥ 2.0</code>)</td>
+<td>Plain stretch to <code>image_size</code> (bounded last resort)</td>
+<td><code>fixed_resize</code></td>
+</tr>
+</tbody>
+</table>
+<p><code>pad</code> (default) reflect-pads the short side (keeps the whole ROI, adds synthetic
+border); <code>crop</code> center-crops the long side (no synthetic data, discards margins).
+The <code>2.0</code> tolerance is the point past which padding would distort more than the
+stretch it avoids.</p>
+<h3 id="the-shape_adjust-knob">The <code>shape_adjust</code> knob<a class="headerlink" href="#the-shape_adjust-knob" title="Permanent link">&para;</a></h3>
+<p>For most models this fallback is internal and fixed to <code>pad</code>. One model exposes the
+choice:</p>
 <table>
 <thead>
 <tr>
 <th>Model</th>
-<th>Per-frame time encoding</th>
-<th>Training cadence</th>
-<th><code>auto</code> → <code>single</code> when</th>
-<th><code>multi</code> frame count</th>
-<th>Max frames</th>
-<th>Out-of-distribution (too-wide) handling</th>
+<th>How to set</th>
+<th>Default</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><a href="../models/olmoearth/"><code>olmoearth</code></a></td>
-<td>sequence position + month (0–11)</td>
-<td>~monthly</td>
-<td><code>window_days</code> ≤ ~30 (one 30-day bin)</td>
-<td>fixed 30-day bins anchored at <code>start</code></td>
-<td><strong>12</strong></td>
-<td><code>window_days</code> &gt; ~390 → equal-divide into 12 frames; <code>temporal_spacing_stretched=True</code> + <code>UserWarning</code></td>
-</tr>
-<tr>
-<td><a href="../models/galileo/"><code>galileo</code></a></td>
-<td>month-of-year (0–11)</td>
-<td>~monthly</td>
-<td><code>window_days</code> ≤ ~30 (one 30-day frame)</td>
-<td>~30-day frames anchored at <code>start</code></td>
-<td><strong>12</strong></td>
-<td><code>window_days</code> &gt; ~390 → equal-divide into 12 frames; <code>temporal_spacing_stretched=True</code> + <code>UserWarning</code></td>
-</tr>
-<tr>
-<td><a href="../models/prithvi/"><code>prithvi</code></a></td>
-<td>(year, day-of-year)</td>
-<td>1–6 month gaps (≈28–184 days)</td>
-<td><code>window_days</code> &lt; ~56 (i.e. <code>window_days // 28 &lt; 2</code>)</td>
-<td><code>T = clamp(window_days // 28, 1, 4)</code>, equal bins</td>
-<td><strong>4</strong></td>
-<td>window beyond ~2 yr → frame gap &gt; 184 days; <code>temporal_spacing_out_of_range=True</code> + <code>UserWarning</code></td>
-</tr>
-<tr>
-<td><a href="../models/anysat/"><code>anysat</code></a></td>
-<td>day-of-year (0–364)</td>
-<td>dense (S2 revisit)</td>
-<td>— (no <code>auto</code>; always multi)</td>
-<td>fixed <code>N</code> equal frames (<code>RS_EMBED_ANYSAT_FRAMES</code>, default 8)</td>
-<td>—</td>
-<td>none — date-aware and cadence-agnostic by design</td>
-</tr>
-<tr>
-<td><a href="../models/agrifm/"><code>agrifm</code></a></td>
-<td>none (frame order only)</td>
-<td>dense intra-season</td>
-<td>— (no <code>auto</code>; always multi)</td>
-<td>fixed <code>N</code> equal frames (<code>RS_EMBED_AGRIFM_FRAMES</code>, default 8)</td>
-<td>—</td>
-<td>n/a — no calendar encoding, only frame order</td>
+<td><code>shape_adjust="pad"</code>/<code>"crop"</code> (keyword / <code>model_config</code>)</td>
+<td><code>pad</code></td>
 </tr>
 </tbody>
 </table>
-<div class="admonition note">
-<p class="admonition-title">Why <code>anysat</code> and <code>agrifm</code> keep a fixed frame count</p>
-<p><code>anysat</code> injects each frame's real day-of-year and was trained for <em>any</em> cadence, so it doesn't need a window-derived count or an out-of-distribution warning. <code>agrifm</code> is a Video Swin model that encodes only frame <strong>order</strong> (no calendar date) and was trained on fixed-length intra-season stacks, so changing the frame count would change its learned temporal receptive field. Both therefore stay on a fixed <code>N</code> (tune via their <code>_FRAMES</code> env var).</p>
-</div>
+<p><a href="../models/thor/"><code>thor</code></a> also squares non-square inputs, but through its own bounded
+<code>native_snap</code> path (<code>RS_EMBED_THOR_SHAPE_ADJUST</code>, default <code>crop</code>) — separate from
+this fallback; see the THOR page.</p>
 <hr />
-<h2 id="worked-examples">Worked examples<a class="headerlink" href="#worked-examples" title="Permanent link">&para;</a></h2>
-<p>Using <code>olmoearth</code> (monthly, cap 12):</p>
+<h2 id="what-gets-recorded">What gets recorded<a class="headerlink" href="#what-gets-recorded" title="Permanent link">&para;</a></h2>
 <table>
 <thead>
 <tr>
-<th><code>TemporalSpec.range</code></th>
-<th><code>window_days</code></th>
-<th><code>auto</code> resolves to</th>
-<th>Frames (<code>T</code>)</th>
-<th>Notes</th>
+<th>Field</th>
+<th>Meaning</th>
 </tr>
 </thead>
 <tbody>
 <tr>
-<td><code>2022-06-01 → 2022-06-20</code></td>
-<td>19</td>
-<td><code>single</code></td>
-<td>1</td>
-<td>&lt; 30 days → one composite</td>
+<td><code>meta["input_prep"]["roi_cropped"]</code></td>
+<td><code>True</code> when the output was cropped back to a sub-ROI</td>
 </tr>
 <tr>
-<td><code>2022-06-01 → 2022-09-01</code></td>
-<td>92</td>
-<td><code>multi</code></td>
-<td>3–4</td>
-<td>fixed 30-day bins</td>
+<td><code>meta["shape_prep"]["applied"]</code></td>
+<td><code>none</code> / <code>pad_to_square</code> / <code>crop_to_square</code> / <code>fixed_resize</code> (fallback path)</td>
 </tr>
 <tr>
-<td><code>2022-01-01 → 2023-01-01</code></td>
-<td>365</td>
-<td><code>multi</code></td>
-<td>12</td>
-<td>full monthly year (in-distribution)</td>
+<td><code>meta["shape_prep"]["orig_hw"]</code> / <code>["square_hw"]</code> / <code>["target_hw"]</code></td>
+<td>ROI shape, squared shape, final model size</td>
 </tr>
 <tr>
-<td><code>2022-01-01 → 2025-01-01</code></td>
-<td>1096</td>
-<td><code>multi</code></td>
-<td>12 (equal-divided)</td>
-<td>&gt; ~390 days → <strong>stretched</strong>, ~91-day spacing, <code>UserWarning</code></td>
+<td><code>meta["shape_prep"]["aspect"]</code></td>
+<td><code>long_side / short_side</code> (drives the <code>fixed_resize</code> fallback)</td>
 </tr>
 </tbody>
 </table>
-<p><code>galileo</code> behaves the same way (monthly, cap 12). <code>prithvi</code> uses the same idea with a ~28-day stride and a cap of 4, so its single/multi switch is at ~56 days and it saturates at 4 frames.</p>
+<p><code>roi_cropped=True</code> means you got the ROI, not the square. <code>applied == "fixed_resize"</code>
+means the ROI was too rectangular to square cleanly and was stretched.</p>
 <hr />
-<h2 id="out-of-distribution-windows">Out-of-distribution windows<a class="headerlink" href="#out-of-distribution-windows" title="Permanent link">&para;</a></h2>
-<p>When a window is wider than a model's frame budget can cover at its training cadence, <code>rs-embed</code> <strong>does not silently drop the trailing time</strong>. Instead it covers the whole window with the available frames (spaced wider than training) and records that the result is extrapolated:</p>
-<ul>
-<li><strong><code>olmoearth</code> / <code>galileo</code></strong>: <code>meta["temporal_sampling"]="equal_divided"</code>, <code>meta["temporal_spacing_stretched"]=True</code>, <code>meta["effective_stride_days"]</code>, plus a <code>UserWarning</code>.</li>
-<li><strong><code>prithvi</code></strong>: <code>meta["temporal_spacing_out_of_range"]=True</code>, <code>meta["max_frame_gap_days"]</code>, plus a <code>UserWarning</code>.</li>
-</ul>
-<p>To stay in-distribution, <strong>narrow the temporal window</strong> so the frames land near the model's training cadence.</p>
-<hr />
-<h2 id="data-availability-empty-sub-windows-are-never-silent">Data availability: empty sub-windows are never silent<a class="headerlink" href="#data-availability-empty-sub-windows-are-never-silent" title="Permanent link">&para;</a></h2>
-<p>Choosing <code>T</code> frames assumes each frame's sub-window actually contains a clear scene. When some don't (clouds, gaps in coverage, a tiny trailing bin), <code>rs-embed</code> makes the gap explicit instead of pretending the series is full. Two mechanisms, by model family:</p>
-<ul>
-<li><strong><code>olmoearth</code></strong> (drops empty bins): the empty bins are removed from the sequence, so <code>T</code> shrinks. Recorded as <code>meta["n_bins"]</code> (bins the window produced), <code>meta["n_frames"]</code> (frames encoded), and <code>meta["dropped_bins"]</code> (the dropped <code>[start, end]</code> ranges), with a <code>UserWarning</code>.</li>
-<li><strong><code>prithvi</code> / <code>galileo</code> / <code>anysat</code> / <code>agrifm</code></strong> (back-fill): the multi-frame provider fetch keeps <code>T</code> fixed by <strong>back-filling empty sub-windows with the whole-window composite</strong> (and padding short series by repeating the last frame) — i.e. duplicate frames. <code>rs-embed</code> records <code>meta["n_frames_requested"]</code>, <code>meta["n_distinct_frames"]</code>, and <code>meta["n_backfilled_frames"]</code>, and emits a <code>UserWarning</code> naming how many of the <code>T</code> sub-windows actually had distinct imagery. <code>prithvi</code> additionally <strong>collapses</strong> the duplicate frames (so its encoded <code>T</code> shrinks — see also <code>meta["requested_frames"]</code> vs <code>meta["num_frames"]</code>); the others feed the duplicate timesteps to the encoder.</li>
-</ul>
-<p>So <code>n_distinct_frames &lt; n_frames_requested</code> (or <code>n_frames &lt; n_bins</code> for <code>olmoearth</code>) means the window was sparser than the requested frame count — <strong>narrow/shift the window, raise <code>cloudy_pct</code>, or lower the frame count</strong> to recover genuine temporal diversity. The warning fires from the shared fetch helper, so it covers the single, tiled, batch, and export paths uniformly.</p>
-<hr />
-<h2 id="frame-order">Frame order<a class="headerlink" href="#frame-order" title="Permanent link">&para;</a></h2>
-<p>Frames are always arranged <strong>earliest-first</strong> (chronological): <code>T=0</code> is the oldest sub-window, <code>T=N-1</code> the newest. The provider sorts imagery by acquisition time and the window splitter emits bins in ascending order, so you never sort the series yourself.</p>
-<p>Every multi-temporal model is <strong>order-sensitive</strong> — the per-frame time encoding in the <a href="#decision-table">decision table</a> means reordering the frames changes the embedding. This holds even for <code>agrifm</code>, which carries no calendar date and encodes only the frame <em>position</em>.</p>
-<p>One case puts ordering in your hands: if you bypass fetching and pass your own array via <code>input_chw</code>, a <code>(T, C, H, W)</code> stack is consumed exactly as given (never reordered), so it <strong>must be earliest-first</strong> to match the fetched convention.</p>
-<hr />
-<h2 id="cost">Cost<a class="headerlink" href="#cost" title="Permanent link">&para;</a></h2>
-<p><code>multi</code> fetches <strong>one composite per frame</strong> from the provider (e.g. GEE), so a multi-month/-year window costs up to <code>T</code>× the fetches/time of a single composite — up to <strong>12×</strong> for <code>olmoearth</code>/<code>galileo</code>, <strong>4×</strong> for <code>prithvi</code>. This matters most for large <code>export_batch</code> runs over many points. To control it:</p>
-<ul>
-<li>pass <code>temporal_mode="single"</code> to force one composite regardless of window length;</li>
-<li>or narrow the window so <code>auto</code> resolves to fewer frames.</li>
-</ul>
-<p>Sub-month windows are <em>cheaper</em> than the old fixed-count behavior, since <code>auto</code> collapses them to <code>T=1</code>.</p>
-<hr />
-<h2 id="see-also">See also<a class="headerlink" href="#see-also" title="Permanent link">&para;</a></h2>
-<ul>
-<li><a href="../models/">Models Overview</a> — the on-the-fly model table (Temporal style column).</li>
-<li><a href="../models_reference/">Advanced Reference</a> — per-model temporal packaging and side inputs.</li>
-<li>Per-model temporal sections: <a href="../models/olmoearth/#temporal_mode">olmoearth</a>, <a href="../models/galileo/#temporal-sampling">galileo</a>, <a href="../models/prithvi/#temporal-mode-temporal_mode">prithvi</a>.</li>
-</ul>
+<h2 id="practical-advice">Practical advice<a class="headerlink" href="#practical-advice" title="Permanent link">&para;</a></h2>
+<p>The contract removes aspect distortion but <strong>cannot invent spatial detail</strong> the ROI
+never had. For tiny ROIs the real fix is to request a <strong>larger, roughly square</strong>
+BBox (e.g. ~2.56 km at 10 m → native 256×256) so no upsampling is needed at all.
+Keeping <code>aspect &lt; 2.0</code> avoids the stretch fallback entirely.</p>
 
 
 

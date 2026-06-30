@@ -268,6 +268,13 @@
   
     
     
+      
+  
+  
+  
+  
+    
+    
       <li class="md-tabs__item">
         <a href="../../api/" class="md-tabs__link">
           
@@ -279,6 +286,9 @@
 
         </a>
       </li>
+    
+  
+
     
   
 
@@ -1679,16 +1689,6 @@
       
         
       
-        
-      
-        
-      
-        
-      
-        
-      
-        
-      
     
     
     
@@ -1742,6 +1742,74 @@
   
   
   
+    
+    
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Reference
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_1">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Reference
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
     <li class="md-nav__item">
       <a href="../../api/" class="md-nav__link">
         
@@ -1779,34 +1847,6 @@
     
   
     Specs & Data Structures
-  
-
-    
-  </span>
-  
-  
-
-      </a>
-    </li>
-  
-
-              
-            
-              
-                
-  
-  
-  
-  
-    <li class="md-nav__item">
-      <a href="../../temporal_sampling/" class="md-nav__link">
-        
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Temporal Sampling
   
 
     
@@ -1927,6 +1967,138 @@
   
 
       </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    
+    
+      
+        
+      
+        
+      
+    
+    
+    
+      
+      
+        
+      
+    
+    
+    <li class="md-nav__item md-nav__item--nested">
+      
+        
+        
+          
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_2" >
+        
+          
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+            
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Concept
+  
+
+    
+  </span>
+  
+  
+
+            <span class="md-nav__icon md-icon"></span>
+          </label>
+        
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_2_label" aria-expanded="false">
+          <label class="md-nav__title" for="__nav_3_2">
+            <span class="md-nav__icon md-icon"></span>
+            
+  
+    Concept
+  
+
+          </label>
+          <ul class="md-nav__list" data-md-scrollfix>
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../temporal_sampling/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Temporal Sampling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../spatial_roi/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Spatial ROI Handling
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+          </ul>
+        </nav>
+      
     </li>
   
 
@@ -2622,21 +2794,12 @@ converts to dB via <code>10·log10</code> before normalization. <code>input_chw<
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
-    TEMP["Temporal range"] --&gt; BINS["Build bins:\n30-day fixed (≤12 mo)\nor equal-divide into 12\n(longer windows, flagged)"]
-    BINS --&gt; FETCH["Fetch one S2 composite\nper bin\nraw DN, C=12"]
-    FETCH --&gt; DROP["Drop empty-bin frames\nkeep aligned timestamps"]
-    DROP --&gt; NORM["Per-frame per-band mean±2σ\nnormalization"]
-    NORM --&gt; SQUARE["Pad/crop each frame to square\n(shape_adjust, no aspect stretch)"]
-    SQUARE --&gt; RESIZE["Resize each frame to image_size\n(default 256×256)"]
-    RESIZE --&gt; STACK["Stack frames\n(T, C, H, W)"]
-    STACK --&gt; TS["Frame timestamps\n(day, month, year)"]
-    STACK --&gt; SAMPLE["Build MaskedOlmoEarthSample\n(B=1, H, W, T, C=12)"]
-    TS --&gt; SAMPLE
-    SAMPLE --&gt; ENC["FlexiViT encoder\npatch_size=4 (default)"]
-    ENC --&gt; POOL["Pool over T×BandSets\n→ (B, H', W', D)"]
-    POOL --&gt; OUTPUT{Output mode}
-    OUTPUT -- pooled --&gt; VEC["Global mean/max\n→ (D,) vector"]
-    OUTPUT -- grid --&gt; GRID["Spatial token map\n(D, H', W')"]</code></pre>
+    INPUT["S2 L2A 12-band\ntemporal range"] --&gt; BINS["Bin into ≤12 frames\n(30-day or equal-divide)\nfetch composite/bin, drop empty"]
+    BINS --&gt; PREP["Per-frame: mean±2σ normalize\n→ square + resize 256×256\n→ stack (T,C,H,W) + timestamps"]
+    PREP --&gt; ENC["FlexiViT encoder\n(patch_size=4)"]
+    ENC --&gt; OUT{Output mode}
+    OUT -- pooled --&gt; VEC["Global mean/max → (D,)"]
+    OUT -- grid --&gt; GRID["Spatial token map (D,H',W')"]</code></pre>
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
@@ -2753,38 +2916,32 @@ v1.1 uses a linear patch embedding (<code>use_linear_patch_embed=True</code>) th
 <p>Default: <code>256</code> (matching the OlmoEarth training tile size).</p>
 <h3 id="shape_adjust"><code>shape_adjust</code><a class="headerlink" href="#shape_adjust" title="Permanent link">&para;</a></h3>
 <p>OlmoEarth's positional encoding is generated from a single <code>grid_size</code> scalar, so
-the encoder requires a <strong>square</strong> token grid — a non-square ROI cannot be fed as
-<code>H != W</code>. Rather than stretch a rectangular ROI to a square (which distorts the
-geometry: a 1.8:1 field collapses into striped, smeared embeddings), the adapter
-makes the ROI square <em>before</em> resizing to <code>image_size</code>.</p>
+the encoder requires a <strong>square</strong> token grid. Like every on-the-fly model it follows
+the shared <a href="../../spatial_roi/">Spatial ROI Handling</a> contract (enlarge to a square of
+real imagery → encode → crop back to the ROI). OlmoEarth additionally exposes the
+<strong>fallback</strong> squaring mode as a knob (most models keep it fixed to <code>pad</code>):</p>
 <table>
 <thead>
 <tr>
-<th>Value</th>
+<th><code>shape_adjust</code></th>
 <th>Behavior</th>
 </tr>
 </thead>
 <tbody>
 <tr>
 <td><code>pad</code> (default)</td>
-<td>Reflect-pad the short side up to the long side — keeps the <strong>whole ROI</strong>, no data discarded</td>
+<td>Reflect-pad the short side — keeps the <strong>whole ROI</strong></td>
 </tr>
 <tr>
 <td><code>crop</code></td>
-<td>Center-crop the long side down to the short side — discards the ROI margins</td>
+<td>Center-crop the long side — discards ROI margins</td>
 </tr>
 </tbody>
 </table>
-<p>This is the shared, reusable strategy in <code>rs_embed.tools.shape</code> (also used by the
-other square-input embedders). If the ROI is <strong>extremely</strong> rectangular (aspect
-ratio ≥ 2.0), padding would inject too much synthetic border and cropping would
-throw away too much real data, so the adapter falls back to a plain stretch — a
-known, bounded behavior. The outcome is recorded in <code>meta["shape_prep"]</code>
-(<code>applied</code> ∈ <code>none</code>/<code>pad_to_square</code>/<code>crop_to_square</code>/<code>fixed_resize</code>, plus
-<code>orig_hw</code>, <code>square_hw</code>, <code>aspect</code>).</p>
-<p>The real fix for tiny ROIs is still to request a <strong>larger, roughly square</strong> BBox
-(~2.56 km at 10 m → native 256×256) so no upsampling is needed at all; <code>shape_adjust</code>
-removes the distortion but cannot invent spatial detail the ROI never had.</p>
+<p>See <a href="../../spatial_roi/">Spatial ROI Handling</a> for when this fallback applies, the
+aspect-ratio stretch limit, the <code>meta</code> fields, and why requesting a <strong>larger,
+roughly square</strong> BBox (~2.56 km at 10 m → native 256×256) is the real fix for tiny
+ROIs — <code>shape_adjust</code> removes distortion but cannot invent detail the ROI never had.</p>
 <h3 id="temporal_mode"><code>temporal_mode</code><a class="headerlink" href="#temporal_mode" title="Permanent link">&para;</a></h3>
 <table>
 <thead>
@@ -2820,30 +2977,22 @@ sample's year window into fixed 30-day bins (<code>duration=30d</code> strides i
 rslearn config — <em>not</em> calendar months), and feeds each frame's start date as
 its <code>(day, month, year)</code> timestamp. The adapter reproduces exactly that:</p>
 <ul>
-<li>Bins: <code>[start, start+30d), [start+30d, start+60d), …</code>, last bin truncated at
-  the range end, up to 12 frames.</li>
-<li><strong>Windows longer than ~12 months are not truncated.</strong> Earlier behavior kept
-  only the first 12 monthly bins and silently dropped the rest; the adapter now
-  detects this (when capping would drop ≥ one full 30-day bin) and instead
-  <strong>equal-divides the whole window into 12 frames</strong> so the entire period is
-  represented. Because the frames are then wider apart than OlmoEarth's monthly
-  training cadence, this is flagged: <code>meta["temporal_sampling"] == "equal_divided"</code>,
-  <code>meta["temporal_spacing_stretched"] == True</code>, <code>meta["effective_stride_days"]</code>
-  records the cadence, and a <code>UserWarning</code> is emitted. Embeddings from such
-  windows are extrapolated — narrow the window to stay in-distribution. The
-  fixed-stride vs. equal-division decision lives in
+<li><strong>Bins:</strong> <code>[start, start+30d), [start+30d, …)</code>, last bin truncated at the range
+  end, up to 12 frames. Per-frame timestamp = bin start date.</li>
+<li><strong>Long windows (&gt;~12 months) are not truncated.</strong> When capping would drop ≥ one
+  full 30-day bin, the adapter <strong>equal-divides the whole window into 12 frames</strong>
+  instead of keeping only the first 12. The wider-than-monthly spacing is flagged
+  (<code>meta["temporal_sampling"]="equal_divided"</code>, <code>meta["temporal_spacing_stretched"]=True</code>,
+  <code>meta["effective_stride_days"]</code>) with a <code>UserWarning</code>. Such embeddings are
+  extrapolated, so narrow the window to stay in-distribution. Decision logic:
   <code>rs_embed.tools.temporal.fixed_or_equal_bins</code>.</li>
-<li>Per-frame timestamp = bin start date (matching the official pipeline).</li>
-<li>Bins with no imagery are <strong>dropped from the sequence</strong> (the encoder runs with
-  <code>fast_pass=True</code>, which ignores attention masks, so empty frames cannot be
-  masked out — they are excluded instead). At least one bin must have data. This
-  drop is <strong>not silent</strong>: <code>meta["n_bins"]</code> records the bins the window produced,
-  <code>meta["n_frames"]</code> the frames actually encoded, and <code>meta["dropped_bins"]</code>
-  lists the <code>[start, end]</code> ranges that had no usable imagery, alongside a
-  <code>UserWarning</code>. So <code>n_frames</code> &lt; <code>n_bins</code> simply means some bins had no
-  cloud-free scene — raise <code>cloudy_pct</code>, widen/shift the window, or use
-  <code>temporal_mode="single"</code>.</li>
-<li>Works for both <code>s2</code> and <code>s1</code>. S1 reuses the single-frame S1 fetch per bin, so
+<li><strong>Empty bins are dropped, not masked</strong> (the encoder runs <code>fast_pass=True</code>, which
+  ignores attention masks); at least one bin must have data. Not silent:
+  <code>meta["n_bins"]</code> (bins produced), <code>meta["n_frames"]</code> (frames encoded), and
+  <code>meta["dropped_bins"]</code> (the empty <code>[start, end]</code> ranges) plus a <code>UserWarning</code>.
+  <code>n_frames &lt; n_bins</code> means some bins had no cloud-free scene — raise <code>cloudy_pct</code>,
+  widen/shift the window, or use <code>temporal_mode="single"</code>.</li>
+<li><strong><code>s2</code> and <code>s1</code></strong> both supported; S1 reuses the single-frame S1 fetch per bin, so
   IW filtering and dB handling apply within each bin.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="n">emb</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">get_embedding</span><span class="p">(</span>
