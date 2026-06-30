@@ -87,6 +87,10 @@ _VARIANT_SPECS: dict[str, tuple[str, str, str]] = {
     "nano_v1_1": ("OlmoEarth-v1_1-Nano", "nano", "v1.1"),
     "tiny_v1_1": ("OlmoEarth-v1_1-Tiny", "tiny", "v1.1"),
     "base_v1_1": ("OlmoEarth-v1_1-Base", "base", "v1.1"),
+    "nano_v1_2": ("OlmoEarth-v1_2-Nano", "nano", "v1.2"),
+    "tiny_v1_2": ("OlmoEarth-v1_2-Tiny", "tiny", "v1.2"),
+    "small_v1_2": ("OlmoEarth-v1_2-Small", "small", "v1.2"),
+    "base_v1_2": ("OlmoEarth-v1_2-Base", "base", "v1.2"),
 }
 
 _VARIANT_ALIASES: dict[str, str] = {
@@ -97,9 +101,15 @@ _VARIANT_ALIASES: dict[str, str] = {
     "nano_11": "nano_v1_1",
     "tiny_11": "tiny_v1_1",
     "base_11": "base_v1_1",
+    "nano_12": "nano_v1_2",
+    "tiny_12": "tiny_v1_2",
+    "small_12": "small_v1_2",
+    "base_12": "base_v1_2",
+    # "small" exists only in v1.2, so the bare size name is unambiguous.
+    "small": "small_v1_2",
 }
 
-_DEFAULT_VARIANT = "tiny_v1_1"
+_DEFAULT_VARIANT = "base_v1_2"
 _DEFAULT_IMAGE_SIZE = 256  # training tile size; model accepts any size divisible by patch_size
 _DEFAULT_PATCH_SIZE = 4
 # OlmoEarth's positional encoding requires a square token grid, so a rectangular
@@ -706,7 +716,7 @@ def _tokens_to_grid(tokens_and_masks, pooling: str, *, modality: str = "s2") -> 
 
 @register("olmoearth")
 class OlmoEarthEmbedder(EmbedderBase):
-    """OlmoEarth v1/v1.1 on-the-fly embeddings from S2 L2A 12-band or S1 VV/VH patches.
+    """OlmoEarth v1/v1.1/v1.2 on-the-fly embeddings from S2 L2A 12-band or S1 VV/VH patches.
 
     Inputs:
       - spatial : BBox / PointBuffer (EPSG:4326)
@@ -731,6 +741,9 @@ class OlmoEarthEmbedder(EmbedderBase):
     Model variants (via ``model_config={"variant": "..."}``):
       v1  : nano (128-d), tiny (192-d), base (768-d), large (1024-d)
       v1.1: nano_v1_1 (128-d), tiny_v1_1 (192-d), base_v1_1 (768-d)
+      v1.2: nano_v1_2, tiny_v1_2, small_v1_2, base_v1_2 (default; ``small``
+            is v1.2-only). Embedding width is read from the model output, so
+            new sizes need no dim wiring here.
     """
 
     # Square-input model: marks it for the API tiling path (its own fetch_input
