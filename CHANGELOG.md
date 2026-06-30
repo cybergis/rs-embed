@@ -10,12 +10,12 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ### Added
 
-- **OlmoEarth v1.2 variants (`nano_v1_2`/`tiny_v1_2`/`small_v1_2`/`base_v1_2`).** Adds the v1.2 OlmoEarth family (Allen AI), including a new `small` size (384-d); dims are 128/192/384/768. v1.2 is not released in a `large` size. Selectable via `variant=`/`model_config`, with short aliases `nano_12`/`tiny_12`/`small_12`/`base_12` (and the bare `small`, which is v1.2-only). Requires `olmoearth-pretrain-minimal>=0.0.6`, which registers the `v1_2` model ids.
+- **OlmoEarth v1.2 variants (`nano_v1_2`/`tiny_v1_2`/`small_v1_2`/`base_v1_2`, incl. a new 384-d `small`).** Requires `olmoearth-pretrain-minimal>=0.0.6`.
 
 ### Changed
 
 - **`satmaepp_s2_10b` is no longer a standalone model; the Sentinel-2 10-band path is now the `"s2_10b"` modality of `satmaepp`.** SatMAE++'s two sensor configurations live under one model name, selected with `modality=` (the codebase's mechanism for same-model/different-sensor, like `terrafm`'s s2/s1): `get_embedding("satmaepp")` is the default fMoW-RGB 3-band path and `get_embedding("satmaepp", modality="s2_10b")` is the grouped-channel 10-band path; for exports use `export_batch(..., per_model_modalities={"satmaepp": "s2_10b"})`. The `satmaepp_s2_10b`, `satmaepp_s2`, and `satmaepp_sentinel10` model names (and their `variant`/env knobs) are removed — **migrate to `modality="s2_10b"`.** Embeddings and metadata for the 10-band path are unchanged (now labelled under `model="satmaepp"`); the model catalog drops from 20 to 19 entries.
-- **`olmoearth` default variant changed `tiny_v1_1` → `base_v1_2`.** The default model is now OlmoEarth v1.2 Base (768-d). To keep the previous default, pass `variant="tiny_v1_1"` (or set `RS_EMBED_OLMOEARTH_VARIANT`).
+- **`olmoearth` default variant is now `base_v1_2` (was `tiny_v1_1`).** Pin `variant="tiny_v1_1"` to keep the old default.
 
 ## [0.2.0] — 2026-06-29
 
