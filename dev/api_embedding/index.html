@@ -2634,7 +2634,7 @@
     <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
     <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
     <span class="n">device</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;resize&quot;</span><span class="p">,</span>  <span class="c1"># default</span>
+    <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;tile&quot;</span><span class="p">,</span>  <span class="c1"># default; pass &quot;resize&quot; to downsample instead</span>
 <span class="p">)</span>
 <span class="n">vec</span> <span class="o">=</span> <span class="n">emb</span><span class="o">.</span><span class="n">data</span>  <span class="c1"># (D,)</span>
 </code></pre></div>

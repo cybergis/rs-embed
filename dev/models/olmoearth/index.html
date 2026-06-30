@@ -2722,7 +2722,7 @@
 - 4 size variants in v1 (<code>nano</code>/<code>tiny</code>/<code>base</code>/<code>large</code>) and 3 in v1.1 (<code>nano_v1_1</code>/<code>tiny_v1_1</code>/<code>base_v1_1</code>)
 - <code>patch_size</code> controls the spatial token density (1–8); default <code>4</code> matches the official inference example
 - Input image resized to <code>image_size</code> (default 256) before encoding
-- Requires <code>olmoearth-pretrain-minimal</code> (<code>pip install rs-embed[olmoearth]</code>)</p>
+- Uses <code>olmoearth-pretrain-minimal</code>, included in the base <code>pip install rs-embed</code></p>
 </div>
 <hr />
 <h2 id="input-contract">Input Contract<a class="headerlink" href="#input-contract" title="Permanent link">&para;</a></h2>
@@ -3100,10 +3100,9 @@ For defaults (256, patch_size=4): <code>64 × 64</code> grid.</p>
 </table>
 <hr />
 <h2 id="installation">Installation<a class="headerlink" href="#installation" title="Permanent link">&para;</a></h2>
-<p>OlmoEarth requires an additional package not included in the base <code>rs-embed</code> install:</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>rs-embed<span class="o">[</span>olmoearth<span class="o">]</span>
-<span class="c1"># or</span>
-uv<span class="w"> </span>pip<span class="w"> </span>install<span class="w"> </span>olmoearth-pretrain-minimal
+<p>OlmoEarth works out of the box — its <code>olmoearth-pretrain-minimal</code> dependency is part
+of the base install:</p>
+<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>rs-embed
 </code></pre></div>
 <hr />
 <h2 id="usage-examples">Usage Examples<a class="headerlink" href="#usage-examples" title="Permanent link">&para;</a></h2>
@@ -3180,7 +3179,7 @@ are provided "as is" with no warranty (Section 6).</p>
 <div class="admonition info">
 <p class="admonition-title">How this affects <code>rs-embed</code></p>
 <p><code>rs-embed</code> does <strong>not</strong> bundle or redistribute the OlmoEarth weights or code — it declares
-<code>olmoearth-pretrain-minimal</code> as an <em>optional</em> dependency and downloads the weights from
+<code>olmoearth-pretrain-minimal</code> as a runtime dependency and downloads the weights from
 Hugging Face at runtime. The license therefore binds <strong>you, the end user</strong>, directly; the
 <code>rs-embed</code> package stays Apache 2.0. Just make sure your own use complies with Section 2 above.</p>
 </div>
