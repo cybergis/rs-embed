@@ -8,10 +8,6 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
-### Changed
-
-- **`satmaepp_s2_10b` is no longer a standalone model; the Sentinel-2 10-band path is now the `"s2_10b"` modality of `satmaepp`.** SatMAE++'s two sensor configurations live under one model name, selected with `modality=` (the codebase's mechanism for same-model/different-sensor, like `terrafm`'s s2/s1): `get_embedding("satmaepp")` is the default fMoW-RGB 3-band path and `get_embedding("satmaepp", modality="s2_10b")` is the grouped-channel 10-band path; for exports use `export_batch(..., per_model_modalities={"satmaepp": "s2_10b"})`. The `satmaepp_s2_10b`, `satmaepp_s2`, and `satmaepp_sentinel10` model names (and their `variant`/env knobs) are removed — **migrate to `modality="s2_10b"`.** Embeddings and metadata for the 10-band path are unchanged (now labelled under `model="satmaepp"`); the model catalog drops from 20 to 19 entries.
-
 ## [0.2.0] — 2026-06-30
 
 This release adds the OlmoEarth model family, makes the temporal models (`prithvi`, `galileo`, `olmoearth`) sample window-adaptively by default, and fixes several `export_batch` correctness issues where a point's embedding differed between the single and batch/tiled paths. Some defaults that change embedding behavior are noted below; pin explicit options where strict reproducibility across versions is required.
@@ -26,6 +22,7 @@ This release adds the OlmoEarth model family, makes the temporal models (`prithv
 
 ### Changed
 
+- **`satmaepp`'s Sentinel-2 10-band path is now selected via `modality="s2_10b"` (default stays fMoW-RGB 3-band); the standalone `satmaepp_s2_10b`/`satmaepp_s2`/`satmaepp_sentinel10` models are removed.** Migrate to `modality="s2_10b"` (embeddings unchanged); catalog drops 20→19 models.
 - **`olmoearth` `temporal_mode` now defaults to `"auto"` (was `"single"`).** `auto` picks `single` for ≤~1-month windows and `multi` otherwise, so multi-month/-year ranges sample temporally by default. **Cost note:** any range >~1 month now fetches up to 12 composites (≈12× single mode) — pass `temporal_mode="single"` to force the cheaper path.
 - **`galileo` now samples a window-adaptive frame count instead of a fixed 8, with a `temporal_mode` knob (default `"auto"`).** Frames track Galileo's ~monthly cadence (≤12); windows beyond 12 months are equal-divided into 12 frames covering the whole range and flagged out-of-distribution. Sub-month windows are now cheaper (1 frame instead of 8); `temporal_mode`/`n_frames` are settable via `model_config` or `RS_EMBED_GALILEO_*`.
 - **Image-level ViT patch-token grid models tile by default with a seam warning.** For `scalemae`, `satmae`, and `satmaepp`, `input_prep=None`/`"auto"` resolves to `"tile"` (the package-wide default, same as `remoteclip`), so these models tile like every other model. On `grid` output the default/auto path and explicit `"tile"` emit a `UserWarning` that the tiled patch-token mosaic can show stitching seams — inherent to mosaicking independent token grids, not a per-model bug — and point to `input_prep="resize"` for a seamless (downsampled) grid; explicit `"resize"` stays silent. `get_embedding` and `export_batch` resolve this identically per model. Metadata records `input_prep.model_policy="tile_default_for_image_level_vit_patch_grid"` (or `"explicit_tile_for_image_level_vit_patch_grid"`) and `resolved_mode="tile"`.
