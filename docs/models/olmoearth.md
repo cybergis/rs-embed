@@ -5,9 +5,9 @@
 | Field                | Value                                                                                                     |
 | -------------------- | --------------------------------------------------------------------------------------------------------- |
 | Model ID             | `olmoearth`                                                                                               |
-| Family / Backbone    | OlmoEarth v1/v1.1 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset                       |
+| Family / Backbone    | OlmoEarth v1/v1.1/v1.2 — FlexiViT encoder (ViT-style) trained on the Major TOM dataset                  |
 | Adapter type         | `on-the-fly`                                                                                              |
-| Model config keys    | `variant` (default: `tiny_v1_1`), `patch_size` (default: `4`), `image_size` (default: `256`), `shape_adjust` (default: `pad`) |
+| Model config keys    | `variant` (default: `base_v1_2`), `patch_size` (default: `4`), `image_size` (default: `256`), `shape_adjust` (default: `pad`) |
 | Training alignment   | High (S2 L2A 12-band; native 10 m resolution; per-band mean±2σ normalization matches training pipeline)   |
 
 !!! success "OlmoEarth In 30 Seconds"
@@ -20,7 +20,7 @@
     - 4 size variants in v1 (`nano`/`tiny`/`base`/`large`) and 3 in v1.1 (`nano_v1_1`/`tiny_v1_1`/`base_v1_1`)
     - `patch_size` controls the spatial token density (1–8); default `4` matches the official inference example
     - Input image resized to `image_size` (default 256) before encoding
-    - Requires `olmoearth-pretrain-minimal` (`pip install rs-embed[olmoearth]`)
+    - Uses `olmoearth-pretrain-minimal`, included in the base `pip install rs-embed`
 
 ---
 
@@ -56,21 +56,12 @@ three band sets (10 m, 20 m, 60 m) totaling 12 channels. The S1 order matches
 
 ```mermaid
 flowchart LR
-    TEMP["Temporal range"] --> BINS["Build bins:\n30-day fixed (≤12 mo)\nor equal-divide into 12\n(longer windows, flagged)"]
-    BINS --> FETCH["Fetch one S2 composite\nper bin\nraw DN, C=12"]
-    FETCH --> DROP["Drop empty-bin frames\nkeep aligned timestamps"]
-    DROP --> NORM["Per-frame per-band mean±2σ\nnormalization"]
-    NORM --> SQUARE["Pad/crop each frame to square\n(shape_adjust, no aspect stretch)"]
-    SQUARE --> RESIZE["Resize each frame to image_size\n(default 256×256)"]
-    RESIZE --> STACK["Stack frames\n(T, C, H, W)"]
-    STACK --> TS["Frame timestamps\n(day, month, year)"]
-    STACK --> SAMPLE["Build MaskedOlmoEarthSample\n(B=1, H, W, T, C=12)"]
-    TS --> SAMPLE
-    SAMPLE --> ENC["FlexiViT encoder\npatch_size=4 (default)"]
-    ENC --> POOL["Pool over T×BandSets\n→ (B, H', W', D)"]
-    POOL --> OUTPUT{Output mode}
-    OUTPUT -- pooled --> VEC["Global mean/max\n→ (D,) vector"]
-    OUTPUT -- grid --> GRID["Spatial token map\n(D, H', W')"]
+    INPUT["S2 L2A 12-band\ntemporal range"] --> BINS["Bin into ≤12 frames\n(30-day or equal-divide)\nfetch composite/bin, drop empty"]
+    BINS --> PREP["Per-frame: mean±2σ normalize\n→ square + resize 256×256\n→ stack (T,C,H,W) + timestamps"]
+    PREP --> ENC["FlexiViT encoder\n(patch_size=4)"]
+    ENC --> OUT{Output mode}
+    OUT -- pooled --> VEC["Global mean/max → (D,)"]
+    OUT -- grid --> GRID["Spatial token map (D,H',W')"]
 ```
 
 ---
@@ -107,12 +98,18 @@ Selects the model size and version. Weights are automatically downloaded from Hu
 | `nano_v1_1`  | v1.1    | 128         | 4     | `allenai/OlmoEarth-v1_1-Nano`      |
 | `tiny_v1_1`  | v1.1    | 192         | 12    | `allenai/OlmoEarth-v1_1-Tiny`      |
 | `base_v1_1`  | v1.1    | 768         | 12    | `allenai/OlmoEarth-v1_1-Base`      |
+| `nano_v1_2`  | v1.2    | 128         | 4     | `allenai/OlmoEarth-v1_2-Nano`      |
+| `tiny_v1_2`  | v1.2    | 192         | 12    | `allenai/OlmoEarth-v1_2-Tiny`      |
+| `small_v1_2` | v1.2    | 384         | 12    | `allenai/OlmoEarth-v1_2-Small`     |
+| `base_v1_2`  | v1.2    | 768         | 12    | `allenai/OlmoEarth-v1_2-Base`      |
 
-!!! note "v1 vs v1.1 architecture difference"
+The default variant is **`base_v1_2`**. v1.2 requires `olmoearth-pretrain-minimal>=0.0.6`.
+
+!!! note "v1 vs v1.1/v1.2 architecture difference"
     v1 uses a Conv2D-based patch embedding, producing 3 separate band-set token groups per spatial location.
-    v1.1 uses a linear patch embedding (`use_linear_patch_embed=True`) that merges band sets into a single token stream. Both versions produce the same output dimensionality after pooling.
+    v1.1 and v1.2 use a linear patch embedding (`use_linear_patch_embed=True`) that merges band sets into a single token stream. All versions produce the same output dimensionality after pooling. v1.2 adds a new `small` size (384-d) and is not released in a `large` size.
 
-Short aliases are accepted: `nano_11`, `tiny_11`, `base_11` for v1.1 variants; `nano_v1`, `tiny_v1`, `base_v1`, `large_v1` for v1 variants.
+Short aliases are accepted: `nano_12`, `tiny_12`, `small_12`, `base_12` (and the bare `small`, which is v1.2-only) for v1.2 variants; `nano_11`, `tiny_11`, `base_11` for v1.1 variants; `nano_v1`, `tiny_v1`, `base_v1`, `large_v1` for v1 variants.
 
 ### `patch_size`
 
@@ -133,27 +130,20 @@ Default: `256` (matching the OlmoEarth training tile size).
 ### `shape_adjust`
 
 OlmoEarth's positional encoding is generated from a single `grid_size` scalar, so
-the encoder requires a **square** token grid — a non-square ROI cannot be fed as
-`H != W`. Rather than stretch a rectangular ROI to a square (which distorts the
-geometry: a 1.8:1 field collapses into striped, smeared embeddings), the adapter
-makes the ROI square *before* resizing to `image_size`.
+the encoder requires a **square** token grid. Like every on-the-fly model it follows
+the shared [Spatial ROI Handling](../spatial_roi.md) contract (enlarge to a square of
+real imagery → encode → crop back to the ROI). OlmoEarth additionally exposes the
+**fallback** squaring mode as a knob (most models keep it fixed to `pad`):
 
-| Value          | Behavior                                                                                  |
-| -------------- | ----------------------------------------------------------------------------------------- |
-| `pad` (default) | Reflect-pad the short side up to the long side — keeps the **whole ROI**, no data discarded |
-| `crop`          | Center-crop the long side down to the short side — discards the ROI margins                |
+| `shape_adjust` | Behavior |
+| -------------- | -------- |
+| `pad` (default) | Reflect-pad the short side — keeps the **whole ROI** |
+| `crop`          | Center-crop the long side — discards ROI margins |
 
-This is the shared, reusable strategy in `rs_embed.tools.shape` (also used by the
-other square-input embedders). If the ROI is **extremely** rectangular (aspect
-ratio ≥ 2.0), padding would inject too much synthetic border and cropping would
-throw away too much real data, so the adapter falls back to a plain stretch — a
-known, bounded behavior. The outcome is recorded in `meta["shape_prep"]`
-(`applied` ∈ `none`/`pad_to_square`/`crop_to_square`/`fixed_resize`, plus
-`orig_hw`, `square_hw`, `aspect`).
-
-The real fix for tiny ROIs is still to request a **larger, roughly square** BBox
-(~2.56 km at 10 m → native 256×256) so no upsampling is needed at all; `shape_adjust`
-removes the distortion but cannot invent spatial detail the ROI never had.
+See [Spatial ROI Handling](../spatial_roi.md) for when this fallback applies, the
+aspect-ratio stretch limit, the `meta` fields, and why requesting a **larger,
+roughly square** BBox (~2.56 km at 10 m → native 256×256) is the real fix for tiny
+ROIs — `shape_adjust` removes distortion but cannot invent detail the ROI never had.
 
 ### `temporal_mode`
 
@@ -174,30 +164,22 @@ sample's year window into fixed 30-day bins (`duration=30d` strides in the
 rslearn config — *not* calendar months), and feeds each frame's start date as
 its `(day, month, year)` timestamp. The adapter reproduces exactly that:
 
-- Bins: `[start, start+30d), [start+30d, start+60d), …`, last bin truncated at
-  the range end, up to 12 frames.
-- **Windows longer than ~12 months are not truncated.** Earlier behavior kept
-  only the first 12 monthly bins and silently dropped the rest; the adapter now
-  detects this (when capping would drop ≥ one full 30-day bin) and instead
-  **equal-divides the whole window into 12 frames** so the entire period is
-  represented. Because the frames are then wider apart than OlmoEarth's monthly
-  training cadence, this is flagged: `meta["temporal_sampling"] == "equal_divided"`,
-  `meta["temporal_spacing_stretched"] == True`, `meta["effective_stride_days"]`
-  records the cadence, and a `UserWarning` is emitted. Embeddings from such
-  windows are extrapolated — narrow the window to stay in-distribution. The
-  fixed-stride vs. equal-division decision lives in
+- **Bins:** `[start, start+30d), [start+30d, …)`, last bin truncated at the range
+  end, up to 12 frames. Per-frame timestamp = bin start date.
+- **Long windows (>~12 months) are not truncated.** When capping would drop ≥ one
+  full 30-day bin, the adapter **equal-divides the whole window into 12 frames**
+  instead of keeping only the first 12. The wider-than-monthly spacing is flagged
+  (`meta["temporal_sampling"]="equal_divided"`, `meta["temporal_spacing_stretched"]=True`,
+  `meta["effective_stride_days"]`) with a `UserWarning`. Such embeddings are
+  extrapolated, so narrow the window to stay in-distribution. Decision logic:
   `rs_embed.tools.temporal.fixed_or_equal_bins`.
-- Per-frame timestamp = bin start date (matching the official pipeline).
-- Bins with no imagery are **dropped from the sequence** (the encoder runs with
-  `fast_pass=True`, which ignores attention masks, so empty frames cannot be
-  masked out — they are excluded instead). At least one bin must have data. This
-  drop is **not silent**: `meta["n_bins"]` records the bins the window produced,
-  `meta["n_frames"]` the frames actually encoded, and `meta["dropped_bins"]`
-  lists the `[start, end]` ranges that had no usable imagery, alongside a
-  `UserWarning`. So `n_frames` < `n_bins` simply means some bins had no
-  cloud-free scene — raise `cloudy_pct`, widen/shift the window, or use
-  `temporal_mode="single"`.
-- Works for both `s2` and `s1`. S1 reuses the single-frame S1 fetch per bin, so
+- **Empty bins are dropped, not masked** (the encoder runs `fast_pass=True`, which
+  ignores attention masks); at least one bin must have data. Not silent:
+  `meta["n_bins"]` (bins produced), `meta["n_frames"]` (frames encoded), and
+  `meta["dropped_bins"]` (the empty `[start, end]` ranges) plus a `UserWarning`.
+  `n_frames < n_bins` means some bins had no cloud-free scene — raise `cloudy_pct`,
+  widen/shift the window, or use `temporal_mode="single"`.
+- **`s2` and `s1`** both supported; S1 reuses the single-frame S1 fetch per bin, so
   IW filtering and dB handling apply within each bin.
 
 ```python
@@ -242,7 +224,7 @@ For defaults (256, patch_size=4): `64 × 64` grid.
 
 | Variable                         | Default  | Effect                                              |
 | -------------------------------- | -------- | --------------------------------------------------- |
-| `RS_EMBED_OLMOEARTH_VARIANT`     | `tiny_v1_1`   | Default model variant when `model_config` not given |
+| `RS_EMBED_OLMOEARTH_VARIANT`     | `base_v1_2`   | Default model variant when `model_config` not given |
 | `RS_EMBED_OLMOEARTH_PATCH_SIZE`  | `4`      | Default patch size when `model_config` not given    |
 | `RS_EMBED_OLMOEARTH_IMAGE_SIZE`  | `256`    | Default image resize target                         |
 | `RS_EMBED_OLMOEARTH_SHAPE_ADJUST` | `pad`   | How non-square ROIs are made square (`pad` / `crop`) |
@@ -254,12 +236,11 @@ For defaults (256, patch_size=4): `64 × 64` grid.
 
 ## Installation
 
-OlmoEarth requires an additional package not included in the base `rs-embed` install:
+OlmoEarth works out of the box — its `olmoearth-pretrain-minimal` dependency is part
+of the base install:
 
 ```bash
-pip install rs-embed[olmoearth]
-# or
-uv pip install olmoearth-pretrain-minimal
+pip install rs-embed
 ```
 
 ---
@@ -291,7 +272,7 @@ emb = get_embedding(
     temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
     output=OutputSpec.grid(),
     backend="gee",
-    variant="tiny_v1_1",
+    variant="tiny_v1_2",
     modality="s1",
 )
 ```
@@ -350,6 +331,6 @@ are provided "as is" with no warranty (Section 6).
 
 !!! info "How this affects `rs-embed`"
     `rs-embed` does **not** bundle or redistribute the OlmoEarth weights or code — it declares
-    `olmoearth-pretrain-minimal` as an *optional* dependency and downloads the weights from
+    `olmoearth-pretrain-minimal` as a runtime dependency and downloads the weights from
     Hugging Face at runtime. The license therefore binds **you, the end user**, directly; the
     `rs-embed` package stays Apache 2.0. Just make sure your own use complies with Section 2 above.

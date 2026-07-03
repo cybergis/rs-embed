@@ -37,9 +37,10 @@ dependencies = [
   "imagecodecs>=2024.0.0",
   "earthengine-api>=1.7.10",
   "geemap>=0.36.6",
-  # Match the tested environment's lower bound instead of forcing needless upgrades.
-  "torch>=2.2",
-  "torchvision>=0.17",
+  # Floor matches the tested environment (torch 2.7.x / torchvision 0.22.x);
+  # olmoearth-pretrain-minimal requires torch>=2.7, and torchvision is pinned 1:1 to torch.
+  "torch>=2.7",
+  "torchvision>=0.22",
   # Keep timm in the tested range used by the vendored THOR runtime.
   "timm>=1.0.3,<=1.0.15",
   "rshf>=0.1.12",
@@ -48,6 +49,8 @@ dependencies = [
   "Pillow>=10",
   "pandas>=2.3",
   "xarray>=2024.06.0",
+  # Small package, kept in the base install so OlmoEarth works out of the box.
+  "olmoearth-pretrain-minimal>=0.0.6",
 
 ]
 
@@ -68,13 +71,12 @@ terramind = [
   # TerraMind still loads its backbone through the TerraTorch registry.
   "terratorch==1.2.1",
 ]
-olmoearth = [
-  "olmoearth-pretrain-minimal>=0.0.5",
-]
+# Kept as an empty compatibility extra now that olmoearth-pretrain-minimal
+# is part of the base installation.
+olmoearth = []
 full = [
   "matplotlib>=3.10",
   "terratorch==1.2.1",
-  "olmoearth-pretrain-minimal>=0.0.5",
 ]
 dev = [
   "pytest>=7.4",

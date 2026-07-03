@@ -70,7 +70,7 @@ Runtime and branch selection:
 | `modality`   | Optional model-facing modality selector such as `s1`, `s2`, or `s2_l2a` for models that expose multiple branches. The API normalizes common aliases such as `sentinel-1 -> s1` and `sentinel-2 -> s2`.              |
 | `backend`    | Access backend. `backend="auto"` is the public default and the recommended choice. Precomputed models typically expect `auto`, while provider-backed on-the-fly paths commonly use `gee` through the auto resolver. |
 | `device`     | `"auto"`, `"cpu"`, or `"cuda"` for torch-backed models.                                                                                                                                                             |
-| `input_prep` | `"resize"`, `"tile"`, `"auto"`, `InputPrepSpec(...)`, or `None` (default). For image-level ViT patch-token grid models (`scalemae`, `satmae`, `satmaepp`, `satmaepp_s2_10b`), `None`/`"auto"` with `OutputSpec.grid()` resolves to `"resize"` and warns; explicit `"tile"` also warns. Explicit `"resize"` does not warn. |
+| `input_prep` | `"resize"`, `"tile"`, `"auto"`, `InputPrepSpec(...)`, or `None` (default). For image-level ViT patch-token grid models (`scalemae`, `satmae`, `satmaepp`), `None`/`"auto"` with `OutputSpec.grid()` resolves to `"resize"` and warns; explicit `"tile"` also warns. Explicit `"resize"` does not warn. |
 
 Model-specific settings:
 
@@ -95,7 +95,7 @@ String values must be one of `"resize"`, `"auto"`, or `"tile"`. `tile` is strict
 
 `**model_kwargs`
 
-Model-specific settings are optional and vary by model. Pass them as direct keyword arguments rather than as a dict. Variant-aware models currently documented include `dofa`, `anysat`, `thor`, `satmaepp_s2_10b`, and `prithvi`; accepted values are documented on the corresponding model pages. If a model does not accept keyword settings, passing unknown keys raises `ModelError`. `describe_model(model_id)["model_config"]` is the machine-readable schema for supported keys and values.
+Model-specific settings are optional and vary by model. Pass them as direct keyword arguments rather than as a dict. Variant-aware models currently documented include `dofa`, `anysat`, `thor`, `satmaepp` (the `s2_10b` modality), and `prithvi`; accepted values are documented on the corresponding model pages. If a model does not accept keyword settings, passing unknown keys raises `ModelError`. `describe_model(model_id)["model_config"]` is the machine-readable schema for supported keys and values.
 
 #### Returns
 
@@ -116,7 +116,7 @@ emb = get_embedding(
     fetch=FetchSpec(scale_m=10),
     backend="auto",
     device="auto",
-    input_prep="resize",  # default
+    input_prep="tile",  # default; pass "resize" to downsample instead
 )
 vec = emb.data  # (D,)
 ```
@@ -168,7 +168,7 @@ Runtime and branch selection:
 | `modality`   | Optional model-facing modality selector such as `s1`, `s2`, or `s2_l2a` for models that expose multiple branches. The API normalizes common aliases such as `sentinel-1 -> s1` and `sentinel-2 -> s2`.              |
 | `backend`    | Access backend. `backend="auto"` is the public default and the recommended choice. Precomputed models typically expect `auto`, while provider-backed on-the-fly paths commonly use `gee` through the auto resolver. |
 | `device`     | `"auto"`, `"cpu"`, or `"cuda"` for torch-backed models.                                                                                                                                                             |
-| `input_prep` | `"resize"`, `"tile"`, `"auto"`, `InputPrepSpec(...)`, or `None` (default). For image-level ViT patch-token grid models (`scalemae`, `satmae`, `satmaepp`, `satmaepp_s2_10b`), `None`/`"auto"` with `OutputSpec.grid()` resolves to `"resize"` and warns; explicit `"tile"` also warns. Explicit `"resize"` does not warn. |
+| `input_prep` | `"resize"`, `"tile"`, `"auto"`, `InputPrepSpec(...)`, or `None` (default). For image-level ViT patch-token grid models (`scalemae`, `satmae`, `satmaepp`), `None`/`"auto"` with `OutputSpec.grid()` resolves to `"resize"` and warns; explicit `"tile"` also warns. Explicit `"resize"` does not warn. |
 
 Model-specific settings:
 
@@ -193,7 +193,7 @@ String values must be one of `"resize"`, `"auto"`, or `"tile"`. `tile` is strict
 
 `**model_kwargs`
 
-Model-specific settings are optional and vary by model. Pass them as direct keyword arguments rather than as a dict. Variant-aware models currently documented include `dofa`, `anysat`, `thor`, `satmaepp_s2_10b`, and `prithvi`; accepted values are documented on the corresponding model pages. If a model does not accept keyword settings, passing unknown keys raises `ModelError`. `describe_model(model_id)["model_config"]` is the machine-readable schema for supported keys and values.
+Model-specific settings are optional and vary by model. Pass them as direct keyword arguments rather than as a dict. Variant-aware models currently documented include `dofa`, `anysat`, `thor`, `satmaepp` (the `s2_10b` modality), and `prithvi`; accepted values are documented on the corresponding model pages. If a model does not accept keyword settings, passing unknown keys raises `ModelError`. `describe_model(model_id)["model_config"]` is the machine-readable schema for supported keys and values.
 
 #### Typical Use
 

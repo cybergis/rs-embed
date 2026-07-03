@@ -33,6 +33,9 @@ from ..tools.shape import (
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
+from .onthefly_satmaepp_s2 import (
+    SatMAEPPSentinel10Embedder,
+)
 
 
 def ensure_torch() -> None:
@@ -508,6 +511,7 @@ class SatMAEPPEmbedder(EmbedderBase):
     )
 
     def describe(self) -> dict[str, Any]:
+        s2 = SatMAEPPSentinel10Embedder
         return {
             "type": "onthefly",
             "backend": ["provider"],
@@ -517,9 +521,32 @@ class SatMAEPPEmbedder(EmbedderBase):
                 "collection": self.input_spec.collection,
                 "bands": list(self.input_spec.bands),
             },
+            # SatMAE++ exposes two sensor configurations under one model name,
+            # selected via ``modality=``: the default fMoW-RGB 3-band path and
+            # the grouped-channel Sentinel-2 10-band path (formerly the standalone
+            # ``satmaepp_s2_10b`` model).
+            "modalities": {
+                "rgb": {
+                    "collection": self.input_spec.collection,
+                    "bands": list(self.input_spec.bands),
+                    "defaults": {
+                        "scale_m": self.input_spec.scale_m,
+                        "cloudy_pct": self.input_spec.cloudy_pct,
+                    },
+                },
+                "s2_10b": {
+                    "collection": s2.input_spec.collection,
+                    "bands": list(s2.input_spec.bands),
+                    "defaults": {
+                        "scale_m": s2.input_spec.scale_m,
+                        "cloudy_pct": s2.input_spec.cloudy_pct,
+                    },
+                },
+            },
             "temporal": {"mode": "range"},
             "output": ["pooled", "grid"],
             "defaults": {
+                "modality": "rgb",
                 "model_id": self.DEFAULT_MODEL_ID,
                 "image_size": self.DEFAULT_IMAGE_SIZE,
                 "scale_m": self.input_spec.scale_m,
@@ -527,7 +554,31 @@ class SatMAEPPEmbedder(EmbedderBase):
                 "composite": self.input_spec.composite,
                 "channel_order": "rgb",
             },
+            # ``variant`` only applies to the ``s2_10b`` modality (the RGB path has
+            # a single published checkpoint).
+            "model_config": {
+                "variant": {
+                    "type": "string",
+                    "default": "large",
+                    "choices": ["large"],
+                    "applies_to_modality": "s2_10b",
+                }
+            },
         }
+
+    @staticmethod
+    def _resolve_modality(sensor: SensorSpec | None) -> str:
+        """Return the selected modality ('rgb' default, or 's2_10b')."""
+        m = getattr(sensor, "modality", None)
+        return "s2_10b" if (m and str(m).strip().lower() == "s2_10b") else "rgb"
+
+    def _s2_delegate(self) -> SatMAEPPSentinel10Embedder:
+        """Lazily build the Sentinel-2 10-band path that backs the s2_10b modality."""
+        s2 = getattr(self, "_s2_delegate_cache", None)
+        if s2 is None:
+            s2 = SatMAEPPSentinel10Embedder()
+            self._s2_delegate_cache = s2
+        return s2
 
     def _resolve_fetch_workers(self, n_items: int) -> int:
         v = int(os.environ.get("RS_EMBED_SATMAEPP_FETCH_WORKERS", str(self.DEFAULT_FETCH_WORKERS)))
@@ -550,8 +601,22 @@ class SatMAEPPEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        model_config: dict[str, Any] | None = None,
         fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
+        if self._resolve_modality(sensor) == "s2_10b":
+            return self._s2_delegate().get_embedding(
+                spatial=spatial,
+                temporal=temporal,
+                sensor=sensor,
+                output=output,
+                backend=backend,
+                device=device,
+                input_chw=input_chw,
+                model_config=model_config,
+                fetch_meta=fetch_meta,
+            )
+
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmaepp_rgb expects a provider backend (or 'auto').")
 
@@ -620,10 +685,22 @@ class SatMAEPPEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if self._resolve_modality(sensor) == "s2_10b":
+            return self._s2_delegate().get_embeddings_batch(
+                spatials=spatials,
+                temporal=temporal,
+                sensor=sensor,
+                model_config=model_config,
+                output=output,
+                backend=backend,
+                device=device,
+            )
+
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmaepp_rgb expects a provider backend (or 'auto').")
         if not spatials:
@@ -700,10 +777,23 @@ class SatMAEPPEmbedder(EmbedderBase):
         input_chws: list[np.ndarray],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if self._resolve_modality(sensor) == "s2_10b":
+            return self._s2_delegate().get_embeddings_batch_from_inputs(
+                spatials=spatials,
+                input_chws=input_chws,
+                temporal=temporal,
+                sensor=sensor,
+                model_config=model_config,
+                output=output,
+                backend=backend,
+                device=device,
+            )
+
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("satmaepp_rgb expects a provider backend (or 'auto').")
         if len(spatials) != len(input_chws):

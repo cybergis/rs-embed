@@ -47,20 +47,20 @@ def _restore_registered_model(model_id, previous):
 
 @pytest.mark.parametrize(
     "model_id",
-    ["satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
+    ["satmae", "satmaepp", "scalemae"],
 )
 @pytest.mark.parametrize(
     ("input_prep", "requested_mode"),
     [(None, "default"), (InputPrepSpec.auto(), "auto")],
 )
-def test_image_level_vit_grid_default_input_prep_resolves_to_resize_with_metadata(
+def test_image_level_vit_grid_default_input_prep_resolves_to_tile_with_metadata(
     model_id,
     input_prep,
     requested_mode,
 ):
     previous = _with_registered_fake_model(model_id)
     try:
-        with pytest.warns(UserWarning, match="resolves to resize"):
+        with pytest.warns(UserWarning, match="can show seams"):
             emb = api.get_embedding(
                 model_id,
                 spatial=_SPATIAL,
@@ -74,8 +74,8 @@ def test_image_level_vit_grid_default_input_prep_resolves_to_resize_with_metadat
 
     prep = emb.meta["input_prep"]
     assert prep["requested_mode"] == requested_mode
-    assert prep["resolved_mode"] == "resize"
-    assert prep["model_policy"] == "resize_default_for_image_level_vit_patch_grid"
+    assert prep["resolved_mode"] == "tile"
+    assert prep["model_policy"] == "tile_default_for_image_level_vit_patch_grid"
     assert prep["resolved_by_model_policy"] is True
     assert prep["tiled_grid_seam_risk"] == "high"
     assert prep["tiled_grid_recommended"] is False
@@ -86,12 +86,12 @@ def test_image_level_vit_grid_default_input_prep_resolves_to_resize_with_metadat
 
 @pytest.mark.parametrize(
     "model_id",
-    ["satmae", "satmaepp", "satmaepp_s2_10b", "scalemae"],
+    ["satmae", "satmaepp", "scalemae"],
 )
-def test_image_level_vit_grid_explicit_tile_is_allowed_but_marked_experimental(model_id):
+def test_image_level_vit_grid_explicit_tile_is_allowed_and_warns_about_seams(model_id):
     previous = _with_registered_fake_model(model_id)
     try:
-        with pytest.warns(UserWarning, match="tiled grid output is experimental"):
+        with pytest.warns(UserWarning, match="can show seams"):
             emb = api.get_embedding(
                 model_id,
                 spatial=_SPATIAL,
@@ -106,7 +106,7 @@ def test_image_level_vit_grid_explicit_tile_is_allowed_but_marked_experimental(m
     prep = emb.meta["input_prep"]
     assert prep["requested_mode"] == "tile"
     assert prep["resolved_mode"] == "tile"
-    assert prep["model_policy"] == "explicit_tile_not_recommended_for_grid"
+    assert prep["model_policy"] == "explicit_tile_for_image_level_vit_patch_grid"
     assert prep["resolved_by_model_policy"] is False
     assert prep["tiled_grid_seam_risk"] == "high"
     assert prep["tiled_grid_recommended"] is False

@@ -94,11 +94,11 @@ For most precomputed models, `sensor` is often `None` or ignored.
 
 ## Input Prep (`resize` / `tile` / `auto`)
 
-`input_prep` is an API-level policy for large on-the-fly inputs. `"resize"` is the fast default, `"tile"` enables API-side tiled inference for large ROIs, and `"auto"` is a conservative automatic choice that mainly matters for some `grid` outputs.
+`input_prep` is an API-level policy for large on-the-fly inputs. `"tile"` is the default, preserving native resolution by running API-side tiled inference and stitching the result; `"resize"` is the faster opt-in that downsamples the whole ROI to a single input; and `"auto"` is a conservative automatic choice that mainly matters for some `grid` outputs.
 
-Use tiling when you want to preserve more spatial detail for large ROIs and the model's default resize would be too destructive.
+Pass `input_prep="resize"` when a downsampled whole-ROI input is good enough and you want to skip the cost of tiling.
 
-Some image-level ViT adapters expose `grid` as patch-token layout rather than a seamless dense geospatial field. For `scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`, `input_prep=None` or `"auto"` with `OutputSpec.grid()` resolves to `"resize"` and emits a warning; explicit `"tile"` is allowed but also warns. Explicit `"resize"` is the recommended no-warning path.
+Some image-level ViT adapters expose `grid` as patch-token layout rather than a seamless dense geospatial field. For `scalemae`, `satmae`, and `satmaepp`, `input_prep=None` or `"auto"` with `OutputSpec.grid()` resolves to `"tile"` (the package-wide default) and emits a warning about stitching seams; explicit `"tile"` warns the same way. Explicit `"resize"` is the seamless (downsampled) opt-in and does not warn.
 
 This is a runtime policy choice, not a model identity choice.
 Use it when the same model needs different large-ROI handling in different workflows.

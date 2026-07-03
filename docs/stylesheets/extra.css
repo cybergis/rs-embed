@@ -230,6 +230,12 @@
   font-weight: 600;
 }
 
+/* Keep Model ID (first column) on one line — don't break IDs like `tessera`. */
+.md-typeset table:not([class]) td:first-child,
+.md-typeset table:not([class]) td:first-child code {
+  white-space: nowrap;
+}
+
 .md-nav {
   font-size: 0.77rem;
   line-height: 1.45;

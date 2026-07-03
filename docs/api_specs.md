@@ -254,8 +254,8 @@ InputPrepSpec(
 #### Recommended Constructors
 
 ```python
-InputPrepSpec.resize()               # default behavior (fastest)
-InputPrepSpec.tile()                 # tile size inferred from model defaults.image_size when available
+InputPrepSpec.tile()                 # default behavior; tile size inferred from model defaults.image_size when available
+InputPrepSpec.resize()               # faster opt-in: downsample the whole ROI to a single input
 InputPrepSpec.auto(max_tiles=4)      # choose tile or resize automatically
 InputPrepSpec.tile(tile_size=224)    # explicit tile size override
 ```
@@ -263,8 +263,8 @@ InputPrepSpec.tile(tile_size=224)    # explicit tile size override
 #### String Shorthand
 
 ```python
-input_prep="resize"   # default
-input_prep="tile"
+input_prep="tile"     # default
+input_prep="resize"
 input_prep="auto"
 ```
 
@@ -272,7 +272,7 @@ input_prep="auto"
 
 Tile size defaults to `embedder.describe()["defaults"]["image_size"]` when available, unless you override it. Boundary tiles use a cover-shift layout such as `300 -> [0,224]` and `[76,300]` to avoid edge padding when possible, and grid stitching uses midpoint-cut ownership in overlap regions rather than hard overwrite. `tile_stride` currently must equal `tile_size`, so explicit overlap or gap control is not enabled yet, although boundary shifting can still create overlap on the last tile. `auto` is conservative and currently prefers tiling mainly for `OutputSpec.grid()` when tile count is small enough.
 
-For image-level ViT patch-token grid models (`scalemae`, `satmae`, `satmaepp`, and `satmaepp_s2_10b`), tiled `grid` output is marked experimental because each tile is an independent image-level token grid. `input_prep=None` or `"auto"` with `OutputSpec.grid()` resolves to `"resize"` and emits a warning; explicit `"tile"` is allowed but also warns. Metadata records `input_prep.model_policy`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
+For image-level ViT patch-token grid models (`scalemae`, `satmae`, and `satmaepp`), `grid` output stitches independent per-tile token grids and can show seams at tile boundaries. `input_prep=None` or `"auto"` resolves to the package-wide `"tile"` default; on `OutputSpec.grid()` the default/auto path and explicit `"tile"` emit a warning. Pass `input_prep="resize"` for a seamless (downsampled) grid (no warning). Metadata records `input_prep.model_policy`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
 
 ![tiles](assets/tiles.png)
 

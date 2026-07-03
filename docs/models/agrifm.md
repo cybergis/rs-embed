@@ -38,8 +38,8 @@
 
 ## Preprocessing Pipeline
 
-!!! tip "Resize is the default — tiling is also available"
-    The pipeline below shows the default `input_prep="resize"` path. For large ROIs, use `input_prep="tile"` to split the input into tiles and preserve spatial detail. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
+!!! tip "Tiling is the default — resize is also available"
+    `input_prep=None`/`"auto"` tiles large ROIs by default to preserve spatial detail; pass `input_prep="resize"` to downsample the whole ROI to the model's input size in a single forward pass instead. See [Choosing Settings](../choosing_settings.md#input-preparation-resize-vs-tile).
 
 ```mermaid
 flowchart LR

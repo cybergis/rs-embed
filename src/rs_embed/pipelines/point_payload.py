@@ -224,12 +224,12 @@ def build_one_point_payload(
 
             if save_embeddings:
                 # Mirror get_embedding's model-aware resolution so image-level
-                # ViT grid models downgrade an unset/auto input_prep to resize
-                # (avoiding tiled stitching seams) on the per-item CPU path too,
-                # rather than silently tiling like the raw config default would.
+                # ViT grid models resolve an unset/auto input_prep to the same
+                # tile default on the per-item CPU path too, keeping export_batch
+                # and get_embedding embeddings identical for the same point.
                 input_prep = resolve_model_aware_input_prep(
                     model_n=normalize_model_name(m),
-                    input_prep=getattr(config, "input_prep", "resize"),
+                    input_prep=getattr(config, "input_prep", None),
                     output=output,
                 )[0]
 

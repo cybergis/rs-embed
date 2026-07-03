@@ -7,7 +7,7 @@
 [![arXiv](https://img.shields.io/badge/arXiv-2602.23678-b31b1b.svg)](https://arxiv.org/abs/2602.23678)
 [![Docs](https://img.shields.io/badge/docs-online-brightgreen)](https://cybergis.github.io/rs-embed/)
 ![Python](https://img.shields.io/badge/python-3.12-blue?logo=python)
-[![PyTorch 2.2](https://img.shields.io/badge/torch-2.2-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
+[![PyTorch 2.7](https://img.shields.io/badge/torch-2.7-EE4C2C?logo=pytorch&logoColor=white)](https://pytorch.org/)
 
 ![Visitors](https://visitor-badge.laobi.icu/badge?page_id=cybergis.rs-embed)
 ![Last Commit](https://img.shields.io/github/last-commit/cybergis/rs-embed)
@@ -151,20 +151,19 @@ This is a convenience index with basic model info only (for quick scanning / lin
 
 | Model ID          | Primary Input            | Resolution(Default) | Publication                                                                     | Link                                                         |
 | ----------------- | ------------------------ | ------------------- | ------------------------------------------------------------------------------- | ------------------------------------------------------------ |
+| `olmoearth`       | S2 L2A 12-band / S1 VV-VH    | 10m                 | [CVPR 2026](https://arxiv.org/abs/2511.13655)                                  | [link](https://huggingface.co/collections/allenai/olmoearth) |
 | `agrifm`          | S2 time series (10-band) | 10m                 | [RSE 2026](https://www.sciencedirect.com/science/article/pii/S0034425726000040) | [link](https://github.com/flyakon/AgriFM)                    |
 | `thor`            | S2 10-band               | 10m                 | [arXiv 2026](https://arxiv.org/abs/2601.16011)                                  | [link](https://github.com/FM4CS/THOR)                        |
-| `olmoearth`       | S2 L2A 12-band / S1 VV-VH    | 10m                 | [arXiv 2025](https://arxiv.org/abs/2511.13655)                                  | [link](https://huggingface.co/collections/allenai/olmoearth) |
 | `terrafm`         | S2 12-band / S1 VV-VH    | 10m                 | [ICLR 2026](https://arxiv.org/abs/2506.06281)                                   | [link](https://github.com/mbzuai-oryx/TerraFM)               |
 | `terramind`       | S2 12-band               | 10m                 | [ICCV 2025](https://arxiv.org/abs/2504.11171)                                   | [link](https://github.com/IBM/terramind)                     |
 | `galileo`         | S2 time series (10-band) | 10m                 | [ICML 2025](https://arxiv.org/abs/2502.09356)                                   | [link](https://github.com/nasaharvest/galileo)               |
 | `wildsat`         | S2 RGB                   | 10m                 | [ICCV 2025](https://arxiv.org/abs/2412.14428)                                   | [link](https://github.com/mdchuc/HRSFM)                      |
 | `anysat`          | S2 time series (10-band) | 10m                 | [CVPR 2025](https://arxiv.org/abs/2412.14123)                                   | [link](https://github.com/gastruc/AnySat)                    |
+| `fomo`            | S2 12-band               | 10m                 | [AAAI 2025](https://arxiv.org/abs/2312.10114)                                   | [link](https://github.com/RolnickLab/FoMo-Bench)             |
 | `prithvi`         | S2 6-band                | 30m                 | [arXiv 2024](https://arxiv.org/abs/2412.02732)                                  | [link](https://huggingface.co/ibm-nasa-geospatial)           |
 | `satvision`       | TOA 14-channel           | 1000m               | [arXiv 2024](https://arxiv.org/abs/2411.17000)                                  | [link](https://github.com/nasa-nccs-hpda/pytorch-caney)      |
 | `dofa`            | Multi-band + wavelengths | 10m                 | [arXiv 2024](https://arxiv.org/abs/2403.15356)                                  | [link](https://github.com/zhu-xlab/DOFA)                     |
-| `satmaepp`        | S2 RGB                   | 10m                 | [CVPR 2024](https://arxiv.org/abs/2403.05419)                                   | [link](https://github.com/techmn/satmae_pp)                  |
-| `satmaepp_s2_10b` | S2 SR 10-band            | 10m                 | [CVPR 2024](https://arxiv.org/abs/2403.05419)                                   | [link](https://github.com/techmn/satmae_pp)                  |
-| `fomo`            | S2 12-band               | 10m                 | [AAAI 2025](https://arxiv.org/abs/2312.10114)                                   | [link](https://github.com/RolnickLab/FoMo-Bench)             |
+| `satmaepp`        | S2 RGB (`modality=rgb`, default) or S2 SR 10-band (`modality=s2_10b`) | 10m | [CVPR 2024](https://arxiv.org/abs/2403.05419)                                   | [link](https://github.com/techmn/satmae_pp)                  |
 | `remoteclip`      | S2 RGB                   | 10m                 | [TGRS 2024](https://arxiv.org/abs/2306.11029)                                   | [link](https://github.com/ChenDelong1999/RemoteCLIP)         |
 | `scalemae`        | S2 RGB (+ scale)         | 10m                 | [ICCV 2023](https://arxiv.org/abs/2212.14532)                                   | [link](https://github.com/bair-climate-initiative/scale-mae) |
 | `satmae`          | S2 RGB                   | 10m                 | [NeurIPS 2022](https://arxiv.org/abs/2207.08051)                                | [link](https://github.com/sustainlab-group/SatMAE)           |

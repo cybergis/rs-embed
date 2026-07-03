@@ -9,7 +9,6 @@ import numpy as np
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
-from ..core.registry import register
 from ..core.specs import (
     ModelInputSpec,
     OutputSpec,
@@ -572,10 +571,15 @@ def _fetch_s2_sr_10_raw_chw(
     return arr
 
 
-@register("satmaepp_s2_10b")
 class SatMAEPPSentinel10Embedder(EmbedderBase):
     """
     SatMAE++ Sentinel-2 10-band adapter reproducing source repo group-channel branch.
+
+    This is no longer a standalone registered model: it backs the ``"s2_10b"``
+    modality of the ``satmaepp`` model, which delegates to it when a 10-band
+    Sentinel-2 sensor is selected (see :mod:`onthefly_satmaepp`). It reports
+    ``model_name="satmaepp"`` so emitted metadata is labelled under the single
+    public model name.
 
     Input bands (S2 SR): B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12
     Source alignment:
@@ -583,6 +587,9 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
       - SentinelNormalize(mean/std) -> ToTensor -> Resize -> CenterCrop (eval-style)
       - forward_encoder(mask_ratio=0.0) for embedding extraction
     """
+
+    # Backs the satmaepp "s2_10b" modality; metadata is labelled "satmaepp".
+    model_name = "satmaepp"
 
     # ViT-grid model needs a square input → base.fetch_input (and the direct/batch
     # fetch paths) enlarge a rectangular ROI to a square of real imagery; the token
@@ -689,7 +696,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
-            raise ModelError("satmaepp_s2_10b expects a provider backend (or 'auto').")
+            raise ModelError("satmaepp modality='s2_10b' expects a provider backend (or 'auto').")
 
         if sensor is None:
             sensor = self._default_sensor()
@@ -701,7 +708,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         if tuple(sensor.bands) != tuple(_S2_SR_10_BANDS):
             raise ModelError(
-                "satmaepp_s2_10b requires exact band order "
+                "satmaepp modality='s2_10b' requires exact band order "
                 f"{_S2_SR_10_BANDS}; got {tuple(sensor.bands)}"
             )
 
@@ -860,7 +867,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         device: str = "auto",
     ) -> list[Embedding]:
         if not is_provider_backend(backend, allow_auto=True):
-            raise ModelError("satmaepp_s2_10b expects a provider backend (or 'auto').")
+            raise ModelError("satmaepp modality='s2_10b' expects a provider backend (or 'auto').")
         if not spatials:
             return []
 
@@ -868,7 +875,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
             sensor = self._default_sensor()
         if tuple(sensor.bands) != tuple(_S2_SR_10_BANDS):
             raise ModelError(
-                "satmaepp_s2_10b requires exact band order "
+                "satmaepp modality='s2_10b' requires exact band order "
                 f"{_S2_SR_10_BANDS}; got {tuple(sensor.bands)}"
             )
 
@@ -1042,7 +1049,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         device: str = "auto",
     ) -> list[Embedding]:
         if not is_provider_backend(backend, allow_auto=True):
-            raise ModelError("satmaepp_s2_10b expects a provider backend (or 'auto').")
+            raise ModelError("satmaepp modality='s2_10b' expects a provider backend (or 'auto').")
         if len(spatials) != len(input_chws):
             raise ModelError(
                 f"spatials/input_chws length mismatch: {len(spatials)} != {len(input_chws)}"
@@ -1054,7 +1061,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
             sensor = self._default_sensor()
         if tuple(sensor.bands) != tuple(_S2_SR_10_BANDS):
             raise ModelError(
-                "satmaepp_s2_10b requires exact band order "
+                "satmaepp modality='s2_10b' requires exact band order "
                 f"{_S2_SR_10_BANDS}; got {tuple(sensor.bands)}"
             )
 
