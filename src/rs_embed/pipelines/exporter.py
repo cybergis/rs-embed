@@ -323,7 +323,9 @@ class BatchExporter:
         def _get_fetch_meta(i: int, skey: str) -> dict[str, Any]:
             return prefetch.get_fetch_meta(i, skey)
 
-        def _write_ckpt(*, stage: str, final: bool = False) -> dict[str, Any]:
+        def _write_ckpt(
+            *, manifest: dict[str, Any], stage: str, final: bool = False
+        ) -> dict[str, Any]:
             return self.checkpoint.combined_write_checkpoint(
                 manifest=manifest,
                 arrays=arrays,
@@ -376,7 +378,7 @@ class BatchExporter:
         manifest["completed_at"] = utc_ts()
 
         # Final write
-        manifest = _write_ckpt(stage="done", final=True)
+        manifest = _write_ckpt(manifest=manifest, stage="done", final=True)
         progress.close()
         return manifest
 

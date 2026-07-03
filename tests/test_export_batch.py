@@ -2863,3 +2863,126 @@ def test_export_batch_multiframe_prefetch_accepts_tchw_inputs(tmp_path, monkeypa
     assert len(manifests) == 1
     assert seen == [(4, 3, 6, 6)]
     assert (out_dir / "p00000.npz").exists()
+
+
+def test_export_batch_combined_manifest_lists_all_models(tmp_path, monkeypatch):
+    """Combined export with 2+ models must record every model in the manifest.
+
+    Regression for a desync where the combined checkpoint re-wrote a stale,
+    single-model manifest (the ``_write_ckpt`` closure ignored the manifest
+    accumulated across models in ``run_pending_models``), so ``load_export``
+    reported only one model even though every model's ``embeddings__*`` array
+    was present in the npz. The manifest's ``models`` list must match the
+    ``embeddings__*`` arrays written to the npz.
+    """
+
+    def _make_dummy(value: float):
+        class _Dummy:
+            def describe(self):
+                return {
+                    "type": "onthefly",
+                    "inputs": {"collection": "C", "bands": ["B1", "B2", "B3"]},
+                    "defaults": {
+                        "scale_m": 10,
+                        "cloudy_pct": 30,
+                        "composite": "median",
+                        "fill_value": 0.0,
+                    },
+                }
+
+            def get_embedding(
+                self,
+                *,
+                spatial,
+                temporal,
+                sensor,
+                output,
+                backend,
+                device="auto",
+                input_chw=None,
+            ):
+                assert input_chw is not None
+                return Embedding(data=np.array([value], dtype=np.float32), meta={})
+
+        return _Dummy
+
+    registry.register("dummy_one")(_make_dummy(1.0))
+    registry.register("dummy_two")(_make_dummy(2.0))
+
+    import rs_embed.api as api
+
+    class DummyProvider:
+        def __init__(self, *args, **kwargs):
+            pass
+
+        def ensure_ready(self):
+            return None
+
+    def fake_fetch(provider, *, spatial, temporal, sensor):
+        return np.zeros((3, 2, 2), dtype=np.float32)
+
+    monkeypatch.setattr(
+        "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
+    )
+    monkeypatch.setattr("rs_embed.providers.fetch.fetch_sensor_patch_chw", fake_fetch)
+    monkeypatch.setattr(
+        "rs_embed.providers.fetch.inspect_fetch_result",
+        lambda x_chw, *, sensor, name: {"ok": True},
+    )
+    get_embedder_bundle_cached.cache_clear()
+
+    spatials = [
+        PointBuffer(lon=0, lat=0, buffer_m=10),
+        PointBuffer(lon=0.1, lat=0.1, buffer_m=10),
+    ]
+    temporal = TemporalSpec.range("2020-01-01", "2020-02-01")
+    sensor = SensorSpec(
+        collection="C",
+        bands=("B1", "B2", "B3"),
+        scale_m=10,
+        cloudy_pct=30,
+        composite="median",
+    )
+
+    out_path = tmp_path / "combined.npz"
+    manifest = api.export_batch(
+        spatials=spatials,
+        temporal=temporal,
+        models=["dummy_one", "dummy_two"],
+        target=ExportTarget.combined(str(out_path)),
+        config=ExportConfig(
+            save_inputs=False, save_embeddings=True, show_progress=False, num_workers=1
+        ),
+        backend="gee",
+        device="cpu",
+        output=OutputSpec.pooled(),
+        sensor=sensor,
+    )
+
+    json_path = out_path.with_suffix(".json")
+    assert out_path.exists() and json_path.exists()
+
+    with open(json_path, encoding="utf-8") as f:
+        on_disk = json.load(f)
+
+    # The returned manifest and the persisted JSON must agree.
+    for man in (manifest, on_disk):
+        model_names = [e["model"] for e in man["models"]]
+        assert sorted(model_names) == ["dummy_one", "dummy_two"], model_names
+        for e in man["models"]:
+            assert e["status"] == "ok"
+            assert e["embeddings"]["npz_key"] == f"embeddings__{e['model']}"
+
+    # The manifest's embedding npz_keys must exactly match the embeddings__*
+    # arrays present in the npz — no model dropped, none orphaned.
+    with np.load(out_path, allow_pickle=True) as z:
+        npz_embed_keys = {k for k in z.files if k.startswith("embeddings__")}
+    manifest_embed_keys = {e["embeddings"]["npz_key"] for e in on_disk["models"]}
+    assert (
+        npz_embed_keys
+        == manifest_embed_keys
+        == {
+            "embeddings__dummy_one",
+            "embeddings__dummy_two",
+        }
+    )
