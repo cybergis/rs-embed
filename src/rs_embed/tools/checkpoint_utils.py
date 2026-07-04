@@ -124,12 +124,15 @@ def restore_prefetch_checkpoint_cache(
 
 def drop_model_arrays(arrays: dict[str, np.ndarray], model_name: str, *, sanitize_key) -> None:
     mkey = sanitize_key(model_name)
-    prefixes = (
+    # Keys are either exact ("embeddings__<m>") or ragged per-item
+    # ("embedding__<m>__00042"). Match on the "__" boundary so one model name
+    # that prefixes another (satmae / satmaepp) never drops the other's arrays.
+    bases = (
         f"embeddings__{mkey}",
         f"embedding__{mkey}",
         f"inputs_bchw__{mkey}",
         f"input_chw__{mkey}",
     )
     for key in list(arrays.keys()):
-        if key.startswith(prefixes):
+        if any(key == base or key.startswith(base + "__") for base in bases):
             arrays.pop(key, None)
