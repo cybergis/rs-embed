@@ -684,3 +684,45 @@ def test_export_batch_fetch_stats_last_point_and_sensor_in_log(tmp_path, monkeyp
     captured = capsys.readouterr()
     assert "last=point:" in captured.err
     assert "sensor:" in captured.err
+
+
+def test_fetch_meta_independent_per_member_and_copied_on_read():
+    """Members of a merged fetch group must not share one fetch_meta object.
+
+    Regression: the same fmeta dict was stored under every member key and
+    returned uncopied by get_fetch_meta; a consumer that mutated it (e.g.
+    popping roi_window_geo) corrupted sibling models' crop windows.
+    """
+    from rs_embed.core.specs import BBox
+    from rs_embed.pipelines.prefetch import PrefetchManager
+
+    sensor1 = SensorSpec(collection="C", bands=("B1",))
+    sensor2 = SensorSpec(collection="C", bands=("B2",))
+    cfg = ExportConfig(save_inputs=True, save_embeddings=True)
+    pm = PrefetchManager(
+        provider=object(),
+        models=["m1", "m2"],
+        resolved_sensor={"m1": sensor1, "m2": sensor2},
+        model_type={"m1": "onthefly", "m2": "onthefly"},
+        config=cfg,
+        fetch_fn=lambda *a, **kw: np.ones((2, 4, 4), dtype=np.float32),
+        inspect_fn=lambda *a, **kw: {"ok": True},
+    )
+    pm.plan()
+    assert len(pm.fetch_sensor_by_key) == 1  # one merged band-union fetch
+    pm.square_fetch_keys = set(pm.fetch_sensor_by_key)
+
+    rect = BBox(minlon=0.0, minlat=0.0, maxlon=0.2, maxlat=0.05)
+    pm.fetch_chunk([0], [rect], TemporalSpec.year(2022))
+
+    member_keys = sorted(k for k in pm.fetch_meta if k[0] == 0)
+    assert len(member_keys) == 2
+    meta_a = pm.fetch_meta[member_keys[0]]
+    meta_b = pm.fetch_meta[member_keys[1]]
+    assert meta_a == meta_b and "roi_window_geo" in meta_a
+    assert meta_a is not meta_b
+
+    # Mutating what a consumer got back must not corrupt the cached entry.
+    got = pm.get_fetch_meta(*member_keys[0])
+    got.pop("roi_window_geo", None)
+    assert "roi_window_geo" in pm.get_fetch_meta(*member_keys[0])
