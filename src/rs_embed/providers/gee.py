@@ -15,6 +15,7 @@ from .gee_utils import (
     _build_s1_dualpol_collection,
     _collection_size_or_none,
     _fetch_with_bbox_fallback,
+    _filter_clouds,
     _flip_sample_tile_y,
     _format_s1_empty_collection_message,
     _gee_error_message,
@@ -109,11 +110,9 @@ class GEEProvider(ProviderBase):
                 ic = ic.filterBounds(region)
             if temporal_range is not None:
                 ic = ic.filterDate(temporal_range[0], temporal_range[1])
-            if sensor.cloudy_pct is not None:
-                try:
-                    ic = ic.filter(ee.Filter.lte("CLOUDY_PIXEL_PERCENTAGE", int(sensor.cloudy_pct)))
-                except Exception as _e:
-                    pass
+            ic = _filter_clouds(
+                ic, collection=str(sensor.collection), cloudy_pct=sensor.cloudy_pct
+            )
             _raise_if_empty_collection(ic, collection=str(sensor.collection))
 
             if sensor.composite == "median":
@@ -446,11 +445,7 @@ class GEEProvider(ProviderBase):
             .filterDate(temporal.start, temporal.end)
             .filterBounds(region)
         )
-        if cloudy_pct is not None:
-            try:
-                col_all = col_all.filter(ee.Filter.lt("CLOUDY_PIXEL_PERCENTAGE", int(cloudy_pct)))
-            except Exception as _e:
-                pass
+        col_all = _filter_clouds(col_all, collection=str(collection), cloudy_pct=cloudy_pct)
         _raise_if_empty_collection(col_all, collection=str(collection))
 
         comp = str(composite).lower().strip()
