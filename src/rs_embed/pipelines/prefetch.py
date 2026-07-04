@@ -21,7 +21,8 @@ from ..providers.prefetch_plan import (
 )
 from ..tools.normalization import normalize_input_array
 from ..tools.progress import FetchStats
-from ..tools.runtime import _embedder_method_accepts_parameter
+from ..tools.shape import roi_fetch_meta
+from ..tools.spatial import square_spatial
 from .runner import run_with_retry
 
 
@@ -67,11 +68,13 @@ class PrefetchManager:
         self.fetch_fn = fetch_fn or _providers_fetch.fetch_sensor_patch_chw
         self.inspect_fn = inspect_fn or _providers_fetch.inspect_fetch_result
         self.fetcher_by_key: dict[str, Any] = fetcher_by_key or {}
-        # Per fetch_key: whether a model-specific fetch_input should enlarge a
-        # rectangular ROI to a square (False under tile input_prep — the tiler
-        # cuts square tiles from any-aspect imagery itself). Missing keys
-        # default to True, matching fetch_input's own default.
-        self.fetcher_square_by_key: dict[str, bool] = {}
+        # Fetch keys whose GENERIC fetches must enlarge a rectangular ROI to a
+        # square (with the crop-back window in fetch meta), mirroring the
+        # fetch-square behavior every model-specific ``fetch_input`` applies by
+        # default. Set by the exporter for merged band-union groups and models
+        # without a custom fetch_input, whenever every member model honors
+        # ``fetch_meta`` (see BatchExporter._resolve_fetcher_by_key).
+        self.square_fetch_keys: set[str] = set()
 
         # Caches populated by fetch_chunk / restored from checkpoint
         self.cache: dict[tuple[int, str], np.ndarray] = {}
@@ -90,11 +93,19 @@ class PrefetchManager:
     def enabled(self) -> bool:
         return self.provider is not None
 
-    def _fetch_input_kwargs(self, fetcher: Any, skey: str) -> dict[str, Any]:
-        """Signature-gated extra kwargs for a model-specific fetch_input call."""
-        if _embedder_method_accepts_parameter(type(fetcher), "fetch_input", "square_input"):
-            return {"square_input": self.fetcher_square_by_key.get(skey, True)}
-        return {}
+    def _generic_fetch_spatial(
+        self, spatial: SpatialSpec, fetch_key: str
+    ) -> tuple[SpatialSpec, dict[str, Any]]:
+        """Apply fetch-square to a generic fetch when the plan calls for it.
+
+        Returns ``(spatial_to_fetch, fetch_meta)`` — the ROI enlarged to a
+        square with its ``roi_window_geo`` crop-back window, or the spatial
+        unchanged with empty meta.
+        """
+        if fetch_key not in self.square_fetch_keys:
+            return spatial, {}
+        sq, geo_roi = square_spatial(spatial)
+        return sq, (roi_fetch_meta(geo_roi) or {})
 
     # ── plan ───────────────────────────────────────────────────────
 
@@ -171,20 +182,20 @@ class PrefetchManager:
                         spatial=spatials[i],
                         temporal=temporal,
                         sensor=sspec,
-                        **self._fetch_input_kwargs(fetcher, skey),
                     ),
                     retries=cfg.max_retries,
                     backoff_s=cfg.retry_backoff_s,
                 )
                 return i, skey, fr.data, fr.meta
+            sq_spatial, fmeta = self._generic_fetch_spatial(spatials[i], skey)
             x = run_with_retry(
                 lambda: self.fetch_fn(
-                    provider, spatial=spatials[i], temporal=temporal, sensor=sspec
+                    provider, spatial=sq_spatial, temporal=temporal, sensor=sspec
                 ),
                 retries=cfg.max_retries,
                 backoff_s=cfg.retry_backoff_s,
             )
-            return i, skey, x, {}
+            return i, skey, x, fmeta
 
         mw = max(1, cfg.num_workers)
         with ThreadPoolExecutor(max_workers=mw) as ex:
@@ -283,7 +294,6 @@ class PrefetchManager:
                     spatial=spatial,
                     temporal=temporal,
                     sensor=sspec,
-                    **self._fetch_input_kwargs(fetcher, skey),
                 ),
                 retries=cfg.max_retries,
                 backoff_s=cfg.retry_backoff_s,
@@ -292,13 +302,17 @@ class PrefetchManager:
             if fr.meta:
                 self.fetch_meta[(idx, skey)] = fr.meta
         else:
+            fetch_key = self.sensor_to_fetch.get(skey, (skey, ()))[0]
+            sq_spatial, fmeta = self._generic_fetch_spatial(spatial, fetch_key)
             x = run_with_retry(
                 lambda: self.fetch_fn(
-                    self.provider, spatial=spatial, temporal=temporal, sensor=sspec
+                    self.provider, spatial=sq_spatial, temporal=temporal, sensor=sspec
                 ),
                 retries=cfg.max_retries,
                 backoff_s=cfg.retry_backoff_s,
             )
+            if fmeta:
+                self.fetch_meta[(idx, skey)] = fmeta
         rep = self.inspect_fn(x, sensor=sspec, name=f"gee_input_{skey}")
         if cfg.fail_on_bad_input and (not bool(rep.get("ok", True))):
             issues = (rep.get("report", {}) or {}).get("issues", [])
