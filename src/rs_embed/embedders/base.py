@@ -290,6 +290,7 @@ class EmbedderBase:
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
         """Batch inference with prefetched CHW inputs.
 
@@ -315,6 +316,10 @@ class EmbedderBase:
             Backend/provider selector.
         device : str
             Target inference device.
+        fetch_metas : list of dict or None
+            Per-item fetch metadata aligned with ``input_chws`` (e.g. the
+            ``roi_window_geo`` window of a square-fetched input). Forwarded to
+            ``get_embedding(fetch_meta=...)`` when that method accepts it.
 
         Returns
         -------
@@ -330,8 +335,9 @@ class EmbedderBase:
             raise ValueError(
                 f"spatials/input_chws length mismatch: {len(spatials)} != {len(input_chws)}"
             )
+        accepts_fetch_meta = _method_accepts_parameter(self, "get_embedding", "fetch_meta")
         out: list[Embedding] = []
-        for s, x in zip(spatials, input_chws, strict=False):
+        for k, (s, x) in enumerate(zip(spatials, input_chws, strict=False)):
             kwargs: dict[str, Any] = {
                 "spatial": s,
                 "temporal": temporal,
@@ -347,5 +353,7 @@ class EmbedderBase:
                 "model_config",
             ):
                 kwargs["model_config"] = model_config
+            if fetch_metas is not None and k < len(fetch_metas) and accepts_fetch_meta:
+                kwargs["fetch_meta"] = fetch_metas[k]
             out.append(self.get_embedding(**kwargs))
         return out

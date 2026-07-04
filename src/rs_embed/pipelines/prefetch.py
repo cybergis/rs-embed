@@ -21,6 +21,7 @@ from ..providers.prefetch_plan import (
 )
 from ..tools.normalization import normalize_input_array
 from ..tools.progress import FetchStats
+from ..tools.runtime import _embedder_method_accepts_parameter
 from .runner import run_with_retry
 
 
@@ -66,6 +67,11 @@ class PrefetchManager:
         self.fetch_fn = fetch_fn or _providers_fetch.fetch_sensor_patch_chw
         self.inspect_fn = inspect_fn or _providers_fetch.inspect_fetch_result
         self.fetcher_by_key: dict[str, Any] = fetcher_by_key or {}
+        # Per fetch_key: whether a model-specific fetch_input should enlarge a
+        # rectangular ROI to a square (False under tile input_prep — the tiler
+        # cuts square tiles from any-aspect imagery itself). Missing keys
+        # default to True, matching fetch_input's own default.
+        self.fetcher_square_by_key: dict[str, bool] = {}
 
         # Caches populated by fetch_chunk / restored from checkpoint
         self.cache: dict[tuple[int, str], np.ndarray] = {}
@@ -83,6 +89,12 @@ class PrefetchManager:
     @property
     def enabled(self) -> bool:
         return self.provider is not None
+
+    def _fetch_input_kwargs(self, fetcher: Any, skey: str) -> dict[str, Any]:
+        """Signature-gated extra kwargs for a model-specific fetch_input call."""
+        if _embedder_method_accepts_parameter(type(fetcher), "fetch_input", "square_input"):
+            return {"square_input": self.fetcher_square_by_key.get(skey, True)}
+        return {}
 
     # ── plan ───────────────────────────────────────────────────────
 
@@ -159,6 +171,7 @@ class PrefetchManager:
                         spatial=spatials[i],
                         temporal=temporal,
                         sensor=sspec,
+                        **self._fetch_input_kwargs(fetcher, skey),
                     ),
                     retries=cfg.max_retries,
                     backoff_s=cfg.retry_backoff_s,
@@ -270,6 +283,7 @@ class PrefetchManager:
                     spatial=spatial,
                     temporal=temporal,
                     sensor=sspec,
+                    **self._fetch_input_kwargs(fetcher, skey),
                 ),
                 retries=cfg.max_retries,
                 backoff_s=cfg.retry_backoff_s,

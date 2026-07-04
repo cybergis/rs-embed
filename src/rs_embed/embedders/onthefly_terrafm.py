@@ -893,7 +893,7 @@ class TerraFMBEmbedder(EmbedderBase):
         return self.get_embeddings_batch_from_inputs(
             spatials=spatials,
             input_chws=raw_inputs,
-            input_meta_list=prefetched_meta,
+            fetch_metas=prefetched_meta,
             temporal=temporal,
             sensor=sensor,
             output=output,
@@ -906,7 +906,7 @@ class TerraFMBEmbedder(EmbedderBase):
         *,
         spatials: list[SpatialSpec],
         input_chws: list[np.ndarray],
-        input_meta_list: list[dict[str, Any] | None] | None = None,
+        fetch_metas: list[dict[str, Any] | None] | None = None,
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
         output: OutputSpec = OutputSpec.pooled(),
@@ -917,9 +917,9 @@ class TerraFMBEmbedder(EmbedderBase):
             raise ModelError(
                 f"spatials/input_chws length mismatch: {len(spatials)} != {len(input_chws)}"
             )
-        if input_meta_list is not None and len(input_meta_list) != len(input_chws):
+        if fetch_metas is not None and len(fetch_metas) != len(input_chws):
             raise ModelError(
-                f"input_meta_list/input_chws length mismatch: {len(input_meta_list)} != {len(input_chws)}"
+                f"fetch_metas/input_chws length mismatch: {len(fetch_metas)} != {len(input_chws)}"
             )
         if not spatials:
             return []
@@ -990,14 +990,12 @@ class TerraFMBEmbedder(EmbedderBase):
             }
             source = sensor_meta["collection"]
 
-        # Per-item fetch-square ROI windows (full frame when input_meta_list is
+        # Per-item fetch-square ROI windows (full frame when fetch_metas is
         # absent — direct user inputs). The grid is needed whenever any item was
         # enlarged to a square, so it can be cropped back to its ROI.
         geo_rois = [
             geo_roi_from_meta(
-                input_meta_list[i]
-                if (input_meta_list is not None and i < len(input_meta_list))
-                else None
+                fetch_metas[i] if (fetch_metas is not None and i < len(fetch_metas)) else None
             )
             for i in range(len(spatials))
         ]
@@ -1019,8 +1017,8 @@ class TerraFMBEmbedder(EmbedderBase):
                 geo_roi = geo_rois[i]
                 cropped_to_roi = not roi_is_full(geo_roi)
                 fetch_meta = (
-                    {k: v for k, v in (input_meta_list[i] or {}).items() if k != "roi_window_geo"}
-                    if input_meta_list is not None and i < len(input_meta_list)
+                    {k: v for k, v in (fetch_metas[i] or {}).items() if k != "roi_window_geo"}
+                    if fetch_metas is not None and i < len(fetch_metas)
                     else {}
                 )
                 base_meta = build_meta(
