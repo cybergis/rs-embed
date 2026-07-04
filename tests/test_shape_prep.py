@@ -98,12 +98,9 @@ def test_prepare_square_roi_window_pad():
 
 
 def test_prepare_square_roi_window_full_when_not_padded():
-    for x in (
-        np.random.rand(3, 32, 32).astype(np.float32),  # already square → none
-        np.random.rand(3, 10, 90).astype(np.float32),  # extreme → fixed_resize
-    ):
-        _, meta = prepare_square(x, size=64)
-        assert roi_is_full(meta["shape_prep"]["roi_window"])
+    x = np.random.rand(3, 32, 32).astype(np.float32)  # already square → none
+    _, meta = prepare_square(x, size=64)
+    assert roi_is_full(meta["shape_prep"]["roi_window"])
 
 
 def test_roi_token_box_basic_and_clamping():
@@ -136,18 +133,28 @@ def test_prepare_square_crop_mode():
     assert meta["shape_prep"]["square_hw"] == (33, 33)
 
 
-def test_prepare_square_extreme_aspect_falls_back_to_stretch():
+def test_prepare_square_extreme_aspect_pads_and_warns():
+    # Extreme rectangles pad (never silently stretch) so the roi_window always
+    # points back at the real ROI; a warning flags the synthetic-border cost.
     x = np.random.rand(3, 10, 90).astype(np.float32)  # aspect 9.0 >> tol
-    y, meta = prepare_square(x, size=32)
+    with pytest.warns(UserWarning, match="aspect ratio"):
+        y, meta = prepare_square(x, size=32)
     assert y.shape == (3, 32, 32)
-    assert meta["shape_prep"]["applied"] == "fixed_resize"
+    assert meta["shape_prep"]["applied"] == "pad_to_square"
+    y0, y1, x0, x1 = meta["shape_prep"]["roi_window"]
+    top = (90 - 10) // 2
+    assert y0 == round(top / 90, 6)
+    assert y1 == round((top + 10) / 90, 6)
+    assert (x0, x1) == (0.0, 1.0)
 
 
 def test_prepare_square_aspect_tol_boundary():
-    # aspect exactly 2.0 with default tol -> fixed_resize (>=)
+    # aspect exactly 2.0 with default tol still pads (warns at >= tol)
     x = np.random.rand(3, 20, 40).astype(np.float32)
-    _, meta = prepare_square(x, size=32)
-    assert meta["shape_prep"]["applied"] == "fixed_resize"
+    with pytest.warns(UserWarning, match="aspect ratio"):
+        _, meta = prepare_square(x, size=32)
+    assert meta["shape_prep"]["applied"] == "pad_to_square"
+    assert not roi_is_full(meta["shape_prep"]["roi_window"])
 
 
 def test_prepare_square_invalid_shape_adjust():

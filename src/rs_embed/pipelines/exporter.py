@@ -402,15 +402,25 @@ class BatchExporter:
     def _resolve_fetcher_by_key(
         self,
         prefetch: PrefetchManager,
-    ) -> tuple[dict[str, Any], dict[str, bool]]:
-        """Build fetch_key → embedder and fetch_key → square_input mappings.
+    ) -> tuple[dict[str, Any], set[str]]:
+        """Build fetch_key → embedder and the set of generic fetches to square.
 
         Must be called after ``prefetch.plan()`` so that the sensor-to-fetch
-        mapping is available. The second mapping tells the prefetch whether a
-        model-specific fetch should enlarge a rectangular ROI to a square.
+        mapping is available.
+
+        The canonical single-embedding path always enlarges a rectangular ROI to
+        a square fetch (``fetch_input``'s ``square_input=True`` default) and
+        crops the output back via ``roi_window_geo``. Fetches that go through a
+        model-specific ``fetch_input`` inherit that behavior for free. Fetches
+        that fall to the generic ``fetch_fn`` — merged multi-model band-union
+        groups, and models without a custom ``fetch_input`` — must be squared by
+        the prefetch itself; ``square_fetch_keys`` lists the fetch keys where
+        that is safe, i.e. every member model's ``get_embedding`` accepts
+        ``fetch_meta`` and therefore honors the crop-back window.
         """
         from ..tools.normalization import normalize_model_name
         from ..tools.runtime import (
+            _embedder_method_accepts_parameter,
             _overrides_base_method,
             get_embedder_bundle_cached,
             sensor_key,
@@ -418,7 +428,8 @@ class BatchExporter:
         from ..tools.serialization import sensor_cache_key
 
         fetcher_by_key: dict[str, Any] = {}
-        fetcher_square_by_key: dict[str, bool] = {}
+        # fetch_key → True while every member seen so far honors fetch_meta.
+        meta_safe_by_key: dict[str, bool] = {}
         for mc in self.models:
             if mc.sensor is None or "precomputed" in mc.model_type.lower():
                 continue
@@ -428,6 +439,15 @@ class BatchExporter:
                 continue
             fetch_key = mapping[0]
             member_keys = prefetch.fetch_members.get(fetch_key, [])
+            embedder, _lock = get_embedder_bundle_cached(
+                normalize_model_name(mc.name),
+                self.resolved_backend.get(mc.name, self.backend),
+                self.device,
+                sensor_key(mc.sensor),
+            )
+            meta_safe_by_key[fetch_key] = meta_safe_by_key.get(
+                fetch_key, True
+            ) and _embedder_method_accepts_parameter(type(embedder), "get_embedding", "fetch_meta")
             # A merged fetch group may represent a union of channels needed by
             # multiple models. Model-specific fetch_input() implementations
             # generally return only that model's own contract, so using one of
@@ -436,24 +456,14 @@ class BatchExporter:
                 continue
             if fetch_key in fetcher_by_key:
                 continue
-            embedder, _lock = get_embedder_bundle_cached(
-                normalize_model_name(mc.name),
-                self.resolved_backend.get(mc.name, self.backend),
-                self.device,
-                sensor_key(mc.sensor),
-            )
             if getattr(embedder, "has_custom_fetch", False) or _overrides_base_method(
                 embedder, "fetch_input"
             ):
                 fetcher_by_key[fetch_key] = embedder
-                # Fetch-square only helps when the whole ROI becomes a single
-                # square encoder input. Under tile input_prep the tiler cuts
-                # square tiles from any-aspect imagery itself, so fetch the
-                # rectangular ROI directly (no extra imagery, no crop-back),
-                # mirroring what get_embedding does when it resolves to tiling.
-                _eff, resolved_prep, _nonresize = self.inference._model_input_prep(mc.name)
-                fetcher_square_by_key[fetch_key] = resolved_prep.mode != "tile"
-        return fetcher_by_key, fetcher_square_by_key
+        square_fetch_keys = {
+            k for k, safe in meta_safe_by_key.items() if safe and k not in fetcher_by_key
+        }
+        return fetcher_by_key, square_fetch_keys
 
     def _setup_prefetch(self) -> tuple[PrefetchManager, bool]:
         """Create and plan a PrefetchManager plus provider-enabled flag."""
@@ -469,9 +479,7 @@ class BatchExporter:
         )
         band_resolver = getattr(provider, "normalize_bands", None) if provider is not None else None
         prefetch.plan(resolve_bands_fn=band_resolver)
-        prefetch.fetcher_by_key, prefetch.fetcher_square_by_key = self._resolve_fetcher_by_key(
-            prefetch
-        )
+        prefetch.fetcher_by_key, prefetch.square_fetch_keys = self._resolve_fetcher_by_key(prefetch)
         return prefetch, prefetch.enabled
 
     def _build_pending_queue(self, *, progress: Any) -> tuple[list[int], list[dict[str, Any]]]:

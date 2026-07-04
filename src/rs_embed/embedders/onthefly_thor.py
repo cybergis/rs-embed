@@ -1097,8 +1097,10 @@ class THORBaseEmbedder(EmbedderBase):
         modality = _normalize_thor_modality(getattr(sensor, "modality", "s2"))
         # Fetch-square: enlarge a rectangular ROI to a square of real imagery so the
         # encoder sees a square input with real spatial context; the ROI window
-        # rides in meta['roi_window_geo'] and the output is cropped back to it.
-        # Skipped when the API tiles the input (square_input=False).
+        # rides in meta['roi_window_geo'] and the output is cropped back to it
+        # (tiled paths crop the stitched grid once). All pipeline callers keep
+        # the square_input=True default; False is an escape hatch for callers
+        # that manage ROI geometry themselves.
         geo_roi = FULL_WINDOW
         if square_input:
             spatial, geo_roi = square_spatial(spatial)

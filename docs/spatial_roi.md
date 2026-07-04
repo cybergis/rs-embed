@@ -91,13 +91,14 @@ the poles or antimeridian, or you may pass a non-square array directly via
 | Case | What happens | `meta["shape_prep"]["applied"]` |
 | ---- | ------------ | ------------------------------- |
 | Already square | Resize to `image_size` | `none` |
-| Within aspect tolerance (`aspect < 2.0`) | Make square (pad **or** crop), then resize | `pad_to_square` / `crop_to_square` |
-| Extremely rectangular (`aspect ≥ 2.0`) | Plain stretch to `image_size` (bounded last resort) | `fixed_resize` |
+| Any rectangle | Make square (pad **or** crop), then resize; the ROI window is recorded so the output is cropped back | `pad_to_square` / `crop_to_square` |
 
 `pad` (default) reflect-pads the short side (keeps the whole ROI, adds synthetic
 border); `crop` center-crops the long side (no synthetic data, discards margins).
-The `2.0` tolerance is the point past which padding would distort more than the
-stretch it avoids.
+There is no silent stretch fallback: extremely rectangular inputs (`aspect ≥ 2.0`)
+still pad, with a `UserWarning` that most of the model input is synthetic border —
+prefer a square fetch of real imagery (automatic on provider-backed paths) or
+`input_prep="tile"` for such ROIs.
 
 ### The `shape_adjust` knob
 
@@ -119,12 +120,11 @@ this fallback; see the THOR page.
 | Field | Meaning |
 | ----- | ------- |
 | `meta["input_prep"]["roi_cropped"]` | `True` when the output was cropped back to a sub-ROI |
-| `meta["shape_prep"]["applied"]` | `none` / `pad_to_square` / `crop_to_square` / `fixed_resize` (fallback path) |
+| `meta["shape_prep"]["applied"]` | `none` / `pad_to_square` / `crop_to_square` (fallback path) |
 | `meta["shape_prep"]["orig_hw"]` / `["square_hw"]` / `["target_hw"]` | ROI shape, squared shape, final model size |
-| `meta["shape_prep"]["aspect"]` | `long_side / short_side` (drives the `fixed_resize` fallback) |
+| `meta["shape_prep"]["aspect"]` | `long_side / short_side` (≥ 2.0 triggers the heavy-padding warning) |
 
-`roi_cropped=True` means you got the ROI, not the square. `applied == "fixed_resize"`
-means the ROI was too rectangular to square cleanly and was stretched.
+`roi_cropped=True` means you got the ROI, not the square.
 
 ---
 
@@ -133,4 +133,5 @@ means the ROI was too rectangular to square cleanly and was stretched.
 The contract removes aspect distortion but **cannot invent spatial detail** the ROI
 never had. For tiny ROIs the real fix is to request a **larger, roughly square**
 BBox (e.g. ~2.56 km at 10 m → native 256×256) so no upsampling is needed at all.
-Keeping `aspect < 2.0` avoids the stretch fallback entirely.
+Keeping `aspect < 2.0` also keeps the pad fallback (direct `input_chw` rectangles)
+mostly real imagery instead of synthetic border.

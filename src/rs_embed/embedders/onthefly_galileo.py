@@ -930,9 +930,10 @@ class GalileoEmbedder(EmbedderBase):
         t = temporal_to_range(temporal)
         # Fetch-square: enlarge a rectangular ROI to a square of real imagery so
         # the encoder sees a square, in-distribution input; the ROI window rides
-        # in meta['roi_window_geo'] and the output is cropped back to it. Skipped
-        # when the API tiles the input (square_input=False) — tiling squares per
-        # tile, so the whole-ROI square fetch would just pull in extra imagery.
+        # in meta['roi_window_geo'] and the output is cropped back to it (tiled
+        # paths crop the stitched grid once). All pipeline callers keep the
+        # square_input=True default; False is an escape hatch for callers that
+        # manage ROI geometry themselves.
         geo_roi = FULL_WINDOW
         if square_input:
             spatial, geo_roi = square_spatial(spatial)

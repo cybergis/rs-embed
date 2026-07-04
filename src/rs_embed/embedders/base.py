@@ -108,11 +108,11 @@ class EmbedderBase:
             Sensor/source definition.
         square_input : bool
             Whether a ``_requires_square_input`` model should enlarge a
-            rectangular ROI to a square fetch. The fetch-square strategy only
-            makes sense when the whole ROI is fed to the encoder as a single
-            square input; when the API tiles the input it cuts square tiles
-            from any-aspect imagery itself, so the caller passes ``False`` to
-            fetch the rectangular ROI directly (no extra imagery, no crop-back).
+            rectangular ROI to a square fetch. Every pipeline path keeps the
+            ``True`` default (the canonical fetch-square rule): tiled paths
+            tile the square and crop the stitched output back to the ROI via
+            ``meta['roi_window_geo']``. ``False`` is an escape hatch for
+            callers that manage ROI geometry themselves.
 
         Returns
         -------
@@ -127,8 +127,8 @@ class EmbedderBase:
         # Square-input models (``_requires_square_input``) enlarge a rectangular
         # ROI to a square of real imagery so the encoder gets a square,
         # in-distribution input. The ROI's window within that square travels in
-        # meta['roi_window_geo'] for the embedder to crop the output back to.
-        # Skipped when ``square_input=False`` (the tiling path squares per tile).
+        # meta['roi_window_geo'] for the embedder (or the tiled stitcher) to
+        # crop the output back to.
         geo_roi = FULL_WINDOW
         if square_input and getattr(self, "_requires_square_input", False):
             spatial, geo_roi = square_spatial(spatial)
