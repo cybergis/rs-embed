@@ -402,11 +402,12 @@ class BatchExporter:
     def _resolve_fetcher_by_key(
         self,
         prefetch: PrefetchManager,
-    ) -> dict[str, Any]:
-        """Build a mapping from fetch_key to embedder for models with custom fetch.
+    ) -> tuple[dict[str, Any], dict[str, bool]]:
+        """Build fetch_key → embedder and fetch_key → square_input mappings.
 
         Must be called after ``prefetch.plan()`` so that the sensor-to-fetch
-        mapping is available.
+        mapping is available. The second mapping tells the prefetch whether a
+        model-specific fetch should enlarge a rectangular ROI to a square.
         """
         from ..tools.normalization import normalize_model_name
         from ..tools.runtime import (
@@ -417,6 +418,7 @@ class BatchExporter:
         from ..tools.serialization import sensor_cache_key
 
         fetcher_by_key: dict[str, Any] = {}
+        fetcher_square_by_key: dict[str, bool] = {}
         for mc in self.models:
             if mc.sensor is None or "precomputed" in mc.model_type.lower():
                 continue
@@ -444,7 +446,14 @@ class BatchExporter:
                 embedder, "fetch_input"
             ):
                 fetcher_by_key[fetch_key] = embedder
-        return fetcher_by_key
+                # Fetch-square only helps when the whole ROI becomes a single
+                # square encoder input. Under tile input_prep the tiler cuts
+                # square tiles from any-aspect imagery itself, so fetch the
+                # rectangular ROI directly (no extra imagery, no crop-back),
+                # mirroring what get_embedding does when it resolves to tiling.
+                _eff, resolved_prep, _nonresize = self.inference._model_input_prep(mc.name)
+                fetcher_square_by_key[fetch_key] = resolved_prep.mode != "tile"
+        return fetcher_by_key, fetcher_square_by_key
 
     def _setup_prefetch(self) -> tuple[PrefetchManager, bool]:
         """Create and plan a PrefetchManager plus provider-enabled flag."""
@@ -460,7 +469,9 @@ class BatchExporter:
         )
         band_resolver = getattr(provider, "normalize_bands", None) if provider is not None else None
         prefetch.plan(resolve_bands_fn=band_resolver)
-        prefetch.fetcher_by_key = self._resolve_fetcher_by_key(prefetch)
+        prefetch.fetcher_by_key, prefetch.fetcher_square_by_key = self._resolve_fetcher_by_key(
+            prefetch
+        )
         return prefetch, prefetch.enabled
 
     def _build_pending_queue(self, *, progress: Any) -> tuple[list[int], list[dict[str, Any]]]:

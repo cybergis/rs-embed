@@ -781,6 +781,7 @@ class SatMAEPPEmbedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
         if self._resolve_modality(sensor) == "s2_10b":
             return self._s2_delegate().get_embeddings_batch_from_inputs(
@@ -792,6 +793,7 @@ class SatMAEPPEmbedder(EmbedderBase):
                 output=output,
                 backend=backend,
                 device=device,
+                fetch_metas=fetch_metas,
             )
 
         if not is_provider_backend(backend, allow_auto=True):
@@ -827,9 +829,13 @@ class SatMAEPPEmbedder(EmbedderBase):
         pp_info = _satmaepp_preprocess_info(model_id=model_id, image_size=image_size)
 
         out: list[Embedding | None] = [None] * len(spatials)
-        # User-supplied inputs carry no fetch-square ROI, so each output covers the
-        # whole frame (build_token_embedding reproduces the legacy token path).
-        geo_roi = geo_roi_from_meta(None)
+        # Prefetched square inputs carry their ROI window in fetch_meta; direct
+        # user inputs carry none, so their outputs cover the whole frame
+        # (build_token_embedding reproduces the legacy token path).
+        geo_rois = [
+            geo_roi_from_meta(fetch_metas[i] if fetch_metas and i < len(fetch_metas) else None)
+            for i in range(len(spatials))
+        ]
 
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
@@ -859,7 +865,9 @@ class SatMAEPPEmbedder(EmbedderBase):
                         **pp_info,
                     },
                 )
-                out[i] = build_token_embedding(tokens, geo_roi=geo_roi, output=output, meta=meta)
+                out[i] = build_token_embedding(
+                    tokens, geo_roi=geo_rois[i], output=output, meta=meta
+                )
 
         if any(e is None for e in out):
             raise ModelError("satmaepp_rgb batch inference produced incomplete outputs.")
