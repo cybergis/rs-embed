@@ -29,6 +29,7 @@ from ..tools.runtime import (
 )
 from ..tools.runtime import call_embedder_get_embedding as _runtime_call_embedder_get_embedding
 from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
+from ..tools.shape import geo_roi_from_meta
 from ..tools.tiling import (
     _aggregate_tiled_embeddings,
     _augment_model_config_for_tiled_dispatch,
@@ -458,6 +459,11 @@ class InferenceEngine:
             tile_map: dict[
                 int, tuple[int, int, list[dict[str, Any]], int, int, tuple[int, int] | None]
             ] = {}
+            # Fetch-square ROI window per spatial idx (full frame when absent).
+            # The stitched grid covers the whole (enlarged square) input; it is
+            # cropped back to this window in step 3, mirroring the single-point
+            # tiled path in tools.tiling.
+            roi_by_idx: dict[int, tuple[float, float, float, float]] = {}
 
             fill_value = float(sensor.fill_value) if sensor is not None else 0.0
             for i, spatial, inp in ready:
@@ -499,6 +505,15 @@ class InferenceEngine:
                 all_tiles.extend(tiles)
                 all_tile_spatials.extend(tile_spatials_pt)
                 img_fmeta = get_fetch_meta_fn(i) if get_fetch_meta_fn is not None else None
+                roi_by_idx[i] = geo_roi_from_meta(img_fmeta)
+                if len(tiles) > 1 and img_fmeta is not None and "roi_window_geo" in img_fmeta:
+                    # The image-level ROI window is relative to the whole input,
+                    # not to any single tile: cropping per tile would be wrong.
+                    # Strip it here and crop once on the stitched grid instead;
+                    # other provenance keys (e.g. unit-scale flags) still apply
+                    # per tile. A single tile spans the whole input, so there the
+                    # embedder-side crop is the correct one — meta passes intact.
+                    img_fmeta = {k: v for k, v in img_fmeta.items() if k != "roi_window_geo"}
                 all_tile_fetch_metas.extend([img_fmeta] * len(tiles))
                 tile_map[i] = (flat_start, len(tiles), tile_metas, h, w, snapped_from)
 
@@ -581,6 +596,9 @@ class InferenceEngine:
                         tile_size=tile_size,
                         stride=stride,
                         prep_meta=prep_meta,
+                        # Fetch-square crop-back: restrict the stitched output to
+                        # the requested ROI, mirroring the single-point tiled path.
+                        roi_window=roi_by_idx.get(i),
                     )
                     result = self._embedding_to_result(stitched)
                 out[i] = result

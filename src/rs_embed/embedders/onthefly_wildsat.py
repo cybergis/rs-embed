@@ -1197,6 +1197,7 @@ class WildSATEmbedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
         if not input_chws:
             return []
@@ -1225,6 +1226,16 @@ class WildSATEmbedder(EmbedderBase):
             "false",
             "False",
         }
+
+        # Fetch-square ROI windows carried in fetch_metas when the export pipeline
+        # prefetched squares. The token grid is cropped back to each window.
+        geo_rois = [
+            geo_roi_from_meta(
+                fetch_metas[k] if (fetch_metas is not None and k < len(fetch_metas)) else None
+            )
+            for k in range(len(input_chws))
+        ]
+        any_cropped = any(not roi_is_full(gr) for gr in geo_rois)
 
         chw_units: list[np.ndarray] = []
         for inp in input_chws:
@@ -1256,13 +1267,15 @@ class WildSATEmbedder(EmbedderBase):
             feature_source=feature_source,
             pooled_from_tokens=pooled_from_tokens,
             pooling=output.pooling,
-            make_grid=(output.mode == "grid"),
+            make_grid=(output.mode == "grid" or any_cropped),
             grid_from_tokens=grid_from_tokens,
             device=dev,
         )
 
         embeddings: list[Embedding] = []
         for _i, (vec, grid, fmeta) in enumerate(batch_results):
+            geo_roi = geo_rois[_i]
+            cropped_to_roi = not roi_is_full(geo_roi)
             meta = build_meta(
                 model=self.model_name,
                 kind="on_the_fly",
@@ -1288,11 +1301,20 @@ class WildSATEmbedder(EmbedderBase):
             )
 
             if output.mode == "pooled":
+                if cropped_to_roi and grid is not None:
+                    # Pool only the ROI tokens (the model's global vector would include
+                    # the real-neighborhood context fetched only to square the input).
+                    _, vec = crop_grid_and_pool(
+                        grid, geo_roi, pooling=output.pooling, pooled_fallback=vec
+                    )
+                    pooling = f"roi_grid_{output.pooling}"
+                else:
+                    pooling = (
+                        output.pooling if fmeta.get("pooled_from_tokens", False) else "identity"
+                    )
                 ometa = {
                     **meta,
-                    "pooling": (
-                        output.pooling if fmeta.get("pooled_from_tokens", False) else "identity"
-                    ),
+                    "pooling": pooling,
                     "pooled_shape": tuple(vec.shape),
                 }
                 embeddings.append(Embedding(data=vec.astype(np.float32), meta=ometa))
@@ -1301,6 +1323,8 @@ class WildSATEmbedder(EmbedderBase):
                     raise ModelError(
                         "Internal error: grid output requested but grid tensor is missing."
                     )
+                if cropped_to_roi:
+                    grid = crop_grid_to_roi(grid, geo_roi)
                 gmeta = {
                     **meta,
                     "grid_shape": tuple(grid.shape),

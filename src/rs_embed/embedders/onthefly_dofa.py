@@ -1014,6 +1014,7 @@ class DOFAEmbedder(EmbedderBase):
         backend: str = "auto",
         device: str = "auto",
         _roi_windows_geo: list[tuple[float, float, float, float] | None] | None = None,
+        fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
         if len(spatials) != len(input_chws):
             raise ModelError(
@@ -1021,6 +1022,11 @@ class DOFAEmbedder(EmbedderBase):
             )
         if not spatials:
             return []
+        # Prefetched square inputs carry the ROI window in fetch_meta (the
+        # export pipeline passes it via ``fetch_metas``); fold it into the
+        # internal per-item ROI list so the output is cropped back to the ROI.
+        if _roi_windows_geo is None and fetch_metas is not None:
+            _roi_windows_geo = [(m or {}).get("roi_window_geo") for m in fetch_metas]
 
         backend_l = backend.lower().strip()
         if backend_l == "tensor":

@@ -830,6 +830,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("scalemae_rgb expects a provider backend (or 'auto').")
@@ -870,9 +871,13 @@ class ScaleMAERGBEmbedder(EmbedderBase):
             )
 
         out: list[Embedding | None] = [None] * len(spatials)
-        # User-supplied inputs carry no fetch-square ROI, so each output covers the
-        # whole frame (build_scalemae_embedding reproduces the legacy token path).
-        geo_roi = geo_roi_from_meta(None)
+        # Prefetched square inputs carry their ROI window in fetch_meta; direct
+        # user inputs carry none, so their outputs cover the whole frame
+        # (build_scalemae_embedding reproduces the legacy token path).
+        geo_rois = [
+            geo_roi_from_meta(fetch_metas[i] if fetch_metas and i < len(fetch_metas) else None)
+            for i in range(len(spatials))
+        ]
 
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
@@ -911,7 +916,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                         "input_override": True,
                     },
                 )
-                out[i] = build_scalemae_embedding(o, geo_roi=geo_roi, output=output, meta=meta)
+                out[i] = build_scalemae_embedding(o, geo_roi=geo_rois[i], output=output, meta=meta)
 
         if any(e is None for e in out):
             raise ModelError("scalemae_rgb prefetched batch inference produced incomplete outputs.")

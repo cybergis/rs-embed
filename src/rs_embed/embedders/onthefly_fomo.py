@@ -759,6 +759,7 @@ class FoMoEmbedder(EmbedderBase):
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
+        fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
         if not input_chws:
             return []
@@ -825,7 +826,9 @@ class FoMoEmbedder(EmbedderBase):
         )
 
         embeddings: list[Embedding] = []
-        for tokens in tokens_list:
+        for k, tokens in enumerate(tokens_list):
+            fm = fetch_metas[k] if (fetch_metas is not None and k < len(fetch_metas)) else None
+            geo_roi = geo_roi_from_meta(fm)
             grid, gmeta = _tokens_to_grid(
                 tokens,
                 n_modalities=len(spectral_keys),
@@ -833,12 +836,16 @@ class FoMoEmbedder(EmbedderBase):
                 image_size=image_size,
             )
 
-            if output.pooling == "max":
-                vec = np.max(tokens, axis=0).astype(np.float32)
-                pooling = "token_max"
-            else:
-                vec = np.mean(tokens, axis=0).astype(np.float32)
-                pooling = "token_mean"
+            # Crop the grid back to the ROI and pool: ROI tokens when enlarged
+            # to a square, else the model's own token pool (as get_embedding).
+            token_pooled = (np.max if output.pooling == "max" else np.mean)(tokens, axis=0).astype(
+                np.float32
+            )
+            grid, vec = crop_grid_and_pool(
+                grid, geo_roi, pooling=output.pooling, pooled_fallback=token_pooled
+            )
+            cropped_to_roi = not roi_is_full(geo_roi)
+            pooling = f"roi_grid_{output.pooling}" if cropped_to_roi else f"token_{output.pooling}"
 
             meta = build_meta(
                 model=self.model_name,
