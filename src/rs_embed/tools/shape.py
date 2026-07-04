@@ -15,9 +15,9 @@ This module centralises a single, reusable strategy:
 2.  resize the square to the model's required ``size``.
 
 When the input is *extremely* rectangular (aspect ratio beyond ``aspect_tol``),
-padding would inject too much synthetic border and cropping would discard too
-much real data, so we fall back to the legacy plain stretch — a known, bounded
-behaviour — and record it in the returned meta.
+padding injects a lot of synthetic border; ``prepare_square`` warns (a square
+fetch of real imagery or tiling serves such ROIs better) but still pads, so the
+output can always be cropped back to the real ROI — it never silently stretches.
 
 All helpers operate on the **last two axes** (``..., H, W``) so the same code
 serves ``CHW`` and ``TCHW`` (and any leading-dim) layouts identically.
@@ -28,6 +28,7 @@ own multi-GSD ``native_snap`` path and is intentionally left untouched.
 
 from __future__ import annotations
 
+import warnings
 from collections.abc import Callable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
@@ -150,10 +151,13 @@ def prepare_square(
     Strategy (the unified rule shared by all square-input embedders):
 
     - already square → just resize to ``size``;
-    - within ``aspect_tol`` → **pad** (default, keeps the whole ROI) or **crop**
-      to square, *then* resize to ``size`` — no stretching;
-    - aspect ratio ≥ ``aspect_tol`` → fall back to a plain stretch to ``size``
-      (legacy behaviour), recorded as ``applied='fixed_resize'``.
+    - otherwise → **pad** (default, keeps the whole ROI) or **crop** to square,
+      *then* resize to ``size`` — never a plain stretch, so the output grid /
+      ROI-pooled vector can always be cropped back to the real ROI via
+      ``meta['shape_prep']['roi_window']``. Aspect ratios ≥ ``aspect_tol`` warn
+      that the padded square is dominated by synthetic border (a square *fetch*
+      of real imagery, or tiling, serves such ROIs better) but still pad —
+      distorting silently is worse than padding loudly.
 
     Returns ``(out, meta)`` where ``meta['shape_prep']`` records what happened so
     callers can surface it in the embedding metadata.
@@ -176,21 +180,25 @@ def prepare_square(
     if h == w:
         applied = "none"
         sq = x
-    elif aspect >= float(aspect_tol):
-        # Too rectangular to square cleanly — keep the bounded legacy stretch.
-        applied = "fixed_resize"
-        sq = x
     elif adj == "crop":
         applied = "crop_to_square"
         sq = center_crop_to_square(x)
     else:
+        if aspect >= float(aspect_tol):
+            warnings.warn(
+                f"prepare_square: input aspect ratio {aspect:.2f} ≥ {float(aspect_tol):.2f} — "
+                "padding to square leaves most of the model input synthetic border. "
+                "Prefer a square fetch of real imagery (rectangular ROIs are enlarged "
+                "automatically on provider-backed paths) or input_prep='tile'.",
+                stacklevel=2,
+            )
         applied = "pad_to_square"
         sq = center_pad_to_square(x, fill_value=fill_value, pad_mode=pad_mode)
 
     meta["applied"] = applied
     meta["square_hw"] = tuple(int(v) for v in _hw(sq))
     # ROI window within the square, normalized to [0, 1] as (y0, y1, x0, x1).
-    # Only padding inserts non-ROI border; crop/none/fixed_resize cover the whole
+    # Only padding inserts non-ROI border; crop/none cover the whole
     # square, so their window is the full frame. Downstream code uses this to crop
     # the output token grid (and pooled tokens) back to the real ROI.
     if applied == "pad_to_square":

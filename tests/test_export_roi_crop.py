@@ -170,8 +170,14 @@ def test_export_batch_prefetched_batch_receives_fetch_metas_with_roi(tmp_path, m
     assert DummyBatchRoi.seen_fetch_metas == [[{"roi_window_geo": _ROI}, {"roi_window_geo": _ROI}]]
 
 
-def test_export_batch_prefetch_skips_square_fetch_under_tile_input_prep(tmp_path, monkeypatch):
-    """Tile input_prep must fetch the rectangular ROI directly (square_input=False)."""
+def test_export_batch_prefetch_always_square_fetches_model_specific(tmp_path, monkeypatch):
+    """Model-specific fetches keep fetch_input's square_input=True default.
+
+    The canonical single-embedding path always enlarges a rectangular ROI to a
+    square fetch — under tile input_prep too (the stitched grid is cropped back
+    to the ROI afterwards). The export prefetch must match it for every
+    input_prep, or the same point embeds differently across APIs.
+    """
 
     class DummyTileFetch:
         seen_square_input: list = []
@@ -206,7 +212,7 @@ def test_export_batch_prefetch_skips_square_fetch_under_tile_input_prep(tmp_path
 
     _patch_provider(monkeypatch)
 
-    for input_prep, expected_square in (("resize", True), ("tile", False)):
+    for input_prep in ("resize", "tile"):
         DummyTileFetch.seen_square_input.clear()
         get_embedder_bundle_cached.cache_clear()
         out_path = tmp_path / f"square_gate_{input_prep}.npz"
@@ -226,7 +232,90 @@ def test_export_batch_prefetch_skips_square_fetch_under_tile_input_prep(tmp_path
             output=OutputSpec.pooled(),
         )
         assert manifest.get("status") == "ok"
-        assert DummyTileFetch.seen_square_input == [expected_square], f"input_prep={input_prep}"
+        assert DummyTileFetch.seen_square_input == [True], f"input_prep={input_prep}"
+
+
+def test_export_batch_merged_fetch_group_square_fetches_with_roi_meta(tmp_path, monkeypatch):
+    """A merged multi-model fetch must square the ROI and hand every member the crop window.
+
+    Regression: two models sharing one band-union fetch bypassed every
+    model-specific fetch_input, so the generic fetch grabbed the raw rectangle
+    with no roi_window_geo — square-input models then padded or stretched it to
+    square with no way to crop back, and the same BBox embedded differently in
+    a multi-model export than via get_embedding.
+    """
+    fetched_spatials: list = []
+    seen_fetch_meta: dict[str, list] = {"a": [], "b": []}
+
+    def _make_dummy(tag: str):
+        class _Dummy:
+            def describe(self):
+                d = dict(_DESCRIBE)
+                d["inputs"] = {"collection": "C", "bands": ["B1", "B2"]}
+                return d
+
+            def get_embedding(
+                self,
+                *,
+                spatial,
+                temporal,
+                sensor,
+                output,
+                backend,
+                device="auto",
+                input_chw=None,
+                fetch_meta=None,
+            ):
+                _ = spatial, temporal, sensor, output, backend, device
+                assert input_chw is not None
+                seen_fetch_meta[tag].append(dict(fetch_meta) if fetch_meta else None)
+                return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
+
+        return _Dummy
+
+    registry.register("dummy_merged_a")(_make_dummy("a"))
+    registry.register("dummy_merged_b")(_make_dummy("b"))
+
+    import rs_embed.api as api
+
+    def fake_fetch(provider, *, spatial, temporal, sensor):
+        _ = provider, temporal, sensor
+        fetched_spatials.append(spatial)
+        return np.full((2, 4, 4), 0.5, dtype=np.float32)
+
+    _patch_provider(monkeypatch)
+    monkeypatch.setattr("rs_embed.providers.fetch.fetch_sensor_patch_chw", fake_fetch)
+
+    rect = BBox(minlon=0.0, minlat=0.0, maxlon=0.2, maxlat=0.05)
+    out_path = tmp_path / "merged_square.npz"
+    manifest = api.export_batch(
+        spatials=[rect],
+        temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
+        models=["dummy_merged_a", "dummy_merged_b"],
+        target=ExportTarget.combined(str(out_path)),
+        config=ExportConfig(save_inputs=False, save_embeddings=True, show_progress=False),
+        backend="gee",
+        device="cpu",
+        output=OutputSpec.pooled(),
+    )
+
+    assert manifest.get("status") == "ok"
+    # One merged fetch for both models, enlarged to a (near-)square BBox.
+    assert len(fetched_spatials) == 1
+    sq = fetched_spatials[0]
+    w = float(sq.maxlon) - float(sq.minlon)
+    h = float(sq.maxlat) - float(sq.minlat)
+    assert w > 0 and h > 0
+    assert abs(w - h) / max(w, h) < 0.15  # mercator square ≈ lat/lon square at low lat
+    # Every member model received the crop-back window.
+    for tag in ("a", "b"):
+        assert len(seen_fetch_meta[tag]) == 1
+        fm = seen_fetch_meta[tag][0]
+        assert fm is not None and "roi_window_geo" in fm
+        y0, y1, x0, x1 = fm["roi_window_geo"]
+        # Wide rectangle → full width, centered vertical band.
+        assert (x0, x1) == (0.0, 1.0)
+        assert 0.0 < y0 < y1 < 1.0
 
 
 class _FakeTiledRoiEmbedder:

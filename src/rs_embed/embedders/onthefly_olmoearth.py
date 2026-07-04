@@ -893,9 +893,10 @@ class OlmoEarthEmbedder(EmbedderBase):
         # Fetch-square: enlarge a rectangular ROI to a square of real imagery so
         # the encoder gets a square, in-distribution input with real spatial
         # context (no synthetic pad). The ROI's window within the square travels
-        # in meta['roi_window_geo']; the output is cropped back to it. Skipped
-        # when the API tiles the input (square_input=False): tiling squares per
-        # tile, so fetching the rectangular ROI directly avoids extra imagery.
+        # in meta['roi_window_geo']; the output is cropped back to it (tiled
+        # paths crop the stitched grid once). All pipeline callers keep the
+        # square_input=True default; False is an escape hatch for callers that
+        # manage ROI geometry themselves.
         geo_roi = FULL_WINDOW
         if square_input:
             spatial, geo_roi = square_spatial(spatial)
