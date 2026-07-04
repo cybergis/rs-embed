@@ -850,6 +850,7 @@ def _call_embedder_get_embedding_tiled(
                 backend=backend,
                 device=device,
                 input_chw=x,
+                fetch_meta=fetch_meta,
             )
     elif input_prep.mode == "tile":
         if num_tiles > input_prep.max_tiles_hard:
