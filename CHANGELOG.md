@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- **Clay v1.5 embedder (`clay`).** Adds the [Clay foundation model](https://github.com/Clay-foundation/model) (made-with-clay/Clay, Apache-2.0): a ViT-L-class MAE encoder (dim 1024, patch 8, 256×256 chips → 32×32 token grid) over the 10 Sentinel-2 L2A bands `B2,B3,B4,B5,B6,B7,B8,B8A,B11,B12`, faithfully reproducing the official inference recipe — per-band mean/std normalization from Clay's `metadata.yaml` on raw SR DN values, wavelength-conditioned dynamic patch embedding, GSD-scaled position encoding, and lat/lon + temporal-midpoint sin/cos metadata encodings derived automatically from `spatial`/`temporal`. `pooled` output is the encoder CLS token (the official Clay embedding); rectangular ROIs follow the 0.2.0 fetch-square contract (grid cropped back to the ROI, pooled becomes `roi_grid_mean`). Only the encoder weights are loaded from the published Lightning checkpoint (`v1.5/clay-v1.5.ckpt`); the vendored code is encoder-only (`_vendor/clay/`, upstream @ f14e698). Tunables: `RS_EMBED_CLAY_{WEIGHTS,WEIGHTS_DIR,HF_REPO_ID,HF_FILENAME,HF_REVISION,MODEL_SIZE,FETCH_WORKERS,BATCH_SIZE}`.
+
 ## [0.2.0] — 2026-06-30
 
 This release adds the OlmoEarth model family, makes the temporal models (`prithvi`, `galileo`, `olmoearth`) sample window-adaptively by default, flips the package-wide default `input_prep` from `resize` to `tile` so all models preserve native resolution by default, and fixes several `export_batch` correctness issues where a point's embedding differed between the single and batch/tiled paths. Some defaults that change embedding behavior are noted below; pin explicit options where strict reproducibility across versions is required.

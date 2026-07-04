@@ -84,6 +84,7 @@ nav:
           - Prithvi: models/prithvi.md
           - OLMoEarth: models/olmoearth.md
           - DOFA: models/dofa.md
+          - Clay: models/clay.md
           - TerraMind: models/terramind.md
           - TerraFM: models/terrafm.md
           - THOR: models/thor.md
