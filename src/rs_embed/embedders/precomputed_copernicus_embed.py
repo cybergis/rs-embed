@@ -91,6 +91,7 @@ def _warn_projection_once() -> None:
 
 @register("copernicus")
 class CopernicusEmbedder(EmbedderBase):
+    _is_precomputed = True
     """
     Precomputed embeddings via a vendored Copernicus GeoTIFF reader.
 
@@ -154,7 +155,6 @@ class CopernicusEmbedder(EmbedderBase):
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if temporal is None:
             raise ModelError("copernicus_embed requires TemporalSpec.year(YYYY).")

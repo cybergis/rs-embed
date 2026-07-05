@@ -270,14 +270,27 @@ class EmbedderBase:
                 "backend": backend,
                 "device": device,
             }
-            if model_config is not None and _method_accepts_parameter(
-                self,
-                "get_embedding",
-                "model_config",
-            ):
+            if model_config is not None:
+                self._require_model_config_support(model_config)
                 kwargs["model_config"] = model_config
             out.append(self.get_embedding(**kwargs))
         return out
+
+    def _require_model_config_support(self, model_config: dict[str, Any]) -> None:
+        """Raise unless ``get_embedding`` accepts model-specific settings.
+
+        The batch paths previously dropped an unsupported ``model_config``
+        silently while the single path raised — the same request behaved
+        differently depending on which path served it.
+        """
+        if not _method_accepts_parameter(self, "get_embedding", "model_config"):
+            from ..core.errors import ModelError
+
+            keys = sorted(str(k) for k in model_config)
+            raise ModelError(
+                f"Model {self.model_name} does not accept model-specific keyword "
+                f"arguments; got keys {keys}."
+            )
 
     def get_embeddings_batch_from_inputs(
         self,
@@ -347,11 +360,8 @@ class EmbedderBase:
                 "device": device,
                 "input_chw": x,
             }
-            if model_config is not None and _method_accepts_parameter(
-                self,
-                "get_embedding",
-                "model_config",
-            ):
+            if model_config is not None:
+                self._require_model_config_support(model_config)
                 kwargs["model_config"] = model_config
             if fetch_metas is not None and k < len(fetch_metas) and accepts_fetch_meta:
                 kwargs["fetch_meta"] = fetch_metas[k]

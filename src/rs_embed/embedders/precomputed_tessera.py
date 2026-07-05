@@ -280,6 +280,7 @@ def _warn_projection_once(tile_crs: str) -> None:
 
 @register("tessera")
 class TesseraEmbedder(EmbedderBase):
+    _is_precomputed = True
     DEFAULT_BATCH_WORKERS = 4
 
     def describe(self) -> dict[str, Any]:
@@ -334,7 +335,6 @@ class TesseraEmbedder(EmbedderBase):
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         backend_n = str(backend).strip().lower()
         if backend_n == "local":

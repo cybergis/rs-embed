@@ -99,7 +99,6 @@ class GSEAnnualEmbedder(EmbedderBase):
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("gse_annual expects a provider backend (or 'auto').")
