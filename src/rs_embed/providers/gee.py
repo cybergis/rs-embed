@@ -104,27 +104,21 @@ class GEEProvider(ProviderBase):
             else:
                 raise ProviderError(f"Unknown TemporalSpec mode: {temporal.mode}")
 
-        try:
-            ic = ee.ImageCollection(sensor.collection)
-            if region is not None:
-                ic = ic.filterBounds(region)
-            if temporal_range is not None:
-                ic = ic.filterDate(temporal_range[0], temporal_range[1])
-            ic = _filter_clouds(ic, collection=str(sensor.collection), cloudy_pct=sensor.cloudy_pct)
-            _raise_if_empty_collection(ic, collection=str(sensor.collection))
+        # No ee.Image(collection) fallback here: EE errors are lazy, so the old
+        # except-Exception fallback could never fire for its intended case
+        # (single-image assets) and only served to swallow real client-side
+        # errors while silently dropping the temporal/cloud filters.
+        ic = ee.ImageCollection(sensor.collection)
+        if region is not None:
+            ic = ic.filterBounds(region)
+        if temporal_range is not None:
+            ic = ic.filterDate(temporal_range[0], temporal_range[1])
+        ic = _filter_clouds(ic, collection=str(sensor.collection), cloudy_pct=sensor.cloudy_pct)
+        _raise_if_empty_collection(ic, collection=str(sensor.collection))
 
-            if sensor.composite == "median":
-                img = ic.median()
-            elif sensor.composite == "mosaic":
-                img = _order_collection_for_mosaic(ic).mosaic()
-            else:
-                img = ic.median()
-        except ProviderError:
-            raise
-        except Exception as _e:
-            img = ee.Image(sensor.collection)
-
-        return img
+        if sensor.composite == "mosaic":
+            return _order_collection_for_mosaic(ic).mosaic()
+        return ic.median()
 
     def fetch_array_chw(
         self,
