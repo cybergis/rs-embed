@@ -176,14 +176,23 @@ def resolve_export_model_configs(
         else:
             raise ModelError("models entries must be strings or ExportModelRequest instances.")
 
-    names = [req.name for req in requests]
-    dupes = sorted({n for n in names if names.count(n) > 1})
+    # Export npz keys and per-model state are keyed by sanitize_key(name), so
+    # distinct spellings that sanitize identically ("mock-model"/"mock_model")
+    # collide just like exact repeats. Group by the sanitized key and report
+    # the original colliding spellings.
+    from .serialization import sanitize_key as _sanitize_key
+
+    names_by_key: dict[str, list[str]] = {}
+    for req in requests:
+        names_by_key.setdefault(_sanitize_key(req.name), []).append(req.name)
+    dupes = {k: v for k, v in sorted(names_by_key.items()) if len(v) > 1}
     if dupes:
+        detail = "; ".join(f"{k!r} <- {sorted(set(v))}" for k, v in dupes.items())
         raise ModelError(
-            f"Duplicate model name(s) in export request: {dupes}. The export "
-            "pipeline keys per-model state and npz arrays by model name, so a "
-            "repeated name silently overwrites its sibling's results; request "
-            "each model once."
+            f"Duplicate model name(s) in export request: {detail}. The export "
+            "pipeline keys per-model state and npz arrays by the sanitized "
+            "model name, so these entries silently overwrite each other; "
+            "request each model once."
         )
 
     model_configs: list[ModelConfig] = []

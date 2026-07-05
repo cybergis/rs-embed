@@ -407,3 +407,18 @@ def test_resolve_export_model_configs_rejects_duplicate_names():
             per_model_fetches=None,
             per_model_modalities=None,
         )
+
+    # Distinct spellings that sanitize to the same npz key collide too.
+    with pytest.raises(ModelError, match="mock_model"):
+        resolve_export_model_configs(
+            models=["mock_model", "mock-model"],
+            backend_n="auto",
+            temporal=None,
+            output=OutputSpec.pooled(),
+            sensor=None,
+            fetch=None,
+            modality=None,
+            per_model_sensors=None,
+            per_model_fetches=None,
+            per_model_modalities=None,
+        )
