@@ -4,6 +4,7 @@ from __future__ import annotations
 import logging
 import os
 from contextlib import contextmanager
+from functools import lru_cache
 from typing import Any
 
 import numpy as np
@@ -200,6 +201,24 @@ def _suppress_rshf_pretrained_init_warning():
         yield suppressed
     finally:
         root_logger.removeFilter(filt)
+
+
+@lru_cache(maxsize=4)
+def _load_remoteclip_on_device(
+    ckpt: str, cache_dir: str, dev: str
+) -> tuple[Any, dict[str, Any]]:
+    """Load RemoteCLIP weights once per (ckpt, cache_dir, device)."""
+    model, wmeta = _load_rshf_remoteclip(
+        ckpt,
+        auto_download=True,
+        require_pretrained=True,
+        cache_dir=(cache_dir or None),
+    )
+    try:
+        model = model.to(dev).eval()
+    except Exception as _e:
+        pass
+    return model, wmeta
 
 
 def _load_rshf_remoteclip(
@@ -581,35 +600,16 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             "notes": "grid output is ViT token grid (patch-level), typically 7x7 for ViT-B/32 at 224px.",
         }
 
-    def __init__(self) -> None:
-        super().__init__()
-        # key: (ckpt, cache_dir, resolved_device) -> (model, weight_meta)
-        self._model_cache: dict[tuple[str, str, str], tuple[Any, dict[str, Any]]] = {}
-
     def _resolve_device(self, device: str) -> str:
         return resolve_device_auto_torch(device)
 
     def _get_model(
         self, *, ckpt: str, cache_dir: str | None, device: str
     ) -> tuple[Any, dict[str, Any], str]:
+        # Module-level, device-keyed cache like every other embedder loader:
+        # per-instance caches multiplied full CLIP weights across instances.
         dev = self._resolve_device(device)
-        cache_dir_s = cache_dir or ""
-        key = (ckpt, cache_dir_s, dev)
-        if key in self._model_cache:
-            m, wmeta = self._model_cache[key]
-            return m, wmeta, dev
-
-        model, wmeta = _load_rshf_remoteclip(
-            ckpt,
-            auto_download=True,
-            require_pretrained=True,
-            cache_dir=cache_dir,
-        )
-        try:
-            model = model.to(dev).eval()
-        except Exception as _e:
-            pass
-        self._model_cache[key] = (model, wmeta)
+        model, wmeta = _load_remoteclip_on_device(ckpt, cache_dir or "", dev)
         return model, wmeta, dev
 
     @staticmethod
@@ -648,8 +648,6 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             raise ModelError("remoteclip_s2rgb expects a provider backend (or 'auto').")
         t = temporal_to_range(temporal)
 
-        provider = self._get_provider(backend)
-
         # overrides via SensorSpec
         scale_m = sensor.scale_m if sensor else 10
         cloudy_pct = sensor.cloudy_pct if sensor else 30
@@ -668,6 +666,8 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
 
         # fetch image (optionally reuse pre-fetched raw patch)
         if input_chw is None:
+            # A prefetched input must not require live provider auth.
+            provider = self._get_provider(backend)
             spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             s2_rgb_chw = _fetch_s2_rgb_chw(
                 provider,
