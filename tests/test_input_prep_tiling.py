@@ -107,16 +107,17 @@ def test_tiled_grid_stitch_restores_shape_and_values():
     assert emb.batch_calls >= 1
 
 
-def test_tiled_resize_model_skips_padding_on_short_axis():
-    """Wide/flat ROI: resize-capable model tiles the long axis, resizes the short.
+def test_tiled_fixed_size_model_pads_short_axis_and_crops():
+    """Wide/flat ROI: tiles are padded square; pad cells crop out of the stitch.
 
-    When one dimension is shorter than ``tile_size`` and the other is long
-    enough to tile, a model that resizes each tile to a fixed input size needs
-    no padding at all — the short axis is fed at its natural size and upsampled.
-    No fabricated pixels, no boundary "dead band". (regression: Prithvi grid
-    over a wide ROI.)
+    The tiling layer never hands a model a rectangular tile (square-input
+    embedders center-pad rectangles internally, which the stitcher cannot
+    see). The short axis is edge-replicate padded to a square tile and the
+    ownership mapping crops the pad cells, so the original values come back
+    exactly. (regression: the old skip-padding path assumed fixed-size models
+    stretch rectangles; they pad, which broke the stitch geometry.)
     """
-    emb = _FakeTileEmbedder()  # describe().defaults.image_size = 4 → resize-capable
+    emb = _FakeTileEmbedder()  # describe().defaults.image_size = 4 → fixed input size
     # H=3 (< tile_size 4 → single y-tile, fed unpadded), W=6 (> 4 → two x-tiles).
     x = np.arange(18, dtype=np.float32).reshape(1, 3, 6)
 
@@ -133,19 +134,17 @@ def test_tiled_resize_model_skips_padding_on_short_axis():
     )
 
     arr = np.asarray(out.data, dtype=np.float32)
-    # No padding occurred (model resizes tiles), so the original values come back
-    # exactly and the short axis stays at its native 3 rows.
+    # Pad cells are cropped by the ownership mapping, so the original values
+    # come back exactly and the short axis stays at its native 3 rows.
     assert arr.shape == (1, 3, 6)
     np.testing.assert_allclose(arr, x)
     assert out.meta["grid_hw"] == (3, 6)
     assert out.meta["input_prep"]["stitched_grid_shape"] == (3, 6)
-    # Even though pad_edges=True was requested, the resize-capable model path
-    # disables padding entirely.
-    assert out.meta["input_prep"]["pad_edges"] is False
-    assert out.meta["input_prep"]["pad_policy"] == "none_model_resizes_tiles"
+    assert out.meta["input_prep"]["pad_edges"] is True
+    assert out.meta["input_prep"]["pad_policy"] == "edge_replicate"
 
 
-def test_tiled_resize_model_anisotropic_tall_thin():
+def test_tiled_fixed_size_model_anisotropic_tall_thin():
     """Tall/thin ROI is the symmetric case: tile the long (height) axis."""
     emb = _FakeTileEmbedder()
     # H=6 (> 4 → two y-tiles), W=3 (< 4 → single x-tile, fed unpadded).
@@ -166,7 +165,7 @@ def test_tiled_resize_model_anisotropic_tall_thin():
     arr = np.asarray(out.data, dtype=np.float32)
     assert arr.shape == (1, 6, 3)
     np.testing.assert_allclose(arr, x)
-    assert out.meta["input_prep"]["pad_policy"] == "none_model_resizes_tiles"
+    assert out.meta["input_prep"]["pad_policy"] == "edge_replicate"
 
 
 def test_slice_and_pad_tile_replicates_edge_not_constant_fill():
@@ -247,24 +246,27 @@ def test_tiled_nonresize_model_edge_pads_and_crops():
     assert out.meta["input_prep"]["pad_policy"] == "edge_replicate"
 
 
-def test_tiled_resize_model_warns_on_extreme_short_axis_upsample():
-    """A very short axis (>4x upsample) warns that its resolution is interpolated."""
-    emb = _FakeTileEmbedder()  # resize-capable
-    # tile_size=20: H=4 (20/4 = 5x > 4x → warn), W=40 (> 20 → tiled).
+def test_tiled_extreme_short_axis_pads_and_crops_exactly():
+    """A very short axis is padded to a square tile and cropped back exactly —
+    no upsampling of few native pixels, no warning needed."""
+    emb = _FakeTileEmbedder()
+    # tile_size=20: H=4 (heavily padded per tile), W=40 (> 20 → tiled).
     x = np.arange(4 * 40, dtype=np.float32).reshape(1, 4, 40)
 
-    with pytest.warns(UserWarning, match="upsamples the height"):
-        _call_embedder_get_embedding_with_input_prep(
-            embedder=emb,
-            spatial=_bbox(),
-            temporal=None,
-            sensor=None,
-            output=OutputSpec.grid(),
-            backend="gee",
-            device="cpu",
-            input_chw=x,
-            input_prep=InputPrepSpec.tile(tile_size=20, max_tiles=16, pad_edges=True),
-        )
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=20, max_tiles=16, pad_edges=True),
+    )
+    arr = np.asarray(out.data, dtype=np.float32)
+    assert arr.shape == (1, 4, 40)
+    np.testing.assert_allclose(arr, x)
 
 
 def test_tiled_pooled_mean_uses_area_weighted_merge():
@@ -870,7 +872,7 @@ def test_batch_tiled_path_matches_single_snap_and_meta():
     # The drift fix in action: batch now snaps (2 tiles, not the 6 an un-snapped
     # cover-shift over 5x9 would spawn) and carries the full reproducibility block.
     assert batch_prep["tile_count"] == 2
-    assert batch_prep["pad_policy"] == "none_model_resizes_tiles"
+    assert batch_prep["pad_policy"] == "edge_replicate"
     assert batch_prep["tile_snap_frac"] == 0.25
     assert tuple(batch_prep["snapped_from_hw"]) == (5, 9)
     assert tuple(batch_prep["snapped_to_hw"]) == (4, 8)
@@ -942,3 +944,49 @@ def test_auto_mode_fallback_forwards_fetch_meta(output, input_hw):
     )
 
     assert emb.seen_fetch_meta == [roi]
+
+
+def test_tiling_never_hands_models_rectangular_tiles():
+    """Contract: every tile delivered to an embedder is tile_size-square.
+
+    Regression: with the old skip-padding path, fixed-size models received
+    rectangular edge tiles and center-padded them internally
+    (shape.prepare_square) - geometry the stitcher could not see, so pad
+    cells were kept and the valid region misplaced in the stitched grid.
+    """
+    seen_shapes: list = []
+
+    class _CenterPadEmbedder(_FakeTileEmbedder):
+        """Behaves like a real square-input embedder: center-pads rectangles."""
+
+        def get_embedding(self, *, input_chw=None, output=OutputSpec.pooled(), **kwargs):
+            x = np.asarray(input_chw, dtype=np.float32)
+            seen_shapes.append(x.shape)
+            h, w = int(x.shape[-2]), int(x.shape[-1])
+            if h != w:
+                from rs_embed.tools.shape import center_pad_to_square
+
+                x = center_pad_to_square(x, pad_mode="edge")
+            return super().get_embedding(input_chw=x, output=output, **kwargs)
+
+    emb = _CenterPadEmbedder()
+    x = np.arange(18, dtype=np.float32).reshape(1, 3, 6)  # wide/flat, tile 4
+
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9, pad_edges=True),
+    )
+
+    assert all(s[-2] == s[-1] == 4 for s in seen_shapes), (
+        f"embedder received non-square tiles: {seen_shapes}"
+    )
+    arr = np.asarray(out.data, dtype=np.float32)
+    assert arr.shape == (1, 3, 6)
+    np.testing.assert_allclose(arr, x)
