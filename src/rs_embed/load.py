@@ -441,15 +441,22 @@ def _stack_per_item_embeddings(
     return np.stack(rows, axis=0)
 
 
-def _per_item_point_index(manifest: dict[str, Any], base: str, fallback: int) -> int:
-    """Row index for one per-item file: the manifest's point_index, else the
-    default ``p<digits>`` filename convention, else the file's scan position."""
+def _per_item_point_index(manifest: dict[str, Any], base: str) -> int | None:
+    """Row index for one per-item file, or ``None`` when the pair is not a
+    point file.
+
+    Every point manifest the exporter writes (build/resume/failure paths)
+    carries ``point_index``; the default ``p<digits>`` filename convention is
+    kept for legacy exports. Anything else — e.g. a combined ``run.npz`` +
+    ``run.json`` dropped into the same directory — is not a point file and
+    must not be ingested as one.
+    """
     idx = manifest.get("point_index")
     if isinstance(idx, int) and idx >= 0:
         return idx
     if base.startswith("p") and base[1:].isdigit():
         return int(base[1:])
-    return fallback
+    return None
 
 
 def _load_per_item(directory: str) -> ExportResult:
@@ -458,11 +465,29 @@ def _load_per_item(directory: str) -> ExportResult:
     # Row i of the result must correspond to the caller's spatials[i]: place
     # each file at its recorded point_index (failed points write no file under
     # continue_on_error, so dense renumbering would silently misalign rows).
+    # Manifests load first so non-point pairs are skipped before their arrays
+    # are read, and a duplicated index fails instead of overwriting a row.
     loaded: list[tuple[int, dict[str, np.ndarray], dict[str, Any]]] = []
-    for pos, (arrays_path, json_path, fmt, base) in enumerate(files):
-        arrays = _load_arrays(arrays_path, fmt)
+    claimed_by: dict[int, str] = {}
+    for arrays_path, json_path, fmt, base in files:
         manifest = _load_json(json_path)
-        loaded.append((_per_item_point_index(manifest, base, pos), arrays, manifest))
+        idx = _per_item_point_index(manifest, base)
+        if idx is None:
+            continue
+        if idx in claimed_by:
+            raise ValueError(
+                f"Per-item files {claimed_by[idx]!r} and {os.path.basename(arrays_path)!r} "
+                f"both claim point_index={idx}; refusing to overwrite a row. "
+                "Remove the stale file or separate the exports."
+            )
+        claimed_by[idx] = os.path.basename(arrays_path)
+        loaded.append((idx, _load_arrays(arrays_path, fmt), manifest))
+    if not loaded:
+        raise ValueError(
+            f"No per-item point files found in {directory!r}. Point files carry "
+            "a 'point_index' in their .json manifest (or use the default "
+            "'p<index>' naming)."
+        )
     loaded.sort(key=lambda t: t[0])
     n_items = max(idx for idx, _, _ in loaded) + 1
 

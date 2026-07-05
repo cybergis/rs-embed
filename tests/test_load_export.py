@@ -747,3 +747,55 @@ class TestRaggedAndAlignment:
         np.testing.assert_allclose(embs[0], [0.0])
         assert np.isnan(embs[1]).all()
         np.testing.assert_allclose(embs[2], [2.0])
+
+
+class TestPerItemFiltering:
+    @staticmethod
+    def _write_point(d, i):
+        np.savez(
+            os.path.join(d, f"p{i:05d}.npz"),
+            embedding__m=np.array([float(i)], dtype=np.float32),
+        )
+        with open(os.path.join(d, f"p{i:05d}.json"), "w") as f:
+            json.dump(
+                {
+                    "point_index": i,
+                    "status": "ok",
+                    "models": [
+                        {"model": "m", "status": "ok", "embedding": {"npz_key": "embedding__m"}}
+                    ],
+                },
+                f,
+            )
+
+    def test_ignores_non_point_artifacts_in_directory(self, tmp_path):
+        """A combined run.npz/run.json dropped into a per-item dir must not
+        be ingested as a point (it has no point_index and no p<digits> name)."""
+        d = str(tmp_path)
+        for i in (0, 1):
+            self._write_point(d, i)
+        np.savez(os.path.join(d, "run.npz"), embeddings__m=np.zeros((5, 2), dtype=np.float32))
+        with open(os.path.join(d, "run.json"), "w") as f:
+            json.dump({"n_items": 5, "status": "ok", "models": []}, f)
+
+        result = load_export(d)
+        assert result.n_items == 2
+        np.testing.assert_allclose(
+            result.models["m"].embeddings, np.array([[0.0], [1.0]], dtype=np.float32)
+        )
+
+    def test_duplicate_point_index_raises(self, tmp_path):
+        """Two files claiming the same point_index must fail loudly, not
+        silently overwrite a row."""
+        d = str(tmp_path)
+        self._write_point(d, 0)
+        # A differently-named file claiming the same index.
+        np.savez(
+            os.path.join(d, "stale.npz"),
+            embedding__m=np.array([9.0], dtype=np.float32),
+        )
+        with open(os.path.join(d, "stale.json"), "w") as f:
+            json.dump({"point_index": 0, "status": "ok", "models": []}, f)
+
+        with pytest.raises(ValueError, match="both claim point_index=0"):
+            load_export(d)
