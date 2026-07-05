@@ -413,7 +413,10 @@ class InputPrepSpec:
     Attributes
     ----------
     mode : {"auto", "resize", "tile"}
-        Preprocessing strategy.
+        Preprocessing strategy. Defaults to ``"tile"`` — the same default the
+        package applies when ``input_prep`` is unset — so
+        ``InputPrepSpec(tile_size=...)`` configures tiling as written instead
+        of silently resolving to a different mode.
     tile_size : int or None
         Tile edge length for tile-based modes.
     tile_stride : int or None
@@ -440,7 +443,7 @@ class InputPrepSpec:
         axis squeeze at ~9%.
     """
 
-    mode: Literal["auto", "resize", "tile"] = "resize"
+    mode: Literal["auto", "resize", "tile"] = "tile"
     tile_size: int | None = None
     tile_stride: int | None = None
     max_tiles: int = 64

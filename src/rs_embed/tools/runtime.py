@@ -134,8 +134,14 @@ def resolve_model_aware_input_prep(
     if input_prep is None or str(resolved.mode) == "auto":
         # Resolve the unset/auto default to an explicit tile so this model
         # behaves like the package-wide default rather than running auto's
-        # long-axis-tile/short-axis-resize heuristic.
-        effective = InputPrepSpec.tile()
+        # long-axis-tile/short-axis-resize heuristic. Only the mode is
+        # overridden — the user's tile_size/max_tiles/... survive.
+        if isinstance(input_prep, InputPrepSpec):
+            from dataclasses import replace as _dc_replace
+
+            effective = _dc_replace(input_prep, mode="tile")
+        else:
+            effective = InputPrepSpec.tile()
         effective_resolved = _resolve_input_prep_spec(effective)
         policy = "tile_default_for_image_level_vit_patch_grid"
         if output.mode == "grid":
