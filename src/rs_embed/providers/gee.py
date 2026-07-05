@@ -139,10 +139,11 @@ class GEEProvider(ProviderBase):
         """Download a rectangular patch as **north-up** CHW float32.
 
         Uses ``ee.Projection.atScale()`` + ``.clip(region)`` before
-        ``sampleRectangle``.  That combination causes GEE to return rows in
-        south-up order, so ``_flip_sample_tile_y`` is applied here before
-        returning — callers always receive north-up output and must not flip
-        again.
+        ``sampleRectangle``.  The ``atScale`` reprojection form makes GEE
+        return rows in south-up order (clipping does not affect row order —
+        see ``_sample_image_bands_raw_chw`` for the verified contract), so
+        ``_flip_sample_tile_y`` is applied here before returning — callers
+        always receive north-up output and must not flip again.
 
         Also resolves band aliases (BLUE/GREEN/RED → B2/B3/B4 for S2, etc.)
         and clips to ``region`` so that pixels outside non-rectangular
@@ -592,9 +593,9 @@ class GEEProvider(ProviderBase):
         else:
             raise ProviderError(f"Unknown composite='{composite}'. Use 'median' or 'mosaic'.")
 
-        # reproject(crs=..., scale=...) + clip: empirically north-up (matches
-        # _sample_image_bands_raw_chw's no-clip behaviour).  If this is ever
-        # found to be south-up, add _flip_sample_tile_y to the return value.
+        # reproject(crs=..., scale=...) + clip: north-up — row order follows the
+        # reprojection form, not clipping (see _sample_image_bands_raw_chw for
+        # the verified contract). No flip here.
         img = img.reproject(crs="EPSG:3857", scale=int(scale_m)).clip(region)
         band_names_raw = img.bandNames().getInfo()
         band_names = tuple(str(b) for b in (band_names_raw or []))

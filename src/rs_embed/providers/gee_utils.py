@@ -409,17 +409,15 @@ def _sample_image_bands_raw_chw(
 ) -> np.ndarray:
     """Sample a GEE image as **north-up** CHW float32 in [0, 10_000].
 
-    GEE's ``sampleRectangle`` returns rows in north-to-south order when the
-    image is reprojected via ``reproject(crs=..., scale=...)`` **without** a
-    prior ``.clip()``.  This specific call pattern is what guarantees north-up
-    output here — no explicit flip is applied.
+    Row-order contract (verified against live GEE with ``ee.Image.pixelLonLat``
+    across hemispheres and scales; see ``tests/test_gee_orientation_live.py``):
+    ``sampleRectangle`` row order depends on the *reprojection form*, not on
+    clipping —
 
-    .. warning::
-        Do **not** add ``.clip(region)`` before ``sampleRectangle`` in this
-        function.  With the ``reproject(crs=..., scale=...)`` form, clipping
-        causes GEE to return south-up rows (the opposite convention), which
-        would silently invert every multiframe tile.  If masking of
-        non-rectangular regions is required, use ``fetch_array_chw`` instead.
+    - ``reproject(crs=..., scale=...)`` → north-up, with or without ``.clip()``
+      (this function and ``_fetch_all_bands_impl``; no flip applied).
+    - ``reproject(ee.Projection(...).atScale(...))`` → south-up
+      (``fetch_array_chw``, which applies ``_flip_sample_tile_y``).
     """
     img = img.select(list(bands)).reproject(crs="EPSG:3857", scale=int(scale_m))
     rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
@@ -441,14 +439,13 @@ def _sample_image_bands_raw_chw(
 def _flip_sample_tile_y(arr: np.ndarray) -> np.ndarray:
     """Flip the penultimate (height) axis of a CHW or TCHW array from south-up to north-up.
 
-    Called inside ``GEEProvider.fetch_array_chw``, which uses
-    ``ee.Projection.atScale() + .clip(region)`` before ``sampleRectangle``.
-    That call pattern causes GEE to return rows in south-up order, so the flip
-    is applied at the end of ``fetch_array_chw`` before returning to callers.
-
-    ``_sample_image_bands_raw_chw`` uses a different call pattern
-    (``reproject(crs=..., scale=...)`` **without** clip) that already returns
-    north-up rows from GEE; applying this flip there would invert those tiles.
+    Called inside ``GEEProvider.fetch_array_chw``, whose
+    ``reproject(ee.Projection(...).atScale(...))`` form makes ``sampleRectangle``
+    return south-up rows. The ``reproject(crs=..., scale=...)`` form returns
+    north-up rows (clipping does not affect row order), so
+    ``_sample_image_bands_raw_chw`` and ``_fetch_all_bands_impl`` must NOT apply
+    this flip. Contract verified against live GEE; see
+    ``_sample_image_bands_raw_chw`` and ``tests/test_gee_orientation_live.py``.
     """
     a = np.asarray(arr, dtype=np.float32)
     if a.ndim < 2:
