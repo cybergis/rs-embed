@@ -936,13 +936,11 @@ class InferenceEngine:
             input_prep_mode=input_prep_resolved.mode,
         )
 
-        batch_attempted = False
         batch_succeeded = False
         all_idxs = list(range(n))
 
         # Tier 1: batch with prefetched inputs (resize/pass-through mode)
         if can_batch_prefetched:
-            batch_attempted = True
             assert ctx.skey is not None and sensor is not None
             prefetched_out, batch_succeeded = self._run_batch_prefetched(
                 idxs=all_idxs,
@@ -965,7 +963,6 @@ class InferenceEngine:
 
         # Tier 2: batch without inputs
         if not batch_succeeded and can_batch:
-            batch_attempted = True
             batch_out, batch_succeeded = self._run_batch_no_input(
                 idxs=all_idxs,
                 spatials=spatials,
@@ -984,7 +981,6 @@ class InferenceEngine:
 
         # Tier 1.5: tiled batch — tile each image then batch all tiles together
         if not batch_succeeded and can_batch_tiled:
-            batch_attempted = True
             assert ctx.skey is not None and sensor is not None
             tiled_out, batch_succeeded = self._run_batch_tiled(
                 idxs=all_idxs,
