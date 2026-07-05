@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- **Pipeline correctness (review batch 1).** Combined-export `drop_model_arrays` no longer deletes a prefix-sibling model's arrays (`satmae` vs `satmaepp`); per-item exports square-fetch consistently beyond the first chunk (cloned prefetch kept `square_fetch_keys`); the `input_prep="auto"` fallback forwards the ROI crop window instead of silently embedding the enlarged square; base `fetch_input` resolves `temporal=None` to the package default window like every embedder entry point (multi-frame models no longer crash on the default tile path); GEE cloud filtering picks the collection's own property (S2/Landsat) instead of emptying Landsat/S1/DEM collections with the S2-only one, with a unified inclusive threshold; `sensor_cache_key` accepts `cloudy_pct=None`; merged fetch groups no longer share one mutable `fetch_meta` dict across models.
+
 ## [0.2.0] — 2026-06-30
 
 This release adds the OlmoEarth model family, makes the temporal models (`prithvi`, `galileo`, `olmoearth`) sample window-adaptively by default, flips the package-wide default `input_prep` from `resize` to `tile` so all models preserve native resolution by default, and fixes several `export_batch` correctness issues where a point's embedding differed between the single and batch/tiled paths. Some defaults that change embedding behavior are noted below; pin explicit options where strict reproducibility across versions is required.
