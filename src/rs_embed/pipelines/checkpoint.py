@@ -82,54 +82,6 @@ class CheckpointManager:
         sidecar = _load_json_dict(os.path.splitext(out_file)[0] + ".json")
         return bool(sidecar) and sidecar.get("request_fingerprint") == fingerprint
 
-    def per_item_resume_manifest(
-        self,
-        *,
-        point_index: int,
-        spatial: SpatialSpec,
-        temporal: TemporalSpec | None,
-        output: OutputSpec,
-        backend: str,
-        device: str,
-        out_file: str,
-    ) -> dict[str, Any]:
-        from ..tools.manifest import point_resume_manifest
-
-        return point_resume_manifest(
-            point_index=point_index,
-            spatial=spatial,
-            temporal=temporal,
-            output=output,
-            backend=backend,
-            device=device,
-            out_file=out_file,
-        )
-
-    def per_item_failure_manifest(
-        self,
-        *,
-        point_index: int,
-        spatial: SpatialSpec,
-        temporal: TemporalSpec | None,
-        output: OutputSpec,
-        backend: str,
-        device: str,
-        stage: str,
-        error: Exception,
-    ) -> dict[str, Any]:
-        from ..tools.manifest import point_failure_manifest
-
-        return point_failure_manifest(
-            point_index=point_index,
-            spatial=spatial,
-            temporal=temporal,
-            output=output,
-            backend=backend,
-            device=device,
-            stage=stage,
-            error=error,
-        )
-
     # ── combined resume ────────────────────────────────────────────
 
     def combined_init_state(
