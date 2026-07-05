@@ -214,6 +214,7 @@ class PrefetchManager:
                         progress.update(1)
                     continue
 
+                member_failed = False
                 for member_skey in self.fetch_members.get(skey, []):
                     member_idx = self.sensor_to_fetch[member_skey][1]
                     x_member = normalize_input_array(
@@ -237,8 +238,7 @@ class PrefetchManager:
                             if not cfg.continue_on_error:
                                 raise err
                             self.errors[(i, member_skey)] = repr(err)
-                            if fetch_stats is not None:
-                                fetch_stats.record_failure()
+                            member_failed = True
                             continue
                         self.input_reports[(i, member_skey)] = rep
                     self.cache[(i, member_skey)] = x_member
@@ -248,12 +248,17 @@ class PrefetchManager:
                         # which must not leak into sibling models' crop windows.
                         self.fetch_meta[(i, member_skey)] = dict(fmeta)
 
+                # One stats record per fetch task: failed if any member failed
+                # inspection (previously counted as both a failure and a success).
                 if fetch_stats is not None:
-                    fsensor = self.fetch_sensor_by_key.get(skey)
-                    fetch_stats.record_success(
-                        point=i,
-                        sensor=fsensor.collection if fsensor is not None else None,
-                    )
+                    if member_failed:
+                        fetch_stats.record_failure()
+                    else:
+                        fsensor = self.fetch_sensor_by_key.get(skey)
+                        fetch_stats.record_success(
+                            point=i,
+                            sensor=fsensor.collection if fsensor is not None else None,
+                        )
                 if progress is not None:
                     progress.update(1)
 

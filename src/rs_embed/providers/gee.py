@@ -261,8 +261,17 @@ class GEEProvider(ProviderBase):
         def _stitch(
             res_a: Any, res_b: Any, bbox: Any, axis: str, scale_m: int, fill_value: float
         ) -> tuple[np.ndarray, dict[str, Any]]:
-            arr_a, meta = res_a
-            arr_b, _ = res_b
+            arr_a, meta_a = res_a
+            arr_b, meta_b = res_b
+            # Merge tile metas: if either half relaxed the IW filter, the
+            # stitched result did too (keeping only tile A's meta hid that).
+            meta = dict(meta_a)
+            meta["s1_iw_applied"] = bool(meta_a.get("s1_iw_applied", True)) and bool(
+                meta_b.get("s1_iw_applied", True)
+            )
+            meta["s1_iw_relaxed_on_empty"] = bool(
+                meta_a.get("s1_iw_relaxed_on_empty", False)
+            ) or bool(meta_b.get("s1_iw_relaxed_on_empty", False))
             return _stitch_bbox_split_arrays(
                 arr_a=arr_a,
                 arr_b=arr_b,
@@ -310,9 +319,7 @@ class GEEProvider(ProviderBase):
         orbit_n = str(orbit).strip().upper() if orbit is not None else None
         if orbit_n is not None:
             if orbit_n not in ("ASCENDING", "DESCENDING"):
-                raise ProviderError(
-                    f"Unknown S1 orbit={orbit!r}. Use 'ASCENDING' or 'DESCENDING'."
-                )
+                raise ProviderError(f"Unknown S1 orbit={orbit!r}. Use 'ASCENDING' or 'DESCENDING'.")
             base = base.filter(ee.Filter.eq("orbitProperties_pass", orbit_n))
         col = _build_s1_dualpol_collection(base, require_iw=bool(require_iw))
         iw_relaxed = False

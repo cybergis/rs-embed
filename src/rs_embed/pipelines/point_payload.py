@@ -24,7 +24,6 @@ from ..tools.runtime import (
     run_with_retry,
     sensor_key,
 )
-from ..tools.shape import square_fetch_request
 from ..tools.serialization import (
     embedding_to_numpy,
     jsonable,
@@ -33,6 +32,7 @@ from ..tools.serialization import (
     sha1,
     utc_ts,
 )
+from ..tools.shape import square_fetch_request
 from ..tools.tiling import _call_embedder_get_embedding_with_input_prep
 
 
