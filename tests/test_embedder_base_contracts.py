@@ -404,3 +404,53 @@ def test_base_batch_raises_on_unsupported_model_config():
         )
     # And without model_config both still work.
     assert len(emb.get_embeddings_batch(spatials=sp, temporal=None, sensor=None)) == 1
+
+
+def test_gse_pooled_is_nan_aware(monkeypatch):
+    """A single nodata pixel must not poison the pooled vector.
+
+    Regression: -9999 -> NaN then plain mean/max made any ROI touching
+    nodata (tile edge, coastline) return an all-NaN embedding silently.
+    """
+    import rs_embed.embedders.precomputed_gse_annual as gse_mod
+
+    embedder = GSEAnnualEmbedder()
+    embedder.model_name = "gse"
+    monkeypatch.setattr(embedder, "_get_provider", lambda _backend: object())
+    patch = np.array(
+        [[[1.0, -9999.0], [3.0, 5.0]], [[2.0, -9999.0], [4.0, 6.0]]], dtype=np.float32
+    )
+    monkeypatch.setattr(
+        gse_mod,
+        "_fetch_collection_patch_all_bands_chw",
+        lambda provider, **kw: (patch.copy(), ["b0", "b1"]),
+    )
+
+    emb = embedder.get_embedding(
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
+        temporal=TemporalSpec.year(2020),
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="auto",
+    )
+    np.testing.assert_allclose(emb.data, np.array([3.0, 4.0], dtype=np.float32))
+    assert emb.meta["nodata_fraction"] == 0.25
+
+    # All-nodata ROI errors instead of returning NaNs.
+    import pytest as _pytest
+
+    from rs_embed.core.errors import ModelError as _ME
+
+    monkeypatch.setattr(
+        gse_mod,
+        "_fetch_collection_patch_all_bands_chw",
+        lambda provider, **kw: (np.full((2, 2, 2), -9999.0, dtype=np.float32), ["b0", "b1"]),
+    )
+    with _pytest.raises(_ME, match="all nodata"):
+        embedder.get_embedding(
+            spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
+            temporal=TemporalSpec.year(2020),
+            sensor=None,
+            output=OutputSpec.pooled(),
+            backend="auto",
+        )

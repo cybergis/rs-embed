@@ -55,6 +55,12 @@ def _to_bbox_4326(spatial: SpatialSpec) -> BBox:
 
 def _year_from_temporal(temporal: TemporalSpec | None, default_year: int = 2021) -> int:
     if temporal is None:
+        warnings.warn(
+            f"temporal=None: tessera defaults to year {default_year}. Pass "
+            "temporal=TemporalSpec.year(...) for reproducible, self-documented results.",
+            UserWarning,
+            stacklevel=2,
+        )
         return default_year
     temporal.validate()
     if temporal.mode == "year" and temporal.year is not None:
