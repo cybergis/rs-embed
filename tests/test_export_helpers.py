@@ -383,3 +383,42 @@ def test_embedding_to_numpy_preserves_shape():
     out = _embedding_to_numpy(e)
     assert out.shape == (3, 4, 4)
     assert out.dtype == np.float32
+
+
+def test_resolve_export_model_configs_rejects_duplicate_names():
+    """Duplicate model names silently overwrote each other's npz arrays and
+    per-model state; they must be rejected up front."""
+    import pytest
+
+    from rs_embed.core.errors import ModelError
+    from rs_embed.core.specs import OutputSpec
+    from rs_embed.tools.export_requests import resolve_export_model_configs
+
+    with pytest.raises(ModelError, match="Duplicate model name"):
+        resolve_export_model_configs(
+            models=["mock_model", "mock_model"],
+            backend_n="auto",
+            temporal=None,
+            output=OutputSpec.pooled(),
+            sensor=None,
+            fetch=None,
+            modality=None,
+            per_model_sensors=None,
+            per_model_fetches=None,
+            per_model_modalities=None,
+        )
+
+    # Distinct spellings that sanitize to the same npz key collide too.
+    with pytest.raises(ModelError, match="mock_model"):
+        resolve_export_model_configs(
+            models=["mock_model", "mock-model"],
+            backend_n="auto",
+            temporal=None,
+            output=OutputSpec.pooled(),
+            sensor=None,
+            fetch=None,
+            modality=None,
+            per_model_sensors=None,
+            per_model_fetches=None,
+            per_model_modalities=None,
+        )

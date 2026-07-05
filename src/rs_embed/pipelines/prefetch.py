@@ -13,7 +13,7 @@ from typing import Any
 import numpy as np
 
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
-from ..core.types import ExportConfig, FetchResult
+from ..core.types import ExportConfig, FetchResult, ModelConfig
 from ..providers import fetch as _providers_fetch
 from ..providers.prefetch_plan import (
     build_prefetch_plan,
@@ -58,6 +58,10 @@ class PrefetchManager:
         fetch_fn: Callable[..., np.ndarray] | None = None,
         inspect_fn: Callable[..., dict[str, Any]] | None = None,
         fetcher_by_key: dict[str, Any] | None = None,
+        model_configs: list[ModelConfig] | None = None,
+        resolved_backend: dict[str, str] | None = None,
+        backend: str = "auto",
+        device: str = "auto",
     ) -> None:
         self.provider = provider
         self.models = models
@@ -66,14 +70,19 @@ class PrefetchManager:
         self.config = config
         self.fetch_fn = fetch_fn or _providers_fetch.fetch_sensor_patch_chw
         self.inspect_fn = inspect_fn or _providers_fetch.inspect_fetch_result
+        self.model_configs = model_configs
+        self.resolved_backend = resolved_backend or {}
+        self.backend = backend
+        self.device = device
         self.fetcher_by_key: dict[str, Any] = fetcher_by_key or {}
         # Fetch keys whose GENERIC fetches must enlarge a rectangular ROI to a
         # square (with the crop-back window in fetch meta), mirroring the
         # fetch-square behavior every model-specific ``fetch_input`` applies by
-        # default. Set by the exporter for merged band-union groups and models
-        # without a custom fetch_input, whenever every member model honors
-        # ``fetch_meta`` (see BatchExporter._resolve_fetcher_by_key).
+        # default: merged band-union groups and models without a custom
+        # fetch_input, whenever every member model honors ``fetch_meta``.
+        # Resolved by plan() when ``model_configs`` is provided.
         self.square_fetch_keys: set[str] = set()
+        self._plan_resolve_bands_fn: Callable[..., Any] | None = None
 
         # Caches populated by fetch_chunk / restored from checkpoint
         self.cache: dict[tuple[int, str], np.ndarray] = {}
@@ -108,7 +117,15 @@ class PrefetchManager:
     # ── plan ───────────────────────────────────────────────────────
 
     def plan(self, resolve_bands_fn: Callable[..., Any] | None = None) -> None:
-        """Build the prefetch plan (sensor dedup + band unions)."""
+        """Build the prefetch plan (sensor dedup + band unions + fetch policy).
+
+        Owns the whole plan: which fetches use a model-specific ``fetch_input``
+        and which generic fetches must fetch-square. Keeping this inside
+        ``plan()`` makes :meth:`clone` trivially safe — the policy can never be
+        forgotten when copying a manager (that omission once silently disabled
+        fetch-square for every chunk after the first).
+        """
+        self._plan_resolve_bands_fn = resolve_bands_fn
         (
             self.sensor_by_key,
             self.fetch_sensor_by_key,
@@ -121,6 +138,87 @@ class PrefetchManager:
             model_type=self.model_type,
             resolve_bands_fn=resolve_bands_fn,
         )
+        if self.model_configs is not None:
+            self.fetcher_by_key, self.square_fetch_keys = self._resolve_fetchers()
+
+    def _resolve_fetchers(self) -> tuple[dict[str, Any], set[str]]:
+        """fetch_key → embedder for model-specific fetches, and the generic
+        fetch keys that must fetch-square.
+
+        The canonical single-embedding path always enlarges a rectangular ROI
+        to a square fetch (``fetch_input``'s ``square_input=True`` default) and
+        crops the output back via ``roi_window_geo``. Model-specific
+        ``fetch_input`` fetches inherit that for free; generic fetches (merged
+        multi-model band-union groups, models without a custom ``fetch_input``)
+        are squared by the prefetch itself whenever every member model's
+        ``get_embedding`` accepts ``fetch_meta`` and thus honors the crop-back
+        window.
+        """
+        from ..tools.normalization import normalize_model_name
+        from ..tools.runtime import (
+            _embedder_method_accepts_parameter,
+            _overrides_base_method,
+            get_embedder_bundle_cached,
+            sensor_key,
+        )
+        from ..tools.serialization import sensor_cache_key
+
+        fetcher_by_key: dict[str, Any] = {}
+        # fetch_key → True while every member seen so far honors fetch_meta.
+        meta_safe_by_key: dict[str, bool] = {}
+        for mc in self.model_configs or []:
+            if mc.sensor is None or "precomputed" in mc.model_type.lower():
+                continue
+            member_skey = sensor_cache_key(mc.sensor)
+            mapping = self.sensor_to_fetch.get(member_skey)
+            if mapping is None:
+                continue
+            fetch_key = mapping[0]
+            member_keys = self.fetch_members.get(fetch_key, [])
+            embedder, _lock = get_embedder_bundle_cached(
+                normalize_model_name(mc.name),
+                self.resolved_backend.get(mc.name, self.backend),
+                self.device,
+                sensor_key(mc.sensor),
+            )
+            meta_safe_by_key[fetch_key] = meta_safe_by_key.get(
+                fetch_key, True
+            ) and _embedder_method_accepts_parameter(type(embedder), "get_embedding", "fetch_meta")
+            # A merged fetch group may represent a union of channels needed by
+            # multiple models. Model-specific fetch_input() implementations
+            # generally return only that model's own contract, so using one of
+            # them for a shared union fetch can truncate the prefetched tensor.
+            if len(member_keys) != 1:
+                continue
+            if fetch_key in fetcher_by_key:
+                continue
+            if getattr(embedder, "has_custom_fetch", False) or _overrides_base_method(
+                embedder, "fetch_input"
+            ):
+                fetcher_by_key[fetch_key] = embedder
+        square_fetch_keys = {
+            k for k, safe in meta_safe_by_key.items() if safe and k not in fetcher_by_key
+        }
+        return fetcher_by_key, square_fetch_keys
+
+    def clone(self) -> PrefetchManager:
+        """A sibling manager with the same plan and fresh per-chunk caches."""
+        twin = PrefetchManager(
+            provider=self.provider,
+            models=self.models,
+            resolved_sensor=self.resolved_sensor,
+            model_type=self.model_type,
+            config=self.config,
+            fetch_fn=self.fetch_fn,
+            inspect_fn=self.inspect_fn,
+            fetcher_by_key=dict(self.fetcher_by_key),
+            model_configs=self.model_configs,
+            resolved_backend=self.resolved_backend,
+            backend=self.backend,
+            device=self.device,
+        )
+        twin.plan(self._plan_resolve_bands_fn)
+        return twin
 
     # ── fetch ──────────────────────────────────────────────────────
 
@@ -217,11 +315,20 @@ class PrefetchManager:
                 member_failed = False
                 for member_skey in self.fetch_members.get(skey, []):
                     member_idx = self.sensor_to_fetch[member_skey][1]
-                    x_member = normalize_input_array(
-                        select_prefetched_channels(x, member_idx),
-                        expected_channels=len(member_idx),
-                        name=f"gee_input_{member_skey}",
-                    )
+                    try:
+                        x_member = normalize_input_array(
+                            select_prefetched_channels(x, member_idx),
+                            expected_channels=len(member_idx),
+                            name=f"gee_input_{member_skey}",
+                        )
+                    except Exception as e:
+                        # Post-fetch processing failures are per-member errors,
+                        # not batch aborts, under continue_on_error.
+                        if not cfg.continue_on_error:
+                            raise
+                        self.errors[(i, member_skey)] = repr(e)
+                        member_failed = True
+                        continue
                     if cfg.fail_on_bad_input:
                         sspec_member = self.sensor_by_key[member_skey]
                         rep = self.inspect_fn(

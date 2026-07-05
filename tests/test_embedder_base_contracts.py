@@ -65,7 +65,7 @@ def test_precomputed_custom_init_preserves_base_state():
     assert copernicus._providers == {}
 
 
-def test_gse_get_embedding_ignores_input_chw(monkeypatch):
+def test_gse_get_embedding_has_no_input_chw_param(monkeypatch):
     import rs_embed.embedders.precomputed_gse_annual as gse_mod
 
     embedder = GSEAnnualEmbedder()
@@ -92,7 +92,6 @@ def test_gse_get_embedding_ignores_input_chw(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="auto",
-        input_chw=np.ones((3, 8, 8), dtype=np.float32),
     )
 
     np.testing.assert_allclose(emb.data, np.array([4.0, 5.0], dtype=np.float32))
@@ -124,7 +123,7 @@ def test_gse_get_embedding_uses_sensor_scale_m(monkeypatch):
     np.testing.assert_allclose(emb.data, np.array([1.0, 1.0], dtype=np.float32))
 
 
-def test_tessera_get_embedding_ignores_input_chw(monkeypatch):
+def test_tessera_get_embedding_has_no_input_chw_param(monkeypatch):
     import rs_embed.embedders.precomputed_tessera as tessera_mod
 
     embedder = TesseraEmbedder()
@@ -146,13 +145,12 @@ def test_tessera_get_embedding_ignores_input_chw(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="auto",
-        input_chw=np.ones((3, 8, 8), dtype=np.float32),
     )
 
     np.testing.assert_allclose(emb.data, np.full((64,), 1.0, dtype=np.float32))
 
 
-def test_copernicus_get_embedding_ignores_input_chw(monkeypatch):
+def test_copernicus_get_embedding_has_no_input_chw_param(monkeypatch):
     import rs_embed.embedders.precomputed_copernicus_embed as cop_mod
 
     embedder = CopernicusEmbedder()
@@ -170,7 +168,6 @@ def test_copernicus_get_embedding_ignores_input_chw(monkeypatch):
         sensor=None,
         output=OutputSpec.pooled(),
         backend="auto",
-        input_chw=np.ones((3, 8, 8), dtype=np.float32),
     )
 
     np.testing.assert_allclose(emb.data, np.array([4.0, 5.0], dtype=np.float32))
@@ -350,3 +347,110 @@ def test_base_fetch_input_single_defaults_temporal_like_get_embedding(monkeypatc
     )
     assert fr is not None
     assert seen["temporal"] == temporal_to_range(None)
+
+
+def test_precomputed_embedders_declare_honest_capabilities():
+    """Signatures are the capability contract; precomputed models must not
+    advertise prefetched-input support they ignore, and must carry the
+    _is_precomputed flag so the API-side prefetch skips them.
+
+    Regression: tessera/copernicus declared (and silently ignored) input_chw
+    and lacked the flag - tessera's documented cache override
+    (collection="cache:<dir>") was prefetched as a GEE collection and failed.
+    """
+    from rs_embed.embedders.precomputed_copernicus_embed import CopernicusEmbedder as _Cop
+    from rs_embed.embedders.precomputed_gse_annual import GSEAnnualEmbedder as _Gse
+    from rs_embed.embedders.precomputed_tessera import TesseraEmbedder as _Tes
+    from rs_embed.tools.runtime import embedder_accepts_input_chw
+
+    embedder_accepts_input_chw.cache_clear()
+    for cls in (_Tes, _Cop, _Gse):
+        assert getattr(cls, "_is_precomputed", False) is True, cls.__name__
+        assert embedder_accepts_input_chw(cls) is False, cls.__name__
+
+
+def test_base_batch_raises_on_unsupported_model_config():
+    """The batch paths must reject an unsupported model_config like the
+    single path does, instead of silently dropping it.
+
+    Regression: export_batch with model kwargs for a model whose
+    get_embedding has no model_config ran the prefetched-batch path with the
+    config silently ignored, while the same request on the single path raised.
+    """
+    import pytest
+
+    from rs_embed.core.embedding import Embedding
+    from rs_embed.core.errors import ModelError
+    from rs_embed.core.specs import PointBuffer
+    from rs_embed.embedders.base import EmbedderBase
+
+    class _NoConfig(EmbedderBase):
+        model_name = "noconfig"
+
+        def get_embedding(
+            self, *, spatial, temporal, sensor, output, backend, device="auto", input_chw=None
+        ):
+            return Embedding(data=np.zeros(2, dtype=np.float32), meta={})
+
+    emb = _NoConfig()
+    sp = [PointBuffer(lon=0, lat=0, buffer_m=10)]
+    with pytest.raises(ModelError, match="model-specific"):
+        emb.get_embeddings_batch(
+            spatials=sp, temporal=None, sensor=None, model_config={"variant": "x"}
+        )
+    with pytest.raises(ModelError, match="model-specific"):
+        emb.get_embeddings_batch_from_inputs(
+            spatials=sp,
+            input_chws=[np.zeros((1, 2, 2), dtype=np.float32)],
+            model_config={"variant": "x"},
+        )
+    # And without model_config both still work.
+    assert len(emb.get_embeddings_batch(spatials=sp, temporal=None, sensor=None)) == 1
+
+
+def test_gse_pooled_is_nan_aware(monkeypatch):
+    """A single nodata pixel must not poison the pooled vector.
+
+    Regression: -9999 -> NaN then plain mean/max made any ROI touching
+    nodata (tile edge, coastline) return an all-NaN embedding silently.
+    """
+    import rs_embed.embedders.precomputed_gse_annual as gse_mod
+
+    embedder = GSEAnnualEmbedder()
+    embedder.model_name = "gse"
+    monkeypatch.setattr(embedder, "_get_provider", lambda _backend: object())
+    patch = np.array([[[1.0, -9999.0], [3.0, 5.0]], [[2.0, -9999.0], [4.0, 6.0]]], dtype=np.float32)
+    monkeypatch.setattr(
+        gse_mod,
+        "_fetch_collection_patch_all_bands_chw",
+        lambda provider, **kw: (patch.copy(), ["b0", "b1"]),
+    )
+
+    emb = embedder.get_embedding(
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
+        temporal=TemporalSpec.year(2020),
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="auto",
+    )
+    np.testing.assert_allclose(emb.data, np.array([3.0, 4.0], dtype=np.float32))
+    assert emb.meta["nodata_fraction"] == 0.25
+
+    # All-nodata ROI errors instead of returning NaNs.
+    import pytest as _pytest
+
+    from rs_embed.core.errors import ModelError as _ME
+
+    monkeypatch.setattr(
+        gse_mod,
+        "_fetch_collection_patch_all_bands_chw",
+        lambda provider, **kw: (np.full((2, 2, 2), -9999.0, dtype=np.float32), ["b0", "b1"]),
+    )
+    with _pytest.raises(_ME, match="all nodata"):
+        embedder.get_embedding(
+            spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
+            temporal=TemporalSpec.year(2020),
+            sensor=None,
+            output=OutputSpec.pooled(),
+            backend="auto",
+        )

@@ -290,7 +290,6 @@ def get_embedding(
     return _run_embedding_request_shared(
         spatials=[spatial],
         temporal=temporal,
-        sensor=sensor_eff,
         output=output,
         ctx=ctx,
     )[0]
@@ -385,7 +384,6 @@ def get_embeddings_batch(
     return _run_embedding_request_shared(
         spatials=spatials,
         temporal=temporal,
-        sensor=sensor_eff,
         output=output,
         ctx=ctx,
     )

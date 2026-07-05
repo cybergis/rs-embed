@@ -163,11 +163,27 @@ def describe_model_cached(model_n: str) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=32)
-def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple):
-    """Return (embedder instance, instance lock)."""
+def _embedder_bundle_cached(model: str, backend: str, device: str):
     cls = get_embedder_cls(model)
-    emb = cls()
-    return emb, RLock()
+    return cls(), RLock()
+
+
+def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple = ()):
+    """Return (embedder instance, instance lock).
+
+    Instances are constructed bare — no sensor state — so the cache is keyed
+    by (model, backend, device) only. ``sensor_k`` is accepted for
+    call-site compatibility but ignored: keying on it multiplied embedder
+    instances (each holding its own lazily-loaded state) per sensor variation,
+    including fields like check_save_dir that cannot affect the instance.
+    """
+    _ = sensor_k
+    return _embedder_bundle_cached(str(model), str(backend), str(device))
+
+
+# Preserve the lru_cache management surface on the public wrapper.
+get_embedder_bundle_cached.cache_clear = _embedder_bundle_cached.cache_clear  # type: ignore[attr-defined]
+get_embedder_bundle_cached.cache_info = _embedder_bundle_cached.cache_info  # type: ignore[attr-defined]
 
 
 def _clear_loaded_embedder_module_caches() -> int:
@@ -622,10 +638,15 @@ def run_embedding_request(
     *,
     spatials: list[SpatialSpec],
     temporal: TemporalSpec | None,
-    sensor: SensorSpec | None,
     output: OutputSpec,
     ctx: _EmbeddingRequestContext,
 ) -> list[Embedding]:
+    """Run a single/batch embedding request.
+
+    ``ctx.sensor_eff`` is the single source of the effective sensor — the
+    same value keys the prefetch, the embedder call, and the request meta.
+    """
+    sensor = ctx.sensor_eff
     from .tiling import _call_embedder_get_embedding_with_input_prep
 
     prefetched_inputs = fetch_api_side_inputs(
