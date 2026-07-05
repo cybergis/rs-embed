@@ -248,6 +248,37 @@ def test_clay_tensor_get_embedding_uses_input_chw(monkeypatch):
     assert out.meta["pooling"] == "model_cls"
 
 
+def test_clay_prefetched_input_needs_no_provider(monkeypatch):
+    """get_embedding(input_chw=...) on the provider backend must not acquire a
+    live provider (lazy-provider convention from the batch-5 review fixes) and
+    must record the resolved temporal window in meta."""
+    import rs_embed.embedders.onthefly_clay as clay
+
+    emb = ClayEmbedder()
+
+    def _boom(_backend):
+        raise AssertionError("prefetched input must not touch the provider")
+
+    monkeypatch.setattr(emb, "_get_provider", _boom)
+    monkeypatch.setattr(clay, "_load_clay_model", _fake_load)
+    monkeypatch.setattr(clay, "_clay_forward_tokens_and_cls_batch", _fake_forward)
+
+    out = emb.get_embedding(
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=256),
+        temporal=TemporalSpec.year(2021),
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="gee",
+        input_chw=np.full((10, 8, 8), 5000.0, dtype=np.float32),
+        fetch_meta={"roi_window_geo": (0.0, 1.0, 0.0, 0.5)},
+    )
+    assert out.data.shape == (2,)
+    assert out.meta["pooling"] == "roi_grid_mean"  # ROI window honored
+    # meta records the resolved range, not the raw year request
+    assert out.meta["temporal"]["mode"] == "range"
+    assert out.meta["temporal"]["start"] == "2021-01-01"
+
+
 def test_clay_get_embedding_uses_model_config_model_size(monkeypatch):
     import rs_embed.embedders.onthefly_clay as clay
 

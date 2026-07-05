@@ -687,8 +687,6 @@ class ClayEmbedder(EmbedderBase):
             provider_meta = {"backend_tensor": True, **norm_meta}
 
         else:
-            provider = self._get_provider(backend)
-
             # overrides
             collection = (
                 getattr(sensor, "collection", "COPERNICUS/S2_SR_HARMONIZED")
@@ -703,6 +701,9 @@ class ClayEmbedder(EmbedderBase):
             composite = str(getattr(sensor, "composite", "median")) if sensor else "median"
 
             if input_chw is None:
+                # Acquire the provider only when actually fetching — a
+                # prefetched input must not require live provider auth.
+                provider = self._get_provider(backend)
                 spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
                 raw_chw, provider_meta = _fetch_provider_multiband_sr_chw(
                     provider,
@@ -790,7 +791,9 @@ class ClayEmbedder(EmbedderBase):
             backend=backend_l,
             source=source,
             sensor=sensor,
-            temporal=temporal,
+            # Resolved window, not the raw request: it drove the fetch AND the
+            # time encoding (meta convention since the batch-4 review fixes).
+            temporal=t,
             image_size=image_size,
             extra={
                 "output_mode": output.mode,
