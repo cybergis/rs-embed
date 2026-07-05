@@ -245,7 +245,10 @@ class PrefetchManager:
                         self.input_reports[(i, member_skey)] = rep
                     self.cache[(i, member_skey)] = x_member
                     if fmeta:
-                        self.fetch_meta[(i, member_skey)] = fmeta
+                        # Independent copy per member: consumers may mutate the
+                        # dict they receive (or stamp it into Embedding.meta),
+                        # which must not leak into sibling models' crop windows.
+                        self.fetch_meta[(i, member_skey)] = dict(fmeta)
 
                 if fetch_stats is not None:
                     fsensor = self.fetch_sensor_by_key.get(skey)
@@ -322,8 +325,12 @@ class PrefetchManager:
         return x
 
     def get_fetch_meta(self, idx: int, sensor_key: str) -> dict[str, Any]:
-        """Return fetch metadata for a cached input, or empty dict."""
-        return self.fetch_meta.get((idx, sensor_key), {})
+        """Return a copy of the fetch metadata for a cached input, or empty dict.
+
+        A copy so a caller that mutates the returned dict cannot corrupt the
+        cached entry other consumers (retries, sibling models) still read.
+        """
+        return dict(self.fetch_meta.get((idx, sensor_key), {}))
 
     def has_error(self, idx: int, sensor_key: str) -> str | None:
         return self.errors.get((idx, sensor_key))

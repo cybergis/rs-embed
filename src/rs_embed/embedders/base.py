@@ -141,14 +141,14 @@ class EmbedderBase:
             fetch_collection_patch_chw,
             fetch_s2_multiframe_raw_tchw,
         )
+        from .meta import temporal_to_range
+
+        # Embedder entry points resolve temporal via temporal_to_range (None ->
+        # package default window). The prefetch path must fetch the same window,
+        # so normalize here too instead of raising on None / fetching unfiltered.
+        temporal = temporal_to_range(temporal)
 
         if spec.temporal_mode == "multi":
-            if temporal is None:
-                from ..core.errors import ModelError
-
-                raise ModelError(
-                    f"{self.model_name} requires a TemporalSpec for multi-frame fetch."
-                )
             raw = fetch_s2_multiframe_raw_tchw(
                 provider,
                 spatial=spatial,

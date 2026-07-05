@@ -761,3 +761,109 @@ def test_fetch_all_bands_impl_passes_through_gee_row_order(monkeypatch):
     # Empirically GEE returns north-up for this call pattern, so row 0 = northernmost.
     np.testing.assert_allclose(arr[0, 0], _NORTH_ROW)
     np.testing.assert_allclose(arr[0, 1], _SOUTH_ROW)
+
+
+def test_cloud_property_for_collection_mapping():
+    from rs_embed.providers.gee_utils import _cloud_property_for_collection
+
+    assert (
+        _cloud_property_for_collection("COPERNICUS/S2_SR_HARMONIZED") == "CLOUDY_PIXEL_PERCENTAGE"
+    )
+    assert _cloud_property_for_collection("LANDSAT/LC08/C02/T1_L2") == "CLOUD_COVER"
+    assert _cloud_property_for_collection("LANDSAT/LE07/C02/T1_L2") == "CLOUD_COVER"
+    assert _cloud_property_for_collection("COPERNICUS/S1_GRD") is None
+    assert _cloud_property_for_collection("USGS/SRTMGL1_003") is None
+    assert _cloud_property_for_collection("") is None
+
+
+def test_filter_clouds_uses_collection_property_and_skips_unknown(monkeypatch):
+    """Cloud filtering must use the collection's own property (inclusive lte)
+    and must not empty collections that lack a cloud-cover property.
+
+    Regression: the S2-only CLOUDY_PIXEL_PERCENTAGE filter was applied
+    unconditionally with the default cloudy_pct=30; GEE property filters
+    exclude images lacking the property, so every Landsat/S1/DEM request
+    dropped all images and failed with a misleading 'No images found'.
+    """
+    import sys
+    import types
+
+    from rs_embed.providers.gee_utils import _filter_clouds
+
+    seen_filters = []
+
+    class _FakeCollection:
+        def filter(self, f):
+            seen_filters.append(f)
+            return self
+
+    fake_ee = types.SimpleNamespace(
+        Filter=types.SimpleNamespace(lte=lambda prop, val: ("lte", prop, val))
+    )
+    monkeypatch.setitem(sys.modules, "ee", fake_ee)
+
+    col = _FakeCollection()
+
+    # S2 -> its own property, inclusive threshold.
+    out = _filter_clouds(col, collection="COPERNICUS/S2_SR_HARMONIZED", cloudy_pct=30)
+    assert out is col
+    assert seen_filters == [("lte", "CLOUDY_PIXEL_PERCENTAGE", 30)]
+
+    # Landsat -> CLOUD_COVER, not the S2 property.
+    seen_filters.clear()
+    _filter_clouds(col, collection="LANDSAT/LC08/C02/T1_L2", cloudy_pct=20)
+    assert seen_filters == [("lte", "CLOUD_COVER", 20)]
+
+    # No cloud property (SAR/DEM) -> unfiltered.
+    seen_filters.clear()
+    out = _filter_clouds(col, collection="COPERNICUS/S1_GRD", cloudy_pct=30)
+    assert out is col
+    assert seen_filters == []
+
+    # cloudy_pct=None -> unfiltered.
+    _filter_clouds(col, collection="COPERNICUS/S2_SR_HARMONIZED", cloudy_pct=None)
+    assert seen_filters == []
+
+
+def test_build_image_default_cloudy_pct_does_not_empty_landsat(monkeypatch):
+    """A default-constructed SensorSpec (cloudy_pct=30) for Landsat must
+    filter on CLOUD_COVER, not filter out every image via the S2 property."""
+    import sys
+    import types
+
+    seen_filters = []
+
+    class _FakeSize:
+        def getInfo(self):
+            return 3
+
+    class _FakeCollection:
+        def filterBounds(self, _region):
+            return self
+
+        def filterDate(self, _start, _end):
+            return self
+
+        def filter(self, f):
+            seen_filters.append(f)
+            return self
+
+        def size(self):
+            return _FakeSize()
+
+        def median(self):
+            return "median_image"
+
+    fake_ee = types.SimpleNamespace(
+        ImageCollection=lambda _collection: _FakeCollection(),
+        Filter=types.SimpleNamespace(lte=lambda prop, val: ("lte", prop, val)),
+    )
+    monkeypatch.setitem(sys.modules, "ee", fake_ee)
+
+    provider = GEEProvider(auto_auth=False)
+    sensor = SensorSpec(collection="LANDSAT/LC08/C02/T1_L2", bands=("SR_B4",))
+    temporal = TemporalSpec.range("2024-01-01", "2024-02-01")
+
+    img = provider.build_image(sensor=sensor, temporal=temporal, region=object())
+    assert img == "median_image"
+    assert seen_filters == [("lte", "CLOUD_COVER", 30)]

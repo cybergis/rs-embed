@@ -560,6 +560,7 @@ class BatchExporter:
             inspect_fn=self.inspect_fn,
             fetcher_by_key=src.fetcher_by_key,
         )
+        clone.square_fetch_keys = set(src.square_fetch_keys)
         clone.sensor_by_key = src.sensor_by_key
         clone.fetch_sensor_by_key = src.fetch_sensor_by_key
         clone.sensor_to_fetch = src.sensor_to_fetch

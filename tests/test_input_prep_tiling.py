@@ -878,3 +878,67 @@ def test_batch_tiled_path_matches_single_snap_and_meta():
     # Parity: the two paths stamp an identical input_prep block (jsonable() has
     # already turned the batch path's tuples into lists, so normalize both).
     assert jsonable(single_prep) == batch_prep
+
+
+class _FakeMetaEmbedder:
+    """Records the fetch_meta each get_embedding call receives."""
+
+    model_name = "fake_meta"
+
+    def __init__(self):
+        self.seen_fetch_meta = []
+
+    def describe(self):
+        return {"defaults": {"image_size": 4}}
+
+    def get_embedding(
+        self,
+        *,
+        spatial,
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="gee",
+        device="cpu",
+        input_chw=None,
+        fetch_meta=None,
+    ):
+        self.seen_fetch_meta.append(dict(fetch_meta) if fetch_meta else None)
+        x = np.asarray(input_chw, dtype=np.float32)
+        return Embedding(data=np.asarray([float(x.mean())], dtype=np.float32), meta={})
+
+
+@pytest.mark.parametrize(
+    "output,input_hw",
+    [
+        (OutputSpec.pooled(), (8, 8)),  # auto + pooled always falls back
+        (OutputSpec.grid(), (4, 4)),  # auto + grid, single tile -> fallback
+    ],
+)
+def test_auto_mode_fallback_forwards_fetch_meta(output, input_hw):
+    """The auto-mode fallback must not drop the fetch-square crop window.
+
+    Regression: the auto fallback branch called the embedder without
+    fetch_meta, so a rectangular ROI prefetched as an enlarged square was
+    never cropped back - the pooled embedding silently covered imagery
+    outside the requested bbox.
+    """
+    emb = _FakeMetaEmbedder()
+    h, w = input_hw
+    x = np.zeros((1, h, w), dtype=np.float32)
+    roi = {"roi_window_geo": (0.25, 0.75, 0.0, 1.0)}
+
+    _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=output,
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.auto(tile_size=4),
+        fetch_meta=dict(roi),
+    )
+
+    assert emb.seen_fetch_meta == [roi]

@@ -273,3 +273,80 @@ def test_onthefly_embedders_that_accept_input_chw_implement_batch_from_inputs():
         "remove from _KNOWN_MISSING_BATCH_FROM_INPUTS if present):\n  "
         + "\n  ".join(sorted(missing_override))
     )
+
+
+def test_base_fetch_input_multi_defaults_temporal_like_get_embedding(monkeypatch):
+    """fetch_input(temporal=None) must use the temporal_to_range default window.
+
+    Regression: multi-frame spec models without a fetch_input override
+    (anysat, agrifm) raised on temporal=None from the API prefetch path,
+    while the same call with input_prep='resize' succeeded via the
+    embedder's own temporal_to_range default.
+    """
+    import numpy as np
+
+    from rs_embed.core.specs import ModelInputSpec, PointBuffer
+    from rs_embed.embedders.base import EmbedderBase
+    from rs_embed.embedders.meta import temporal_to_range
+
+    seen: dict[str, object] = {}
+
+    def fake_multi(provider, *, spatial, temporal, **kwargs):
+        seen["temporal"] = temporal
+        return np.zeros((2, 1, 4, 4), dtype=np.float32)
+
+    monkeypatch.setattr("rs_embed.providers.fetch.fetch_s2_multiframe_raw_tchw", fake_multi)
+
+    class _MultiModel(EmbedderBase):
+        model_name = "multi_dummy"
+        input_spec = ModelInputSpec(
+            collection="C",
+            bands=("B1",),
+            temporal_mode="multi",
+            n_frames=2,
+        )
+
+    fr = _MultiModel().fetch_input(
+        object(),
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=10),
+        temporal=None,
+        sensor=None,
+    )
+    assert fr is not None
+    default = temporal_to_range(None)
+    assert seen["temporal"] == default
+
+
+def test_base_fetch_input_single_defaults_temporal_like_get_embedding(monkeypatch):
+    """Single-composite fetch_input(temporal=None) must not fetch unfiltered.
+
+    The direct get_embedding path resolves None to the package default
+    window; the prefetch path previously passed None through to the
+    provider (whole-collection composite, different data).
+    """
+    import numpy as np
+
+    from rs_embed.core.specs import ModelInputSpec, PointBuffer
+    from rs_embed.embedders.base import EmbedderBase
+    from rs_embed.embedders.meta import temporal_to_range
+
+    seen: dict[str, object] = {}
+
+    def fake_single(provider, *, spatial, temporal, **kwargs):
+        seen["temporal"] = temporal
+        return np.zeros((1, 4, 4), dtype=np.float32)
+
+    monkeypatch.setattr("rs_embed.providers.fetch.fetch_collection_patch_chw", fake_single)
+
+    class _SingleModel(EmbedderBase):
+        model_name = "single_dummy"
+        input_spec = ModelInputSpec(collection="C", bands=("B1",))
+
+    fr = _SingleModel().fetch_input(
+        object(),
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=10),
+        temporal=None,
+        sensor=None,
+    )
+    assert fr is not None
+    assert seen["temporal"] == temporal_to_range(None)

@@ -554,6 +554,16 @@ def test_sensor_cache_key_deterministic_and_differs():
     assert _sensor_cache_key(s1) != _sensor_cache_key(s2)
 
 
+def test_sensor_cache_key_accepts_none_cloudy_pct():
+    """cloudy_pct=None is a legitimate sensor config (no cloud filter) and
+    must key like any other value instead of crashing export planning."""
+    s_none = SensorSpec(collection="A", bands=("B1",), cloudy_pct=None)  # type: ignore[arg-type]
+    s_30 = SensorSpec(collection="A", bands=("B1",), cloudy_pct=30)
+    assert isinstance(_sensor_cache_key(s_none), str)
+    assert _sensor_cache_key(s_none) == _sensor_cache_key(s_none)
+    assert _sensor_cache_key(s_none) != _sensor_cache_key(s_30)
+
+
 # ══════════════════════════════════════════════════════════════════════
 # export_batch — argument validation (no GEE needed)
 # ══════════════════════════════════════════════════════════════════════

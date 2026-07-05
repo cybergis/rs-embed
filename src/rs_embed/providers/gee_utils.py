@@ -288,6 +288,41 @@ def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str,
     return tuple(amap.get((b or "").upper(), b) for b in bands)
 
 
+# ── Cloud-cover filtering ─────────────────────────────────────────────────────
+
+# Scene-level cloud-cover property per collection family. GEE property filters
+# EXCLUDE images that lack the property, so applying the S2 property to any
+# other collection silently filters out every image.
+_CLOUD_PROPERTY_BY_COLLECTION: tuple[tuple[str, str], ...] = (
+    ("COPERNICUS/S2", "CLOUDY_PIXEL_PERCENTAGE"),
+    ("LANDSAT/", "CLOUD_COVER"),
+)
+
+
+def _cloud_property_for_collection(collection: str) -> str | None:
+    c = (collection or "").upper()
+    for marker, prop in _CLOUD_PROPERTY_BY_COLLECTION:
+        if marker in c:
+            return prop
+    return None
+
+
+def _filter_clouds(col: Any, *, collection: str, cloudy_pct: int | None) -> Any:
+    """Apply the collection's scene cloud-cover filter (inclusive threshold).
+
+    Collections without a known cloud-cover property (SAR, DEMs, ...) are
+    returned unfiltered rather than emptied by a filter on a missing property.
+    """
+    if cloudy_pct is None:
+        return col
+    prop = _cloud_property_for_collection(collection)
+    if prop is None:
+        return col
+    import ee
+
+    return col.filter(ee.Filter.lte(prop, int(cloudy_pct)))
+
+
 # ── Temporal split helper ─────────────────────────────────────────────────────
 
 
