@@ -180,7 +180,6 @@ class Model:
         return run_embedding_request(
             spatials=[spatial],
             temporal=temporal,
-            sensor=self._sensor,
             output=self._output,
             ctx=self._ctx,
         )[0]
@@ -217,7 +216,6 @@ class Model:
         return run_embedding_request(
             spatials=spatials,
             temporal=temporal,
-            sensor=self._sensor,
             output=self._output,
             ctx=self._ctx,
         )
