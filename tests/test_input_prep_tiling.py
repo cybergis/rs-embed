@@ -1082,3 +1082,44 @@ def test_tiled_pooled_mean_weights_by_owned_area_not_valid_area():
     assert got == pytest.approx(expected, rel=1e-6)
     # And it differs from the old equal (valid-area) weighting.
     assert got != pytest.approx((m0 + m1) / 2.0, rel=1e-9)
+
+
+def test_stitched_meta_drops_per_tile_diagnostics_and_updates_grid_keys():
+    """Stitched meta must describe the stitched output, not tile 0."""
+
+    class _MetaModel(_FakeTileEmbedder):
+        def get_embedding(self, *, input_chw=None, output=OutputSpec.pooled(), **kwargs):
+            emb = super().get_embedding(input_chw=input_chw, output=output, **kwargs)
+            x = np.asarray(input_chw, dtype=np.float32)
+            emb.meta.update(
+                {
+                    "grid_shape": (int(x.shape[-2]), int(x.shape[-1])),
+                    "shape_prep": {"applied": "none", "orig_hw": tuple(x.shape[-2:])},
+                }
+            )
+            return emb
+
+    emb = _MetaModel()
+    x = np.arange(36, dtype=np.float32).reshape(1, 6, 6)
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9),
+    )
+    assert out.meta["grid_shape"] == (6, 6)  # stitched, not tile 0's (4, 4)
+    assert "shape_prep" not in out.meta  # per-tile diagnostic dropped
+
+
+def test_env_tile_snap_frac_rejects_out_of_range(monkeypatch):
+    """The env override's error message promises [0, 0.5]; enforce it."""
+    from rs_embed.tools.tiling import _resolve_input_prep_spec
+
+    monkeypatch.setenv("RS_EMBED_TILE_SNAP_FRAC", "0.9")
+    with pytest.raises(Exception, match=r"\[0, 0.5\]"):
+        _resolve_input_prep_spec(None)

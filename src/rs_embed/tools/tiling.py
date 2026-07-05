@@ -106,8 +106,12 @@ def _resolve_input_prep_spec(
             raise ModelError(
                 f"RS_EMBED_TILE_SNAP_FRAC must be a float in [0, 0.5], got {env_snap!r}."
             ) from e
-    # Snapping more than half a tile would downscale an axis by >33%, which
-    # distorts more than the overlap it removes; clamp to a safe band.
+        # Snapping more than half a tile would downscale an axis by >33%, which
+        # distorts more than the overlap it removes.
+        if not (0.0 <= tile_snap_frac <= 0.5):
+            raise ModelError(
+                f"RS_EMBED_TILE_SNAP_FRAC must be a float in [0, 0.5], got {env_snap!r}."
+            )
     tile_snap_frac = float(min(0.5, max(0.0, tile_snap_frac)))
     if tile_size is not None:
         tile_size = int(tile_size)
@@ -595,6 +599,10 @@ def _aggregate_tiled_embeddings(
     if not embs:
         raise ModelError("No tile embeddings produced.")
     base_meta = dict(getattr(embs[0], "meta", {}) or {})
+    # Tile 0's per-tile shape diagnostics describe one tile, not the stitched
+    # output; carrying them over would misdocument the result.
+    for per_tile_key in ("shape_prep", "resize_meta"):
+        base_meta.pop(per_tile_key, None)
     base_meta["input_prep"] = dict(prep_meta)
     # Fetch-square ROI: the tiled input covers an enlarged square; restrict the
     # merged output to the ROI window so only the requested region is returned.
@@ -605,9 +613,7 @@ def _aggregate_tiled_embeddings(
     # tiles overlap their neighbor; raw valid-area weights counted the overlap
     # twice and biased pooled vectors toward seam regions).
     row_owned, col_owned = _tile_axis_ownership(tile_meta)
-    owned_rects = [
-        (*row_owned[int(m["row"])], *col_owned[int(m["col"])]) for m in tile_meta
-    ]
+    owned_rects = [(*row_owned[int(m["row"])], *col_owned[int(m["col"])]) for m in tile_meta]
 
     if output.mode == "pooled":
         vecs = [np.asarray(_embedding_to_numpy(e), dtype=np.float32).reshape(-1) for e in embs]
@@ -730,9 +736,11 @@ def _aggregate_tiled_embeddings(
         base_meta["input_prep"]["roi_cropped"] = True
         base_meta["input_prep"]["roi_grid_shape"] = (out_h, out_w)
 
-    # Keep model-reported grid metadata consistent with stitched output.
-    if "grid_hw" in base_meta:
-        base_meta["grid_hw"] = (int(out_h), int(out_w))
+    # Keep model-reported grid metadata consistent with the stitched output
+    # (models use different key names for the same fact).
+    for grid_key in ("grid_hw", "grid_shape", "grid_hw_tokens"):
+        if grid_key in base_meta:
+            base_meta[grid_key] = (int(out_h), int(out_w))
     return Embedding(data=out_arr, meta=base_meta)
 
 
@@ -931,7 +939,14 @@ def _call_embedder_get_embedding_tiled(
                     f"Tiled batch inference returned {len(tile_embs)} outputs for {len(tiles)} tiles."
                 )
             tile_embs = [_normalize_embedding_output(emb=e, output=output) for e in tile_embs]
-        except Exception as _e:
+        except Exception as batch_exc:
+            warnings.warn(
+                f"Tiled batch inference failed ({batch_exc!r}); retrying the "
+                f"{len(tiles)} tiles serially. This doubles inference cost - "
+                "investigate the cause if it persists.",
+                UserWarning,
+                stacklevel=2,
+            )
             tile_embs = [
                 _call_embedder_get_embedding(
                     embedder=embedder,
