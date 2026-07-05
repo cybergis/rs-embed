@@ -20,6 +20,7 @@ from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ExportLayout, ExportTarget, ModelConfig
 from ..providers import fetch as _providers_fetch
 from ..tools.manifest import (
+    export_request_fingerprint,
     point_failure_manifest,
     point_resume_manifest,
     summarize_status,
@@ -115,6 +116,21 @@ class BatchExporter:
         # Compose engine sub-systems
         self.inference = InferenceEngine(device=device, output=output, config=config)
         self.checkpoint = CheckpointManager(target=target, config=config)
+
+    def _request_fingerprint(self, spatial: SpatialSpec | None = None) -> str:
+        """Fingerprint of this export request (see export_request_fingerprint).
+
+        With *spatial*, the per-item fingerprint for that point; without, the
+        combined fingerprint over all spatials.
+        """
+        return export_request_fingerprint(
+            models=self.models,
+            temporal=self.temporal,
+            output=self.output,
+            config=self.config,
+            spatials=self.spatials if spatial is None else None,
+            spatial=spatial,
+        )
 
     # ── public entry point ─────────────────────────────────────────
 
@@ -256,6 +272,7 @@ class BatchExporter:
             device=self.device,
             models=self.model_names,
             out_path=out_file,
+            fingerprint=self._request_fingerprint(),
         )
 
         prefetch, _provider_enabled = self._setup_prefetch()
@@ -490,7 +507,9 @@ class BatchExporter:
         manifests: list[dict[str, Any]] = []
         for i in range(len(self.spatials)):
             out_file = os.path.join(out_dir, f"{names[i]}{self.ext}")
-            if self.checkpoint.per_item_should_skip(out_file):
+            if self.checkpoint.per_item_should_skip(
+                out_file, fingerprint=self._request_fingerprint(self.spatials[i])
+            ):
                 manifests.append(
                     point_resume_manifest(
                         point_index=i,
@@ -621,6 +640,7 @@ class BatchExporter:
                         inspect_fn=self.inspect_fn,
                         fetch_meta_cache=prefetch.fetch_meta,
                     )
+                    manifest["request_fingerprint"] = self._request_fingerprint(self.spatials[i])
                     if use_batch:
                         self._inject_precomputed_embeddings(
                             point_index=i,
