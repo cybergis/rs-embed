@@ -465,46 +465,65 @@ class GEEProvider(ProviderBase):
         def _reduce(c: Any) -> Any:
             return c.median() if comp == "median" else _order_collection_for_mosaic(c).mosaic()
 
+        # Clip to the collection's valid data range only when it is known;
+        # Landsat SR / signed products keep their native values.
+        value_range = (0.0, 10000.0) if "COPERNICUS/S2" in str(collection).upper() else None
+
+        def _sample(col: Any) -> np.ndarray:
+            return _sample_image_bands_raw_chw(
+                _reduce(col),
+                region=region,
+                bands=resolved_bands,
+                scale_m=scale_m,
+                fill_value=fill_value,
+                value_range=value_range,
+            )
+
         fallback_frame = None
         try:
             if int(col_all.size().getInfo()) > 0:
-                fallback_frame = _sample_image_bands_raw_chw(
-                    _reduce(col_all),
-                    region=region,
-                    bands=resolved_bands,
-                    scale_m=scale_m,
-                    fill_value=fill_value,
-                )
+                fallback_frame = _sample(col_all)
         except Exception as _e:
             fallback_frame = None
 
-        frames = []
+        # One entry per bin (None = no imagery in that bin) so frame i always
+        # corresponds to bin i — consumers (e.g. prithvi's midpoint dates)
+        # rely on that alignment.
         bins = _split_date_range(temporal.start, temporal.end, max(1, int(n_frames)))
+        binned: list[np.ndarray | None] = []
         for start_i, end_i in bins:
             col_i = col_all.filterDate(start_i, end_i)
             try:
                 has_data = int(col_i.size().getInfo()) > 0
-            except Exception as _e:
-                has_data = False
+            except Exception as e:
+                # A failed count is not an empty bin: substituting the
+                # whole-window composite here would silently change the data.
+                raise ProviderError(
+                    f"Failed to query image count for bin [{start_i}, {end_i}) "
+                    f"of {str(collection)!r}: {e}"
+                ) from e
+            binned.append(_sample(col_i) if has_data else None)
 
-            if has_data:
-                frames.append(
-                    _sample_image_bands_raw_chw(
-                        _reduce(col_i),
-                        region=region,
-                        bands=resolved_bands,
-                        scale_m=scale_m,
-                        fill_value=fill_value,
-                    )
-                )
-            elif fallback_frame is not None:
-                frames.append(fallback_frame.copy())
-
-        if not frames:
-            if fallback_frame is not None:
-                frames = [fallback_frame.copy() for _ in range(max(1, int(n_frames)))]
-            else:
+        filled = [f is not None for f in binned]
+        if not any(filled):
+            if fallback_frame is None:
                 raise ProviderError(_no_images_found_message(collection=str(collection)))
+            frames = [fallback_frame.copy() for _ in binned]
+        else:
+            frames = []
+            for i, f in enumerate(binned):
+                if f is not None:
+                    frames.append(f)
+                elif fallback_frame is not None:
+                    frames.append(fallback_frame.copy())
+                else:
+                    # No whole-window fallback available: back-fill from the
+                    # nearest non-empty bin to keep bin alignment.
+                    j = min(
+                        (k for k, ok in enumerate(filled) if ok),
+                        key=lambda k: abs(k - i),
+                    )
+                    frames.append(np.copy(binned[j]))  # type: ignore[arg-type]
 
         t = max(1, int(n_frames))
         if len(frames) < t:

@@ -892,3 +892,184 @@ def test_build_image_default_cloudy_pct_does_not_empty_landsat(monkeypatch):
     img = provider.build_image(sensor=sensor, temporal=temporal, region=object())
     assert img == "median_image"
     assert seen_filters == [("lte", "CLOUD_COVER", 30)]
+
+
+def _make_multiframe_fake_ee(
+    *,
+    bin_values: list[float | None],
+    fallback_value: float | None = 1.0,
+    bin_size_raises: bool = False,
+):
+    """Fake ee for multiframe fetch: one value per temporal bin (None = empty).
+
+    ``fallback_value=None`` makes the whole-window fallback probe fail;
+    ``bin_size_raises`` makes the per-bin image count query raise.
+    """
+
+    class _FakeSize:
+        def __init__(self, n=1, raises=False):
+            self._n, self._raises = n, raises
+
+        def getInfo(self):
+            if self._raises:
+                raise RuntimeError("transient getInfo failure")
+            return self._n
+
+    class _FakeImage:
+        def __init__(self, value):
+            self.value = value
+
+        def select(self, _bands):
+            return self
+
+        def reproject(self, **_kwargs):
+            return self
+
+        def sampleRectangle(self, *, region, defaultValue):  # noqa: ARG002
+            img = self
+
+            class _Rect:
+                def getInfo(self):
+                    return {"properties": {"B1": [[img.value]]}}
+
+            return _Rect()
+
+    class _FakeBin:
+        def __init__(self, value):
+            self.value = value
+
+        def size(self):
+            if bin_size_raises:
+                return _FakeSize(raises=True)
+            return _FakeSize(1 if self.value is not None else 0)
+
+        def median(self):
+            return _FakeImage(self.value)
+
+    class _FakeCollection:
+        def __init__(self):
+            self.bin_idx = 0
+
+        def filterDate(self, _start, _end):
+            # First filterDate builds col_all; later ones select bins in order.
+            if not hasattr(self, "_dated"):
+                self._dated = True
+                return self
+            b = _FakeBin(bin_values[self.bin_idx])
+            self.bin_idx += 1
+            return b
+
+        def filterBounds(self, _region):
+            return self
+
+        def filter(self, _filt):
+            return self
+
+        def size(self):
+            if fallback_value is None:
+                return _FakeSize(raises=True)
+            return _FakeSize(1)
+
+        def median(self):
+            return _FakeImage(fallback_value)
+
+    return types.SimpleNamespace(
+        ImageCollection=lambda _collection: _FakeCollection(),
+        Filter=types.SimpleNamespace(
+            lte=lambda f, v: ("lte", f, v),
+            eq=lambda f, v: ("eq", f, v),
+            listContains=lambda f, v: ("listContains", f, v),
+        ),
+    )
+
+
+def _multiframe_provider(monkeypatch, fake_ee):
+    monkeypatch.setitem(sys.modules, "ee", fake_ee)
+    provider = GEEProvider(auto_auth=False)
+    monkeypatch.setattr(provider, "ensure_ready", lambda: None)
+    monkeypatch.setattr(provider, "get_region", lambda _spatial: object())
+    return provider
+
+
+def test_multiframe_fetch_does_not_clip_non_s2_collections(monkeypatch):
+    """The [0,10000] S2 DN clip must not destroy other collections' values.
+
+    Regression: the clip was baked into the generic sampler, so Landsat SR
+    (DN up to ~65455) and signed products were silently truncated.
+    """
+    provider = _multiframe_provider(
+        monkeypatch,
+        _make_multiframe_fake_ee(bin_values=[-5.0, 20000.0], fallback_value=1.0),
+    )
+    arr = provider.fetch_multiframe_collection_raw_tchw(
+        spatial=object(),
+        temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
+        collection="FAKE/LANDSAT_LIKE",
+        bands=("B1",),
+        n_frames=2,
+    )
+    assert arr.shape == (2, 1, 1, 1)
+    assert arr[0, 0, 0, 0] == -5.0
+    assert arr[1, 0, 0, 0] == 20000.0
+
+
+def test_multiframe_fetch_clips_s2_to_dn_range(monkeypatch):
+    provider = _multiframe_provider(
+        monkeypatch,
+        _make_multiframe_fake_ee(bin_values=[-5.0, 20000.0], fallback_value=1.0),
+    )
+    arr = provider.fetch_multiframe_collection_raw_tchw(
+        spatial=object(),
+        temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
+        collection="COPERNICUS/S2_SR_HARMONIZED",
+        bands=("B1",),
+        n_frames=2,
+    )
+    assert arr[0, 0, 0, 0] == 0.0
+    assert arr[1, 0, 0, 0] == 10000.0
+
+
+def test_multiframe_fetch_bin_count_failure_raises(monkeypatch):
+    """A failed per-bin image count is an error, not an empty bin.
+
+    Regression: a transient getInfo failure was treated as 'no data' and the
+    whole-window composite was silently substituted for a bin that had data.
+    """
+    provider = _multiframe_provider(
+        monkeypatch,
+        _make_multiframe_fake_ee(bin_values=[2.0, 3.0], bin_size_raises=True),
+    )
+    with pytest.raises(ProviderError, match="Failed to query image count"):
+        provider.fetch_multiframe_collection_raw_tchw(
+            spatial=object(),
+            temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
+            collection="FAKE/COLL",
+            bands=("B1",),
+            n_frames=2,
+        )
+
+
+def test_multiframe_fetch_empty_bin_keeps_alignment_without_fallback(monkeypatch):
+    """An empty bin with no whole-window fallback must not shift later frames.
+
+    Regression: the empty bin was skipped, so frame i no longer corresponded
+    to bin i (prithvi's midpoint-date logic relies on that alignment) and the
+    tail was padded with duplicates.
+    """
+    provider = _multiframe_provider(
+        monkeypatch,
+        _make_multiframe_fake_ee(bin_values=[2.0, None, 4.0], fallback_value=None),
+    )
+    arr = provider.fetch_multiframe_collection_raw_tchw(
+        spatial=object(),
+        temporal=TemporalSpec.range("2024-01-01", "2024-04-01"),
+        collection="FAKE/COLL",
+        bands=("B1",),
+        n_frames=3,
+    )
+    vals = arr[:, 0, 0, 0].tolist()
+    # bin 2's frame stays at index 2; the empty bin 1 back-fills from the
+    # nearest non-empty bin instead of shifting everything left.
+    assert vals[0] == 2.0
+    assert vals[2] == 4.0
+    assert vals[1] in (2.0, 4.0)

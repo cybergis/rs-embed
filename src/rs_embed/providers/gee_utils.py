@@ -406,8 +406,14 @@ def _sample_image_bands_raw_chw(
     bands: Sequence[str],
     scale_m: int,
     fill_value: float,
+    value_range: tuple[float, float] | None = None,
 ) -> np.ndarray:
-    """Sample a GEE image as **north-up** CHW float32 in [0, 10_000].
+    """Sample a GEE image as **north-up** CHW float32.
+
+    *value_range*, when given, clips the sampled values — callers pass the
+    collection's valid data range (e.g. ``(0, 10000)`` for S2 DN). ``None``
+    (the default) returns values unclipped, so collections with other ranges
+    (Landsat SR, signed products) are not silently destroyed.
 
     Row-order contract (verified against live GEE with ``ee.Image.pixelLonLat``
     across hemispheres and scales; see ``tests/test_gee_orientation_live.py``):
@@ -430,7 +436,9 @@ def _sample_image_bands_raw_chw(
     except Exception as e:
         raise ProviderError("Failed to sample rectangle from GEE image.") from e
     raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
-    return np.clip(raw, 0.0, 10000.0).astype(np.float32)
+    if value_range is not None:
+        raw = np.clip(raw, float(value_range[0]), float(value_range[1]))
+    return raw.astype(np.float32)
 
 
 # ── Tile fetch helpers ────────────────────────────────────────────────────────
