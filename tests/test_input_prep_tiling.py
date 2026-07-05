@@ -990,3 +990,95 @@ def test_tiling_never_hands_models_rectangular_tiles():
     arr = np.asarray(out.data, dtype=np.float32)
     assert arr.shape == (1, 3, 6)
     np.testing.assert_allclose(arr, x)
+
+
+class _FakeBlockMeanEmbedder:
+    """Fixed 16x16 token grid over a 256px tile: each cell = its block's mean."""
+
+    model_name = "fake_blockmean"
+
+    def describe(self):
+        return {"defaults": {"image_size": 256}}
+
+    def get_embedding(
+        self,
+        *,
+        spatial,
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="gee",
+        device="cpu",
+        input_chw=None,
+    ):
+        x = np.asarray(input_chw, dtype=np.float32)
+        assert x.shape[-2] == x.shape[-1] == 256
+        g = x.reshape(x.shape[0], 16, 16, 16, 16).mean(axis=(2, 4))
+        return Embedding(
+            data=g[:1],
+            meta={"y_axis_direction": "north_to_south", "grid_hw": (16, 16)},
+        )
+
+
+def test_stitched_grid_has_no_duplicate_seam_cells():
+    """Midpoint cuts snap to shared cell edges: no duplicated seam rows/cols.
+
+    Regression: floor/ceil rounding in each tile's own feature space made
+    both neighbors keep the cell straddling an unaligned midpoint cut -
+    h=256, w=400, tile 256, 16-cell grids produced a 26-column stitch for
+    400 px (ideal 25) with two columns covering the same input.
+    """
+    emb = _FakeBlockMeanEmbedder()
+    # Values increase along x only, so output columns must strictly increase.
+    x = np.tile(np.arange(400, dtype=np.float32), (1, 256, 1))
+
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=256, max_tiles=9, tile_snap_frac=0.0),
+    )
+
+    arr = np.asarray(out.data, dtype=np.float32)
+    # 400 px at 16 px per cell -> exactly 25 columns (was 26 with a duplicate).
+    assert arr.shape == (1, 16, 25)
+    cols = arr[0, 0, :]
+    assert np.all(np.diff(cols) > 0), f"duplicate/non-monotone seam columns: {cols}"
+
+
+def test_tiled_pooled_mean_weights_by_owned_area_not_valid_area():
+    """Overlap regions must not be double-counted in the pooled mean.
+
+    Regression: weights were valid_h*valid_w per tile, so cover-shift edge
+    tiles counted their overlap with the previous tile twice, biasing the
+    pooled vector toward seam regions.
+    """
+    emb = _FakeTileEmbedder()  # pooled: returns mean of its input tile
+    # w=7, tile 4 -> tiles [0,4) and [3,7), both full 4x4 (no padding),
+    # midpoint cut at 3 -> owned widths 3 and 4.
+    x = np.arange(28, dtype=np.float32).reshape(1, 4, 7)
+
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="gee",
+        device="cpu",
+        input_chw=x,
+        input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9, tile_snap_frac=0.0),
+    )
+
+    m0 = float(x[..., 0:4].mean())
+    m1 = float(x[..., 3:7].mean())
+    expected = (12.0 * m0 + 16.0 * m1) / 28.0  # owned areas 3*4 and 4*4
+    got = float(np.asarray(out.data, dtype=np.float32).reshape(-1)[0])
+    assert got == pytest.approx(expected, rel=1e-6)
+    # And it differs from the old equal (valid-area) weighting.
+    assert got != pytest.approx((m0 + m1) / 2.0, rel=1e-9)
