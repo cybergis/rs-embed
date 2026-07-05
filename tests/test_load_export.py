@@ -315,7 +315,7 @@ class TestFindPerItemFiles:
             (tmp_path / f"p{i:05d}.npz").touch()
             (tmp_path / f"p{i:05d}.json").touch()
         files = _find_per_item_files(d)
-        indices = [int(os.path.basename(a).lstrip("p").split(".")[0]) for a, _, _ in files]
+        indices = [int(os.path.basename(a).lstrip("p").split(".")[0]) for a, _, _, _ in files]
         assert indices == [0, 1, 2]
 
     def test_skips_orphaned_npz(self, tmp_path):
@@ -649,3 +649,101 @@ def test_top_level_exports():
     assert hasattr(rs_embed, "ExportResult")
     assert hasattr(rs_embed, "ModelResult")
     assert rs_embed.load_export is load_export
+
+
+class TestRaggedAndAlignment:
+    def test_combined_ragged_partial_loads_with_nan_rows(self, tmp_path):
+        """Partial combined exports (npz_keys/indices) must load NaN-filled.
+
+        Regression: the loader only understood dense npz_key references, so
+        the ragged format the exporter writes on partial success loaded as
+        embeddings=None, contradicting the documented NaN-fill promise.
+        """
+        d = str(tmp_path)
+        arrays = {
+            "embedding__m__00000": np.array([1.0, 2.0], dtype=np.float32),
+            "embedding__m__00002": np.array([5.0, 6.0], dtype=np.float32),
+        }
+        npz_path = os.path.join(d, "run.npz")
+        np.savez(npz_path, **arrays)
+        manifest = {
+            "n_items": 3,
+            "status": "partial",
+            "spatials": [{}, {}, {}],
+            "models": [
+                {
+                    "model": "m",
+                    "status": "partial",
+                    "embeddings": {
+                        "npz_keys": ["embedding__m__00000", "embedding__m__00002"],
+                        "indices": [0, 2],
+                    },
+                    "metas": [{}, {}, {}],
+                }
+            ],
+        }
+        with open(os.path.join(d, "run.json"), "w") as f:
+            json.dump(manifest, f)
+
+        result = load_export(npz_path)
+        embs = result.models["m"].embeddings
+        assert embs is not None and embs.shape == (3, 2)
+        np.testing.assert_allclose(embs[0], [1.0, 2.0])
+        assert np.isnan(embs[1]).all()  # missing point -> NaN row
+        np.testing.assert_allclose(embs[2], [5.0, 6.0])
+
+    def test_per_item_custom_names_load(self, tmp_path):
+        """target.names exports must be loadable (not just p<digits>)."""
+        d = str(tmp_path)
+        for i, name in enumerate(["siteA", "siteB"]):
+            np.savez(
+                os.path.join(d, f"{name}.npz"),
+                embedding__m=np.array([float(i)], dtype=np.float32),
+            )
+            with open(os.path.join(d, f"{name}.json"), "w") as f:
+                json.dump(
+                    {
+                        "point_index": i,
+                        "status": "ok",
+                        "models": [
+                            {"model": "m", "status": "ok", "embedding": {"npz_key": "embedding__m"}}
+                        ],
+                    },
+                    f,
+                )
+        result = load_export(d)
+        assert result.n_items == 2
+        np.testing.assert_allclose(
+            result.models["m"].embeddings, np.array([[0.0], [1.0]], dtype=np.float32)
+        )
+
+    def test_per_item_missing_point_keeps_row_alignment(self, tmp_path):
+        """A failed point (no file under continue_on_error) must leave a NaN
+        row at its index, not densely renumber the survivors.
+
+        Regression: row i of the result no longer corresponded to the
+        caller's spatials[i] when any point failed.
+        """
+        d = str(tmp_path)
+        for i in (0, 2):  # point 1 failed and wrote no file
+            np.savez(
+                os.path.join(d, f"p{i:05d}.npz"),
+                embedding__m=np.array([float(i)], dtype=np.float32),
+            )
+            with open(os.path.join(d, f"p{i:05d}.json"), "w") as f:
+                json.dump(
+                    {
+                        "point_index": i,
+                        "status": "ok",
+                        "models": [
+                            {"model": "m", "status": "ok", "embedding": {"npz_key": "embedding__m"}}
+                        ],
+                    },
+                    f,
+                )
+        result = load_export(d)
+        assert result.n_items == 3
+        embs = result.models["m"].embeddings
+        np.testing.assert_allclose(embs[0], [0.0])
+        assert np.isnan(embs[1]).all()
+        np.testing.assert_allclose(embs[2], [2.0])

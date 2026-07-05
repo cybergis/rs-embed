@@ -273,6 +273,56 @@ def _load_json(json_path: str) -> dict[str, Any]:
     return data
 
 
+def _gather_ragged_rows(
+    ref: dict[str, Any],
+    arrays: dict[str, np.ndarray],
+    n_items: int,
+) -> np.ndarray | None:
+    """Assemble a ragged combined reference (``npz_keys``/``indices``) into a
+    dense ``(n_items, ...)`` array with NaN rows at missing points.
+
+    The exporter writes this format on partial success (per-point keys like
+    ``embedding__<model>__00012``). When ``indices`` is absent, the point
+    index is parsed from the key's trailing ``__<index>`` suffix. Genuinely
+    unstackable per-point shapes return ``None`` — there is no dense
+    representation to promise.
+    """
+    keys = ref.get("npz_keys")
+    if not (isinstance(keys, list) and keys):
+        return None
+    indices = ref.get("indices")
+    per_point: list[np.ndarray | None] = [None] * n_items
+    for j, k in enumerate(keys):
+        if not (isinstance(k, str) and k in arrays):
+            continue
+        if isinstance(indices, list) and j < len(indices):
+            idx = int(indices[j])
+        else:
+            tail = k.rsplit("__", 1)[-1]
+            idx = int(tail) if tail.isdigit() else j
+        if 0 <= idx < n_items:
+            per_point[idx] = np.asarray(arrays[k], dtype=np.float32)
+    try:
+        return _stack_per_item_embeddings(per_point)
+    except ValueError:
+        return None
+
+
+def _combined_ref_array(
+    ref: Any,
+    arrays: dict[str, np.ndarray],
+    *,
+    default_key: str,
+    n_items: int,
+) -> np.ndarray | None:
+    """Resolve a combined manifest array reference: dense key or ragged keys."""
+    ref = ref if isinstance(ref, dict) else {}
+    key = ref.get("npz_key") or default_key
+    if key in arrays:
+        return np.asarray(arrays[key], dtype=np.float32)
+    return _gather_ragged_rows(ref, arrays, n_items)
+
+
 def _build_combined_model_result(
     entry: dict[str, Any],
     arrays: dict[str, np.ndarray],
@@ -285,16 +335,18 @@ def _build_combined_model_result(
 
     key = sanitize_key(name)
 
-    # Embeddings
-    emb_meta = entry.get("embeddings") or {}
-    emb_key = emb_meta.get("npz_key") or _EMBEDDING_KEY_BATCH.format(model=key)
-    embeddings = np.asarray(arrays[emb_key], dtype=np.float32) if emb_key in arrays else None
-
-    # Inputs (optional)
-    inp_meta = entry.get("inputs") or {}
-    inp_key = inp_meta.get("npz_key") if isinstance(inp_meta, dict) else None
-    inp_key = inp_key or _INPUT_KEY_BATCH.format(model=key)
-    inputs = np.asarray(arrays[inp_key], dtype=np.float32) if inp_key in arrays else None
+    embeddings = _combined_ref_array(
+        entry.get("embeddings"),
+        arrays,
+        default_key=_EMBEDDING_KEY_BATCH.format(model=key),
+        n_items=n_items,
+    )
+    inputs = _combined_ref_array(
+        entry.get("inputs"),
+        arrays,
+        default_key=_INPUT_KEY_BATCH.format(model=key),
+        n_items=n_items,
+    )
 
     # Per-point metadata list
     raw_metas = entry.get("metas") or []
@@ -345,36 +397,32 @@ def _load_combined(path: str) -> ExportResult:
 # ---------------------------------------------------------------------------
 
 
-def _find_per_item_files(directory: str) -> list[tuple[str, str, str]]:
-    """Return sorted ``(arrays_path, json_path, fmt)`` tuples for a per-item dir.
+def _find_per_item_files(directory: str) -> list[tuple[str, str, str, str]]:
+    """Return sorted ``(arrays_path, json_path, fmt, base)`` tuples for a per-item dir.
 
-    Files must match the pattern ``p<digits>.(npz|nc)`` with a paired ``.json``.
+    Any ``<base>.(npz|nc)`` with a paired ``<base>.json`` manifest is a point
+    file — custom ``target.names`` load the same as the default ``p<index>``
+    names. The manifest's ``point_index`` decides row placement.
     """
-    entries: list[tuple[int, str, str, str]] = []
-    for fname in os.listdir(directory):
+    entries: list[tuple[str, str, str, str]] = []
+    for fname in sorted(os.listdir(directory)):
         base, ext = os.path.splitext(fname)
         ext = ext.lower()
-        if not (base.startswith("p") and base[1:].isdigit()):
-            continue
         if ext not in (".npz", ".nc", ".netcdf"):
             continue
-        fmt = "npz" if ext == ".npz" else "netcdf"
         json_path = os.path.join(directory, base + ".json")
         if not os.path.exists(json_path):
             continue
-        arrays_path = os.path.join(directory, fname)
-        index = int(base[1:])
-        entries.append((index, arrays_path, json_path, fmt))
+        fmt = "npz" if ext == ".npz" else "netcdf"
+        entries.append((os.path.join(directory, fname), json_path, fmt, base))
 
     if not entries:
         raise ValueError(
             f"No per-item export files found in {directory!r}. "
-            "Expected files matching 'p<index>.npz' or 'p<index>.nc' "
-            "with paired '.json' manifests."
+            "Expected '<name>.npz' or '<name>.nc' files with paired "
+            "'.json' manifests."
         )
-
-    entries.sort(key=lambda t: t[0])
-    return [(arrays_path, json_path, fmt) for _, arrays_path, json_path, fmt in entries]
+    return entries
 
 
 def _stack_per_item_embeddings(
@@ -393,11 +441,32 @@ def _stack_per_item_embeddings(
     return np.stack(rows, axis=0)
 
 
+def _per_item_point_index(manifest: dict[str, Any], base: str, fallback: int) -> int:
+    """Row index for one per-item file: the manifest's point_index, else the
+    default ``p<digits>`` filename convention, else the file's scan position."""
+    idx = manifest.get("point_index")
+    if isinstance(idx, int) and idx >= 0:
+        return idx
+    if base.startswith("p") and base[1:].isdigit():
+        return int(base[1:])
+    return fallback
+
+
 def _load_per_item(directory: str) -> ExportResult:
     files = _find_per_item_files(directory)
-    n_items = len(files)
 
-    spatials: list[dict[str, Any]] = []
+    # Row i of the result must correspond to the caller's spatials[i]: place
+    # each file at its recorded point_index (failed points write no file under
+    # continue_on_error, so dense renumbering would silently misalign rows).
+    loaded: list[tuple[int, dict[str, np.ndarray], dict[str, Any]]] = []
+    for pos, (arrays_path, json_path, fmt, base) in enumerate(files):
+        arrays = _load_arrays(arrays_path, fmt)
+        manifest = _load_json(json_path)
+        loaded.append((_per_item_point_index(manifest, base, pos), arrays, manifest))
+    loaded.sort(key=lambda t: t[0])
+    n_items = max(idx for idx, _, _ in loaded) + 1
+
+    spatials: list[dict[str, Any]] = [{} for _ in range(n_items)]
     temporal: dict[str, Any] | None = None
     overall_status: str | None = None
 
@@ -410,16 +479,13 @@ def _load_per_item(directory: str) -> ExportResult:
 
     manifest_first: dict[str, Any] = {}
 
-    for i, (arrays_path, json_path, fmt) in enumerate(files):
-        arrays = _load_arrays(arrays_path, fmt)
-        manifest = _load_json(json_path)
-
-        if i == 0:
+    for pos, (i, arrays, manifest) in enumerate(loaded):
+        if pos == 0:
             manifest_first = manifest
             temporal = manifest.get("temporal") or None
 
         spatial = manifest.get("spatial")
-        spatials.append(spatial if isinstance(spatial, dict) else {})
+        spatials[i] = spatial if isinstance(spatial, dict) else {}
 
         for entry in manifest.get("models") or []:
             name = str(entry.get("model", ""))
@@ -445,7 +511,7 @@ def _load_per_item(directory: str) -> ExportResult:
 
             per_model_embeddings.setdefault(name, [None] * n_items)
             per_model_inputs.setdefault(name, [None] * n_items)
-            per_model_meta.setdefault(name, [{}] * n_items)
+            per_model_meta.setdefault(name, [{} for _ in range(n_items)])
             per_model_status.setdefault(name, [])
             per_model_error.setdefault(name, None)
 
