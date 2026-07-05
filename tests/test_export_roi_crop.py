@@ -519,3 +519,159 @@ def test_per_item_pipelined_chunks_keep_square_fetch(tmp_path, monkeypatch):
     assert len(seen_fetch_meta) == 3
     for i, fm in enumerate(seen_fetch_meta):
         assert fm is not None and "roi_window_geo" in fm, f"point {i} lost roi_window_geo"
+
+
+def test_api_prefetch_generic_fallback_square_fetches(monkeypatch):
+    """runtime.fetch_api_side_inputs' generic fallback must fetch-square.
+
+    Regression: when an embedder's fetch_input returned None, the API-side
+    prefetch fetched the raw rectangular ROI with no roi_window_geo, while
+    the export pipeline squared the same request - the same point embedded
+    differently across APIs.
+    """
+    fetched_spatials: list = []
+    seen_fetch_meta: list = []
+
+    class DummyGenericRuntime:
+        def describe(self):
+            return dict(_DESCRIBE)
+
+        def fetch_input(self, provider, *, spatial, temporal, sensor, square_input=True):
+            _ = provider, spatial, temporal, sensor, square_input
+            return None  # force the generic fallback
+
+        def get_embedding(
+            self,
+            *,
+            spatial,
+            temporal,
+            sensor,
+            output,
+            backend,
+            device="auto",
+            input_chw=None,
+            fetch_meta=None,
+        ):
+            _ = spatial, temporal, sensor, output, backend, device
+            assert input_chw is not None
+            seen_fetch_meta.append(dict(fetch_meta) if fetch_meta else None)
+            return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
+
+    registry.register("dummy_generic_runtime")(DummyGenericRuntime)
+
+    import rs_embed.api as api
+
+    def fake_fetch(provider, *, spatial, temporal, sensor):
+        _ = provider, temporal, sensor
+        fetched_spatials.append(spatial)
+        return np.full((1, 4, 4), 0.5, dtype=np.float32)
+
+    _patch_provider(monkeypatch)
+    monkeypatch.setattr("rs_embed.tools.runtime._fetch_sensor_patch_chw", fake_fetch)
+
+    rect = BBox(minlon=0.0, minlat=0.0, maxlon=0.2, maxlat=0.05)
+    api.get_embedding(
+        "dummy_generic_runtime",
+        spatial=rect,
+        temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
+        backend="gee",
+        device="cpu",
+        output=OutputSpec.pooled(),
+        input_prep="tile",
+    )
+
+    assert len(fetched_spatials) == 1
+    sq = fetched_spatials[0]
+    w = float(sq.maxlon) - float(sq.minlon)
+    h = float(sq.maxlat) - float(sq.minlat)
+    assert abs(w - h) / max(w, h) < 0.15, "generic API-side fallback did not square-fetch"
+    assert seen_fetch_meta and seen_fetch_meta[0] is not None
+    assert "roi_window_geo" in seen_fetch_meta[0]
+
+
+def test_point_payload_sync_fallback_squares_and_reuses_provider():
+    """build_one_point_payload's sync fetch fallback must square-fetch and
+    create one provider per point, not one per model.
+
+    Regression: it was a third, subtly different fetch path - raw rectangle,
+    no roi_window_geo, and a fresh provider (with ensure_ready) per model.
+    """
+    from rs_embed.core.types import ExportConfig
+    from rs_embed.pipelines.point_payload import build_one_point_payload
+
+    fetched_spatials: list = []
+    providers_created: list = []
+
+    class DummyPayloadModel:
+        def describe(self):
+            return dict(_DESCRIBE)
+
+        def fetch_input(self, provider, *, spatial, temporal, sensor, square_input=True):
+            _ = provider, spatial, temporal, sensor, square_input
+            return None
+
+        def get_embedding(
+            self,
+            *,
+            spatial,
+            temporal,
+            sensor,
+            output,
+            backend,
+            device="auto",
+            input_chw=None,
+            fetch_meta=None,
+        ):
+            _ = spatial, temporal, sensor, output, backend, device, input_chw
+            assert fetch_meta is not None and "roi_window_geo" in fetch_meta
+            return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
+
+    registry.register("dummy_payload_a")(DummyPayloadModel)
+    registry.register("dummy_payload_b")(DummyPayloadModel)
+    get_embedder_bundle_cached.cache_clear()
+
+    def provider_factory():
+        providers_created.append(1)
+        return _DummyProvider()
+
+    def fake_fetch(provider, *, spatial, temporal, sensor):
+        _ = provider, temporal, sensor
+        fetched_spatials.append(spatial)
+        return np.full((1, 4, 4), 0.5, dtype=np.float32)
+
+    from rs_embed.core.specs import SensorSpec
+
+    rect = BBox(minlon=0.0, minlat=0.0, maxlon=0.2, maxlat=0.05)
+    sensors = {
+        "dummy_payload_a": SensorSpec(collection="C", bands=("B1",)),
+        "dummy_payload_b": SensorSpec(collection="D", bands=("B1",)),
+    }
+    _arrays, manifest = build_one_point_payload(
+        point_index=0,
+        spatial=rect,
+        temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
+        models=["dummy_payload_a", "dummy_payload_b"],
+        backend="gee",
+        device="cpu",
+        output=OutputSpec.pooled(),
+        resolved_sensor=sensors,
+        resolved_model_config={"dummy_payload_a": None, "dummy_payload_b": None},
+        model_type={"dummy_payload_a": "onthefly", "dummy_payload_b": "onthefly"},
+        inputs_cache={},
+        input_reports={},
+        prefetch_errors={},
+        pass_input_into_embedder=True,
+        config=ExportConfig(save_inputs=False, save_embeddings=True, show_progress=False),
+        provider_factory=provider_factory,
+        fetch_fn=fake_fetch,
+        inspect_fn=lambda x, *, sensor, name: {"ok": True},
+    )
+
+    assert manifest["status"] == "ok"
+    # Two distinct sensors -> two fetches, both squared; one provider total.
+    assert len(fetched_spatials) == 2
+    for sq in fetched_spatials:
+        w = float(sq.maxlon) - float(sq.minlon)
+        h = float(sq.maxlat) - float(sq.minlat)
+        assert abs(w - h) / max(w, h) < 0.15
+    assert len(providers_created) == 1

@@ -104,27 +104,21 @@ class GEEProvider(ProviderBase):
             else:
                 raise ProviderError(f"Unknown TemporalSpec mode: {temporal.mode}")
 
-        try:
-            ic = ee.ImageCollection(sensor.collection)
-            if region is not None:
-                ic = ic.filterBounds(region)
-            if temporal_range is not None:
-                ic = ic.filterDate(temporal_range[0], temporal_range[1])
-            ic = _filter_clouds(ic, collection=str(sensor.collection), cloudy_pct=sensor.cloudy_pct)
-            _raise_if_empty_collection(ic, collection=str(sensor.collection))
+        # No ee.Image(collection) fallback here: EE errors are lazy, so the old
+        # except-Exception fallback could never fire for its intended case
+        # (single-image assets) and only served to swallow real client-side
+        # errors while silently dropping the temporal/cloud filters.
+        ic = ee.ImageCollection(sensor.collection)
+        if region is not None:
+            ic = ic.filterBounds(region)
+        if temporal_range is not None:
+            ic = ic.filterDate(temporal_range[0], temporal_range[1])
+        ic = _filter_clouds(ic, collection=str(sensor.collection), cloudy_pct=sensor.cloudy_pct)
+        _raise_if_empty_collection(ic, collection=str(sensor.collection))
 
-            if sensor.composite == "median":
-                img = ic.median()
-            elif sensor.composite == "mosaic":
-                img = _order_collection_for_mosaic(ic).mosaic()
-            else:
-                img = ic.median()
-        except ProviderError:
-            raise
-        except Exception as _e:
-            img = ee.Image(sensor.collection)
-
-        return img
+        if sensor.composite == "mosaic":
+            return _order_collection_for_mosaic(ic).mosaic()
+        return ic.median()
 
     def fetch_array_chw(
         self,
@@ -139,10 +133,11 @@ class GEEProvider(ProviderBase):
         """Download a rectangular patch as **north-up** CHW float32.
 
         Uses ``ee.Projection.atScale()`` + ``.clip(region)`` before
-        ``sampleRectangle``.  That combination causes GEE to return rows in
-        south-up order, so ``_flip_sample_tile_y`` is applied here before
-        returning — callers always receive north-up output and must not flip
-        again.
+        ``sampleRectangle``.  The ``atScale`` reprojection form makes GEE
+        return rows in south-up order (clipping does not affect row order —
+        see ``_sample_image_bands_raw_chw`` for the verified contract), so
+        ``_flip_sample_tile_y`` is applied here before returning — callers
+        always receive north-up output and must not flip again.
 
         Also resolves band aliases (BLUE/GREEN/RED → B2/B3/B4 for S2, etc.)
         and clips to ``region`` so that pixels outside non-rectangular
@@ -266,8 +261,17 @@ class GEEProvider(ProviderBase):
         def _stitch(
             res_a: Any, res_b: Any, bbox: Any, axis: str, scale_m: int, fill_value: float
         ) -> tuple[np.ndarray, dict[str, Any]]:
-            arr_a, meta = res_a
-            arr_b, _ = res_b
+            arr_a, meta_a = res_a
+            arr_b, meta_b = res_b
+            # Merge tile metas: if either half relaxed the IW filter, the
+            # stitched result did too (keeping only tile A's meta hid that).
+            meta = dict(meta_a)
+            meta["s1_iw_applied"] = bool(meta_a.get("s1_iw_applied", True)) and bool(
+                meta_b.get("s1_iw_applied", True)
+            )
+            meta["s1_iw_relaxed_on_empty"] = bool(
+                meta_a.get("s1_iw_relaxed_on_empty", False)
+            ) or bool(meta_b.get("s1_iw_relaxed_on_empty", False))
             return _stitch_bbox_split_arrays(
                 arr_a=arr_a,
                 arr_b=arr_b,
@@ -309,6 +313,14 @@ class GEEProvider(ProviderBase):
             .filterDate(temporal.start, temporal.end)
             .filterBounds(region)
         )
+        # Orbit is an explicit user constraint: apply it to the base collection
+        # so the IW-relax fallback and the empty-collection diagnostics below
+        # respect it too. The default (None) stays unfiltered — mixed passes.
+        orbit_n = str(orbit).strip().upper() if orbit is not None else None
+        if orbit_n is not None:
+            if orbit_n not in ("ASCENDING", "DESCENDING"):
+                raise ProviderError(f"Unknown S1 orbit={orbit!r}. Use 'ASCENDING' or 'DESCENDING'.")
+            base = base.filter(ee.Filter.eq("orbitProperties_pass", orbit_n))
         col = _build_s1_dualpol_collection(base, require_iw=bool(require_iw))
         iw_relaxed = False
         iw_applied = bool(require_iw)
@@ -379,6 +391,7 @@ class GEEProvider(ProviderBase):
             "s1_iw_relaxed_on_empty": bool(iw_relaxed),
             "s1_relax_iw_on_empty": bool(relax_iw_on_empty),
             "s1_orbit_requested": orbit,
+            "s1_orbit_applied": orbit_n,
             "s1_collection_used": collection_id,
         }
         return arr, meta
@@ -453,46 +466,65 @@ class GEEProvider(ProviderBase):
         def _reduce(c: Any) -> Any:
             return c.median() if comp == "median" else _order_collection_for_mosaic(c).mosaic()
 
+        # Clip to the collection's valid data range only when it is known;
+        # Landsat SR / signed products keep their native values.
+        value_range = (0.0, 10000.0) if "COPERNICUS/S2" in str(collection).upper() else None
+
+        def _sample(col: Any) -> np.ndarray:
+            return _sample_image_bands_raw_chw(
+                _reduce(col),
+                region=region,
+                bands=resolved_bands,
+                scale_m=scale_m,
+                fill_value=fill_value,
+                value_range=value_range,
+            )
+
         fallback_frame = None
         try:
             if int(col_all.size().getInfo()) > 0:
-                fallback_frame = _sample_image_bands_raw_chw(
-                    _reduce(col_all),
-                    region=region,
-                    bands=resolved_bands,
-                    scale_m=scale_m,
-                    fill_value=fill_value,
-                )
+                fallback_frame = _sample(col_all)
         except Exception as _e:
             fallback_frame = None
 
-        frames = []
+        # One entry per bin (None = no imagery in that bin) so frame i always
+        # corresponds to bin i — consumers (e.g. prithvi's midpoint dates)
+        # rely on that alignment.
         bins = _split_date_range(temporal.start, temporal.end, max(1, int(n_frames)))
+        binned: list[np.ndarray | None] = []
         for start_i, end_i in bins:
             col_i = col_all.filterDate(start_i, end_i)
             try:
                 has_data = int(col_i.size().getInfo()) > 0
-            except Exception as _e:
-                has_data = False
+            except Exception as e:
+                # A failed count is not an empty bin: substituting the
+                # whole-window composite here would silently change the data.
+                raise ProviderError(
+                    f"Failed to query image count for bin [{start_i}, {end_i}) "
+                    f"of {str(collection)!r}: {e}"
+                ) from e
+            binned.append(_sample(col_i) if has_data else None)
 
-            if has_data:
-                frames.append(
-                    _sample_image_bands_raw_chw(
-                        _reduce(col_i),
-                        region=region,
-                        bands=resolved_bands,
-                        scale_m=scale_m,
-                        fill_value=fill_value,
-                    )
-                )
-            elif fallback_frame is not None:
-                frames.append(fallback_frame.copy())
-
-        if not frames:
-            if fallback_frame is not None:
-                frames = [fallback_frame.copy() for _ in range(max(1, int(n_frames)))]
-            else:
+        filled = [f is not None for f in binned]
+        if not any(filled):
+            if fallback_frame is None:
                 raise ProviderError(_no_images_found_message(collection=str(collection)))
+            frames = [fallback_frame.copy() for _ in binned]
+        else:
+            frames = []
+            for i, f in enumerate(binned):
+                if f is not None:
+                    frames.append(f)
+                elif fallback_frame is not None:
+                    frames.append(fallback_frame.copy())
+                else:
+                    # No whole-window fallback available: back-fill from the
+                    # nearest non-empty bin to keep bin alignment.
+                    j = min(
+                        (k for k, ok in enumerate(filled) if ok),
+                        key=lambda k: abs(k - i),
+                    )
+                    frames.append(np.copy(binned[j]))  # type: ignore[arg-type]
 
         t = max(1, int(n_frames))
         if len(frames) < t:
@@ -592,9 +624,9 @@ class GEEProvider(ProviderBase):
         else:
             raise ProviderError(f"Unknown composite='{composite}'. Use 'median' or 'mosaic'.")
 
-        # reproject(crs=..., scale=...) + clip: empirically north-up (matches
-        # _sample_image_bands_raw_chw's no-clip behaviour).  If this is ever
-        # found to be south-up, add _flip_sample_tile_y to the return value.
+        # reproject(crs=..., scale=...) + clip: north-up — row order follows the
+        # reprojection form, not clipping (see _sample_image_bands_raw_chw for
+        # the verified contract). No flip here.
         img = img.reproject(crs="EPSG:3857", scale=int(scale_m)).clip(region)
         band_names_raw = img.bandNames().getInfo()
         band_names = tuple(str(b) for b in (band_names_raw or []))

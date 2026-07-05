@@ -551,6 +551,14 @@ def fetch_api_side_inputs(
             fetch_extra["temporal_mode"] = tm
 
     # Use the embedder's fetch_input() when available; fall back to generic.
+    # The generic fallback fetch-squares like every other path (fetch_input's
+    # square_input=True default, PrefetchManager's square_fetch_keys) whenever
+    # the embedder honors the crop-back window via fetch_meta.
+    from .shape import square_fetch_request
+
+    square_generic = _embedder_method_accepts_parameter(
+        type(embedder), "get_embedding", "fetch_meta"
+    )
     results: list[FetchResult] = []
     for idx, spatial in enumerate(spatials):
         try:
@@ -564,13 +572,16 @@ def fetch_api_side_inputs(
             if fr is not None:
                 results.append(fr)
             else:
+                fetch_spatial, fmeta = (
+                    square_fetch_request(spatial) if square_generic else (spatial, {})
+                )
                 raw = _fetch_sensor_patch_chw(
                     provider,
-                    spatial=spatial,
+                    spatial=fetch_spatial,
                     temporal=temporal,
                     sensor=sensor_eff,
                 )
-                results.append(FetchResult(data=raw, meta={}))
+                results.append(FetchResult(data=raw, meta=fmeta))
         except Exception as exc:
             raise ModelError(
                 f"Failed to fetch API-side input for spatial[{idx}] ({spatial}): {exc}"
