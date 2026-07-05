@@ -1073,3 +1073,25 @@ def test_multiframe_fetch_empty_bin_keeps_alignment_without_fallback(monkeypatch
     assert vals[0] == 2.0
     assert vals[2] == 4.0
     assert vals[1] in (2.0, 4.0)
+
+
+def test_normalize_s1_vvvh_rejects_db_scale_input():
+    """dB-scale S1 input must fail loudly, not normalize to constant zero.
+
+    Regression: use_float_linear=False fetches return negative dB values;
+    max(x,0) zeroed them all and the embedder ran on a blank image.
+    """
+    import numpy as np
+
+    from rs_embed.core.errors import ModelError
+    from rs_embed.providers.fetch import normalize_s1_vvvh_chw
+
+    db = np.random.uniform(-25.0, -5.0, size=(2, 4, 4)).astype(np.float32)
+    with pytest.raises(ModelError, match="dB-scaled"):
+        normalize_s1_vvvh_chw(db)
+
+    # Linear-scale values (small non-negative floats) still normalize.
+    linear = np.random.uniform(0.0, 0.5, size=(2, 4, 4)).astype(np.float32)
+    out = normalize_s1_vvvh_chw(linear)
+    assert out.shape == (2, 4, 4)
+    assert float(out.min()) >= 0.0 and float(out.max()) <= 1.0
