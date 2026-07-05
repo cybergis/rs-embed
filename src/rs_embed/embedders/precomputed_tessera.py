@@ -371,7 +371,9 @@ class TesseraEmbedder(EmbedderBase):
             backend=backend_n,
             source="geotessera.GeoTessera",
             sensor=None,
-            temporal=temporal,
+            # Record the year actually served (temporal=None silently defaults),
+            # not the raw request.
+            temporal=TemporalSpec.year(int(year)),
             image_size=None,
             extra={
                 "cache_dir": cache_dir,
