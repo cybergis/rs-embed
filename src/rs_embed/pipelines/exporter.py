@@ -20,6 +20,7 @@ from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ExportLayout, ExportTarget, ModelConfig
 from ..providers import fetch as _providers_fetch
 from ..tools.manifest import (
+    export_request_fingerprint,
     point_failure_manifest,
     point_resume_manifest,
     summarize_status,
@@ -116,6 +117,21 @@ class BatchExporter:
         self.inference = InferenceEngine(device=device, output=output, config=config)
         self.checkpoint = CheckpointManager(target=target, config=config)
 
+    def _request_fingerprint(self, spatial: SpatialSpec | None = None) -> str:
+        """Fingerprint of this export request (see export_request_fingerprint).
+
+        With *spatial*, the per-item fingerprint for that point; without, the
+        combined fingerprint over all spatials.
+        """
+        return export_request_fingerprint(
+            models=self.models,
+            temporal=self.temporal,
+            output=self.output,
+            config=self.config,
+            spatials=self.spatials if spatial is None else None,
+            spatial=spatial,
+        )
+
     # ── public entry point ─────────────────────────────────────────
 
     def run(self) -> Any:
@@ -185,7 +201,7 @@ class BatchExporter:
                 if prefetch_pipeline_ex is not None and (chunk_idx + 1) < len(chunk_groups):
                     # Clone a fresh prefetch manager for next chunk so its cache
                     # is isolated from the current chunk while both are live.
-                    next_prefetch = self._clone_prefetch(active_prefetch)
+                    next_prefetch = active_prefetch.clone()
                     prefetched_chunk_fut = prefetch_pipeline_ex.submit(
                         self._prefetch_chunk,
                         next_prefetch,
@@ -256,6 +272,7 @@ class BatchExporter:
             device=self.device,
             models=self.model_names,
             out_path=out_file,
+            fingerprint=self._request_fingerprint(),
         )
 
         prefetch, _provider_enabled = self._setup_prefetch()
@@ -397,72 +414,6 @@ class BatchExporter:
         )
         return provider
 
-    def _resolve_fetcher_by_key(
-        self,
-        prefetch: PrefetchManager,
-    ) -> tuple[dict[str, Any], set[str]]:
-        """Build fetch_key → embedder and the set of generic fetches to square.
-
-        Must be called after ``prefetch.plan()`` so that the sensor-to-fetch
-        mapping is available.
-
-        The canonical single-embedding path always enlarges a rectangular ROI to
-        a square fetch (``fetch_input``'s ``square_input=True`` default) and
-        crops the output back via ``roi_window_geo``. Fetches that go through a
-        model-specific ``fetch_input`` inherit that behavior for free. Fetches
-        that fall to the generic ``fetch_fn`` — merged multi-model band-union
-        groups, and models without a custom ``fetch_input`` — must be squared by
-        the prefetch itself; ``square_fetch_keys`` lists the fetch keys where
-        that is safe, i.e. every member model's ``get_embedding`` accepts
-        ``fetch_meta`` and therefore honors the crop-back window.
-        """
-        from ..tools.normalization import normalize_model_name
-        from ..tools.runtime import (
-            _embedder_method_accepts_parameter,
-            _overrides_base_method,
-            get_embedder_bundle_cached,
-            sensor_key,
-        )
-        from ..tools.serialization import sensor_cache_key
-
-        fetcher_by_key: dict[str, Any] = {}
-        # fetch_key → True while every member seen so far honors fetch_meta.
-        meta_safe_by_key: dict[str, bool] = {}
-        for mc in self.models:
-            if mc.sensor is None or "precomputed" in mc.model_type.lower():
-                continue
-            member_skey = sensor_cache_key(mc.sensor)
-            mapping = prefetch.sensor_to_fetch.get(member_skey)
-            if mapping is None:
-                continue
-            fetch_key = mapping[0]
-            member_keys = prefetch.fetch_members.get(fetch_key, [])
-            embedder, _lock = get_embedder_bundle_cached(
-                normalize_model_name(mc.name),
-                self.resolved_backend.get(mc.name, self.backend),
-                self.device,
-                sensor_key(mc.sensor),
-            )
-            meta_safe_by_key[fetch_key] = meta_safe_by_key.get(
-                fetch_key, True
-            ) and _embedder_method_accepts_parameter(type(embedder), "get_embedding", "fetch_meta")
-            # A merged fetch group may represent a union of channels needed by
-            # multiple models. Model-specific fetch_input() implementations
-            # generally return only that model's own contract, so using one of
-            # them for a shared union fetch can truncate the prefetched tensor.
-            if len(member_keys) != 1:
-                continue
-            if fetch_key in fetcher_by_key:
-                continue
-            if getattr(embedder, "has_custom_fetch", False) or _overrides_base_method(
-                embedder, "fetch_input"
-            ):
-                fetcher_by_key[fetch_key] = embedder
-        square_fetch_keys = {
-            k for k, safe in meta_safe_by_key.items() if safe and k not in fetcher_by_key
-        }
-        return fetcher_by_key, square_fetch_keys
-
     def _setup_prefetch(self) -> tuple[PrefetchManager, bool]:
         """Create and plan a PrefetchManager plus provider-enabled flag."""
         provider = self._init_provider()
@@ -474,10 +425,13 @@ class BatchExporter:
             config=self.config,
             fetch_fn=self.fetch_fn,
             inspect_fn=self.inspect_fn,
+            model_configs=self.models,
+            resolved_backend=self.resolved_backend,
+            backend=self.backend,
+            device=self.device,
         )
         band_resolver = getattr(provider, "normalize_bands", None) if provider is not None else None
         prefetch.plan(resolve_bands_fn=band_resolver)
-        prefetch.fetcher_by_key, prefetch.square_fetch_keys = self._resolve_fetcher_by_key(prefetch)
         return prefetch, prefetch.enabled
 
     def _build_pending_queue(self, *, progress: Any) -> tuple[list[int], list[dict[str, Any]]]:
@@ -490,7 +444,9 @@ class BatchExporter:
         manifests: list[dict[str, Any]] = []
         for i in range(len(self.spatials)):
             out_file = os.path.join(out_dir, f"{names[i]}{self.ext}")
-            if self.checkpoint.per_item_should_skip(out_file):
+            if self.checkpoint.per_item_should_skip(
+                out_file, fingerprint=self._request_fingerprint(self.spatials[i])
+            ):
                 manifests.append(
                     point_resume_manifest(
                         point_index=i,
@@ -548,25 +504,6 @@ class BatchExporter:
         """Prefetch a chunk of inputs (for use in pipelined prefetch)."""
         prefetch.fetch_chunk(idxs, self.spatials, self.temporal, fetch_stats=fetch_stats)
 
-    def _clone_prefetch(self, src: PrefetchManager) -> PrefetchManager:
-        """Clone a PrefetchManager preserving the plan with fresh per-chunk caches."""
-        clone = PrefetchManager(
-            provider=src.provider,
-            models=self.model_names,
-            resolved_sensor=self.resolved_sensor,
-            model_type=self.model_type,
-            config=self.config,
-            fetch_fn=self.fetch_fn,
-            inspect_fn=self.inspect_fn,
-            fetcher_by_key=src.fetcher_by_key,
-        )
-        clone.sensor_by_key = src.sensor_by_key
-        clone.fetch_sensor_by_key = src.fetch_sensor_by_key
-        clone.sensor_to_fetch = src.sensor_to_fetch
-        clone.sensor_models = src.sensor_models
-        clone.fetch_members = src.fetch_members
-        return clone
-
     def _write_per_item_chunk(
         self,
         *,
@@ -620,6 +557,7 @@ class BatchExporter:
                         inspect_fn=self.inspect_fn,
                         fetch_meta_cache=prefetch.fetch_meta,
                     )
+                    manifest["request_fingerprint"] = self._request_fingerprint(self.spatials[i])
                     if use_batch:
                         self._inject_precomputed_embeddings(
                             point_index=i,

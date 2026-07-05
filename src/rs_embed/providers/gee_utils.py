@@ -288,6 +288,41 @@ def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str,
     return tuple(amap.get((b or "").upper(), b) for b in bands)
 
 
+# ── Cloud-cover filtering ─────────────────────────────────────────────────────
+
+# Scene-level cloud-cover property per collection family. GEE property filters
+# EXCLUDE images that lack the property, so applying the S2 property to any
+# other collection silently filters out every image.
+_CLOUD_PROPERTY_BY_COLLECTION: tuple[tuple[str, str], ...] = (
+    ("COPERNICUS/S2", "CLOUDY_PIXEL_PERCENTAGE"),
+    ("LANDSAT/", "CLOUD_COVER"),
+)
+
+
+def _cloud_property_for_collection(collection: str) -> str | None:
+    c = (collection or "").upper()
+    for marker, prop in _CLOUD_PROPERTY_BY_COLLECTION:
+        if marker in c:
+            return prop
+    return None
+
+
+def _filter_clouds(col: Any, *, collection: str, cloudy_pct: int | None) -> Any:
+    """Apply the collection's scene cloud-cover filter (inclusive threshold).
+
+    Collections without a known cloud-cover property (SAR, DEMs, ...) are
+    returned unfiltered rather than emptied by a filter on a missing property.
+    """
+    if cloudy_pct is None:
+        return col
+    prop = _cloud_property_for_collection(collection)
+    if prop is None:
+        return col
+    import ee
+
+    return col.filter(ee.Filter.lte(prop, int(cloudy_pct)))
+
+
 # ── Temporal split helper ─────────────────────────────────────────────────────
 
 
@@ -371,20 +406,24 @@ def _sample_image_bands_raw_chw(
     bands: Sequence[str],
     scale_m: int,
     fill_value: float,
+    value_range: tuple[float, float] | None = None,
 ) -> np.ndarray:
-    """Sample a GEE image as **north-up** CHW float32 in [0, 10_000].
+    """Sample a GEE image as **north-up** CHW float32.
 
-    GEE's ``sampleRectangle`` returns rows in north-to-south order when the
-    image is reprojected via ``reproject(crs=..., scale=...)`` **without** a
-    prior ``.clip()``.  This specific call pattern is what guarantees north-up
-    output here — no explicit flip is applied.
+    *value_range*, when given, clips the sampled values — callers pass the
+    collection's valid data range (e.g. ``(0, 10000)`` for S2 DN). ``None``
+    (the default) returns values unclipped, so collections with other ranges
+    (Landsat SR, signed products) are not silently destroyed.
 
-    .. warning::
-        Do **not** add ``.clip(region)`` before ``sampleRectangle`` in this
-        function.  With the ``reproject(crs=..., scale=...)`` form, clipping
-        causes GEE to return south-up rows (the opposite convention), which
-        would silently invert every multiframe tile.  If masking of
-        non-rectangular regions is required, use ``fetch_array_chw`` instead.
+    Row-order contract (verified against live GEE with ``ee.Image.pixelLonLat``
+    across hemispheres and scales; see ``tests/test_gee_orientation_live.py``):
+    ``sampleRectangle`` row order depends on the *reprojection form*, not on
+    clipping —
+
+    - ``reproject(crs=..., scale=...)`` → north-up, with or without ``.clip()``
+      (this function and ``_fetch_all_bands_impl``; no flip applied).
+    - ``reproject(ee.Projection(...).atScale(...))`` → south-up
+      (``fetch_array_chw``, which applies ``_flip_sample_tile_y``).
     """
     img = img.select(list(bands)).reproject(crs="EPSG:3857", scale=int(scale_m))
     rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
@@ -397,7 +436,9 @@ def _sample_image_bands_raw_chw(
     except Exception as e:
         raise ProviderError("Failed to sample rectangle from GEE image.") from e
     raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
-    return np.clip(raw, 0.0, 10000.0).astype(np.float32)
+    if value_range is not None:
+        raw = np.clip(raw, float(value_range[0]), float(value_range[1]))
+    return raw.astype(np.float32)
 
 
 # ── Tile fetch helpers ────────────────────────────────────────────────────────
@@ -406,14 +447,13 @@ def _sample_image_bands_raw_chw(
 def _flip_sample_tile_y(arr: np.ndarray) -> np.ndarray:
     """Flip the penultimate (height) axis of a CHW or TCHW array from south-up to north-up.
 
-    Called inside ``GEEProvider.fetch_array_chw``, which uses
-    ``ee.Projection.atScale() + .clip(region)`` before ``sampleRectangle``.
-    That call pattern causes GEE to return rows in south-up order, so the flip
-    is applied at the end of ``fetch_array_chw`` before returning to callers.
-
-    ``_sample_image_bands_raw_chw`` uses a different call pattern
-    (``reproject(crs=..., scale=...)`` **without** clip) that already returns
-    north-up rows from GEE; applying this flip there would invert those tiles.
+    Called inside ``GEEProvider.fetch_array_chw``, whose
+    ``reproject(ee.Projection(...).atScale(...))`` form makes ``sampleRectangle``
+    return south-up rows. The ``reproject(crs=..., scale=...)`` form returns
+    north-up rows (clipping does not affect row order), so
+    ``_sample_image_bands_raw_chw`` and ``_fetch_all_bands_impl`` must NOT apply
+    this flip. Contract verified against live GEE; see
+    ``_sample_image_bands_raw_chw`` and ``tests/test_gee_orientation_live.py``.
     """
     a = np.asarray(arr, dtype=np.float32)
     if a.ndim < 2:

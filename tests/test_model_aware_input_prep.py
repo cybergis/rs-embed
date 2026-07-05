@@ -112,3 +112,43 @@ def test_image_level_vit_grid_explicit_tile_is_allowed_and_warns_about_seams(mod
     assert prep["tiled_grid_recommended"] is False
     assert emb.meta["grid_semantics"] == "vit_patch_tokens"
     assert emb.meta["grid_tile_recommended"] is False
+
+
+def test_input_prep_spec_bare_construction_defaults_to_tile():
+    """InputPrepSpec(tile_size=512) must mean tiling with that size.
+
+    Regression: the dataclass default was mode='resize' while the unset
+    (None) default resolved to tile - two different defaults for the same
+    concept, so this natural construction silently resized and ignored
+    tile_size.
+    """
+    from rs_embed.tools.tiling import _resolve_input_prep_spec
+
+    spec = InputPrepSpec(tile_size=512)
+    resolved = _resolve_input_prep_spec(spec)
+    assert resolved.mode == "tile"
+    assert resolved.tile_size == 512
+    # And the two defaults agree.
+    assert InputPrepSpec().mode == _resolve_input_prep_spec(None).mode == "tile"
+
+
+def test_vit_grid_model_policy_preserves_user_auto_fields():
+    """The satmae/scalemae tile policy must override only the mode.
+
+    Regression: the policy replaced the user's auto spec wholesale with
+    InputPrepSpec.tile() defaults, dropping tile_size/max_tiles/....
+    """
+    from rs_embed.tools.runtime import resolve_model_aware_input_prep
+
+    user = InputPrepSpec.auto(tile_size=512, max_tiles=16, tile_snap_frac=0.0)
+    effective, resolved, requested_mode, policy = resolve_model_aware_input_prep(
+        model_n="satmae",
+        input_prep=user,
+        output=OutputSpec.pooled(),
+    )
+    assert policy == "tile_default_for_image_level_vit_patch_grid"
+    assert requested_mode == "auto"
+    assert resolved.mode == "tile"
+    assert resolved.tile_size == 512
+    assert resolved.max_tiles == 16
+    assert resolved.tile_snap_frac == 0.0

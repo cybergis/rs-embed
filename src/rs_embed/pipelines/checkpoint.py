@@ -15,6 +15,7 @@ import numpy as np
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ExportTarget
 from ..tools.checkpoint_utils import (
+    drop_model_arrays,
     drop_prefetch_checkpoint_arrays,
     is_incomplete_combined_manifest,
     load_saved_arrays,
@@ -27,9 +28,25 @@ from ..tools.manifest import (
 from ..tools.manifest import (
     summarize_status,
 )
-from ..tools.serialization import jsonable, sensor_cache_key, utc_ts
+from ..tools.serialization import jsonable, sanitize_key, sensor_cache_key, utc_ts
 from ..writers import write_arrays
 from .runner import run_with_retry
+
+
+def _array_refs_present(ref: Any, arrays: dict[str, np.ndarray]) -> bool:
+    """Whether every array a manifest entry references actually exists.
+
+    Entries reference arrays as ``{"npz_key": ...}`` or ``{"npz_keys": [...]}``;
+    ``None`` (nothing saved) references nothing and is trivially present.
+    """
+    if not isinstance(ref, dict):
+        return True
+    if "npz_key" in ref:
+        return str(ref["npz_key"]) in arrays
+    if "npz_keys" in ref:
+        keys = ref["npz_keys"]
+        return isinstance(keys, list) and all(str(k) in arrays for k in keys)
+    return True
 
 
 class CheckpointManager:
@@ -49,56 +66,21 @@ class CheckpointManager:
 
     # ── per-item resume ────────────────────────────────────────────
 
-    def per_item_should_skip(self, out_file: str) -> bool:
-        return bool(self.config.resume) and os.path.exists(out_file)
+    def per_item_should_skip(self, out_file: str, *, fingerprint: str | None = None) -> bool:
+        """Skip a point only when its existing output matches the current request.
 
-    def per_item_resume_manifest(
-        self,
-        *,
-        point_index: int,
-        spatial: SpatialSpec,
-        temporal: TemporalSpec | None,
-        output: OutputSpec,
-        backend: str,
-        device: str,
-        out_file: str,
-    ) -> dict[str, Any]:
-        from ..tools.manifest import point_resume_manifest
-
-        return point_resume_manifest(
-            point_index=point_index,
-            spatial=spatial,
-            temporal=temporal,
-            output=output,
-            backend=backend,
-            device=device,
-            out_file=out_file,
-        )
-
-    def per_item_failure_manifest(
-        self,
-        *,
-        point_index: int,
-        spatial: SpatialSpec,
-        temporal: TemporalSpec | None,
-        output: OutputSpec,
-        backend: str,
-        device: str,
-        stage: str,
-        error: Exception,
-    ) -> dict[str, Any]:
-        from ..tools.manifest import point_failure_manifest
-
-        return point_failure_manifest(
-            point_index=point_index,
-            spatial=spatial,
-            temporal=temporal,
-            output=output,
-            backend=backend,
-            device=device,
-            stage=stage,
-            error=error,
-        )
+        The sidecar manifest's ``request_fingerprint`` is compared against
+        *fingerprint*; an output from a different request (or with a missing/
+        unreadable sidecar) is recomputed rather than trusted. When manifests
+        are disabled (``save_manifest=False``) there is nothing to verify
+        against, so existence alone decides — the caller opted out.
+        """
+        if not (bool(self.config.resume) and os.path.exists(out_file)):
+            return False
+        if fingerprint is None or not self.config.save_manifest:
+            return True
+        sidecar = _load_json_dict(os.path.splitext(out_file)[0] + ".json")
+        return bool(sidecar) and sidecar.get("request_fingerprint") == fingerprint
 
     # ── combined resume ────────────────────────────────────────────
 
@@ -112,8 +94,18 @@ class CheckpointManager:
         device: str,
         models: list[str],
         out_path: str,
+        fingerprint: str | None = None,
     ) -> tuple[dict[str, np.ndarray], dict[str, Any], list[str], str]:
-        """Initialize combined export state, handling resume if applicable."""
+        """Initialize combined export state, handling resume if applicable.
+
+        A prior checkpoint is only resumed when its ``request_fingerprint``
+        matches *fingerprint* — otherwise its results belong to a different
+        request and splicing them in would mislabel old embeddings as the new
+        spatials. A model entry is only kept as completed when its status is
+        ``ok`` (``partial`` re-runs so failed points get retried) and every
+        array it references actually loaded; stale arrays of models no longer
+        in the request are dropped.
+        """
         fmt = self.config.format
         resume = self.config.resume
 
@@ -136,34 +128,50 @@ class CheckpointManager:
 
         if bool(resume) and os.path.exists(out_path):
             resume_manifest = _load_json_dict(json_path)
-            if is_incomplete_combined_manifest(resume_manifest):
+            fingerprint_ok = resume_manifest is not None and (
+                fingerprint is None or resume_manifest.get("request_fingerprint") == fingerprint
+            )
+            if is_incomplete_combined_manifest(resume_manifest) and not fingerprint_ok:
+                warnings.warn(
+                    f"Checkpoint at '{out_path}' was written by a different export request; "
+                    "ignoring it and starting fresh.",
+                    stacklevel=4,
+                )
+            if is_incomplete_combined_manifest(resume_manifest) and fingerprint_ok:
                 try:
                     arrays = load_saved_arrays(fmt=fmt, out_path=out_path)
                 except Exception as _e:
                     warnings.warn(
                         f"Could not load checkpoint arrays from '{out_path}': {_e}. "
-                        "Starting with empty array cache; all inputs will be re-fetched.",
+                        "Starting with empty array cache; all models will be re-run.",
                         stacklevel=4,
                     )
                     arrays = {}
-                if resume_manifest is not None:
-                    manifest = dict(resume_manifest)
-                    old_models = manifest.get("models")
-                    kept: list[dict[str, Any]] = []
-                    if isinstance(old_models, list):
-                        for m in models:
-                            for item in old_models:
-                                if not isinstance(item, dict) or item.get("model") != m:
-                                    continue
-                                if str(item.get("status", "")).lower() in (
-                                    "ok",
-                                    "partial",
-                                ):
-                                    kept.append(item)
-                                    completed_models.add(m)
-                                break
-                    manifest["models"] = kept
+                manifest = dict(resume_manifest)
+                old_models = manifest.get("models")
+                kept: list[dict[str, Any]] = []
+                if arrays and isinstance(old_models, list):
+                    current = set(models)
+                    for item in old_models:
+                        name = item.get("model") if isinstance(item, dict) else None
+                        if isinstance(name, str) and name not in current:
+                            drop_model_arrays(arrays, name, sanitize_key=sanitize_key)
+                    for m in models:
+                        for item in old_models:
+                            if not isinstance(item, dict) or item.get("model") != m:
+                                continue
+                            if (
+                                str(item.get("status", "")).lower() == "ok"
+                                and _array_refs_present(item.get("embeddings"), arrays)
+                                and _array_refs_present(item.get("inputs"), arrays)
+                            ):
+                                kept.append(item)
+                                completed_models.add(m)
+                            break
+                manifest["models"] = kept
 
+        if fingerprint is not None:
+            manifest["request_fingerprint"] = fingerprint
         manifest.setdefault("created_at", utc_ts())
         manifest["status"] = "running"
         manifest["stage"] = str(manifest.get("stage", "init"))

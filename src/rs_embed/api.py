@@ -290,7 +290,6 @@ def get_embedding(
     return _run_embedding_request_shared(
         spatials=[spatial],
         temporal=temporal,
-        sensor=sensor_eff,
         output=output,
         ctx=ctx,
     )[0]
@@ -385,7 +384,6 @@ def get_embeddings_batch(
     return _run_embedding_request_shared(
         spatials=spatials,
         temporal=temporal,
-        sensor=sensor_eff,
         output=output,
         ctx=ctx,
     )
@@ -496,18 +494,9 @@ def export_batch(
 
     _validate_spatial_list(spatials=spatials, temporal=temporal, output=output)
 
-    resume_manifest = _maybe_return_completed_combined_resume(
-        target=export_target,
-        config=export_config,
-        spatials=spatials,
-        temporal=temporal,
-        output=output,
-        backend=backend_n,
-        device=device_n,
-    )
-    if resume_manifest is not None:
-        return resume_manifest
-
+    # Resolve models before the resume short-circuit: the resolved configs are
+    # the canonical input to the request fingerprint, and an invalid model
+    # list should fail rather than be reported "already complete".
     model_configs, resolved_backend = _resolve_export_model_configs(
         models=models,
         backend_n=backend_n,
@@ -520,6 +509,19 @@ def export_batch(
         per_model_fetches=per_model_fetches,
         per_model_modalities=per_model_modalities,
     )
+
+    resume_manifest = _maybe_return_completed_combined_resume(
+        target=export_target,
+        config=export_config,
+        model_configs=model_configs,
+        spatials=spatials,
+        temporal=temporal,
+        output=output,
+        backend=backend_n,
+        device=device_n,
+    )
+    if resume_manifest is not None:
+        return resume_manifest
 
     exporter = BatchExporter(
         spatials=spatials,

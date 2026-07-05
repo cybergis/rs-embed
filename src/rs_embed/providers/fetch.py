@@ -446,11 +446,23 @@ def fetch_s1_vvvh_binned_raw_tchw(
 
 
 def normalize_s1_vvvh_chw(raw_chw: np.ndarray) -> np.ndarray:
-    """Convert raw S1 VV/VH to numerically stable [0,1] CHW."""
+    """Convert raw **linear-scale** S1 VV/VH to numerically stable [0,1] CHW.
+
+    dB-scale input (``use_float_linear=False`` fetches) is rejected: its
+    mostly-negative values would be zeroed by the ``max(x, 0)`` step and the
+    output would be a constant-zero image with no warning.
+    """
     arr = np.asarray(raw_chw, dtype=np.float32)
     if arr.ndim != 3 or int(arr.shape[0]) != 2:
         raise ModelError(
             f"Expected raw S1 VV/VH CHW with C=2, got shape={getattr(arr, 'shape', None)}"
+        )
+    finite_nonzero = arr[np.isfinite(arr) & (arr != 0.0)]
+    if finite_nonzero.size and float(np.mean(finite_nonzero < 0)) > 0.5:
+        raise ModelError(
+            "normalize_s1_vvvh_chw expects linear-scale S1 backscatter but the input "
+            "looks dB-scaled (mostly negative values). Fetch with use_float_linear=True "
+            "(COPERNICUS/S1_GRD_FLOAT) or convert dB to linear (10**(x/10)) first."
         )
     x = np.log1p(np.maximum(arr, 0.0))
     denom = np.percentile(x, 99) if np.isfinite(x).all() else 1.0

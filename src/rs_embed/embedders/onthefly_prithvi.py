@@ -1198,11 +1198,10 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             device=device,
         )
 
-        # Fetch S2 6-band patch from provider
-        provider = self._get_provider(backend)
-
-        # Fetch S2 6-band patch from provider (optionally reuse pre-fetched raw patch)
+        # Fetch S2 6-band patch from provider (optionally reuse pre-fetched raw
+        # patch — a prefetched input must not require live provider auth).
         if input_chw is None:
+            provider = self._get_provider(backend)
             spatial, geo_roi = square_spatial(spatial)  # enlarge rectangle to square
             x_chw = _fetch_s2_prithvi6_chw(
                 provider,

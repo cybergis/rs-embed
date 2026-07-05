@@ -14,7 +14,11 @@ from ..core.types import (
 )
 from ..core.validation import assert_supported
 from .checkpoint_utils import is_incomplete_combined_manifest
-from .manifest import combined_resume_manifest, load_json_dict
+from .manifest import (
+    combined_resume_manifest,
+    export_request_fingerprint,
+    load_json_dict,
+)
 from .model_defaults import resolve_sensor_for_model
 from .normalization import _resolve_embedding_api_backend, normalize_model_name
 from .runtime import require_model_config_support
@@ -172,6 +176,25 @@ def resolve_export_model_configs(
         else:
             raise ModelError("models entries must be strings or ExportModelRequest instances.")
 
+    # Export npz keys and per-model state are keyed by sanitize_key(name), so
+    # distinct spellings that sanitize identically ("mock-model"/"mock_model")
+    # collide just like exact repeats. Group by the sanitized key and report
+    # the original colliding spellings.
+    from .serialization import sanitize_key as _sanitize_key
+
+    names_by_key: dict[str, list[str]] = {}
+    for req in requests:
+        names_by_key.setdefault(_sanitize_key(req.name), []).append(req.name)
+    dupes = {k: v for k, v in sorted(names_by_key.items()) if len(v) > 1}
+    if dupes:
+        detail = "; ".join(f"{k!r} <- {sorted(set(v))}" for k, v in dupes.items())
+        raise ModelError(
+            f"Duplicate model name(s) in export request: {detail}. The export "
+            "pipeline keys per-model state and npz arrays by the sanitized "
+            "model name, so these entries silently overwrite each other; "
+            "request each model once."
+        )
+
     model_configs: list[ModelConfig] = []
     resolved_backend: dict[str, str] = {}
     for req in requests:
@@ -229,6 +252,7 @@ def maybe_return_completed_combined_resume(
     *,
     target: ExportTarget,
     config: ExportConfig,
+    model_configs: list[ModelConfig],
     spatials: list[SpatialSpec],
     temporal: TemporalSpec | None,
     output: OutputSpec,
@@ -237,8 +261,12 @@ def maybe_return_completed_combined_resume(
 ) -> dict[str, object] | None:
     """Return a completed resume manifest if the export is already finished.
 
-    Short-circuits the export pipeline when a combined export file already
-    exists and its manifest shows completion, avoiding redundant work.
+    Short-circuits the export pipeline only when a combined export file
+    exists, its sidecar manifest is readable and complete, and the manifest's
+    ``request_fingerprint`` matches the current request. A missing or
+    unreadable sidecar, or a fingerprint from a different request (including
+    pre-fingerprint exports), means the file cannot be trusted as this
+    request's result — the export proceeds and rewrites it.
 
     Parameters
     ----------
@@ -246,6 +274,8 @@ def maybe_return_completed_combined_resume(
         Export target specifying the output file location.
     config : ExportConfig
         Export configuration; only checked when ``config.resume`` is ``True``.
+    model_configs : list[ModelConfig]
+        Resolved per-model configurations of the current request.
     spatials : list[SpatialSpec]
         Spatial points from the current export request.
     temporal : TemporalSpec or None
@@ -269,7 +299,16 @@ def maybe_return_completed_combined_resume(
         return None
     json_path = os.path.splitext(target.out_file)[0] + ".json"
     resume_manifest = load_json_dict(json_path)
-    if is_incomplete_combined_manifest(resume_manifest):
+    if resume_manifest is None or is_incomplete_combined_manifest(resume_manifest):
+        return None
+    fingerprint = export_request_fingerprint(
+        models=model_configs,
+        temporal=temporal,
+        output=output,
+        config=config,
+        spatials=spatials,
+    )
+    if resume_manifest.get("request_fingerprint") != fingerprint:
         return None
     return combined_resume_manifest(
         spatials=spatials,

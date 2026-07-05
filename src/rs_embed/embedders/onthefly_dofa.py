@@ -770,10 +770,12 @@ class DOFAEmbedder(EmbedderBase):
             wavelengths_um = [float(v) for v in wavelengths_um]
 
             provider_meta = {"backend_tensor": True, **norm_meta}
+            temporal_used = temporal  # tensor input: no fetch window involved
 
         else:
             provider = self._get_provider(backend)
             t = temporal_to_range(temporal)
+            temporal_used = t  # meta must record the window the data came from
 
             # overrides
             collection = (
@@ -871,7 +873,7 @@ class DOFAEmbedder(EmbedderBase):
             backend=backend_l,
             source=source,
             sensor=sensor,
-            temporal=temporal,
+            temporal=temporal_used,
             image_size=image_size,
             extra={
                 "variant": str(variant),

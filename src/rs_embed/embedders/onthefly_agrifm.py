@@ -712,18 +712,13 @@ class AgriFMEmbedder(EmbedderBase):
                     raise ModelError(
                         f"input_chw must be TCHW with C=10 for agrifm, got {raw.shape}"
                     )
+                # Preserve the provided series' own T (the prefetch may have
+                # fetched a different frame count than the runtime config);
+                # temporal metadata below follows raw_tchw.shape[0], so
+                # padding/truncating to n_frames would misalign frames.
                 raw_tchw = raw.astype(np.float32, copy=False)
                 input_original_frames = int(raw_tchw.shape[0])
                 input_mode = "tchw_exact"
-                if raw_tchw.shape[0] < n_frames:
-                    raw_tchw = np.concatenate(
-                        [raw_tchw] + [raw_tchw[-1:]] * (n_frames - raw_tchw.shape[0]),
-                        axis=0,
-                    )
-                    input_mode = "tchw_padded_last"
-                elif raw_tchw.shape[0] > n_frames:
-                    raw_tchw = raw_tchw[:n_frames]
-                    input_mode = "tchw_truncated"
             else:
                 raise ModelError(
                     f"input_chw must be CHW (10 bands) or TCHW (T,10,H,W), got {getattr(raw, 'shape', None)}"

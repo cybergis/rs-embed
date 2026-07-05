@@ -375,7 +375,7 @@ def test_terrafm_tensor_get_embedding_uses_input_chw(monkeypatch):
     monkeypatch.setattr(
         tf,
         "_load_terrafm_b",
-        lambda *, auto_download, cache_dir: (object(), {"device": "cpu"}),
+        lambda *, dev, auto_download, cache_dir: (object(), {"device": dev}),
     )
 
     def _fake_forward(model, x_bchw, *, device, want_grid):
