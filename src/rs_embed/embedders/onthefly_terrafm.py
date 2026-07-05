@@ -289,11 +289,17 @@ def _assert_weights_loaded(model) -> dict[str, float]:
 @lru_cache(maxsize=4)
 def _load_terrafm_b(
     *,
+    dev: str,
     auto_download: bool = True,
     cache_dir: str | None = None,
 ) -> tuple[Any, dict[str, Any]]:
     """
-    Returns (model, weight_meta).
+    Returns (model_on_dev, weight_meta).
+
+    Keyed by device like every other embedder's loader: a device-less cache
+    shared one nn.Module across per-device instance locks, so concurrent
+    cpu/cuda calls raced .to(dev) against a running forward and sequential
+    mixed-device calls bounced the weights back and forth.
     """
     import torch
 
@@ -309,6 +315,7 @@ def _load_terrafm_b(
     state = torch.load(wt_path, map_location="cpu")
     model.load_state_dict(state, strict=False)
     stats = _assert_weights_loaded(model)
+    model = model.to(dev).eval()
 
     meta = {
         "hf_repo": HF_REPO_ID,
@@ -316,6 +323,7 @@ def _load_terrafm_b(
         "weight_file": wt_path,
         "weight_file_size": os.path.getsize(wt_path),
         "weights_verified": True,
+        "device": str(dev),
         **stats,
     }
     return model, meta
@@ -337,7 +345,6 @@ def _terrafm_pooled_and_grid(
     import torch
 
     dev = _auto_device(device)
-    model = model.to(dev).eval()
 
     x = torch.from_numpy(x_bchw).to(dev)  # [B,C,H,W]
     with torch.no_grad():
@@ -377,7 +384,6 @@ def _terrafm_pooled_and_grid_batch(
     import torch
 
     dev = _auto_device(device)
-    model = model.to(dev).eval()
     x = torch.from_numpy(x_bchw).to(dev)  # [B,C,H,W]
 
     with torch.inference_mode():
@@ -696,7 +702,9 @@ class TerraFMBEmbedder(EmbedderBase):
         # -----------------
         # Load model (strict weights)
         # -----------------
-        model, wmeta = _load_terrafm_b(auto_download=True, cache_dir=cache_dir)
+        model, wmeta = _load_terrafm_b(
+            dev=_auto_device(device), auto_download=True, cache_dir=cache_dir
+        )
 
         # Need the feature-map grid for grid output, or to crop+pool the ROI when
         # the input was enlarged to a square at fetch time.
@@ -960,7 +968,9 @@ class TerraFMBEmbedder(EmbedderBase):
             except ModelError as exc:
                 raise ModelError(f"{exc} at index={i}") from exc
 
-        model, wmeta = _load_terrafm_b(auto_download=True, cache_dir=cache_dir)
+        model, wmeta = _load_terrafm_b(
+            dev=_auto_device(device), auto_download=True, cache_dir=cache_dir
+        )
         dev = str(wmeta.get("device", _auto_device(device)))
         infer_bs = self._resolve_infer_batch(dev)
 
