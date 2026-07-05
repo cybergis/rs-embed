@@ -310,6 +310,16 @@ class GEEProvider(ProviderBase):
             .filterDate(temporal.start, temporal.end)
             .filterBounds(region)
         )
+        # Orbit is an explicit user constraint: apply it to the base collection
+        # so the IW-relax fallback and the empty-collection diagnostics below
+        # respect it too. The default (None) stays unfiltered — mixed passes.
+        orbit_n = str(orbit).strip().upper() if orbit is not None else None
+        if orbit_n is not None:
+            if orbit_n not in ("ASCENDING", "DESCENDING"):
+                raise ProviderError(
+                    f"Unknown S1 orbit={orbit!r}. Use 'ASCENDING' or 'DESCENDING'."
+                )
+            base = base.filter(ee.Filter.eq("orbitProperties_pass", orbit_n))
         col = _build_s1_dualpol_collection(base, require_iw=bool(require_iw))
         iw_relaxed = False
         iw_applied = bool(require_iw)
@@ -380,6 +390,7 @@ class GEEProvider(ProviderBase):
             "s1_iw_relaxed_on_empty": bool(iw_relaxed),
             "s1_relax_iw_on_empty": bool(relax_iw_on_empty),
             "s1_orbit_requested": orbit,
+            "s1_orbit_applied": orbit_n,
             "s1_collection_used": collection_id,
         }
         return arr, meta
