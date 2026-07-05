@@ -110,9 +110,7 @@ class GEEProvider(ProviderBase):
                 ic = ic.filterBounds(region)
             if temporal_range is not None:
                 ic = ic.filterDate(temporal_range[0], temporal_range[1])
-            ic = _filter_clouds(
-                ic, collection=str(sensor.collection), cloudy_pct=sensor.cloudy_pct
-            )
+            ic = _filter_clouds(ic, collection=str(sensor.collection), cloudy_pct=sensor.cloudy_pct)
             _raise_if_empty_collection(ic, collection=str(sensor.collection))
 
             if sensor.composite == "median":

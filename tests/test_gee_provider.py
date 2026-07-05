@@ -767,8 +767,7 @@ def test_cloud_property_for_collection_mapping():
     from rs_embed.providers.gee_utils import _cloud_property_for_collection
 
     assert (
-        _cloud_property_for_collection("COPERNICUS/S2_SR_HARMONIZED")
-        == "CLOUDY_PIXEL_PERCENTAGE"
+        _cloud_property_for_collection("COPERNICUS/S2_SR_HARMONIZED") == "CLOUDY_PIXEL_PERCENTAGE"
     )
     assert _cloud_property_for_collection("LANDSAT/LC08/C02/T1_L2") == "CLOUD_COVER"
     assert _cloud_property_for_collection("LANDSAT/LE07/C02/T1_L2") == "CLOUD_COVER"
