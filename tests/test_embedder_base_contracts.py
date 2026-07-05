@@ -381,13 +381,15 @@ def test_base_batch_raises_on_unsupported_model_config():
 
     from rs_embed.core.embedding import Embedding
     from rs_embed.core.errors import ModelError
-    from rs_embed.core.specs import OutputSpec, PointBuffer
+    from rs_embed.core.specs import PointBuffer
     from rs_embed.embedders.base import EmbedderBase
 
     class _NoConfig(EmbedderBase):
         model_name = "noconfig"
 
-        def get_embedding(self, *, spatial, temporal, sensor, output, backend, device="auto", input_chw=None):
+        def get_embedding(
+            self, *, spatial, temporal, sensor, output, backend, device="auto", input_chw=None
+        ):
             return Embedding(data=np.zeros(2, dtype=np.float32), meta={})
 
     emb = _NoConfig()
@@ -417,9 +419,7 @@ def test_gse_pooled_is_nan_aware(monkeypatch):
     embedder = GSEAnnualEmbedder()
     embedder.model_name = "gse"
     monkeypatch.setattr(embedder, "_get_provider", lambda _backend: object())
-    patch = np.array(
-        [[[1.0, -9999.0], [3.0, 5.0]], [[2.0, -9999.0], [4.0, 6.0]]], dtype=np.float32
-    )
+    patch = np.array([[[1.0, -9999.0], [3.0, 5.0]], [[2.0, -9999.0], [4.0, 6.0]]], dtype=np.float32)
     monkeypatch.setattr(
         gse_mod,
         "_fetch_collection_patch_all_bands_chw",

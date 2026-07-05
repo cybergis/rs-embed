@@ -204,9 +204,7 @@ def _suppress_rshf_pretrained_init_warning():
 
 
 @lru_cache(maxsize=4)
-def _load_remoteclip_on_device(
-    ckpt: str, cache_dir: str, dev: str
-) -> tuple[Any, dict[str, Any]]:
+def _load_remoteclip_on_device(ckpt: str, cache_dir: str, dev: str) -> tuple[Any, dict[str, Any]]:
     """Load RemoteCLIP weights once per (ckpt, cache_dir, device)."""
     model, wmeta = _load_rshf_remoteclip(
         ckpt,

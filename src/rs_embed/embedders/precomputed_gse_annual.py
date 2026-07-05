@@ -163,8 +163,7 @@ class GSEAnnualEmbedder(EmbedderBase):
             # must not poison the whole vector. All-nodata ROIs still error.
             if nodata_fraction >= 1.0:
                 raise ModelError(
-                    "gse_annual: the requested ROI contains no valid embedding "
-                    "pixels (all nodata)."
+                    "gse_annual: the requested ROI contains no valid embedding pixels (all nodata)."
                 )
             if output.pooling == "mean":
                 vec = np.nanmean(emb_chw, axis=(-2, -1)).astype(np.float32)
