@@ -47,6 +47,7 @@ def _write_json_atomic(json_path: str, payload: dict[str, Any]) -> None:
 
     _atomic_replace(json_path, _dump)
 
+
 # ── format → file extension mapping ────────────────────────────────
 
 _FORMAT_EXT: dict[str, str] = {

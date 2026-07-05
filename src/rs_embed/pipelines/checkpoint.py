@@ -128,9 +128,8 @@ class CheckpointManager:
 
         if bool(resume) and os.path.exists(out_path):
             resume_manifest = _load_json_dict(json_path)
-            fingerprint_ok = (
-                resume_manifest is not None
-                and (fingerprint is None or resume_manifest.get("request_fingerprint") == fingerprint)
+            fingerprint_ok = resume_manifest is not None and (
+                fingerprint is None or resume_manifest.get("request_fingerprint") == fingerprint
             )
             if is_incomplete_combined_manifest(resume_manifest) and not fingerprint_ok:
                 warnings.warn(
