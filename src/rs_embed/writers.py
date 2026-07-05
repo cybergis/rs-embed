@@ -15,9 +15,37 @@ from __future__ import annotations
 
 import json
 import os
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
+
+
+def _atomic_replace(out_path: str, write_tmp: Callable[[str], None]) -> None:
+    """Write via a same-directory temp file, then atomically replace *out_path*.
+
+    A crash mid-write leaves the previous file (or nothing) at *out_path*
+    instead of a truncated one — required because resume treats an existing
+    output as done.
+    """
+    tmp = f"{out_path}.tmp-{os.getpid()}"
+    try:
+        write_tmp(tmp)
+        os.replace(tmp, out_path)
+    finally:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+
+
+def _write_json_atomic(json_path: str, payload: dict[str, Any]) -> None:
+    def _dump(tmp: str) -> None:
+        with open(tmp, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    _atomic_replace(json_path, _dump)
 
 # ── format → file extension mapping ────────────────────────────────
 
@@ -96,16 +124,21 @@ def _write_npz(
         out_path += ".npz"
     os.makedirs(os.path.dirname(out_path) or ".", exist_ok=True)
 
-    np.savez_compressed(out_path, **arrays)
+    def _dump_npz(tmp: str) -> None:
+        with open(tmp, "wb") as fh:
+            np.savez_compressed(fh, **arrays)
 
-    if save_manifest:
-        json_path = os.path.splitext(out_path)[0] + ".json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2)
-        manifest["manifest_path"] = json_path
+    _atomic_replace(out_path, _dump_npz)
 
+    # Stamp path keys before dumping the sidecar so the on-disk manifest
+    # carries them too (not just the returned dict). Arrays are written first
+    # so a complete sidecar always describes a complete arrays file.
     manifest["npz_path"] = out_path
     manifest["npz_keys"] = sorted(arrays.keys())
+    if save_manifest:
+        json_path = os.path.splitext(out_path)[0] + ".json"
+        manifest["manifest_path"] = json_path
+        _write_json_atomic(json_path, manifest)
     return manifest
 
 
@@ -149,16 +182,14 @@ def _write_netcdf(
         ds.attrs["n_items"] = int(manifest["n_items"])
 
     engine = _pick_engine()
-    ds.to_netcdf(out_path, engine=engine)
-
-    if save_manifest:
-        json_path = os.path.splitext(out_path)[0] + ".json"
-        with open(json_path, "w", encoding="utf-8") as f:
-            json.dump(manifest, f, ensure_ascii=False, indent=2)
-        manifest["manifest_path"] = json_path
+    _atomic_replace(out_path, lambda tmp: ds.to_netcdf(tmp, engine=engine))
 
     manifest["nc_path"] = out_path
     manifest["nc_variables"] = sorted(arrays.keys())
+    if save_manifest:
+        json_path = os.path.splitext(out_path)[0] + ".json"
+        manifest["manifest_path"] = json_path
+        _write_json_atomic(json_path, manifest)
     return manifest
 
 

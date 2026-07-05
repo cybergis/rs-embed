@@ -255,3 +255,50 @@ def test_write_arrays_unknown_format(tmp_path):
             manifest={},
             save_manifest=False,
         )
+
+
+def test_write_npz_crash_preserves_previous_file(tmp_path, monkeypatch):
+    """A crash mid-write must leave the previous output intact, not a
+    truncated file — resume treats an existing output as done."""
+    out = str(tmp_path / "out.npz")
+    arrays = {"a": np.arange(4, dtype=np.float32)}
+    write_arrays(fmt="npz", out_path=out, arrays=arrays, manifest={}, save_manifest=True)
+    good_npz = open(out, "rb").read()
+    good_json = open(str(tmp_path / "out.json"), "rb").read()
+
+    def _boom(fh, **kw):
+        fh.write(b"partial")
+        raise RuntimeError("disk full")
+
+    monkeypatch.setattr(np, "savez_compressed", _boom)
+    with pytest.raises(RuntimeError, match="disk full"):
+        write_arrays(
+            fmt="npz",
+            out_path=out,
+            arrays={"a": np.zeros(9, dtype=np.float32)},
+            manifest={},
+            save_manifest=True,
+        )
+
+    assert open(out, "rb").read() == good_npz
+    assert open(str(tmp_path / "out.json"), "rb").read() == good_json
+    assert [p for p in tmp_path.iterdir() if ".tmp-" in p.name] == []
+
+
+def test_write_npz_sidecar_contains_path_keys(tmp_path):
+    """The on-disk sidecar must carry the same path keys as the returned
+    manifest (they were previously stamped only after the JSON dump)."""
+    import json as _json
+
+    out = str(tmp_path / "out.npz")
+    write_arrays(
+        fmt="npz",
+        out_path=out,
+        arrays={"a": np.zeros(2, dtype=np.float32)},
+        manifest={},
+        save_manifest=True,
+    )
+    on_disk = _json.load(open(tmp_path / "out.json", encoding="utf-8"))
+    assert on_disk["npz_path"] == out
+    assert on_disk["npz_keys"] == ["a"]
+    assert on_disk["manifest_path"] == str(tmp_path / "out.json")
