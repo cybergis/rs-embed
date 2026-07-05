@@ -21,8 +21,7 @@ from ..providers.prefetch_plan import (
 )
 from ..tools.normalization import normalize_input_array
 from ..tools.progress import FetchStats
-from ..tools.shape import roi_fetch_meta
-from ..tools.spatial import square_spatial
+from ..tools.shape import square_fetch_request
 from .runner import run_with_retry
 
 
@@ -104,8 +103,7 @@ class PrefetchManager:
         """
         if fetch_key not in self.square_fetch_keys:
             return spatial, {}
-        sq, geo_roi = square_spatial(spatial)
-        return sq, (roi_fetch_meta(geo_roi) or {})
+        return square_fetch_request(spatial)
 
     # ── plan ───────────────────────────────────────────────────────
 

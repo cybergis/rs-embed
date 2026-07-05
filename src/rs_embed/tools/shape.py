@@ -275,6 +275,19 @@ def roi_fetch_meta(
     return None if roi_is_full(geo_roi) else {"roi_window_geo": geo_roi}
 
 
+def square_fetch_request(spatial: SpatialSpec) -> tuple[SpatialSpec, dict[str, Any]]:
+    """The generic fetch-square request for *spatial*.
+
+    Returns the ROI enlarged to a square of real imagery plus the crop-back
+    window in ``fetch_meta`` form (empty when the ROI is already square).
+    Every generic-fetch fallback must use this — the model-specific
+    ``fetch_input`` path squares by default, and the same spatial must fetch
+    the same geometry regardless of which path serves it.
+    """
+    sq, geo_roi = square_spatial(spatial)
+    return sq, (roi_fetch_meta(geo_roi) or {})
+
+
 def crop_grid_and_pool(
     grid: np.ndarray,
     geo_roi: tuple[float, float, float, float],
