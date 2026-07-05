@@ -236,6 +236,20 @@ class InferenceEngine:
         )
         return can_batch_prefetched, can_batch_no_input, can_batch_tiled
 
+    @staticmethod
+    def _warn_batch_fallback(tier: str, model_name: str, exc: Exception) -> None:
+        """Batch-tier failures must not be silent: the whole batch is re-run
+        point by point, doubling inference cost and hiding the root cause
+        (including the deliberate returned-wrong-count RuntimeError)."""
+        import warnings
+
+        warnings.warn(
+            f"{tier} batch inference for {model_name!r} failed ({exc!r}); "
+            "falling back to per-point inference.",
+            UserWarning,
+            stacklevel=3,
+        )
+
     def _run_batch_prefetched(
         self,
         *,
@@ -322,7 +336,8 @@ class InferenceEngine:
                     out[sub_idx[j]] = self._embedding_to_result(emb)
                     on_done(sub_idx[j])
             return out, True
-        except Exception as _e:
+        except Exception as e:
+            self._warn_batch_fallback("prefetched-input", model_name, e)
             return out, False
 
     def _run_batch_no_input(
@@ -388,7 +403,8 @@ class InferenceEngine:
                     out[sub_idx[j]] = self._embedding_to_result(emb)
                     on_done(sub_idx[j])
             return out, True
-        except Exception as _e:
+        except Exception as e:
+            self._warn_batch_fallback("no-input", model_name, e)
             return out, False
 
     def _run_batch_tiled(
@@ -604,7 +620,8 @@ class InferenceEngine:
                 on_done(i)
 
             return out, True
-        except Exception:
+        except Exception as e:
+            self._warn_batch_fallback("tiled", model_name, e)
             return out, False
 
     def _run_single_fallback(
@@ -947,7 +964,7 @@ class InferenceEngine:
             out.update(prefetched_out)
 
         # Tier 2: batch without inputs
-        if not batch_attempted and can_batch:
+        if not batch_succeeded and can_batch:
             batch_attempted = True
             batch_out, batch_succeeded = self._run_batch_no_input(
                 idxs=all_idxs,
@@ -966,7 +983,7 @@ class InferenceEngine:
             out.update(batch_out)
 
         # Tier 1.5: tiled batch — tile each image then batch all tiles together
-        if not batch_attempted and can_batch_tiled:
+        if not batch_succeeded and can_batch_tiled:
             batch_attempted = True
             assert ctx.skey is not None and sensor is not None
             tiled_out, batch_succeeded = self._run_batch_tiled(

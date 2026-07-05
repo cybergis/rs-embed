@@ -315,11 +315,20 @@ class PrefetchManager:
                 member_failed = False
                 for member_skey in self.fetch_members.get(skey, []):
                     member_idx = self.sensor_to_fetch[member_skey][1]
-                    x_member = normalize_input_array(
-                        select_prefetched_channels(x, member_idx),
-                        expected_channels=len(member_idx),
-                        name=f"gee_input_{member_skey}",
-                    )
+                    try:
+                        x_member = normalize_input_array(
+                            select_prefetched_channels(x, member_idx),
+                            expected_channels=len(member_idx),
+                            name=f"gee_input_{member_skey}",
+                        )
+                    except Exception as e:
+                        # Post-fetch processing failures are per-member errors,
+                        # not batch aborts, under continue_on_error.
+                        if not cfg.continue_on_error:
+                            raise
+                        self.errors[(i, member_skey)] = repr(e)
+                        member_failed = True
+                        continue
                     if cfg.fail_on_bad_input:
                         sspec_member = self.sensor_by_key[member_skey]
                         rep = self.inspect_fn(

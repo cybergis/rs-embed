@@ -176,6 +176,16 @@ def resolve_export_model_configs(
         else:
             raise ModelError("models entries must be strings or ExportModelRequest instances.")
 
+    names = [req.name for req in requests]
+    dupes = sorted({n for n in names if names.count(n) > 1})
+    if dupes:
+        raise ModelError(
+            f"Duplicate model name(s) in export request: {dupes}. The export "
+            "pipeline keys per-model state and npz arrays by model name, so a "
+            "repeated name silently overwrites its sibling's results; request "
+            "each model once."
+        )
+
     model_configs: list[ModelConfig] = []
     resolved_backend: dict[str, str] = {}
     for req in requests:
