@@ -106,8 +106,12 @@ def _resolve_input_prep_spec(
             raise ModelError(
                 f"RS_EMBED_TILE_SNAP_FRAC must be a float in [0, 0.5], got {env_snap!r}."
             ) from e
-    # Snapping more than half a tile would downscale an axis by >33%, which
-    # distorts more than the overlap it removes; clamp to a safe band.
+        # Snapping more than half a tile would downscale an axis by >33%, which
+        # distorts more than the overlap it removes.
+        if not (0.0 <= tile_snap_frac <= 0.5):
+            raise ModelError(
+                f"RS_EMBED_TILE_SNAP_FRAC must be a float in [0, 0.5], got {env_snap!r}."
+            )
     tile_snap_frac = float(min(0.5, max(0.0, tile_snap_frac)))
     if tile_size is not None:
         tile_size = int(tile_size)
@@ -219,7 +223,7 @@ class _TileParams:
 
     tile_size: int
     stride: int
-    model_resizes: bool
+    model_fixed_size: bool
     effective_pad_edges: bool
 
 
@@ -232,20 +236,27 @@ def _resolve_tile_params(
     ``tile_size`` is the explicit ``input_prep.tile_size`` or, failing that, the
     model's advertised ``describe().defaults.image_size``; ``0`` signals that no
     tile size could be determined and the caller should fall back to a plain
-    call. A model that advertises a fixed input size resizes every tile to it,
-    so a sub-tile edge tile needs no edge padding: ``effective_pad_edges`` is
-    forced off and the boundary "dead band" is avoided.
+    call.
+
+    Edge tiles are padded to square whenever ``pad_edges`` is on (the default),
+    for every model. The tiling layer must never hand a model a rectangular
+    tile: square-input embedders center-pad rectangles internally
+    (``shape.prepare_square``), which the stitcher cannot see — its
+    input→feature mapping would keep pad cells and misplace the valid region.
+    Feeding only ``tile_size``-square tiles keeps the tile→grid geometry
+    deterministic (fixed-size models plainly resize a square; the stitcher's
+    ownership crop removes the pad cells). ``pad_edges=False`` is an expert
+    escape hatch for models that natively handle rectangular inputs with a
+    proportional output grid.
     """
     model_img = _embedder_default_image_size(embedder)
     tile_size = int(input_prep.tile_size or model_img or 0)
     stride = int(input_prep.tile_stride or tile_size)
-    model_resizes = model_img is not None and int(model_img) > 0
-    effective_pad_edges = bool(input_prep.pad_edges) and not model_resizes
     return _TileParams(
         tile_size=tile_size,
         stride=stride,
-        model_resizes=model_resizes,
-        effective_pad_edges=effective_pad_edges,
+        model_fixed_size=model_img is not None and int(model_img) > 0,
+        effective_pad_edges=bool(input_prep.pad_edges),
     )
 
 
@@ -486,48 +497,91 @@ def _midpoint_owned_ranges(
     return owned
 
 
-def _map_input_subrange_to_feature(
-    *,
-    rel_start: int,
-    rel_end: int,
-    valid_len: int,
-    out_len: int,
-) -> tuple[int, int]:
-    if valid_len <= 0 or out_len <= 0:
-        return (0, 0)
-    rs = max(0, min(int(valid_len), int(rel_start)))
-    re = max(rs, min(int(valid_len), int(rel_end)))
-    if re <= rs:
-        re = min(int(valid_len), rs + 1)
-    fs = int(math.floor((float(rs) / float(valid_len)) * float(out_len)))
-    fe = int(math.ceil((float(re) / float(valid_len)) * float(out_len)))
-    fs = max(0, min(int(out_len) - 1, fs))
-    fe = max(fs + 1, min(int(out_len), fe))
-    return (fs, fe)
-
-
-def _roi_tile_overlap_weights(
+def _tile_axis_ownership(
     tile_meta: list[dict[str, int]],
+) -> tuple[dict[int, tuple[int, int]], dict[int, tuple[int, int]]]:
+    """Midpoint-cut ownership intervals per row and per column of a tile grid.
+
+    The single source of tile-ownership geometry: the grid stitcher crops each
+    tile to its owned extent, and the pooled merge weights each tile by its
+    owned area — so overlap regions (cover-shift edge tiles) are counted
+    exactly once by both output modes.
+    """
+    row_items: list[tuple[int, int, int]] = []
+    col_items: list[tuple[int, int, int]] = []
+    seen_r: set[int] = set()
+    seen_c: set[int] = set()
+    for m in tile_meta:
+        r, c = int(m["row"]), int(m["col"])
+        if r not in seen_r:
+            seen_r.add(r)
+            row_items.append((r, int(m["y0"]), int(m["y1"])))
+        if c not in seen_c:
+            seen_c.add(c)
+            col_items.append((c, int(m["x0"]), int(m["x1"])))
+    return _midpoint_owned_ranges(row_items), _midpoint_owned_ranges(col_items)
+
+
+def _axis_feature_crops(
+    owned: dict[int, tuple[int, int]],
+    ref: dict[int, dict[str, int]],
+    *,
+    span_of: Any,
+    out_len: int,
+) -> dict[int, tuple[int, int]]:
+    """Map per-tile owned pixel ranges to feature-cell crops along one axis.
+
+    Cuts are snapped to feature-cell edges *sequentially*: each tile's kept
+    range starts where the previous tile's snapped crop actually ended (in
+    input pixels), not at the raw midpoint. Rounding each tile independently
+    (floor start / ceil end) made adjacent tiles both keep the cell straddling
+    a midpoint cut — one duplicated grid row/column per unaligned seam, an
+    inflated output grid, and a skewed px-per-cell mapping.
+    """
+    order = sorted(owned.keys(), key=lambda i: int(ref[i]["start"]))
+    crops: dict[int, tuple[int, int]] = {}
+    cut_px: float | None = None
+    for pos, idx in enumerate(order):
+        start = float(ref[idx]["start"])
+        span = float(span_of(idx))
+        n = int(out_len)
+        if span <= 0 or n <= 0:
+            crops[idx] = (0, 0)
+            continue
+        own_s, own_e = owned[idx]
+        s_px = float(own_s) if cut_px is None else float(cut_px)
+        fs = int(math.floor((s_px - start) / span * n))
+        fs = max(0, min(n - 1, fs))
+        f_end = (float(own_e) - start) / span * n
+        if pos == len(order) - 1:
+            fe = int(math.ceil(f_end))  # cover the trailing edge fully
+        else:
+            fe = int(math.floor(f_end + 0.5))  # snap the cut to the nearest edge
+        fe = max(fs + 1, min(n, fe))
+        cut_px = start + fe * span / n
+        crops[idx] = (fs, fe)
+    return crops
+
+
+def _roi_owned_overlap_weights(
+    owned_rects: list[tuple[int, int, int, int]],
     *,
     roi_window: tuple[float, float, float, float],
     input_hw: tuple[int, int],
 ) -> np.ndarray:
-    """Per-tile area (in px²) of the tile's valid region that falls inside the ROI.
+    """Per-tile area (in px²) of the tile's owned region inside the ROI.
 
-    Tiles fully outside the fetch-square ROI window get weight 0 so a pooled
-    merge averages only the requested region, not the enlarged square.
+    Owned (midpoint-cut) regions partition the input, so every ROI pixel is
+    weighted exactly once; tiles fully outside the fetch-square ROI window get
+    weight 0 so a pooled merge averages only the requested region.
     """
     ih, iw = int(input_hw[0]), int(input_hw[1])
     ry0, ry1 = roi_window[0] * ih, roi_window[1] * ih
     rx0, rx1 = roi_window[2] * iw, roi_window[3] * iw
     out = []
-    for m in tile_meta:
-        ty0 = int(m["y0"])
-        tx0 = int(m["x0"])
-        ty1 = ty0 + max(1, int(m["valid_h"]))
-        tx1 = tx0 + max(1, int(m["valid_w"]))
-        oh = max(0.0, min(ty1, ry1) - max(ty0, ry0))
-        ow = max(0.0, min(tx1, rx1) - max(tx0, rx0))
+    for oy0, oy1, ox0, ox1 in owned_rects:
+        oh = max(0.0, min(oy1, ry1) - max(oy0, ry0))
+        ow = max(0.0, min(ox1, rx1) - max(ox0, rx0))
         out.append(oh * ow)
     return np.asarray(out, dtype=np.float32)
 
@@ -545,10 +599,21 @@ def _aggregate_tiled_embeddings(
     if not embs:
         raise ModelError("No tile embeddings produced.")
     base_meta = dict(getattr(embs[0], "meta", {}) or {})
+    # Tile 0's per-tile shape diagnostics describe one tile, not the stitched
+    # output; carrying them over would misdocument the result.
+    for per_tile_key in ("shape_prep", "resize_meta"):
+        base_meta.pop(per_tile_key, None)
     base_meta["input_prep"] = dict(prep_meta)
     # Fetch-square ROI: the tiled input covers an enlarged square; restrict the
     # merged output to the ROI window so only the requested region is returned.
     roi_crop = roi_window is not None and not roi_is_full(roi_window)
+
+    # Shared ownership geometry: midpoint cuts partition the input among tiles,
+    # so both output modes count every pixel exactly once (cover-shift edge
+    # tiles overlap their neighbor; raw valid-area weights counted the overlap
+    # twice and biased pooled vectors toward seam regions).
+    row_owned, col_owned = _tile_axis_ownership(tile_meta)
+    owned_rects = [(*row_owned[int(m["row"])], *col_owned[int(m["col"])]) for m in tile_meta]
 
     if output.mode == "pooled":
         vecs = [np.asarray(_embedding_to_numpy(e), dtype=np.float32).reshape(-1) for e in embs]
@@ -559,8 +624,8 @@ def _aggregate_tiled_embeddings(
             )
         mat = np.stack(vecs, axis=0)
         roi_w = (
-            _roi_tile_overlap_weights(
-                tile_meta, roi_window=roi_window, input_hw=prep_meta["input_hw"]
+            _roi_owned_overlap_weights(
+                owned_rects, roi_window=roi_window, input_hw=prep_meta["input_hw"]
             )
             if roi_crop
             else None
@@ -572,7 +637,7 @@ def _aggregate_tiled_embeddings(
             out_vec = np.max(sel if len(sel) else mat, axis=0).astype(np.float32, copy=False)
         else:
             ws = np.asarray(
-                [max(1, int(m["valid_h"])) * max(1, int(m["valid_w"])) for m in tile_meta],
+                [max(1, (oy1 - oy0)) * max(1, (ox1 - ox0)) for oy0, oy1, ox0, ox1 in owned_rects],
                 dtype=np.float32,
             )
             if roi_w is not None:
@@ -602,79 +667,39 @@ def _aggregate_tiled_embeddings(
     nrows = max(int(m["row"]) for m in tile_meta) + 1
     ncols = max(int(m["col"]) for m in tile_meta) + 1
 
-    row_items: list[tuple[int, int, int]] = []
-    col_items: list[tuple[int, int, int]] = []
     row_ref: dict[int, dict[str, int]] = {}
     col_ref: dict[int, dict[str, int]] = {}
     for m in tile_meta:
         r = int(m["row"])
         c = int(m["col"])
-        if r not in row_ref:
-            row_ref[r] = {
-                "start": int(m["y0"]),
-                "end": int(m["y1"]),
-                "valid": int(m["valid_h"]),
-                "out_len": int(gh),
-            }
-            row_items.append((r, int(m["y0"]), int(m["y1"])))
-        if c not in col_ref:
-            col_ref[c] = {
-                "start": int(m["x0"]),
-                "end": int(m["x1"]),
-                "valid": int(m["valid_w"]),
-                "out_len": int(gw),
-            }
-            col_items.append((c, int(m["x0"]), int(m["x1"])))
-
-    row_owned = _midpoint_owned_ranges(row_items)
-    col_owned = _midpoint_owned_ranges(col_items)
+        row_ref.setdefault(r, {"start": int(m["y0"]), "valid": int(m["valid_h"])})
+        col_ref.setdefault(c, {"start": int(m["x0"]), "valid": int(m["valid_w"])})
+    if len(row_ref) != nrows or len(col_ref) != ncols:
+        raise ModelError("Missing row/col metadata for tiled stitch.")
 
     # When ``pad_edges`` is on, an edge tile shorter than ``tile_size`` is
     # bottom/right-padded to ``tile_size`` *before* inference, so the per-tile
     # output grid spans the full padded ``tile_size`` — only the leading
     # ``valid / tile_size`` fraction is real data. The input→feature mapping
-    # below must therefore measure feature cells against the padded extent
+    # must therefore measure feature cells against the padded extent
     # (``tile_size``), not against ``valid``; otherwise the padded region's grid
     # cells (constant "dead band" embeddings) are kept instead of cropped.
     pad_edges = bool(prep_meta.get("pad_edges", True))
 
-    def _span(valid: int) -> int:
-        return int(tile_size) if pad_edges else int(valid)
-
-    row_heights = [0] * nrows
-    col_widths = [0] * ncols
-    row_crop: dict[int, tuple[int, int]] = {}
-    col_crop: dict[int, tuple[int, int]] = {}
-    for r in range(nrows):
-        rr = row_ref.get(r)
-        if rr is None:
-            raise ModelError(f"Missing row metadata for tiled stitch row={r}.")
-        own_s, own_e = row_owned[r]
-        rel_s = int(own_s - rr["start"])
-        rel_e = int(own_e - rr["start"])
-        fy0, fy1 = _map_input_subrange_to_feature(
-            rel_start=rel_s,
-            rel_end=rel_e,
-            valid_len=_span(int(rr["valid"])),
-            out_len=int(rr["out_len"]),
-        )
-        row_crop[r] = (fy0, fy1)
-        row_heights[r] = int(fy1 - fy0)
-    for c in range(ncols):
-        cc = col_ref.get(c)
-        if cc is None:
-            raise ModelError(f"Missing col metadata for tiled stitch col={c}.")
-        own_s, own_e = col_owned[c]
-        rel_s = int(own_s - cc["start"])
-        rel_e = int(own_e - cc["start"])
-        fx0, fx1 = _map_input_subrange_to_feature(
-            rel_start=rel_s,
-            rel_end=rel_e,
-            valid_len=_span(int(cc["valid"])),
-            out_len=int(cc["out_len"]),
-        )
-        col_crop[c] = (fx0, fx1)
-        col_widths[c] = int(fx1 - fx0)
+    row_crop = _axis_feature_crops(
+        row_owned,
+        row_ref,
+        span_of=lambda r: tile_size if pad_edges else row_ref[r]["valid"],
+        out_len=gh,
+    )
+    col_crop = _axis_feature_crops(
+        col_owned,
+        col_ref,
+        span_of=lambda c: tile_size if pad_edges else col_ref[c]["valid"],
+        out_len=gw,
+    )
+    row_heights = [int(row_crop[r][1] - row_crop[r][0]) for r in range(nrows)]
+    col_widths = [int(col_crop[c][1] - col_crop[c][0]) for c in range(ncols)]
 
     out_h = int(sum(row_heights))
     out_w = int(sum(col_widths))
@@ -711,9 +736,11 @@ def _aggregate_tiled_embeddings(
         base_meta["input_prep"]["roi_cropped"] = True
         base_meta["input_prep"]["roi_grid_shape"] = (out_h, out_w)
 
-    # Keep model-reported grid metadata consistent with stitched output.
-    if "grid_hw" in base_meta:
-        base_meta["grid_hw"] = (int(out_h), int(out_w))
+    # Keep model-reported grid metadata consistent with the stitched output
+    # (models use different key names for the same fact).
+    for grid_key in ("grid_hw", "grid_shape", "grid_hw_tokens"):
+        if grid_key in base_meta:
+            base_meta[grid_key] = (int(out_h), int(out_w))
     return Embedding(data=out_arr, meta=base_meta)
 
 
@@ -729,7 +756,6 @@ def _build_tile_prep_meta(
     stride: int,
     tile_count: int,
     effective_pad_edges: bool,
-    model_resizes: bool,
     max_tiles: int,
     max_tiles_hard: int,
     input_hw: tuple[int, int],
@@ -751,11 +777,7 @@ def _build_tile_prep_meta(
         "tile_stride": int(stride),
         "tile_count": int(tile_count),
         "pad_edges": bool(effective_pad_edges),
-        "pad_policy": (
-            "none_model_resizes_tiles"
-            if model_resizes
-            else ("edge_replicate" if effective_pad_edges else "none")
-        ),
+        "pad_policy": "edge_replicate" if effective_pad_edges else "none",
         "max_tiles": int(max_tiles),
         "max_tiles_hard": int(max_tiles_hard),
         "input_hw": (int(input_hw[0]), int(input_hw[1])),
@@ -784,14 +806,7 @@ def _call_embedder_get_embedding_tiled(
     x = np.asarray(input_chw, dtype=np.float32)
     params = _resolve_tile_params(embedder, input_prep)
     tile_size = params.tile_size
-    # A model that advertises a fixed input size resizes every tile to it, so a
-    # sub-tile edge tile (a dimension shorter than ``tile_size``) can be fed at
-    # its natural size and let the model upsample it — no padding, no fabricated
-    # pixels, no boundary "dead band". This is the anisotropic case: the long
-    # axis tiles (native resolution preserved) while the short axis resizes.
-    # Edge-replicate padding is kept only as the fallback for models without a
-    # fixed input size, which may require exactly ``tile_size`` tiles.
-    model_resizes = params.model_resizes
+    model_fixed_size = params.model_fixed_size
     effective_pad_edges = params.effective_pad_edges
     if tile_size <= 0:
         # No tile size could be determined (no explicit tile_size and the model
@@ -829,11 +844,12 @@ def _call_embedder_get_embedding_tiled(
     num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
     if input_prep.mode == "auto":
         # A dimension smaller than a tile only forces a plain resize for models
-        # that cannot resize a sub-tile edge tile themselves. Resize-capable
-        # models tile the long axis (keeping its native resolution) and resize
-        # the short axis, so a wide/flat or tall/thin ROI keeps detail on its
-        # long side instead of being squashed by a whole-ROI resize.
-        small_dim_forces_resize = (h <= tile_size or w <= tile_size) and not model_resizes
+        # without a fixed input size. Fixed-size models tile the long axis
+        # (keeping its native resolution) while the short axis is padded to a
+        # square tile and the pad cells cropped from the stitched grid, so a
+        # wide/flat or tall/thin ROI keeps detail on its long side instead of
+        # being squashed by a whole-ROI resize.
+        small_dim_forces_resize = (h <= tile_size or w <= tile_size) and not model_fixed_size
         if (
             output.mode != "grid"
             or num_tiles <= 1
@@ -871,28 +887,6 @@ def _call_embedder_get_embedding_tiled(
             "Current tiled input preprocessing supports tile_stride == tile_size only; "
             "boundary tiles may still be shifted to avoid padding."
         )
-
-    # In the anisotropic case (one axis tiled, the other shorter than a tile and
-    # resized) a very short axis is upsampled hard: the embedding there is
-    # interpolated from few native pixels. Flag it (don't block) so the low
-    # native resolution on that axis is visible rather than silent.
-    if model_resizes:
-        if h < tile_size and w > tile_size and (tile_size / max(1, h)) > 4.0:
-            warnings.warn(
-                f"input_prep tiling upsamples the height {h}px to the model input "
-                f"{tile_size}px (~{tile_size / max(1, h):.1f}x); the embedding's vertical "
-                "resolution is interpolated from few native pixels. Consider a taller ROI "
-                "or input_prep='resize'.",
-                stacklevel=2,
-            )
-        if w < tile_size and h > tile_size and (tile_size / max(1, w)) > 4.0:
-            warnings.warn(
-                f"input_prep tiling upsamples the width {w}px to the model input "
-                f"{tile_size}px (~{tile_size / max(1, w):.1f}x); the embedding's horizontal "
-                "resolution is interpolated from few native pixels. Consider a wider ROI "
-                "or input_prep='resize'.",
-                stacklevel=2,
-            )
 
     fill_value = float(sensor.fill_value) if sensor is not None else 0.0
     tiles, tile_meta, tile_spatials = _tile_one_image(
@@ -945,7 +939,14 @@ def _call_embedder_get_embedding_tiled(
                     f"Tiled batch inference returned {len(tile_embs)} outputs for {len(tiles)} tiles."
                 )
             tile_embs = [_normalize_embedding_output(emb=e, output=output) for e in tile_embs]
-        except Exception as _e:
+        except Exception as batch_exc:
+            warnings.warn(
+                f"Tiled batch inference failed ({batch_exc!r}); retrying the "
+                f"{len(tiles)} tiles serially. This doubles inference cost - "
+                "investigate the cause if it persists.",
+                UserWarning,
+                stacklevel=2,
+            )
             tile_embs = [
                 _call_embedder_get_embedding(
                     embedder=embedder,
@@ -982,7 +983,6 @@ def _call_embedder_get_embedding_tiled(
         stride=stride,
         tile_count=len(tiles),
         effective_pad_edges=effective_pad_edges,
-        model_resizes=model_resizes,
         max_tiles=input_prep.max_tiles,
         max_tiles_hard=input_prep.max_tiles_hard,
         input_hw=(h, w),

@@ -18,11 +18,20 @@ def temporal_to_range(
 ) -> TemporalSpec:
     """
     Normalize TemporalSpec to a start/end range.
-    - None -> default range
+    - None -> default range (with a UserWarning: the window is otherwise invisible)
     - year -> [year-01-01, (year+1)-01-01)  # end-exclusive
     - range -> unchanged
     """
     if temporal is None:
+        import warnings
+
+        warnings.warn(
+            f"temporal=None: using the package default window "
+            f"{default[0]}..{default[1]}. Pass temporal=TemporalSpec.range(...)/"
+            "year(...) for reproducible, self-documented results.",
+            UserWarning,
+            stacklevel=2,
+        )
         return TemporalSpec.range(default[0], default[1])
     temporal.validate()
     if temporal.mode == "range":
@@ -115,6 +124,11 @@ def build_meta(
     Construct a consistent meta dictionary across embedders.
     Standard keys:
       model, type, backend, source, sensor, temporal, image_size
+
+    Convention: *temporal* must be the **resolved** spec the data was actually
+    fetched/served with (the ``temporal_to_range`` result, tessera's served
+    year, ...), not the raw request — ``{"mode": None}`` in an embedding's meta
+    would leave the real window unrecorded and the result irreproducible.
     """
     t_dict = temporal_to_dict(temporal)
 

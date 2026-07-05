@@ -582,7 +582,6 @@ class InferenceEngine:
                         stride=stride,
                         tile_count=tile_count,
                         effective_pad_edges=params.effective_pad_edges,
-                        model_resizes=params.model_resizes,
                         max_tiles=spec.max_tiles,
                         max_tiles_hard=spec.max_tiles_hard,
                         input_hw=(h, w),
