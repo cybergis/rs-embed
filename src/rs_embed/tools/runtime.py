@@ -134,8 +134,14 @@ def resolve_model_aware_input_prep(
     if input_prep is None or str(resolved.mode) == "auto":
         # Resolve the unset/auto default to an explicit tile so this model
         # behaves like the package-wide default rather than running auto's
-        # long-axis-tile/short-axis-resize heuristic.
-        effective = InputPrepSpec.tile()
+        # long-axis-tile/short-axis-resize heuristic. Only the mode is
+        # overridden — the user's tile_size/max_tiles/... survive.
+        if isinstance(input_prep, InputPrepSpec):
+            from dataclasses import replace as _dc_replace
+
+            effective = _dc_replace(input_prep, mode="tile")
+        else:
+            effective = InputPrepSpec.tile()
         effective_resolved = _resolve_input_prep_spec(effective)
         policy = "tile_default_for_image_level_vit_patch_grid"
         if output.mode == "grid":
@@ -157,11 +163,27 @@ def describe_model_cached(model_n: str) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=32)
-def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple):
-    """Return (embedder instance, instance lock)."""
+def _embedder_bundle_cached(model: str, backend: str, device: str):
     cls = get_embedder_cls(model)
-    emb = cls()
-    return emb, RLock()
+    return cls(), RLock()
+
+
+def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple = ()):
+    """Return (embedder instance, instance lock).
+
+    Instances are constructed bare — no sensor state — so the cache is keyed
+    by (model, backend, device) only. ``sensor_k`` is accepted for
+    call-site compatibility but ignored: keying on it multiplied embedder
+    instances (each holding its own lazily-loaded state) per sensor variation,
+    including fields like check_save_dir that cannot affect the instance.
+    """
+    _ = sensor_k
+    return _embedder_bundle_cached(str(model), str(backend), str(device))
+
+
+# Preserve the lru_cache management surface on the public wrapper.
+get_embedder_bundle_cached.cache_clear = _embedder_bundle_cached.cache_clear  # type: ignore[attr-defined]
+get_embedder_bundle_cached.cache_info = _embedder_bundle_cached.cache_info  # type: ignore[attr-defined]
 
 
 def _clear_loaded_embedder_module_caches() -> int:
@@ -551,6 +573,14 @@ def fetch_api_side_inputs(
             fetch_extra["temporal_mode"] = tm
 
     # Use the embedder's fetch_input() when available; fall back to generic.
+    # The generic fallback fetch-squares like every other path (fetch_input's
+    # square_input=True default, PrefetchManager's square_fetch_keys) whenever
+    # the embedder honors the crop-back window via fetch_meta.
+    from .shape import square_fetch_request
+
+    square_generic = _embedder_method_accepts_parameter(
+        type(embedder), "get_embedding", "fetch_meta"
+    )
     results: list[FetchResult] = []
     for idx, spatial in enumerate(spatials):
         try:
@@ -564,13 +594,16 @@ def fetch_api_side_inputs(
             if fr is not None:
                 results.append(fr)
             else:
+                fetch_spatial, fmeta = (
+                    square_fetch_request(spatial) if square_generic else (spatial, {})
+                )
                 raw = _fetch_sensor_patch_chw(
                     provider,
-                    spatial=spatial,
+                    spatial=fetch_spatial,
                     temporal=temporal,
                     sensor=sensor_eff,
                 )
-                results.append(FetchResult(data=raw, meta={}))
+                results.append(FetchResult(data=raw, meta=fmeta))
         except Exception as exc:
             raise ModelError(
                 f"Failed to fetch API-side input for spatial[{idx}] ({spatial}): {exc}"
@@ -605,10 +638,15 @@ def run_embedding_request(
     *,
     spatials: list[SpatialSpec],
     temporal: TemporalSpec | None,
-    sensor: SensorSpec | None,
     output: OutputSpec,
     ctx: _EmbeddingRequestContext,
 ) -> list[Embedding]:
+    """Run a single/batch embedding request.
+
+    ``ctx.sensor_eff`` is the single source of the effective sensor — the
+    same value keys the prefetch, the embedder call, and the request meta.
+    """
+    sensor = ctx.sensor_eff
     from .tiling import _call_embedder_get_embedding_with_input_prep
 
     prefetched_inputs = fetch_api_side_inputs(

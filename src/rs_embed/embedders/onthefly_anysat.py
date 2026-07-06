@@ -651,10 +651,16 @@ class AnySatEmbedder(EmbedderBase):
                 fill_value=float(ss.fill_value),
             )
         else:
+            # Preserve a provided time series' own T (the prefetch may have
+            # fetched a different frame count than the runtime config): the
+            # date encodings below follow raw_tchw.shape[0], so truncating to
+            # n_frames here would misalign frames against their dates.
+            raw = np.asarray(input_chw)
+            coerce_frames = int(raw.shape[0]) if raw.ndim == 4 else n_frames
             raw_tchw = _coerce_input_to_tchw(
                 input_chw,
                 expected_channels=10,
-                n_frames=n_frames,
+                n_frames=coerce_frames,
                 model_name="anysat",
             )
 

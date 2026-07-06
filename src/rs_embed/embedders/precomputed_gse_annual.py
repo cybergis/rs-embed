@@ -99,7 +99,6 @@ class GSEAnnualEmbedder(EmbedderBase):
         output: OutputSpec,
         backend: str,
         device: str = "auto",
-        input_chw: np.ndarray | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
             raise ModelError("gse_annual expects a provider backend (or 'auto').")
@@ -141,6 +140,7 @@ class GSEAnnualEmbedder(EmbedderBase):
             )
         emb_chw = np.asarray(emb_chw, dtype=np.float32)
         emb_chw[emb_chw == -9999] = np.nan
+        nodata_fraction = float(np.isnan(emb_chw[0]).mean()) if emb_chw.size else 0.0
 
         meta = build_meta(
             model=self.model_name,
@@ -154,14 +154,21 @@ class GSEAnnualEmbedder(EmbedderBase):
                 "year": temporal.year,
                 "scale_m": scale_m,
                 "bands": band_names,
+                "nodata_fraction": nodata_fraction,
             },
         )
 
         if output.mode == "pooled":
+            # NaN-aware pooling: a single nodata pixel (tile edge, coastline)
+            # must not poison the whole vector. All-nodata ROIs still error.
+            if nodata_fraction >= 1.0:
+                raise ModelError(
+                    "gse_annual: the requested ROI contains no valid embedding pixels (all nodata)."
+                )
             if output.pooling == "mean":
-                vec = emb_chw.mean(axis=(-2, -1)).astype(np.float32)
+                vec = np.nanmean(emb_chw, axis=(-2, -1)).astype(np.float32)
             elif output.pooling == "max":
-                vec = emb_chw.max(axis=(-2, -1)).astype(np.float32)
+                vec = np.nanmax(emb_chw, axis=(-2, -1)).astype(np.float32)
             else:
                 raise ModelError(f"Unknown pooling='{output.pooling}' (expected 'mean' or 'max').")
             return Embedding(data=vec, meta={**meta, "pooling": output.pooling})

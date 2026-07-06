@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 from typing import Any
@@ -7,6 +8,51 @@ from typing import Any
 from ..core.specs import OutputSpec, SpatialSpec, TemporalSpec
 from .serialization import jsonable as _jsonable
 from .serialization import utc_ts as _utc_ts
+
+
+def export_request_fingerprint(
+    *,
+    models: list[Any],
+    temporal: TemporalSpec | None,
+    output: OutputSpec,
+    config: Any,
+    spatials: list[SpatialSpec] | None = None,
+    spatial: SpatialSpec | None = None,
+) -> str:
+    """Hash of the request fields that determine an export file's contents.
+
+    Stored in every export manifest as ``request_fingerprint`` and compared on
+    resume: an existing output only counts as "already done" for the same
+    request. Covers resolved per-model configuration (name, backend, sensor,
+    model_config), temporal, output, and the content-affecting config flags —
+    not runtime knobs (device, workers, retries, progress) that leave the
+    output unchanged. Pass ``spatials`` for a combined export or the single
+    item's ``spatial`` for a per-item file, so per-item resume survives
+    appending points but not reordering them.
+    """
+    payload: dict[str, Any] = {
+        "models": [
+            {
+                "name": mc.name,
+                "backend": mc.backend,
+                "sensor": _jsonable(mc.sensor),
+                "model_config": _jsonable(mc.model_config),
+            }
+            for mc in models
+        ],
+        "temporal": _jsonable(temporal),
+        "output": _jsonable(output),
+        "format": str(config.format),
+        "save_inputs": bool(config.save_inputs),
+        "save_embeddings": bool(config.save_embeddings),
+        "input_prep": _jsonable(config.input_prep),
+    }
+    if spatials is not None:
+        payload["spatials"] = [_jsonable(s) for s in spatials]
+    if spatial is not None:
+        payload["spatial"] = _jsonable(spatial)
+    data = json.dumps(payload, sort_keys=True).encode("utf-8")
+    return hashlib.sha1(data).hexdigest()
 
 
 def load_json_dict(path: str) -> dict[str, Any] | None:

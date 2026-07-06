@@ -88,7 +88,7 @@ def sensor_cache_key(sensor: SensorSpec) -> str:
         "collection": sensor.collection,
         "bands": list(sensor.bands),
         "scale_m": int(sensor.scale_m),
-        "cloudy_pct": int(sensor.cloudy_pct),
+        "cloudy_pct": int(sensor.cloudy_pct) if sensor.cloudy_pct is not None else None,
         "fill_value": float(sensor.fill_value),
         "composite": str(sensor.composite),
         "modality": getattr(sensor, "modality", None),
