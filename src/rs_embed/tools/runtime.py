@@ -175,27 +175,17 @@ def describe_model_cached(model_n: str) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=32)
-def _embedder_bundle_cached(model: str, backend: str, device: str):
-    cls = get_embedder_cls(model)
-    return cls(), RLock()
-
-
-def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple = ()):
+def get_embedder_bundle_cached(model: str, backend: str, device: str):
     """Return (embedder instance, instance lock).
 
-    Instances are constructed bare — no sensor state — so the cache is keyed
-    by (model, backend, device) only. ``sensor_k`` is accepted for
-    call-site compatibility but ignored: keying on it multiplied embedder
-    instances (each holding its own lazily-loaded state) per sensor variation,
-    including fields like check_save_dir that cannot affect the instance.
+    Instances are constructed bare — no sensor state — so the cache keys on
+    (model, backend, device) only.  Sensor identity is deliberately excluded:
+    keying on it multiplied embedder instances (each holding its own
+    lazily-loaded state) per sensor variation, including fields like
+    check_save_dir that cannot affect the instance.
     """
-    _ = sensor_k
-    return _embedder_bundle_cached(str(model), str(backend), str(device))
-
-
-# Preserve the lru_cache management surface on the public wrapper.
-get_embedder_bundle_cached.cache_clear = _embedder_bundle_cached.cache_clear  # type: ignore[attr-defined]
-get_embedder_bundle_cached.cache_info = _embedder_bundle_cached.cache_info  # type: ignore[attr-defined]
+    cls = get_embedder_cls(model)
+    return cls(), RLock()
 
 
 def _clear_loaded_embedder_module_caches() -> int:
@@ -247,39 +237,6 @@ def reset_runtime() -> dict[str, int]:
         "runtime_caches_cleared": len(runtime_caches),
         "embedder_module_caches_cleared": int(embedder_module_caches_cleared),
     }
-
-
-def sensor_key(sensor: SensorSpec | None) -> tuple:
-    """Build a hashable cache key from a :class:`SensorSpec`.
-
-    Parameters
-    ----------
-    sensor : SensorSpec or None
-        Sensor to hash. Returns a sentinel tuple when ``None``.
-
-    Returns
-    -------
-    tuple
-        Hashable key representing all sensor fields relevant to caching.
-    """
-    if sensor is None:
-        return ("__none__",)
-    return (
-        sensor.collection,
-        sensor.bands,
-        sensor.scale_m,
-        sensor.cloudy_pct,
-        float(sensor.fill_value),
-        str(sensor.composite),
-        getattr(sensor, "modality", None),
-        getattr(sensor, "orbit", None),
-        bool(getattr(sensor, "use_float_linear", True)),
-        bool(getattr(sensor, "s1_require_iw", True)),
-        bool(getattr(sensor, "s1_relax_iw_on_empty", True)),
-        bool(getattr(sensor, "check_input", False)),
-        bool(getattr(sensor, "check_raise", True)),
-        getattr(sensor, "check_save_dir", None),
-    )
 
 
 def _overrides_base_method(embedder: Any, method_name: str) -> bool:
@@ -465,8 +422,7 @@ def _prepare_embedding_request_context(
     if input_prep_resolved.mode == "tile" and sensor_eff is None:
         sensor_eff = default_sensor_for_model(model_n)
 
-    sensor_k = sensor_key(sensor_eff)
-    embedder, lock = get_embedder_bundle_cached(model_n, backend_n, device_n, sensor_k)
+    embedder, lock = get_embedder_bundle_cached(model_n, backend_n, device_n)
     assert_supported(embedder, backend=backend_n, output=output, temporal=temporal)
 
     return _EmbeddingRequestContext(

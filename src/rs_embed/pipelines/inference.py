@@ -23,7 +23,6 @@ from ..tools.runtime import (
     get_embedder_bundle_cached,
     require_model_config_support,
     resolve_model_aware_input_prep,
-    sensor_key,
     supports_batch_api,
     supports_prefetched_batch_api,
 )
@@ -58,7 +57,6 @@ class _ModelContext(NamedTuple):
 
     embedder: Any
     lock: Any
-    sensor_k: str
     skey: str | None
     needs_provider_input: bool
 
@@ -183,19 +181,17 @@ class InferenceEngine:
         """Resolve embedder bundle and provider-input requirements for one model."""
         from ..tools.normalization import normalize_model_name
 
-        sensor_k = sensor_key(sensor)
         skey = (
             sensor_cache_key(sensor)
             if provider_enabled and sensor is not None and not is_precomputed
             else None
         )
         embedder, lock = get_embedder_bundle_cached(
-            normalize_model_name(name), backend, self.device, sensor_k
+            normalize_model_name(name), backend, self.device
         )
         return _ModelContext(
             embedder=embedder,
             lock=lock,
-            sensor_k=sensor_k,
             skey=skey,
             needs_provider_input=(skey is not None),
         )
@@ -823,12 +819,10 @@ class InferenceEngine:
         """Return ``(embedder, lock)`` for the given model config."""
         from ..tools.normalization import normalize_model_name
 
-        sensor_k = sensor_key(model_config.sensor)
         return get_embedder_bundle_cached(
             normalize_model_name(model_config.name),
             model_config.backend,
             device,
-            sensor_k,
         )
 
     # ── combined-export: infer all spatials for one model ──────────

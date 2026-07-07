@@ -159,7 +159,6 @@ class PrefetchManager:
             _embedder_method_accepts_parameter,
             _overrides_base_method,
             get_embedder_bundle_cached,
-            sensor_key,
         )
         from ..tools.serialization import sensor_cache_key
 
@@ -179,7 +178,6 @@ class PrefetchManager:
                 normalize_model_name(mc.name),
                 self.resolved_backend.get(mc.name, self.backend),
                 self.device,
-                sensor_key(mc.sensor),
             )
             meta_safe_by_key[fetch_key] = meta_safe_by_key.get(
                 fetch_key, True

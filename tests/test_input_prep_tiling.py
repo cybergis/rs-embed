@@ -704,7 +704,6 @@ def test_infer_chunk_tile_mode_uses_batch_on_gpu(monkeypatch):
         lambda **kw: _ModelContext(
             embedder=emb,
             lock=lock,
-            sensor_k=("s2",),
             skey=skey,
             needs_provider_input=True,
         ),

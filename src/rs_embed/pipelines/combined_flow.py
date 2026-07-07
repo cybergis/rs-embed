@@ -19,7 +19,6 @@ from ..tools.normalization import normalize_model_name
 from ..tools.progress import create_progress
 from ..tools.runtime import (
     get_embedder_bundle_cached,
-    sensor_key,
 )
 from ..tools.serialization import (
     jsonable,
@@ -115,10 +114,7 @@ def run_pending_models(
             is_precomputed = "precomputed" in (model_type.get(m) or "")
 
             # Resolve embedder just for describe()
-            sensor_k = sensor_key(sspec)
-            embedder, _lock = get_embedder_bundle_cached(
-                normalize_model_name(m), m_backend, device, sensor_k
-            )
+            embedder, _lock = get_embedder_bundle_cached(normalize_model_name(m), m_backend, device)
             try:
                 m_entry["describe"] = jsonable(embedder.describe())
             except Exception as e:

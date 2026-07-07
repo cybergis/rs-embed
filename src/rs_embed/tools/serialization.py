@@ -83,8 +83,17 @@ def embedding_to_numpy(emb: Embedding) -> np.ndarray:
     return np.asarray(emb.data, dtype=np.float32)
 
 
-def sensor_cache_key(sensor: SensorSpec) -> str:
-    obj = {
+def sensor_identity_fields(sensor: SensorSpec, *, include_bands: bool = True) -> dict[str, Any]:
+    """Fetch-affecting identity fields of a :class:`SensorSpec`.
+
+    Single source of truth for every sensor-identity key: adding a
+    fetch-affecting field to ``SensorSpec`` needs exactly one edit here to
+    reach both :func:`sensor_cache_key` (per-sensor cache/manifest identity)
+    and ``providers.prefetch_plan.sensor_fetch_group_key`` (band-superset
+    grouping, which excludes ``bands``).  ``check_*`` fields are deliberately
+    excluded — they cannot affect fetched pixels.
+    """
+    obj: dict[str, Any] = {
         "collection": sensor.collection,
         "bands": list(sensor.bands),
         "scale_m": int(sensor.scale_m),
@@ -97,5 +106,14 @@ def sensor_cache_key(sensor: SensorSpec) -> str:
         "s1_require_iw": bool(getattr(sensor, "s1_require_iw", True)),
         "s1_relax_iw_on_empty": bool(getattr(sensor, "s1_relax_iw_on_empty", True)),
     }
+    if not include_bands:
+        del obj["bands"]
+    return obj
+
+
+def sensor_cache_key(sensor: SensorSpec) -> str:
+    # NOTE: the hash is persisted (export manifests key input refs by it), so
+    # the identity-field names/types above must stay stable across versions.
+    obj = sensor_identity_fields(sensor)
     data = json.dumps(obj, sort_keys=True).encode("utf-8")
     return sanitize_key(hashlib.sha1(data).hexdigest()[:12])

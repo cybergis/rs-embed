@@ -7,27 +7,18 @@ import numpy as np
 
 from ..core.specs import SensorSpec
 from ..tools.serialization import sensor_cache_key as _sensor_cache_key
+from ..tools.serialization import sensor_identity_fields as _sensor_identity_fields
 
 _LEGACY_RESOLVE_BANDS_WARNED = False
 
 
-def sensor_fetch_group_key(
-    sensor: SensorSpec,
-) -> tuple[str, int, int, float, str, str | None, str | None, bool, bool, bool]:
-    """Fetch identity excluding bands; used to build reusable band supersets."""
-    cloudy = -1 if getattr(sensor, "cloudy_pct", None) is None else int(sensor.cloudy_pct)
-    return (
-        str(sensor.collection),
-        int(sensor.scale_m),
-        cloudy,
-        float(sensor.fill_value),
-        str(sensor.composite),
-        getattr(sensor, "modality", None),
-        getattr(sensor, "orbit", None),
-        bool(getattr(sensor, "use_float_linear", True)),
-        bool(getattr(sensor, "s1_require_iw", True)),
-        bool(getattr(sensor, "s1_relax_iw_on_empty", True)),
-    )
+def sensor_fetch_group_key(sensor: SensorSpec) -> tuple:
+    """Fetch identity excluding bands; used to build reusable band supersets.
+
+    Derived from :func:`~rs_embed.tools.serialization.sensor_identity_fields`
+    so the field set stays in lockstep with :func:`sensor_cache_key`.
+    """
+    return tuple(sorted(_sensor_identity_fields(sensor, include_bands=False).items()))
 
 
 def select_prefetched_channels(x_chw: np.ndarray, idx: tuple[int, ...]) -> np.ndarray:
