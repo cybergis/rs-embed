@@ -19,7 +19,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-from ..core.types import FetchResult
+from ..core.types import EmbedderCapabilities, FetchResult
 from ..providers import ProviderBase
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
@@ -983,6 +983,34 @@ class THORBaseEmbedder(EmbedderBase):
         image_size=288,
         expected_channels=10,
     )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
+    def tiled_dispatch_model_config(
+        self,
+        model_config: dict[str, Any] | None,
+        *,
+        tile_size: int,
+    ) -> dict[str, Any] | None:
+        """THOR adapts its forward pass to pre-tiled inputs.
+
+        The runtime config reads ``_input_prep_mode`` to skip internal
+        native-snap resizing when the batch tiler already sliced the input
+        into ``tile_size`` tiles.
+        """
+        cfg = dict(model_config or {})
+        cfg["_input_prep_mode"] = "tile"
+        cfg["_input_prep_tile_size"] = int(tile_size)
+        return cfg
 
     def describe(self) -> dict[str, Any]:
         return {

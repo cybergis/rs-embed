@@ -91,6 +91,9 @@ from .tools.runtime import (
     describe_model_cached as _describe_model_cached,
 )
 from .tools.runtime import (
+    model_manages_own_input_prep as _model_manages_own_input_prep,
+)
+from .tools.runtime import (
     reset_runtime as _reset_runtime_shared,
 )
 from .tools.runtime import (
@@ -103,19 +106,19 @@ from .tools.tiling import _resolve_input_prep_spec as _resolve_input_prep_spec
 # -----------------------------------------------------------------------------
 
 
-def _warn_gse_input_prep(model_n: str, input_prep: Any) -> None:
+def _warn_managed_input_prep(model_n: str, input_prep: Any) -> None:
     import warnings
 
-    if model_n != "gse":
+    if not _model_manages_own_input_prep(model_n):
         return
     # ``None`` is the unset/package-default sentinel; don't warn when the user
-    # made no explicit choice (gse always manages its own tiling regardless).
+    # made no explicit choice (the model manages its own tiling regardless).
     if input_prep is None:
         return
     if _resolve_input_prep_spec(input_prep).mode != "resize":
         warnings.warn(
-            "model='gse' manages spatial tiling automatically based on request size; "
-            "input_prep is ignored.",
+            f"model='{model_n}' manages spatial tiling automatically based on "
+            "request size; input_prep is ignored.",
             UserWarning,
             stacklevel=3,
         )
@@ -268,7 +271,7 @@ def get_embedding(
     >>> emb = get_embedding("dofa", spatial=point, temporal=t, variant="large")
     """
     model_config = model_kwargs or None
-    _warn_gse_input_prep(_normalize_model_name(model), input_prep)
+    _warn_managed_input_prep(_normalize_model_name(model), input_prep)
     _validate_specs(spatial=spatial, temporal=temporal, output=output)
     sensor_eff = _resolve_sensor_for_model(
         _normalize_model_name(model),
@@ -362,7 +365,7 @@ def get_embeddings_batch(
     >>> embs = get_embeddings_batch("dofa", spatials=points, temporal=t, variant="large")
     """
     model_config = model_kwargs or None
-    _warn_gse_input_prep(_normalize_model_name(model), input_prep)
+    _warn_managed_input_prep(_normalize_model_name(model), input_prep)
     _validate_spatial_list(spatials=spatials, temporal=temporal, output=output)
     sensor_eff = _resolve_sensor_for_model(
         _normalize_model_name(model),
@@ -474,11 +477,12 @@ def export_batch(
     if not isinstance(spatials, list) or len(spatials) == 0:
         raise ModelError("spatials must be a non-empty list[SpatialSpec].")
 
-    if _resolve_input_prep_spec(config.input_prep).mode != "resize":
-        for _m in models:
-            if _normalize_model_name(_m if isinstance(_m, str) else _m.name) == "gse":
-                _warn_gse_input_prep("gse", config.input_prep)
-                break
+    if config.input_prep is not None:
+        model_names_n = {
+            _normalize_model_name(_m if isinstance(_m, str) else _m.name) for _m in models
+        }
+        for _model_n in sorted(model_names_n):
+            _warn_managed_input_prep(_model_n, config.input_prep)
 
     backend_n = _normalize_backend_name(backend)
     device_n = _normalize_device_name(device)

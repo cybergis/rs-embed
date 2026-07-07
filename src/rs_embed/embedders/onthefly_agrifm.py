@@ -24,6 +24,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers import ProviderBase
 from ..providers.fetch import (
     count_distinct_frames,
@@ -607,6 +608,15 @@ class AgriFMEmbedder(EmbedderBase):
         n_frames=8,
         image_size=224,
         expected_channels=10,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:

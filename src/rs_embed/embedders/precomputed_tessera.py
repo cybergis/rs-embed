@@ -19,6 +19,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta
 
@@ -288,6 +289,13 @@ def _warn_projection_once(tile_crs: str) -> None:
 class TesseraEmbedder(EmbedderBase):
     _is_precomputed = True
     DEFAULT_BATCH_WORKERS = 4
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        batch_fetch_metas=True,
+        model_config_batch_inputs=True,
+    )
 
     def describe(self) -> dict[str, Any]:
         return {

@@ -25,7 +25,7 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import get_embedder_cls
 from ..core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..core.types import FetchResult
+from ..core.types import FetchResult, declared_capability
 from ..core.validation import assert_supported
 from ..providers import ProviderBase, get_provider, has_provider
 from ..providers.fetch import fetch_sensor_patch_chw as _fetch_sensor_patch_chw
@@ -84,17 +84,29 @@ class _EmbeddingRequestContext:
     lock: Any
 
 
-_IMAGE_LEVEL_VIT_GRID_MODELS = frozenset(
-    {
-        "satmae",
-        "satmaepp",
-        "scalemae",
-    }
-)
+def _embedder_cls_flag(model_n: str, flag: str) -> bool:
+    """Read a boolean model-policy flag from the registered embedder class.
+
+    Unknown model names resolve to ``False`` (matching the old name-set
+    behavior); the invalid name itself is reported by the embedder lookup on
+    the request path proper.
+    """
+    try:
+        cls = get_embedder_cls(normalize_model_name(model_n))
+    except ModelError:
+        return False
+    return bool(getattr(cls, flag, False))
 
 
+@lru_cache(maxsize=64)
 def _is_image_level_vit_grid_model(model_n: str) -> bool:
-    return str(model_n).strip().lower() in _IMAGE_LEVEL_VIT_GRID_MODELS
+    return _embedder_cls_flag(model_n, "_image_level_vit_patch_grid")
+
+
+@lru_cache(maxsize=64)
+def model_manages_own_input_prep(model_n: str) -> bool:
+    """True when the model's embedder manages spatial tiling itself (input_prep ignored)."""
+    return _embedder_cls_flag(model_n, "_manages_own_input_prep")
 
 
 def _warn_image_level_vit_tiled_grid_seam(model_l: str) -> None:
@@ -217,16 +229,22 @@ def reset_runtime() -> dict[str, int]:
     import_errors_cleared = len(_runtime_registry._REGISTRY_IMPORT_ERRORS)
     _runtime_registry._REGISTRY_IMPORT_ERRORS.clear()
 
-    get_embedder_bundle_cached.cache_clear()
-    describe_model_cached.cache_clear()
-    _embedder_method_accepts_parameter.cache_clear()
-    embedder_accepts_input_chw.cache_clear()
-    embedder_accepts_model_config.cache_clear()
+    runtime_caches = (
+        get_embedder_bundle_cached,
+        describe_model_cached,
+        _embedder_method_accepts_parameter,
+        embedder_accepts_input_chw,
+        embedder_accepts_model_config,
+        _is_image_level_vit_grid_model,
+        model_manages_own_input_prep,
+    )
+    for cache in runtime_caches:
+        cache.cache_clear()
     embedder_module_caches_cleared = _clear_loaded_embedder_module_caches()
 
     return {
         "import_errors_cleared": int(import_errors_cleared),
-        "runtime_caches_cleared": 5,
+        "runtime_caches_cleared": len(runtime_caches),
         "embedder_module_caches_cleared": int(embedder_module_caches_cleared),
     }
 
@@ -290,6 +308,9 @@ def _embedder_method_accepts_parameter(
     method_name: str,
     param_name: str,
 ) -> bool:
+    declared = declared_capability(embedder_cls, method_name, param_name)
+    if declared is not None:
+        return declared
     fn = getattr(embedder_cls, method_name, None)
     if fn is None:
         return False

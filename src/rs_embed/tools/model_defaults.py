@@ -92,17 +92,6 @@ def apply_fetch_to_sensor(sensor: SensorSpec, fetch: FetchSpec | None) -> Sensor
 
 
 def _fetch_override_sensor_for_model(model_id: str) -> SensorSpec | None:
-    model_key = str(model_id).strip().lower()
-    if model_key == "gse":
-        return SensorSpec(
-            collection="GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL",
-            bands=tuple(),
-            scale_m=10,
-            cloudy_pct=100,
-            composite="mosaic",
-            fill_value=-9999.0,
-        )
-
     desc = _probe_model_desc(model_id)
     source = str(desc.get("source", "")).strip()
     defaults = desc.get("defaults", {}) or {}

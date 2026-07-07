@@ -40,6 +40,86 @@ class InferenceStrategy(enum.Enum):
     SINGLE = "single"
 
 
+# ── Embedder capabilities ─────────────────────────────────────────
+
+
+@dataclass(frozen=True)
+class EmbedderCapabilities:
+    """Explicit pipeline-routing capabilities declared on an embedder class.
+
+    Each field answers "does this embedder's method accept this optional
+    parameter?" — the questions the runtime needs to route requests
+    (prefetched inputs, fetch metadata, model-specific settings).
+
+    Declared as a class attribute (``capabilities = EmbedderCapabilities(...)``)
+    this is the single source of truth for routing.  Embedder classes that do
+    not declare it (``capabilities = None``) fall back to signature
+    introspection for backward compatibility; all in-tree embedders must
+    declare it, and a contract test asserts the declaration matches the
+    actual method signatures.
+
+    Attributes
+    ----------
+    input_chw : bool
+        ``get_embedding()`` accepts a prefetched ``input_chw`` array.
+    fetch_meta : bool
+        ``get_embedding()`` accepts ``fetch_meta`` (e.g. the fetch-square
+        ``roi_window_geo`` crop window).
+    fetch_temporal_mode : bool
+        ``fetch_input()`` accepts a ``temporal_mode`` override.
+    batch_fetch_metas : bool
+        ``get_embeddings_batch_from_inputs()`` accepts per-item
+        ``fetch_metas``.
+    model_config_single : bool
+        ``get_embedding()`` accepts ``model_config``.
+    model_config_batch : bool
+        ``get_embeddings_batch()`` accepts ``model_config``.
+    model_config_batch_inputs : bool
+        ``get_embeddings_batch_from_inputs()`` accepts ``model_config``.
+    """
+
+    input_chw: bool = False
+    fetch_meta: bool = False
+    fetch_temporal_mode: bool = False
+    batch_fetch_metas: bool = False
+    model_config_single: bool = False
+    model_config_batch: bool = False
+    model_config_batch_inputs: bool = False
+
+
+# Single source of the (method, parameter) -> capability-field mapping used by
+# both the runtime introspection helpers and the embedder base class.
+CAPABILITY_FIELD_BY_METHOD_PARAM: dict[tuple[str, str], str] = {
+    ("get_embedding", "input_chw"): "input_chw",
+    ("get_embedding", "fetch_meta"): "fetch_meta",
+    ("get_embedding", "model_config"): "model_config_single",
+    ("get_embeddings_batch", "model_config"): "model_config_batch",
+    ("get_embeddings_batch_from_inputs", "model_config"): "model_config_batch_inputs",
+    ("get_embeddings_batch_from_inputs", "fetch_metas"): "batch_fetch_metas",
+    ("fetch_input", "temporal_mode"): "fetch_temporal_mode",
+}
+
+
+def declared_capability(
+    embedder_cls: type,
+    method_name: str,
+    param_name: str,
+) -> bool | None:
+    """Return the declared capability for ``(method_name, param_name)``.
+
+    Returns ``None`` when the class declares no ``capabilities`` object or the
+    pair is not a known capability — callers then fall back to signature
+    introspection.
+    """
+    caps = getattr(embedder_cls, "capabilities", None)
+    if not isinstance(caps, EmbedderCapabilities):
+        return None
+    field = CAPABILITY_FIELD_BY_METHOD_PARAM.get((method_name, param_name))
+    if field is None:
+        return None
+    return bool(getattr(caps, field))
+
+
 # ── Fetch results ─────────────────────────────────────────────────
 
 
