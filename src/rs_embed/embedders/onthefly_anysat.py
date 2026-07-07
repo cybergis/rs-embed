@@ -26,7 +26,7 @@ from ..providers.fetch import (
     frame_diversity_meta,
 )
 from ..providers.fetch import (
-    fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+    fetch_multiframe_patch_raw_tchw as _fetch_multiframe_patch_raw_tchw,
 )
 from ..providers.resolution import (
     is_provider_backend,
@@ -237,7 +237,7 @@ def _fetch_s2_10_raw_tchw(
     composite: str = "median",
     fill_value: float = 0.0,
 ) -> np.ndarray:
-    raw = _fetch_s2_multiframe_raw_tchw(
+    raw = _fetch_multiframe_patch_raw_tchw(
         provider,
         spatial=spatial,
         temporal=temporal,
