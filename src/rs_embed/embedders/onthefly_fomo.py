@@ -20,6 +20,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers.resolution import (
     is_provider_backend,
 )
@@ -38,7 +39,6 @@ from ..tools.shape import (
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
-from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 from .onthefly_terramind import _fetch_s2_sr_12_raw_chw

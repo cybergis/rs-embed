@@ -19,6 +19,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers import ProviderBase
 from ..providers.fetch import (
     count_distinct_frames,
@@ -46,7 +47,6 @@ from ..tools.shape import (
 )
 from ..tools.spatial import square_spatial
 from ..tools.temporal import temporal_frame_midpoints
-from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range

@@ -21,6 +21,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers.fetch import (
     fetch_s2_rgb_chw as _fetch_s2_rgb_chw,
 )
@@ -42,7 +43,6 @@ from ..tools.shape import (
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
-from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range

@@ -18,8 +18,8 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-from ._vendor.copernicus_embed import CopernicusEmbedGeoTiff
 from ..core.types import EmbedderCapabilities
+from ._vendor.copernicus_embed import CopernicusEmbedGeoTiff
 from .base import EmbedderBase
 from .meta import build_meta
 

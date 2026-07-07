@@ -59,8 +59,7 @@ def test_declared_capabilities_match_signatures(embedder_cls):
         actual = _signature_accepts(embedder_cls, method_name, param_name)
         if declared is not None and declared != actual:
             mismatches.append(
-                f"{field}: declared={declared} but "
-                f"{method_name}({param_name}=...) accepts={actual}"
+                f"{field}: declared={declared} but {method_name}({param_name}=...) accepts={actual}"
             )
     assert not mismatches, (
         f"{embedder_cls.__name__} capability declaration drifted from its "

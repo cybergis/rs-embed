@@ -20,6 +20,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers import ProviderBase
 
 # -----------------------------
@@ -41,7 +42,6 @@ from ..tools.shape import (
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
-from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 

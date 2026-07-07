@@ -88,10 +88,10 @@ from .tools.runtime import (
     provider_factory_for_backend,
 )
 from .tools.runtime import (
-    model_manages_own_input_prep as _model_manages_own_input_prep,
+    describe_model_cached as _describe_model_cached,
 )
 from .tools.runtime import (
-    describe_model_cached as _describe_model_cached,
+    model_manages_own_input_prep as _model_manages_own_input_prep,
 )
 from .tools.runtime import (
     reset_runtime as _reset_runtime_shared,
