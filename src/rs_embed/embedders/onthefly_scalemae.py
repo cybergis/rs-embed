@@ -789,9 +789,13 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                     device=dev,
                     input_res_m=chunk_res,
                 )
+                # The batch forward returns one chunk-level extra dict.
+                chunk_extras = [chunk_extra] * len(chunk_idx)
             except Exception as _e:
+                # Per-item fallback: keep each item's own extra (input_res_m
+                # differs per point, so the extras genuinely differ).
                 chunk_outs = []
-                chunk_extra = {}
+                chunk_extras = []
                 for rgb_u8, input_res_m in zip(chunk_rgb, chunk_res, strict=True):
                     o1, e1 = _scalemae_forward_tokens_or_vec(
                         model,
@@ -801,7 +805,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                         input_res_m=float(input_res_m),
                     )
                     chunk_outs.append(o1)
-                    chunk_extra = e1
+                    chunk_extras.append(e1)
 
             if len(chunk_outs) != len(chunk_idx):
                 raise ModelError(
@@ -820,7 +824,7 @@ class ScaleMAERGBEmbedder(EmbedderBase):
                     source=sensor.collection,
                     extra={
                         "used_scale_m": float(sensor.scale_m),
-                        **chunk_extra,
+                        **chunk_extras[j],
                         "input_res_m": float(chunk_res[j]),
                         "out_shape": tuple(o.shape),
                         "batch_infer": True,
