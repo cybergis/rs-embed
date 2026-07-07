@@ -9,7 +9,6 @@ from ..core.embedding import Embedding
 from ..core.specs import ModelInputSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import EmbedderCapabilities, FetchResult, declared_capability
 from ..providers.base import ProviderBase
-from ..tools.shape import roi_is_full
 from ..tools.spatial import FULL_WINDOW, square_spatial
 
 
@@ -157,8 +156,9 @@ class EmbedderBase:
 
         from ..providers.fetch import (
             fetch_collection_patch_chw,
-            fetch_s2_multiframe_raw_tchw,
+            fetch_multiframe_patch_raw_tchw,
         )
+        from ..tools.shape import roi_fetch_meta
         from .meta import temporal_to_range
 
         # Embedder entry points resolve temporal via temporal_to_range (None ->
@@ -166,8 +166,11 @@ class EmbedderBase:
         # so normalize here too instead of raising on None / fetching unfiltered.
         temporal = temporal_to_range(temporal)
 
+        # The spec's temporal_mode selects single-composite vs. equal-divided
+        # time-series fetch; both are collection-agnostic and fully driven by
+        # the resolved SensorSpec.
         if spec.temporal_mode == "multi":
-            raw = fetch_s2_multiframe_raw_tchw(
+            raw = fetch_multiframe_patch_raw_tchw(
                 provider,
                 spatial=spatial,
                 temporal=temporal,
@@ -192,8 +195,7 @@ class EmbedderBase:
                 fill_value=fetch_sensor.fill_value,
             )
 
-        meta: dict[str, Any] = {} if roi_is_full(geo_roi) else {"roi_window_geo": geo_roi}
-        return FetchResult(data=raw, meta=meta)
+        return FetchResult(data=raw, meta=roi_fetch_meta(geo_roi) or {})
 
     def tiled_dispatch_model_config(
         self,
