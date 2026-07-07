@@ -156,8 +156,8 @@ class PrefetchManager:
         """
         from ..tools.normalization import normalize_model_name
         from ..tools.runtime import (
-            _embedder_method_accepts_parameter,
             _overrides_base_method,
+            embedder_honors_fetch_meta,
             get_embedder_bundle_cached,
         )
         from ..tools.serialization import sensor_cache_key
@@ -181,7 +181,7 @@ class PrefetchManager:
             )
             meta_safe_by_key[fetch_key] = meta_safe_by_key.get(
                 fetch_key, True
-            ) and _embedder_method_accepts_parameter(type(embedder), "get_embedding", "fetch_meta")
+            ) and embedder_honors_fetch_meta(type(embedder))
             # A merged fetch group may represent a union of channels needed by
             # multiple models. Model-specific fetch_input() implementations
             # generally return only that model's own contract, so using one of

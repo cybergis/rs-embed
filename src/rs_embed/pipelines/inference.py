@@ -644,6 +644,120 @@ class InferenceEngine:
             on_done(i)
         return out
 
+    def _dispatch_model_tiers(
+        self,
+        *,
+        idxs: list[int],
+        spatials: list[SpatialSpec],
+        temporal: TemporalSpec | None,
+        sensor: SensorSpec | None,
+        ctx: _ModelContext,
+        backend: str,
+        model_name: str,
+        model_config: dict[str, Any] | None,
+        get_input_fn: Callable[[int], np.ndarray],
+        get_fetch_meta_fn: Callable[[int], dict[str, Any] | None] | None,
+        prefer_batch: bool,
+        use_lock: bool,
+        infer_one_fn: Callable[[int], Embedding],
+        input_prep_resolved: Any,
+        explicit_nonresize: bool,
+        on_done: Callable[[int], None],
+    ) -> dict[int, TaskResult]:
+        """Run the tiered batch/single dispatch for one model over *idxs*.
+
+        Single implementation of the tier ladder shared by per-item chunk
+        inference (:meth:`infer_chunk`) and combined-export model inference
+        (:meth:`infer_model`):
+
+        1. batch with prefetched inputs,
+        2. batch without provider inputs,
+        3. tiled batch (explicit tile mode only),
+        4. per-point fallback for whatever the batch tiers did not finish.
+        """
+        cfg = self.config
+        out: dict[int, TaskResult] = {}
+        can_batch_prefetched, can_batch_no_input, can_batch_tiled = self._evaluate_batch_capability(
+            embedder=ctx.embedder,
+            needs_provider_input=ctx.needs_provider_input,
+            sensor=sensor,
+            skey=ctx.skey,
+            prefer_batch=prefer_batch,
+            allow_nonresize=not explicit_nonresize,
+            input_prep_mode=input_prep_resolved.mode,
+        )
+
+        batch_succeeded = False
+        if can_batch_prefetched:
+            prefetched_out, batch_succeeded = self._run_batch_prefetched(
+                idxs=idxs,
+                spatials=spatials,
+                temporal=temporal,
+                sensor=sensor,
+                embedder=ctx.embedder,
+                lock=ctx.lock,
+                backend=backend,
+                get_input_fn=get_input_fn,
+                batch_size=cfg.effective_infer_batch_size,
+                continue_on_error=cfg.continue_on_error,
+                on_done=on_done,
+                use_lock=use_lock,
+                model_name=model_name,
+                model_config=model_config,
+                get_fetch_meta_fn=get_fetch_meta_fn,
+            )
+            out.update(prefetched_out)
+
+        if not batch_succeeded and can_batch_no_input:
+            batch_out, batch_succeeded = self._run_batch_no_input(
+                idxs=idxs,
+                spatials=spatials,
+                temporal=temporal,
+                sensor=sensor,
+                embedder=ctx.embedder,
+                lock=ctx.lock,
+                backend=backend,
+                batch_size=cfg.effective_infer_batch_size,
+                on_done=on_done,
+                use_lock=use_lock,
+                model_name=model_name,
+                model_config=model_config,
+            )
+            out.update(batch_out)
+
+        if not batch_succeeded and can_batch_tiled:
+            tiled_out, batch_succeeded = self._run_batch_tiled(
+                idxs=idxs,
+                spatials=spatials,
+                temporal=temporal,
+                sensor=sensor,
+                embedder=ctx.embedder,
+                lock=ctx.lock,
+                backend=backend,
+                get_input_fn=get_input_fn,
+                batch_size=cfg.effective_infer_batch_size,
+                continue_on_error=cfg.continue_on_error,
+                on_done=on_done,
+                use_lock=use_lock,
+                model_name=model_name,
+                model_config=model_config,
+                input_prep_resolved=input_prep_resolved,
+                get_fetch_meta_fn=get_fetch_meta_fn,
+            )
+            out.update(tiled_out)
+
+        if not batch_succeeded:
+            fallback_out = self._run_single_fallback(
+                idxs=idxs,
+                already_done=set(out.keys()),
+                infer_one_fn=infer_one_fn,
+                continue_on_error=cfg.continue_on_error,
+                on_done=on_done,
+            )
+            out.update(fallback_out)
+
+        return out
+
     # ── chunk inference (multi-point × multi-model) ────────────────
 
     def infer_chunk(
@@ -663,8 +777,6 @@ class InferenceEngine:
         Returns ``{(point_idx, model_name): TaskResult}``.
         """
         out: dict[tuple[int, str], TaskResult] = {}
-        cfg = self.config
-        infer_bs = cfg.effective_infer_batch_size
 
         for mc in models:
             ctx = self._resolve_model_context(
@@ -724,91 +836,26 @@ class InferenceEngine:
                 except Exception as _e:
                     pass
 
-            can_batch_prefetched, can_batch_no_input, can_batch_tiled = (
-                self._evaluate_batch_capability(
-                    embedder=ctx.embedder,
-                    needs_provider_input=ctx.needs_provider_input,
-                    sensor=mc.sensor,
-                    skey=ctx.skey,
-                    prefer_batch=(self.prefer_batch or mc.is_precomputed),
-                    allow_nonresize=not explicit_nonresize,
-                    input_prep_mode=input_prep_resolved.mode,
-                )
+            model_out = self._dispatch_model_tiers(
+                idxs=idxs,
+                spatials=spatials,
+                temporal=temporal,
+                sensor=mc.sensor,
+                ctx=ctx,
+                backend=mc.backend,
+                model_name=mc.name,
+                model_config=mc.model_config,
+                get_input_fn=_get_input,
+                get_fetch_meta_fn=_get_fmeta,
+                prefer_batch=(self.prefer_batch or mc.is_precomputed),
+                use_lock=False,
+                infer_one_fn=_single,
+                input_prep_resolved=input_prep_resolved,
+                explicit_nonresize=explicit_nonresize,
+                on_done=_mark_done,
             )
-
-            batch_succeeded = False
-            if can_batch_prefetched:
-                prefetched_out, batch_succeeded = self._run_batch_prefetched(
-                    idxs=idxs,
-                    spatials=spatials,
-                    temporal=temporal,
-                    sensor=mc.sensor,
-                    embedder=ctx.embedder,
-                    lock=ctx.lock,
-                    backend=mc.backend,
-                    get_input_fn=_get_input,
-                    batch_size=infer_bs,
-                    continue_on_error=cfg.continue_on_error,
-                    on_done=_mark_done,
-                    use_lock=False,
-                    model_name=mc.name,
-                    model_config=mc.model_config,
-                    get_fetch_meta_fn=_get_fmeta,
-                )
-                for i, rec in prefetched_out.items():
-                    out[(i, mc.name)] = rec
-
-            if not batch_succeeded and can_batch_no_input:
-                batch_out, batch_succeeded = self._run_batch_no_input(
-                    idxs=idxs,
-                    spatials=spatials,
-                    temporal=temporal,
-                    sensor=mc.sensor,
-                    embedder=ctx.embedder,
-                    lock=ctx.lock,
-                    backend=mc.backend,
-                    batch_size=infer_bs,
-                    on_done=_mark_done,
-                    use_lock=False,
-                    model_name=mc.name,
-                    model_config=mc.model_config,
-                )
-                for i, rec in batch_out.items():
-                    out[(i, mc.name)] = rec
-
-            if not batch_succeeded and can_batch_tiled:
-                tiled_out, batch_succeeded = self._run_batch_tiled(
-                    idxs=idxs,
-                    spatials=spatials,
-                    temporal=temporal,
-                    sensor=mc.sensor,
-                    embedder=ctx.embedder,
-                    lock=ctx.lock,
-                    backend=mc.backend,
-                    get_input_fn=_get_input,
-                    batch_size=infer_bs,
-                    continue_on_error=cfg.continue_on_error,
-                    on_done=_mark_done,
-                    use_lock=False,
-                    model_name=mc.name,
-                    model_config=mc.model_config,
-                    input_prep_resolved=input_prep_resolved,
-                    get_fetch_meta_fn=_get_fmeta,
-                )
-                for i, rec in tiled_out.items():
-                    out[(i, mc.name)] = rec
-
-            if not batch_succeeded:
-                already_done = {i for i in idxs if (i, mc.name) in out}
-                fallback_out = self._run_single_fallback(
-                    idxs=idxs,
-                    already_done=already_done,
-                    infer_one_fn=_single,
-                    continue_on_error=cfg.continue_on_error,
-                    on_done=_mark_done,
-                )
-                for i, rec in fallback_out.items():
-                    out[(i, mc.name)] = rec
+            for i, rec in model_out.items():
+                out[(i, mc.name)] = rec
 
         return out
 
@@ -857,8 +904,6 @@ class InferenceEngine:
         """
         cfg = self.config
         n = len(spatials)
-        infer_bs = cfg.effective_infer_batch_size
-        out: dict[int, TaskResult] = {}
         done: set[int] = set()
 
         ctx = self._resolve_model_context(
@@ -920,94 +965,24 @@ class InferenceEngine:
                 backoff_s=cfg.retry_backoff_s,
             )
 
-        can_batch_prefetched, can_batch, can_batch_tiled = self._evaluate_batch_capability(
-            embedder=ctx.embedder,
-            needs_provider_input=ctx.needs_provider_input,
+        return self._dispatch_model_tiers(
+            idxs=list(range(n)),
+            spatials=spatials,
+            temporal=temporal,
             sensor=sensor,
-            skey=ctx.skey,
+            ctx=ctx,
+            backend=model_backend,
+            model_name=model_name,
+            model_config=model_config,
+            get_input_fn=lambda i: get_input_fn(i, ctx.skey, sensor),
+            get_fetch_meta_fn=_batch_fmeta_fn,
             prefer_batch=(allow_batch and prefer_batch),
-            allow_nonresize=not explicit_nonresize,
-            input_prep_mode=input_prep_resolved.mode,
+            use_lock=True,
+            infer_one_fn=_infer_one_with_retry,
+            input_prep_resolved=input_prep_resolved,
+            explicit_nonresize=explicit_nonresize,
+            on_done=_mark_done,
         )
-
-        batch_succeeded = False
-        all_idxs = list(range(n))
-
-        # Tier 1: batch with prefetched inputs (resize/pass-through mode)
-        if can_batch_prefetched:
-            assert ctx.skey is not None and sensor is not None
-            prefetched_out, batch_succeeded = self._run_batch_prefetched(
-                idxs=all_idxs,
-                spatials=spatials,
-                temporal=temporal,
-                sensor=sensor,
-                embedder=ctx.embedder,
-                lock=ctx.lock,
-                backend=model_backend,
-                get_input_fn=lambda i: get_input_fn(i, ctx.skey, sensor),
-                batch_size=infer_bs,
-                continue_on_error=cfg.continue_on_error,
-                on_done=_mark_done,
-                use_lock=True,
-                model_name=model_name,
-                model_config=model_config,
-                get_fetch_meta_fn=_batch_fmeta_fn,
-            )
-            out.update(prefetched_out)
-
-        # Tier 2: batch without inputs
-        if not batch_succeeded and can_batch:
-            batch_out, batch_succeeded = self._run_batch_no_input(
-                idxs=all_idxs,
-                spatials=spatials,
-                temporal=temporal,
-                sensor=sensor,
-                embedder=ctx.embedder,
-                lock=ctx.lock,
-                backend=model_backend,
-                batch_size=infer_bs,
-                on_done=_mark_done,
-                use_lock=True,
-                model_name=model_name,
-                model_config=model_config,
-            )
-            out.update(batch_out)
-
-        # Tier 1.5: tiled batch — tile each image then batch all tiles together
-        if not batch_succeeded and can_batch_tiled:
-            assert ctx.skey is not None and sensor is not None
-            tiled_out, batch_succeeded = self._run_batch_tiled(
-                idxs=all_idxs,
-                spatials=spatials,
-                temporal=temporal,
-                sensor=sensor,
-                embedder=ctx.embedder,
-                lock=ctx.lock,
-                backend=model_backend,
-                get_input_fn=lambda i: get_input_fn(i, ctx.skey, sensor),
-                batch_size=infer_bs,
-                continue_on_error=cfg.continue_on_error,
-                on_done=_mark_done,
-                use_lock=True,
-                model_name=model_name,
-                model_config=model_config,
-                input_prep_resolved=input_prep_resolved,
-                get_fetch_meta_fn=_batch_fmeta_fn,
-            )
-            out.update(tiled_out)
-
-        # Tier 3: single-item fallback
-        if not batch_succeeded:
-            fallback_out = self._run_single_fallback(
-                idxs=all_idxs,
-                already_done=done,
-                infer_one_fn=_infer_one_with_retry,
-                continue_on_error=cfg.continue_on_error,
-                on_done=_mark_done,
-            )
-            out.update(fallback_out)
-
-        return out
 
 
 # ── module-level helpers ───────────────────────────────────────────
