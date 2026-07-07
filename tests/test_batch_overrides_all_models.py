@@ -9,6 +9,7 @@ from rs_embed.embedders.onthefly_fomo import FoMoEmbedder
 from rs_embed.embedders.onthefly_galileo import GalileoEmbedder
 from rs_embed.embedders.onthefly_prithvi import PrithviEOV2S2_6B_Embedder
 from rs_embed.embedders.onthefly_remoteclip import RemoteCLIPS2RGBEmbedder
+from rs_embed.embedders.onthefly_satmaepp import SatMAEPPEmbedder
 from rs_embed.embedders.onthefly_satvision_toa import SatVisionTOAEmbedder
 from rs_embed.embedders.onthefly_scalemae import ScaleMAERGBEmbedder
 from rs_embed.embedders.onthefly_terrafm import TerraFMBEmbedder
@@ -746,3 +747,88 @@ def test_precomputed_batch_overrides_call_single_embedding(monkeypatch):
         backend="local",
     )
     assert len(out_tes) == 2
+
+
+def test_scalemae_batch_fallback_keeps_per_item_extra_meta(monkeypatch):
+    """Regression (review B1): the per-item fallback used to overwrite
+    ``chunk_extra`` each iteration, stamping every point in the chunk with the
+    LAST point's extra meta. Each embedding must keep its own."""
+    import rs_embed.embedders.onthefly_scalemae as sm
+
+    emb = ScaleMAERGBEmbedder()
+    monkeypatch.setenv("RS_EMBED_SCALEMAE_FETCH_WORKERS", "1")
+    monkeypatch.setattr(emb, "_get_provider", lambda _backend: object())
+
+    def _fake_fetch(*, spatial, temporal, sensor, out_size, provider):
+        return np.full((11, 13, 3), int(spatial.lon) + 10, dtype=np.uint8)
+
+    def _fake_load(*, model_id, device):
+        return object(), {"device": "cpu"}
+
+    def _boom_batch(model, rgb_u8_batch, *, image_size, device, input_res_m):
+        raise RuntimeError("batch forward unavailable")
+
+    def _fake_single(model, rgb_u8, *, image_size, device, input_res_m):
+        val = float(rgb_u8[0, 0, 0])
+        return np.full((4, 2), val, dtype=np.float32), {
+            "tokens_kind": "tokens_forward",
+            "marker": val,
+        }
+
+    monkeypatch.setattr(sm, "fetch_s2_rgb_u8_from_provider", _fake_fetch)
+    monkeypatch.setattr(sm, "_load_scalemae", _fake_load)
+    monkeypatch.setattr(sm, "_scalemae_forward_tokens_or_vec_batch", _boom_batch)
+    monkeypatch.setattr(sm, "_scalemae_forward_tokens_or_vec", _fake_single)
+
+    out = emb.get_embeddings_batch(
+        spatials=_spatials(3),
+        temporal=TemporalSpec.year(2020),
+        output=OutputSpec.pooled(),
+        backend="gee",
+    )
+
+    assert [float(e.data[0]) for e in out] == [10.0, 11.0, 12.0]
+    # Each point keeps ITS OWN extra, not the last point's.
+    assert [e.meta["marker"] for e in out] == [10.0, 11.0, 12.0]
+
+
+def test_satmaepp_batch_outputs_align_with_spatials(monkeypatch):
+    """Regression (review B2): the batch loop used to filter the fetched slice
+    (``if x is not None``) before the forward while re-associating results by
+    position — any dropped item would silently shift every later embedding
+    onto the wrong spatial. Lock the positional alignment and that the
+    forward receives the full unfiltered slice."""
+    import rs_embed.embedders.onthefly_satmaepp as satpp
+
+    emb = SatMAEPPEmbedder()
+    monkeypatch.setenv("RS_EMBED_SATMAEPP_FETCH_WORKERS", "1")
+    monkeypatch.setattr(emb, "_get_provider", lambda _backend: object())
+
+    def _fake_fetch(*, spatial, temporal, sensor, out_size, provider):
+        return np.full((11, 13, 3), int(spatial.lon) + 10, dtype=np.uint8)
+
+    def _fake_load(*, model_id, device):
+        return object(), {"device": "cpu"}
+
+    slice_sizes: list[int] = []
+
+    def _fake_forward_batch(model, rgb_u8_batch, *, image_size, device, model_id):
+        slice_sizes.append(len(rgb_u8_batch))
+        return [
+            np.full((4, 2), float(rgb_u8[0, 0, 0]), dtype=np.float32) for rgb_u8 in rgb_u8_batch
+        ]
+
+    monkeypatch.setattr(satpp, "fetch_s2_rgb_u8_from_provider", _fake_fetch)
+    monkeypatch.setattr(satpp, "_load_satmaepp", _fake_load)
+    monkeypatch.setattr(satpp, "_satmaepp_forward_tokens_batch", _fake_forward_batch)
+
+    spatials = _spatials(4)
+    out = emb.get_embeddings_batch(
+        spatials=spatials,
+        temporal=TemporalSpec.year(2020),
+        output=OutputSpec.pooled(),
+        backend="gee",
+    )
+
+    assert sum(slice_sizes) == len(spatials)
+    assert [float(e.data[0]) for e in out] == [10.0, 11.0, 12.0, 13.0]

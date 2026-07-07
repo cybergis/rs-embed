@@ -753,10 +753,12 @@ class SatMAEPPEmbedder(EmbedderBase):
 
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)
-            rgb_batch = [x for x in rgb_u8_all[s0:s1] if x is not None]
+            # Feed the slice as-is: square_fetch_batch guarantees no None, and
+            # results are re-associated positionally (i = s0 + j) below, so any
+            # filtering here would silently misalign outputs with spatials.
             toks_batch = _satmaepp_forward_tokens_batch(
                 model,
-                rgb_batch,
+                rgb_u8_all[s0:s1],
                 image_size=image_size,
                 device=dev,
                 model_id=model_id,
