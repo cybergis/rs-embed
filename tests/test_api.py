@@ -257,7 +257,7 @@ def test_reset_runtime_clears_runtime_and_embedder_module_caches(monkeypatch):
     summary = reset_runtime()
 
     assert summary["import_errors_cleared"] == 1
-    assert summary["runtime_caches_cleared"] == 5
+    assert summary["runtime_caches_cleared"] == 7
     assert summary["embedder_module_caches_cleared"] >= 1
     assert rt.get_embedder_bundle_cached.cache_info().currsize == 0
     assert rt.embedder_accepts_input_chw.cache_info().currsize == 0

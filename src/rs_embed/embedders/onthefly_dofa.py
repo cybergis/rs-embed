@@ -41,6 +41,7 @@ from ..tools.shape import (
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from ._vendor.dofa_vit import vit_base_patch16, vit_large_patch16
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -655,6 +656,17 @@ class DOFAEmbedder(EmbedderBase):
         cloudy_pct=30,
         image_size=224,
         expected_channels=9,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:

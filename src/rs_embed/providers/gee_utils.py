@@ -384,7 +384,7 @@ def _format_s1_empty_collection_message(
         f"time=({temporal.start!r}, {temporal.end!r}) "
         f"filters=[{details}]. "
         f"requested_iw={require_iw} relax_iw_on_empty={relax_iw_on_empty}. "
-        "TerraFM S1 expects dual-pol VV/VH input; try a wider time window or a different AOI."
+        "This request needs dual-pol (VV/VH) S1 scenes; try a wider time window or a different AOI."
     )
 
 

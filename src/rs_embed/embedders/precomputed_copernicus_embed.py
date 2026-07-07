@@ -19,6 +19,7 @@ from ..core.specs import (
     TemporalSpec,
 )
 from ._vendor.copernicus_embed import CopernicusEmbedGeoTiff
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta
 
@@ -101,6 +102,13 @@ class CopernicusEmbedder(EmbedderBase):
     """
 
     DEFAULT_BATCH_WORKERS = 4
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        batch_fetch_metas=True,
+        model_config_batch_inputs=True,
+    )
 
     def describe(self) -> dict[str, Any]:
         return {

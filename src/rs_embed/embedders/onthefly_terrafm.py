@@ -20,7 +20,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-from ..core.types import FetchResult
+from ..core.types import EmbedderCapabilities, FetchResult
 from ..providers import ProviderBase
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
@@ -435,6 +435,14 @@ class TerraFMBEmbedder(EmbedderBase):
     DEFAULT_FETCH_WORKERS = 8
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 64
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+    )
 
     def describe(self) -> dict[str, Any]:
         return {

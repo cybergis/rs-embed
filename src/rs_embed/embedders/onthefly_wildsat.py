@@ -42,6 +42,7 @@ from ..tools.shape import (
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
@@ -925,6 +926,17 @@ class WildSATEmbedder(EmbedderBase):
 
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
 
     def describe(self) -> dict[str, Any]:
         return {

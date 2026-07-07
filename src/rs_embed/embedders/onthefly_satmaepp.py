@@ -31,6 +31,7 @@ from ..tools.shape import (
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 from .onthefly_satmaepp_s2 import (
@@ -495,6 +496,9 @@ class SatMAEPPEmbedder(EmbedderBase):
     # SatMAE++ needs a square token grid → base.fetch_input enlarges a rectangular
     # ROI to a square of real imagery; the output is cropped back to the ROI.
     _requires_square_input = True
+    # Image-level ViT adapter: "grid" output is a patch-token grid, tiled
+    # mosaics of which can show seams (see resolve_model_aware_input_prep).
+    _image_level_vit_patch_grid = True
     DEFAULT_MODEL_ID = "MVRL/satmaepp_ViT-L_pretrain_fmow_rgb"
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
@@ -508,6 +512,17 @@ class SatMAEPPEmbedder(EmbedderBase):
         cloudy_pct=30,
         image_size=224,
         expected_channels=3,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:

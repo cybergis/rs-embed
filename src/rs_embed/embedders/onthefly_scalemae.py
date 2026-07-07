@@ -29,6 +29,7 @@ from ..tools.shape import (
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -575,6 +576,9 @@ class ScaleMAERGBEmbedder(EmbedderBase):
     # crop stays geometrically aligned. ImageNet normalization is kept — it matches
     # pretraining and is not optional.
     _requires_square_input = True
+    # Image-level ViT adapter: "grid" output is a patch-token grid, tiled
+    # mosaics of which can show seams (see resolve_model_aware_input_prep).
+    _image_level_vit_patch_grid = True
     DEFAULT_MODEL_ID = "MVRL/scalemae-vitlarge-800"
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
@@ -588,6 +592,14 @@ class ScaleMAERGBEmbedder(EmbedderBase):
         cloudy_pct=30,
         image_size=224,
         expected_channels=3,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
     )
 
     def describe(self) -> dict[str, Any]:

@@ -41,6 +41,7 @@ from ..tools.shape import (
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -576,6 +577,14 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         cloudy_pct=30,
         image_size=224,
         expected_channels=3,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
     )
 
     def describe(self) -> dict[str, Any]:

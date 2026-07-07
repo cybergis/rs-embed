@@ -47,6 +47,7 @@ from ..tools.shape import (
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 
@@ -607,6 +608,15 @@ class AgriFMEmbedder(EmbedderBase):
         n_frames=8,
         image_size=224,
         expected_channels=10,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:
