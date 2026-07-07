@@ -18,7 +18,7 @@ from ..providers import fetch as _providers_fetch
 from ..tools.manifest import summarize_status
 from ..tools.normalization import normalize_model_name
 from ..tools.runtime import (
-    _embedder_method_accepts_parameter,
+    fetch_embedder_input,
     get_embedder_bundle_cached,
     resolve_model_aware_input_prep,
     run_with_retry,
@@ -31,7 +31,6 @@ from ..tools.serialization import (
     sha1,
     utc_ts,
 )
-from ..tools.shape import square_fetch_request
 from ..tools.tiling import _call_embedder_get_embedding_with_input_prep
 
 
@@ -166,42 +165,27 @@ def build_one_point_payload(
                                 f"Missing provider factory for model={m}, index={point_index}, sensor={skey}"
                             )
                         prov = _get_provider()
+                        # Shared "fetch_input, else generic square fetch" path —
+                        # identical fetch geometry and temporal_mode forwarding
+                        # as the API prefetch (tools.runtime.fetch_embedder_input).
                         fetch_result = run_with_retry(
-                            lambda _p=prov, _ss=sspec, _embedder=embedder: _embedder.fetch_input(
-                                _p,
-                                spatial=spatial,
-                                temporal=temporal,
-                                sensor=_ss,
+                            lambda _p=prov, _ss=sspec, _embedder=embedder, _mcfg=model_config: (
+                                fetch_embedder_input(
+                                    embedder=_embedder,
+                                    provider=_p,
+                                    spatial=spatial,
+                                    temporal=temporal,
+                                    sensor=_ss,
+                                    model_config=_mcfg,
+                                    fetch_fn=fetch,
+                                )
                             ),
                             retries=max_retries,
                             backoff_s=retry_backoff_s,
                         )
-                        if fetch_result is not None:
-                            input_chw = np.asarray(fetch_result.data, dtype=np.float32)
-                            if fetch_result.meta:
-                                local_fetch_meta[skey] = jsonable(fetch_result.meta)
-                        else:
-                            # Generic fallback fetch-squares like every other
-                            # path when the embedder honors the crop-back window.
-                            fetch_spatial, sq_meta = (
-                                square_fetch_request(spatial)
-                                if _embedder_method_accepts_parameter(
-                                    type(embedder), "get_embedding", "fetch_meta"
-                                )
-                                else (spatial, {})
-                            )
-                            input_chw = run_with_retry(
-                                lambda _p=prov, _ss=sspec, _sp=fetch_spatial: fetch(
-                                    _p,
-                                    spatial=_sp,
-                                    temporal=temporal,
-                                    sensor=_ss,
-                                ),
-                                retries=max_retries,
-                                backoff_s=retry_backoff_s,
-                            )
-                            if sq_meta:
-                                local_fetch_meta[skey] = jsonable(sq_meta)
+                        input_chw = np.asarray(fetch_result.data, dtype=np.float32)
+                        if fetch_result.meta:
+                            local_fetch_meta[skey] = jsonable(fetch_result.meta)
                         local_inp[skey] = input_chw
 
                 report = input_reports.get((point_index, skey))
