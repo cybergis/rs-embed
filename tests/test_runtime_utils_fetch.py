@@ -77,11 +77,12 @@ def test_runtime_utils_fetch_multiframe_delegates_to_provider():
             assert isinstance(spatial, BBox)
             return np.ones((4, 3, 2, 5), dtype=np.float32)
 
-    out = ru.fetch_s2_multiframe_raw_tchw(
+    out = ru.fetch_multiframe_patch_raw_tchw(
         _FakeProvider(),
         spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
         temporal=TemporalSpec.range("2024-01-01", "2024-02-01"),
         bands=("B4", "B3", "B2"),
+        collection="COPERNICUS/S2_SR_HARMONIZED",
         n_frames=4,
     )
     assert out.shape == (4, 3, 2, 5)
@@ -230,11 +231,12 @@ def test_multiframe_fetch_warns_on_backfilled_frames():
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        ru.fetch_s2_multiframe_raw_tchw(
+        ru.fetch_multiframe_patch_raw_tchw(
             _FakeProvider(),
             spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
             temporal=TemporalSpec.range("2024-01-01", "2024-04-01"),
             bands=("B4", "B3", "B2"),
+            collection="COPERNICUS/S2_SR_HARMONIZED",
             n_frames=4,
         )
     msgs = [str(m.message) for m in w if issubclass(m.category, UserWarning)]
@@ -252,11 +254,12 @@ def test_multiframe_fetch_silent_when_all_frames_distinct():
 
     with warnings.catch_warnings(record=True) as w:
         warnings.simplefilter("always")
-        ru.fetch_s2_multiframe_raw_tchw(
+        ru.fetch_multiframe_patch_raw_tchw(
             _FakeProvider(),
             spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
             temporal=TemporalSpec.range("2024-01-01", "2024-04-01"),
             bands=("B4", "B3", "B2"),
+            collection="COPERNICUS/S2_SR_HARMONIZED",
             n_frames=4,
         )
     assert [m for m in w if "sub-window" in str(m.message)] == []

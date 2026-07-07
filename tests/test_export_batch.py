@@ -2829,7 +2829,7 @@ def test_export_batch_multiframe_prefetch_accepts_tchw_inputs(tmp_path, monkeypa
         "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
     )
     monkeypatch.setattr(
-        "rs_embed.providers.fetch.fetch_s2_multiframe_raw_tchw",
+        "rs_embed.providers.fetch.fetch_multiframe_patch_raw_tchw",
         lambda provider, **kwargs: np.stack(
             [
                 np.full((3, 6, 6), fill_value=float(t + 1), dtype=np.float32)

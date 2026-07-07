@@ -492,6 +492,75 @@ def _annotate_embedding_list(
     ]
 
 
+def embedder_honors_fetch_meta(embedder_cls: type) -> bool:
+    """True when ``get_embedding`` accepts ``fetch_meta`` (the crop-back window).
+
+    This is THE gate for generic fetch-squaring: enlarging a rectangular ROI
+    to a square fetch is only safe when the embedder will crop the output back
+    via ``fetch_meta['roi_window_geo']``.  Every pipeline path (API prefetch,
+    per-item sync fallback, PrefetchManager planning) must use this predicate.
+    """
+    return _embedder_method_accepts_parameter(embedder_cls, "get_embedding", "fetch_meta")
+
+
+def fetch_input_extras_from_model_config(
+    embedder_cls: type,
+    model_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Fetch-affecting ``fetch_input`` kwargs derived from *model_config*.
+
+    Forwarding these (e.g. ``temporal_mode``) makes every prefetch path fetch
+    the SAME input as the direct ``get_embedding`` path; without it a user's
+    ``temporal_mode="single"`` silently became the env/auto default.
+    """
+    extras: dict[str, Any] = {}
+    if model_config and _embedder_method_accepts_parameter(
+        embedder_cls, "fetch_input", "temporal_mode"
+    ):
+        tm = model_config.get("temporal_mode")
+        if tm is not None:
+            extras["temporal_mode"] = tm
+    return extras
+
+
+def fetch_embedder_input(
+    *,
+    embedder: Any,
+    provider: Any,
+    spatial: SpatialSpec,
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec,
+    model_config: dict[str, Any] | None = None,
+    fetch_fn: Callable[..., np.ndarray] | None = None,
+) -> FetchResult:
+    """The single "embedder ``fetch_input``, else generic square fetch" path.
+
+    Every pipeline that fetches provider input on behalf of an embedder goes
+    through here so the fetch geometry is identical everywhere: the embedder's
+    own ``fetch_input`` wins; the generic fallback enlarges the ROI to a
+    fetch-square exactly when :func:`embedder_honors_fetch_meta` says the
+    crop-back window will be honored.
+    """
+    from .shape import square_fetch_request
+
+    fr = embedder.fetch_input(
+        provider,
+        spatial=spatial,
+        temporal=temporal,
+        sensor=sensor,
+        **fetch_input_extras_from_model_config(type(embedder), model_config),
+    )
+    if fr is not None:
+        return fr
+    if embedder_honors_fetch_meta(type(embedder)):
+        fetch_spatial, fmeta = square_fetch_request(spatial)
+    else:
+        fetch_spatial, fmeta = spatial, {}
+    fn = fetch_fn or _fetch_sensor_patch_chw
+    raw = fn(provider, spatial=fetch_spatial, temporal=temporal, sensor=sensor)
+    return FetchResult(data=raw, meta=fmeta)
+
+
 def fetch_api_side_inputs(
     *,
     spatials: list[SpatialSpec],
@@ -537,50 +606,19 @@ def fetch_api_side_inputs(
     if callable(ensure_ready):
         run_with_retry(lambda: ensure_ready(), retries=0, backoff_s=0.0)
 
-    # Forward fetch-affecting model_config (e.g. temporal_mode) so the prefetch
-    # path fetches the SAME input as the direct get_embedding path. Without this
-    # the prefetch used fetch_input's defaults and silently ignored the user's
-    # config (e.g. temporal_mode="single" became multi via the env/auto default).
-    fetch_extra: dict[str, Any] = {}
-    if model_config and _embedder_method_accepts_parameter(
-        type(embedder), "fetch_input", "temporal_mode"
-    ):
-        tm = model_config.get("temporal_mode")
-        if tm is not None:
-            fetch_extra["temporal_mode"] = tm
-
-    # Use the embedder's fetch_input() when available; fall back to generic.
-    # The generic fallback fetch-squares like every other path (fetch_input's
-    # square_input=True default, PrefetchManager's square_fetch_keys) whenever
-    # the embedder honors the crop-back window via fetch_meta.
-    from .shape import square_fetch_request
-
-    square_generic = _embedder_method_accepts_parameter(
-        type(embedder), "get_embedding", "fetch_meta"
-    )
     results: list[FetchResult] = []
     for idx, spatial in enumerate(spatials):
         try:
-            fr = embedder.fetch_input(
-                provider,
-                spatial=spatial,
-                temporal=temporal,
-                sensor=sensor_eff,
-                **fetch_extra,
-            )
-            if fr is not None:
-                results.append(fr)
-            else:
-                fetch_spatial, fmeta = (
-                    square_fetch_request(spatial) if square_generic else (spatial, {})
-                )
-                raw = _fetch_sensor_patch_chw(
-                    provider,
-                    spatial=fetch_spatial,
+            results.append(
+                fetch_embedder_input(
+                    embedder=embedder,
+                    provider=provider,
+                    spatial=spatial,
                     temporal=temporal,
                     sensor=sensor_eff,
+                    model_config=model_config,
                 )
-                results.append(FetchResult(data=raw, meta=fmeta))
+            )
         except Exception as exc:
             raise ModelError(
                 f"Failed to fetch API-side input for spatial[{idx}] ({spatial}): {exc}"

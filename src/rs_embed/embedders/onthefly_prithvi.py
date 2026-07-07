@@ -29,7 +29,7 @@ from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
 )
 from ..providers.fetch import (
-    fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+    fetch_multiframe_patch_raw_tchw as _fetch_multiframe_patch_raw_tchw,
 )
 from ..providers.resolution import (
     is_provider_backend,
@@ -470,7 +470,7 @@ def _fetch_s2_prithvi6_tchw(
     Bins align with ``temporal_frame_midpoints`` (both use the shared
     ``split_date_range``), so frame ``i`` corresponds to midpoint date ``i``.
     """
-    return _fetch_s2_multiframe_raw_tchw(
+    return _fetch_multiframe_patch_raw_tchw(
         provider,
         spatial=spatial,
         temporal=temporal,
