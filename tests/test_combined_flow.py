@@ -50,16 +50,11 @@ def _patch_deps(
         combined_flow, "drop_model_arrays", lambda arrays, m, sanitize_key=None: None
     )
     monkeypatch.setattr(combined_flow, "jsonable", lambda x: x)
-    monkeypatch.setattr(
-        combined_flow,
-        "sensor_key",
-        lambda s: ("__none__",) if s is None else (s.collection,),
-    )
     monkeypatch.setattr(combined_flow, "normalize_model_name", lambda m: m)
     monkeypatch.setattr(
         combined_flow,
         "get_embedder_bundle_cached",
-        lambda model, backend, device, sk: (embedder, lock),
+        lambda model, backend, device: (embedder, lock),
     )
     monkeypatch.setattr(
         combined_flow, "sensor_cache_key", lambda s: s.collection if s else "__none__"
@@ -72,12 +67,7 @@ def _patch_deps(
     monkeypatch.setattr(
         inference_mod,
         "get_embedder_bundle_cached",
-        lambda model, backend, device, sk: (embedder, lock),
-    )
-    monkeypatch.setattr(
-        inference_mod,
-        "sensor_key",
-        lambda s: ("__none__",) if s is None else (s.collection,),
+        lambda model, backend, device: (embedder, lock),
     )
     monkeypatch.setattr(
         inference_mod,

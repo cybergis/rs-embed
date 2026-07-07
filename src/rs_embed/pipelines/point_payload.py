@@ -22,7 +22,6 @@ from ..tools.runtime import (
     get_embedder_bundle_cached,
     resolve_model_aware_input_prep,
     run_with_retry,
-    sensor_key,
 )
 from ..tools.serialization import (
     embedding_to_numpy,
@@ -125,12 +124,9 @@ def build_one_point_payload(
         m_entry["sensor"] = jsonable(sspec)
 
         try:
-            sensor_k = sensor_key(sspec)
             m_backend = _resolved_backend.get(m, backend)
             model_config = resolved_model_config.get(m)
-            embedder, lock = get_embedder_bundle_cached(
-                normalize_model_name(m), m_backend, device, sensor_k
-            )
+            embedder, lock = get_embedder_bundle_cached(normalize_model_name(m), m_backend, device)
 
             try:
                 m_entry["describe"] = jsonable(embedder.describe())

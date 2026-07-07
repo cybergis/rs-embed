@@ -37,7 +37,6 @@ from .tools.runtime import (
     require_model_config_support,
     resolve_model_aware_input_prep,
     run_embedding_request,
-    sensor_key,
 )
 
 
@@ -125,9 +124,8 @@ class Model:
         if self._input_prep_resolved.mode == "tile" and self._sensor is None:
             self._sensor = default_sensor_for_model(self._model_n)
 
-        sensor_k = sensor_key(self._sensor)
         self._embedder, self._lock = get_embedder_bundle_cached(
-            self._model_n, self._backend_n, self._device, sensor_k
+            self._model_n, self._backend_n, self._device
         )
         require_model_config_support(
             embedder=self._embedder,

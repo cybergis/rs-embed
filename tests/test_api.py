@@ -34,7 +34,6 @@ from rs_embed.core.types import (
 )
 from rs_embed.embedders.base import EmbedderBase
 from rs_embed.tools.output import normalize_embedding_output
-from rs_embed.tools.runtime import sensor_key
 from rs_embed.tools.serialization import sensor_cache_key as _sensor_cache_key
 
 # ── mock embedder ──────────────────────────────────────────────────
@@ -239,7 +238,7 @@ def test_get_embedding_unknown_model():
 
 
 def test_reset_runtime_clears_runtime_and_embedder_module_caches(monkeypatch):
-    rt.get_embedder_bundle_cached("mock_model", "auto", "auto", sensor_key(None))
+    rt.get_embedder_bundle_cached("mock_model", "auto", "auto")
     rt.embedder_accepts_input_chw(type(_MockEmbedder))
     rt.embedder_accepts_model_config(type(_MockVariantEmbedder))
     registry._REGISTRY_IMPORT_ERRORS["remoteclip"] = RuntimeError("boom")
@@ -353,7 +352,7 @@ def test_get_embeddings_batch_empty():
 
 
 def test_get_embeddings_batch_with_sensor():
-    """Ensures sensor param flows through _sensor_key without errors."""
+    """Ensures an explicit sensor flows through the request path without errors."""
 
     sensor = SensorSpec(collection="COLL", bands=("B1",))
     spatials = [PointBuffer(lon=0.0, lat=0.0, buffer_m=256)]
@@ -531,19 +530,8 @@ def test_assert_supported_broken_describe_raises_model_error():
 
 
 # ══════════════════════════════════════════════════════════════════════
-# _sensor_key / _sensor_cache_key
+# _sensor_cache_key
 # ══════════════════════════════════════════════════════════════════════
-
-
-def test_sensor_key_none():
-    assert sensor_key(None) == ("__none__",)
-
-
-def test_sensor_key_deterministic_and_differs():
-    s1 = SensorSpec(collection="A", bands=("B1",), modality="s1")
-    s2 = SensorSpec(collection="A", bands=("B1",), modality="s2")
-    assert sensor_key(s1) == sensor_key(s1)
-    assert sensor_key(s1) != sensor_key(s2)
 
 
 def test_sensor_cache_key_deterministic_and_differs():
