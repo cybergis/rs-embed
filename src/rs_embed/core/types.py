@@ -406,6 +406,8 @@ class ExportConfig:
         scalemae, ...) also tile by default but warn that tiled grids can show
         stitching seams; pass ``"resize"`` to downsample to the model image size
         for a seamless grid, or ``"auto"`` to tile only when beneficial.
+        Equivalent to the top-level ``export_batch(input_prep=...)`` parameter
+        (the recommended spelling); passing both raises ``ModelError``.
     """
 
     format: str = "npz"
