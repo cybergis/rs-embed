@@ -7,7 +7,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -44,6 +43,7 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from ._vendor.dofa_vit import vit_base_patch16, vit_large_patch16
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, verify_loaded_params
 
 # -----------------------------
 # Defaults: Sentinel-2 SR (official DOFA 9-band order)
@@ -464,15 +464,12 @@ def _load_dofa_model_cached(variant: str, dev: str):
     model = model.to(dev).eval()
 
     # sanity
-    p0 = None
-    for _, p in model.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("DOFA model has no parameters; unexpected.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("DOFA parameters contain NaN/Inf; weight load likely failed.")
+    verify_loaded_params(
+        model,
+        model_name="DOFA",
+        no_params_msg="DOFA model has no parameters; unexpected.",
+        nonfinite_msg="DOFA parameters contain NaN/Inf; weight load likely failed.",
+    )
 
     meta = {
         "variant": variant_l,
@@ -939,17 +936,7 @@ class DOFAEmbedder(EmbedderBase):
                 "patch_size": int(getattr(model, "patch_size", 16)),
             }
 
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -1170,17 +1157,7 @@ class DOFAEmbedder(EmbedderBase):
                         "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
                         "patch_size": int(getattr(model, "patch_size", 16)),
                     }
-                    da = xr.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(grid.shape[1]),
-                            "x": np.arange(grid.shape[2]),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
+                    da = grid_to_dataarray(grid, meta=meta)
                     out[i] = Embedding(data=da, meta=meta)
                     continue
 

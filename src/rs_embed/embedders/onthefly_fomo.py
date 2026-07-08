@@ -8,7 +8,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -45,6 +44,7 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 from .onthefly_terramind import _fetch_s2_sr_12_raw_chw
+from .shared import grid_to_dataarray, normalize_s2, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -309,16 +309,12 @@ def _load_fomo_cached(
 
     model = _move_model_to_device(model, dev, model_name="FoMo")
 
-    p0 = None
-    for _, p in model.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("FoMo model has no parameters; cannot verify loaded checkpoint.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("FoMo model parameters contain NaN/Inf; checkpoint load likely failed.")
-    p0f = p0.float()
+    wstats = verify_loaded_params(
+        model,
+        model_name="FoMo",
+        no_params_msg="FoMo model has no parameters; cannot verify loaded checkpoint.",
+        nonfinite_msg="FoMo model parameters contain NaN/Inf; checkpoint load likely failed.",
+    )
 
     meta = {
         "ckpt_path": ckpt_path,
@@ -334,9 +330,7 @@ def _load_fomo_cached(
         "device": str(dev),
         "missing_keys": int(len(getattr(msg, "missing_keys", []))),
         "unexpected_keys": int(len(getattr(msg, "unexpected_keys", []))),
-        "param_mean": float(p0f.mean().cpu()),
-        "param_std": float(p0f.std().cpu()),
-        "param_absmax": float(p0f.abs().max().cpu()),
+        **wstats,
     }
     return model, meta
 
@@ -382,27 +376,12 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> np.ndarray:
 
 
 def _normalize_s2(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
-    x = np.asarray(raw_chw, dtype=np.float32)
-    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-    x = np.clip(x, 0.0, 10000.0)
-
-    m = str(mode).lower().strip()
-    if m in {"unit", "unit_scale", "reflectance"}:
-        x = x / 10000.0
-    elif m in {"per_tile_minmax", "minmax", "tile_minmax"}:
-        x = x / 10000.0
-        lo = np.min(x, axis=(1, 2), keepdims=True)
-        hi = np.max(x, axis=(1, 2), keepdims=True)
-        den = np.maximum(hi - lo, 1e-6)
-        x = (x - lo) / den
-    elif m in {"none", "raw"}:
-        pass
-    else:
-        raise ModelError(
-            f"Unknown FoMo normalization mode '{mode}'. "
-            "Use one of: unit_scale, per_tile_minmax, none."
-        )
-    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    return normalize_s2(
+        raw_chw,
+        mode=mode,
+        model_name="FoMo",
+        modes_hint="unit_scale, per_tile_minmax, none",
+    )
 
 
 def _resolve_s2_modality_keys() -> tuple[int, ...]:
@@ -737,17 +716,7 @@ class FoMoEmbedder(EmbedderBase):
                 "grid_shape": tuple(grid.shape),
                 "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
             }
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=gmeta_full,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta_full)
             return Embedding(data=da, meta=gmeta_full)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -892,17 +861,7 @@ class FoMoEmbedder(EmbedderBase):
                     "grid_shape": tuple(grid.shape),
                     "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
                 }
-                da = xr.DataArray(
-                    grid.astype(np.float32),
-                    dims=("d", "y", "x"),
-                    coords={
-                        "d": np.arange(grid.shape[0]),
-                        "y": np.arange(grid.shape[1]),
-                        "x": np.arange(grid.shape[2]),
-                    },
-                    name="embedding",
-                    attrs=gmeta_full,
-                )
+                da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta_full)
                 embeddings.append(Embedding(data=da, meta=gmeta_full))
             else:
                 raise ModelError(f"Unknown output mode: {output.mode}")

@@ -34,7 +34,8 @@ from ..tools.shape import (
 )
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
-from .meta import build_meta, temporal_to_range
+from .meta import base_meta, temporal_to_range
+from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw
 
 
 def ensure_torch() -> None:
@@ -138,59 +139,6 @@ def _satmae_preprocess_tensor_batch(model, rgb_u8_batch: list[np.ndarray], *, im
     return torch.stack(xs, dim=0)
 
 
-def base_meta(
-    *,
-    model_name,
-    hf_id,
-    backend,
-    image_size,
-    sensor,
-    temporal=None,
-    source=None,
-    embed_type="on_the_fly",
-    extra=None,
-):
-    m = build_meta(
-        model=model_name,
-        kind=embed_type,
-        backend=backend,
-        source=source or getattr(sensor, "collection", None),
-        sensor=sensor,
-        temporal=temporal,
-        image_size=image_size,
-    )
-    m["hf_id"] = hf_id
-    if extra:
-        m.update(extra)
-    return m
-
-
-def pool_from_tokens(tokens, pooling):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    if len(patch) == 0:
-        return tokens[0].astype("float32"), has_cls
-    if pooling == "mean":
-        return patch.mean(axis=0).astype("float32"), has_cls
-    if pooling == "max":
-        return patch.max(axis=0).astype("float32"), has_cls
-    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
-
-
-def tokens_to_grid_dhw(tokens):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    p, d = patch.shape
-    hw = int(p**0.5)
-    if hw * hw != p:
-        raise ModelError(f"Patch token count {p} is not a perfect square.")
-    return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
-
-
 def build_token_embedding(tokens, *, geo_roi, output, meta):
     """Turn ``[N,D]`` tokens into an Embedding, cropping the patch grid to the ROI.
 
@@ -223,17 +171,7 @@ def build_token_embedding(tokens, *, geo_roi, output, meta):
         meta.update(
             {"grid_hw": (h, w), "grid_kind": "patch_tokens", "cls_removed": bool(cls_removed)}
         )
-        try:
-            import xarray as xr
-        except Exception as e:
-            raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-        da = xr.DataArray(
-            grid,
-            dims=("d", "y", "x"),
-            coords={"d": np.arange(grid.shape[0]), "y": np.arange(h), "x": np.arange(w)},
-            name="embedding",
-            attrs=meta,
-        )
+        da = grid_to_dataarray(grid, meta=meta)
         return Embedding(data=da, meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")

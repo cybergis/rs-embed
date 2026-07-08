@@ -12,7 +12,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -53,6 +52,7 @@ from ..tools.shape import (
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -422,25 +422,12 @@ def _resolve_ckpt_path() -> str:
 
 def _assert_weights_loaded(model) -> dict[str, float]:
     ensure_torch()
-    import torch
-
-    p = None
-    for _, param in model.named_parameters():
-        if param is not None and param.numel() > 0:
-            p = param.detach()
-            break
-    if p is None:
-        raise ModelError("AgriFM model has no parameters; cannot verify weights.")
-    if not torch.isfinite(p).all():
-        raise ModelError("AgriFM parameters contain NaN/Inf; checkpoint load likely failed.")
-
-    p_f = p.float()
-    std = float(p_f.std().cpu())
-    mx = float(p_f.abs().max().cpu())
-    mean = float(p_f.mean().cpu())
-    if std < 1e-6 and mx < 1e-5:
-        raise ModelError("AgriFM parameters look uninitialized (near-zero stats).")
-    return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+    return verify_loaded_params(
+        model,
+        model_name="AgriFM",
+        nonfinite_msg="AgriFM parameters contain NaN/Inf; checkpoint load likely failed.",
+        check_near_zero=True,
+    )
 
 
 @lru_cache(maxsize=6)
@@ -812,17 +799,7 @@ class AgriFMEmbedder(EmbedderBase):
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")

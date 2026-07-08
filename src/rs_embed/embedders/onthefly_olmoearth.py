@@ -45,6 +45,7 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_midpoint_str, temporal_to_range
+from .shared import grid_to_dataarray
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -1336,12 +1337,10 @@ class OlmoEarthEmbedder(EmbedderBase):
         for i, x in enumerate(prepared):
             shape_groups.setdefault(x.shape, []).append(i)
 
-        xr_mod = None
         if output.mode == "grid":
             try:
-                import xarray as xr  # noqa: PLC0415
-
-                xr_mod = xr
+                # fail fast before batch inference
+                import xarray  # noqa: F401, PLC0415
             except ImportError as exc:
                 raise ModelError(
                     "grid output requires xarray. Install: pip install xarray"
@@ -1458,14 +1457,7 @@ class OlmoEarthEmbedder(EmbedderBase):
                         )
                         d, h, w = grid_np.shape
                         meta.update({"grid_hw": (h, w), "grid_kind": "spatial_tokens"})
-                        assert xr_mod is not None
-                        da = xr_mod.DataArray(
-                            grid_np,
-                            dims=("d", "y", "x"),
-                            coords={"d": np.arange(d), "y": np.arange(h), "x": np.arange(w)},
-                            name="embedding",
-                            attrs=meta,
-                        )
+                        da = grid_to_dataarray(grid_np, meta=meta)
                         out[i] = Embedding(data=da, meta=meta)
                     continue
 
@@ -1559,7 +1551,7 @@ def _make_grid_embedding(
     roi_window: tuple[float, float, float, float] = _FULL_ROI,
 ) -> Embedding:
     try:
-        import xarray as xr  # noqa: PLC0415
+        import xarray  # noqa: F401, PLC0415
     except ImportError as exc:
         raise ModelError("grid output requires xarray. Install: pip install xarray") from exc
 
@@ -1567,11 +1559,5 @@ def _make_grid_embedding(
     grid = crop_grid_to_roi(grid, roi_window)  # crop padded border back to the ROI
     d, h, w = grid.shape
     meta.update({"grid_hw": (h, w), "grid_kind": "spatial_tokens"})
-    da = xr.DataArray(
-        grid,
-        dims=("d", "y", "x"),
-        coords={"d": np.arange(d), "y": np.arange(h), "x": np.arange(w)},
-        name="embedding",
-        attrs=meta,
-    )
+    da = grid_to_dataarray(grid, meta=meta)
     return Embedding(data=da, meta=meta)

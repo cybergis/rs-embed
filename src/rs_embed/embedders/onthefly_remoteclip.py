@@ -8,7 +8,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -48,6 +47,7 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, resolve_hf_cache_dir, verify_loaded_params
 
 _DEFAULT_REMOTECLIP_ID = "MVRL/remote-clip-vit-base-patch32"
 
@@ -176,26 +176,8 @@ def _ensure_hf_weights(
 
 def _assert_weights_loaded(model) -> dict[str, float]:
     """Best-effort sanity check that weights are loaded (do not trust rshf warnings)."""
-    import torch
-
     core = getattr(model, "model", model)
-    p = None
-    for _, param in core.named_parameters():
-        if param is not None and param.numel() > 0:
-            p = param.detach()
-            break
-    if p is None:
-        raise ModelError("RemoteCLIP model has no parameters; cannot verify weights.")
-    if not torch.isfinite(p).all():
-        raise ModelError("RemoteCLIP parameters contain NaN/Inf; load likely failed.")
-
-    p_f = p.float()
-    std = float(p_f.std().cpu())
-    mx = float(p_f.abs().max().cpu())
-    mean = float(p_f.mean().cpu())
-    if std < 1e-6 and mx < 1e-5:
-        raise ModelError("RemoteCLIP parameters look uninitialized (near-zero stats).")
-    return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+    return verify_loaded_params(core, model_name="RemoteCLIP", check_near_zero=True)
 
 
 @contextmanager
@@ -779,11 +761,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         rgb_u8 = _s2_rgb_u8_from_chw(s2_rgb_chw)
 
         # HF cache dir
-        cache_dir = (
-            os.environ.get("HUGGINGFACE_HUB_CACHE")
-            or os.environ.get("HF_HOME")
-            or os.environ.get("HUGGINGFACE_HOME")
-        )
+        cache_dir = resolve_hf_cache_dir()
 
         # load model once per (ckpt, cache_dir, device)
         model, wmeta, dev = self._get_model(ckpt=ckpt, cache_dir=cache_dir, device=device)
@@ -877,17 +855,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 "grid_type": "vit_tokens",
             }  # patch grid, not pixel grid
 
-            da = xr.DataArray(
-                grid_dhw,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid_dhw.shape[0]),
-                    "y": np.arange(grid_dhw.shape[1]),
-                    "x": np.arange(grid_dhw.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid_dhw, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -980,11 +948,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
 
         ckpt = _resolve_remoteclip_model_id(model_config, sensor)
 
-        cache_dir = (
-            os.environ.get("HUGGINGFACE_HUB_CACHE")
-            or os.environ.get("HF_HOME")
-            or os.environ.get("HUGGINGFACE_HOME")
-        )
+        cache_dir = resolve_hf_cache_dir()
         model, wmeta, dev = self._get_model(ckpt=ckpt, cache_dir=cache_dir, device=device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
@@ -1098,17 +1062,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 meta = _base_meta_for(
                     {**tmeta, **gmeta, "batch_infer": False, "grid_type": "vit_tokens"}
                 )
-                da = xr.DataArray(
-                    grid_dhw,
-                    dims=("d", "y", "x"),
-                    coords={
-                        "d": np.arange(grid_dhw.shape[0]),
-                        "y": np.arange(grid_dhw.shape[1]),
-                        "x": np.arange(grid_dhw.shape[2]),
-                    },
-                    name="embedding",
-                    attrs=meta,
-                )
+                da = grid_to_dataarray(grid_dhw, meta=meta)
                 out[i] = Embedding(data=da, meta=meta)
         else:
             raise ModelError(f"Unknown output mode: {output.mode}")

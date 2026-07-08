@@ -4,7 +4,13 @@ from contextlib import nullcontext
 
 import numpy as np
 
-if "xarray" not in sys.modules:
+try:
+    import xarray  # noqa: F401
+except ImportError:
+    # Environments without xarray: a minimal stand-in is enough for these tests.
+    # (A SimpleNamespace has no __spec__, so only install it when the real
+    # package is genuinely unavailable — otherwise it poisons later imports
+    # that probe sys.modules, e.g. torch._dynamo's find_spec calls.)
 
     class _FakeDataArray:
         def __init__(self, data, dims=None, coords=None, name=None, attrs=None):
