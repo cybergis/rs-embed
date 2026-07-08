@@ -8,7 +8,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -51,6 +50,7 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, resolve_hf_cache_dir, verify_loaded_params
 
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"
@@ -66,11 +66,7 @@ def _resolve_terrafm_cache_dir(model_config: dict[str, Any] | None) -> str | Non
     v = model_config_value(model_config, "cache_dir")
     if v is not None and str(v).strip():
         return str(v).strip()
-    return (
-        os.environ.get("HUGGINGFACE_HUB_CACHE")
-        or os.environ.get("HF_HOME")
-        or os.environ.get("HUGGINGFACE_HOME")
-    )
+    return resolve_hf_cache_dir()
 
 
 # -----------------------------
@@ -283,25 +279,7 @@ def _load_terrafm_module():
 
 def _assert_weights_loaded(model) -> dict[str, float]:
     """Same philosophy as your RemoteCLIP: param stats should not be near-zero."""
-    import torch
-
-    p = None
-    for _, param in model.named_parameters():
-        if param is not None and param.numel() > 0:
-            p = param.detach()
-            break
-    if p is None:
-        raise ModelError("TerraFM model has no parameters; cannot verify weights.")
-    if not torch.isfinite(p).all():
-        raise ModelError("TerraFM parameters contain NaN/Inf; load likely failed.")
-
-    p_f = p.float()
-    std = float(p_f.std().cpu())
-    mx = float(p_f.abs().max().cpu())
-    mean = float(p_f.mean().cpu())
-    if std < 1e-6 and mx < 1e-5:
-        raise ModelError("TerraFM parameters look uninitialized (near-zero stats).")
-    return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+    return verify_loaded_params(model, model_name="TerraFM", check_near_zero=True)
 
 
 @lru_cache(maxsize=4)
@@ -840,17 +818,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 "grid_type": "feature_map",
                 "grid_shape": tuple(grid.shape),
             }
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -1138,17 +1106,7 @@ class TerraFMBEmbedder(EmbedderBase):
                         "grid_type": "feature_map",
                         "grid_shape": tuple(grid.shape),
                     }
-                    da = xr.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(grid.shape[1]),
-                            "x": np.arange(grid.shape[2]),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
+                    da = grid_to_dataarray(grid, meta=meta)
                     out[i] = Embedding(data=da, meta=meta)
                     continue
 

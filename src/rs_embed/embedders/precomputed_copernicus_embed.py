@@ -23,6 +23,7 @@ from ._vendor.copernicus_embed import CopernicusEmbedGeoTiff
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta
+from .shared import grid_to_dataarray
 
 SUPPORTED_YEARS = {2021}
 _COPERNICUS_PROJECTION_WARNED = False
@@ -281,22 +282,7 @@ class CopernicusEmbedder(EmbedderBase):
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
-            try:
-                import xarray as xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-
-            da = xr.DataArray(
-                chw,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(chw.shape[0]),
-                    "y": np.arange(chw.shape[1]),
-                    "x": np.arange(chw.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(chw, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")

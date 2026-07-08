@@ -9,7 +9,6 @@ from pathlib import Path
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -58,6 +57,7 @@ from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, normalize_s2, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -225,33 +225,13 @@ def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
 
 
 def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
-    x = np.asarray(raw, dtype=np.float32)
-    if x.ndim not in {3, 4}:
-        raise ModelError(f"Galileo normalization expects CHW or TCHW, got {x.shape}")
-    x = np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0)
-    x = np.clip(x, 0.0, 10000.0)
-
-    m = str(mode).lower().strip()
-    if m in {"unit", "unit_scale", "reflectance"}:
-        x = x / 10000.0
-    elif m in {"per_tile_minmax", "minmax", "tile_minmax"}:
-        x = x / 10000.0
-        if x.ndim == 3:
-            lo = np.min(x, axis=(1, 2), keepdims=True)
-            hi = np.max(x, axis=(1, 2), keepdims=True)
-        else:
-            lo = np.min(x, axis=(2, 3), keepdims=True)
-            hi = np.max(x, axis=(2, 3), keepdims=True)
-        den = np.maximum(hi - lo, 1e-6)
-        x = (x - lo) / den
-    elif m in {"none", "raw"}:
-        pass
-    else:
-        raise ModelError(
-            f"Unknown Galileo normalization mode '{mode}'. "
-            "Use one of: none, unit_scale, per_tile_minmax, official_stats."
-        )
-    return np.nan_to_num(x, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
+    return normalize_s2(
+        raw,
+        mode=mode,
+        model_name="Galileo",
+        modes_hint="none, unit_scale, per_tile_minmax, official_stats",
+        allow_tchw=True,
+    )
 
 
 def _apply_galileo_pretrain_stats(data: dict[str, Any]) -> None:
@@ -572,25 +552,18 @@ def _load_galileo_cached(
 
     encoder = _move_model_to_device(encoder, dev, model_name="Galileo")
 
-    p0 = None
-    for _, p in encoder.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("Galileo encoder has no parameters; cannot verify load.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("Galileo parameters contain NaN/Inf; load likely failed.")
-    p0f = p0.float()
+    wstats = verify_loaded_params(
+        encoder,
+        model_name="Galileo",
+        no_params_msg="Galileo encoder has no parameters; cannot verify load.",
+    )
 
     meta = {
         "model_size": str(model_size),
         "model_root": model_root,
         "model_source": (model_root if model_path else f"hf://{hf_repo}/models/{model_size}"),
         "device": str(dev),
-        "param_mean": float(p0f.mean().cpu()),
-        "param_std": float(p0f.std().cpu()),
-        "param_absmax": float(p0f.abs().max().cpu()),
+        **wstats,
     }
     return encoder, meta, mod
 
@@ -1143,17 +1116,7 @@ class GalileoEmbedder(EmbedderBase):
                 "grid_shape": tuple(grid.shape),
                 "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
             }
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=gmeta,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
             return Embedding(data=da, meta=gmeta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")

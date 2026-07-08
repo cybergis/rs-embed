@@ -7,7 +7,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -53,6 +52,7 @@ from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -318,7 +318,6 @@ def _load_anysat_cached(
     dev: str,
 ) -> tuple[Any, dict[str, Any]]:
     ensure_torch()
-    import torch
 
     hub = _load_anysat_hub_module()
     if not hasattr(hub, "AnySat"):
@@ -352,16 +351,12 @@ def _load_anysat_cached(
 
     model = _move_model_to_device(model, dev, model_name="AnySat")
 
-    p0 = None
-    for _, p in model.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("AnySat model has no parameters; cannot verify load.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("AnySat parameters contain NaN/Inf; checkpoint load likely failed.")
-    p0f = p0.float()
+    wstats = verify_loaded_params(
+        model,
+        model_name="AnySat",
+        no_params_msg="AnySat model has no parameters; cannot verify load.",
+        nonfinite_msg="AnySat parameters contain NaN/Inf; checkpoint load likely failed.",
+    )
 
     meta = {
         "model_size": str(model_size),
@@ -370,9 +365,7 @@ def _load_anysat_cached(
         "loaded_from": loaded_from,
         "model_source": "vendored_rs_embed_runtime",
         "device": dev,
-        "param_mean": float(p0f.mean().cpu()),
-        "param_std": float(p0f.std().cpu()),
-        "param_absmax": float(p0f.abs().max().cpu()),
+        **wstats,
     }
     return model, meta
 
@@ -787,17 +780,7 @@ class AnySatEmbedder(EmbedderBase):
                 "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
                 "grid_shape": tuple(grid.shape),
             }
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=gmeta,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
             return Embedding(data=da, meta=gmeta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")

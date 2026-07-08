@@ -7,7 +7,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -54,6 +53,7 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -61,32 +61,6 @@ def ensure_torch() -> None:
         import torch  # noqa: F401
     except Exception as e:
         raise ModelError("This embedder requires torch installed.") from e
-
-
-def pool_from_tokens(tokens, pooling):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    if len(patch) == 0:
-        return tokens[0].astype("float32"), has_cls
-    if pooling == "mean":
-        return patch.mean(axis=0).astype("float32"), has_cls
-    if pooling == "max":
-        return patch.max(axis=0).astype("float32"), has_cls
-    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
-
-
-def tokens_to_grid_dhw(tokens):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    p, d = patch.shape
-    hw = int(p**0.5)
-    if hw * hw != p:
-        raise ModelError(f"Patch token count {p} is not a perfect square.")
-    return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
 
 _S2_SR_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
@@ -796,7 +770,6 @@ def _load_thor_cached(
     dev: str,
 ) -> tuple[Any, dict[str, Any]]:
     ensure_torch()
-    import torch
 
     try:
         mod = _load_thor_module()
@@ -828,17 +801,8 @@ def _load_thor_cached(
 
     model = _move_model_to_device(model, dev, model_name="THOR")
 
-    p0 = None
-    for _, p in model.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("THOR model has no parameters; cannot verify weights.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("THOR parameters contain NaN/Inf; load likely failed.")
+    wstats = verify_loaded_params(model, model_name="THOR")
 
-    p0f = p0.float()
     out_channels = getattr(model, "out_channels", None)
     embed_dim = None
     if isinstance(out_channels, (list, tuple)) and len(out_channels) > 0:
@@ -856,9 +820,7 @@ def _load_thor_cached(
         "pretrained": bool(pretrained),
         "ckpt_path": os.path.expanduser(str(ckpt_path)) if ckpt_path else None,
         "embed_dim": embed_dim,
-        "param_mean": float(p0f.mean().cpu()),
-        "param_std": float(p0f.std().cpu()),
-        "param_absmax": float(p0f.abs().max().cpu()),
+        **wstats,
     }
     return model, meta
 
@@ -1393,17 +1355,7 @@ class THORBaseEmbedder(EmbedderBase):
                 **meta,
                 "grid_shape": tuple(grid.shape),
             }
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=gmeta,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
             return Embedding(data=da, meta=gmeta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
