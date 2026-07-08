@@ -37,6 +37,9 @@ from ..tools.normalization import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
@@ -347,10 +350,7 @@ def _load_anysat_cached(
             model = hub.AnySat(model_size=model_size, flash_attn=bool(flash_attn), device=dev)
             loaded_from = "random_init"
 
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="AnySat")
 
     p0 = None
     for _, p in model.named_parameters():

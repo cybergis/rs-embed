@@ -37,6 +37,9 @@ from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
 from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
@@ -823,10 +826,7 @@ def _load_thor_cached(
             "Check the THOR package installation and model key."
         ) from e
 
-    try:
-        model = model.to(dev).eval()
-    except Exception:
-        pass
+    model = _move_model_to_device(model, dev, model_name="THOR")
 
     p0 = None
     for _, p in model.named_parameters():

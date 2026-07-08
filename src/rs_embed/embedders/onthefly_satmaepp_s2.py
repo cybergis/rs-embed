@@ -27,6 +27,9 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
 from ..tools.shape import (
     crop_grid_and_pool,
     crop_grid_to_roi,
@@ -340,10 +343,7 @@ def _load_satmaepp_s2_cached(
             f"Check image/patch/channel config. Error: {type(e).__name__}: {e}"
         ) from e
 
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="SatMAE++ Sentinel-2")
 
     p0 = None
     for _, p in model.named_parameters():

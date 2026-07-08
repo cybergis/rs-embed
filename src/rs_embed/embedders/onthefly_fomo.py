@@ -28,6 +28,9 @@ from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
 from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
@@ -304,10 +307,7 @@ def _load_fomo_cached(
     sd = _extract_state_dict(obj)
     msg = model.load_state_dict(sd, strict=False)
 
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="FoMo")
 
     p0 = None
     for _, p in model.named_parameters():
@@ -432,10 +432,7 @@ def _fomo_forward_tokens(
     x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
     keys = [int(k) for k in spectral_keys]
 
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="FoMo")
 
     with torch.no_grad():
         out = model((x, keys), pool=False)
@@ -468,10 +465,7 @@ def _fomo_forward_tokens_batch(
     x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
     keys = [int(k) for k in spectral_keys]
 
-    try:
-        model = model.to(dev).eval()
-    except Exception:
-        pass
+    model = _move_model_to_device(model, dev, model_name="FoMo")
 
     with torch.no_grad():
         out = model((x, keys), pool=False)

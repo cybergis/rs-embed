@@ -32,6 +32,9 @@ from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
 from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
@@ -567,15 +570,9 @@ def _load_wildsat_cached(
         sat_sd, prefer_branch=int(prefer_branch)
     )
 
-    try:
-        backbone = backbone.to(dev).eval()
-    except Exception as _e:
-        pass
+    backbone = _move_model_to_device(backbone, dev, model_name="WildSAT")
     if image_head is not None:
-        try:
-            image_head = image_head.to(dev).eval()
-        except Exception as _e:
-            pass
+        image_head = _move_model_to_device(image_head, dev, model_name="WildSAT image head")
 
     p0 = None
     for _, p0cand in backbone.named_parameters():
@@ -685,15 +682,9 @@ def _wildsat_forward(
     dev = _resolve_device(device)
     x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
 
-    try:
-        backbone = backbone.to(dev).eval()
-    except Exception as _e:
-        pass
+    backbone = _move_model_to_device(backbone, dev, model_name="WildSAT")
     if image_head is not None:
-        try:
-            image_head = image_head.to(dev).eval()
-        except Exception as _e:
-            pass
+        image_head = _move_model_to_device(image_head, dev, model_name="WildSAT image head")
 
     with torch.no_grad():
         tok_np: np.ndarray | None = None
