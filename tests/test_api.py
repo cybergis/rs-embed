@@ -902,6 +902,64 @@ def test_export_batch_export_model_request_preserves_model_config(monkeypatch, t
     assert captured["model_config"] == {"variant": "large"}
 
 
+def test_export_batch_top_level_input_prep_flows_into_config(monkeypatch, tmp_path):
+    captured = {}
+
+    def _fake_run(self):
+        captured["input_prep"] = self.config.input_prep
+        return {"status": "ok"}
+
+    monkeypatch.setattr("rs_embed.pipelines.exporter.BatchExporter.run", _fake_run)
+
+    result = export_batch(
+        spatials=[_SPATIAL],
+        temporal=_TEMPORAL,
+        models=["mock_model"],
+        target=ExportTarget.combined(str(tmp_path / "combined")),
+        config=ExportConfig(show_progress=False),
+        backend="auto",
+        input_prep="resize",
+    )
+
+    assert result == {"status": "ok"}
+    assert captured["input_prep"] == "resize"
+
+
+def test_export_batch_config_input_prep_alone_still_works(monkeypatch, tmp_path):
+    captured = {}
+
+    def _fake_run(self):
+        captured["input_prep"] = self.config.input_prep
+        return {"status": "ok"}
+
+    monkeypatch.setattr("rs_embed.pipelines.exporter.BatchExporter.run", _fake_run)
+
+    result = export_batch(
+        spatials=[_SPATIAL],
+        temporal=_TEMPORAL,
+        models=["mock_model"],
+        target=ExportTarget.combined(str(tmp_path / "combined")),
+        config=ExportConfig(show_progress=False, input_prep="resize"),
+        backend="auto",
+    )
+
+    assert result == {"status": "ok"}
+    assert captured["input_prep"] == "resize"
+
+
+def test_export_batch_rejects_input_prep_in_both_places(tmp_path):
+    with pytest.raises(ModelError, match="pass it once"):
+        export_batch(
+            spatials=[_SPATIAL],
+            temporal=_TEMPORAL,
+            models=["mock_model"],
+            target=ExportTarget.combined(str(tmp_path / "combined")),
+            config=ExportConfig(show_progress=False, input_prep="tile"),
+            backend="auto",
+            input_prep="resize",
+        )
+
+
 def test_export_batch_rejects_model_config_for_unsupported_model(tmp_path):
     with pytest.raises(ModelError, match="does not accept model-specific keyword arguments"):
         export_batch(

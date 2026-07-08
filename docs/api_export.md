@@ -24,10 +24,8 @@ export_batch(
     sensor: Optional[SensorSpec] = None,
     fetch: Optional[FetchSpec] = None,
     modality: Optional[str] = None,
-    per_model_sensors: Optional[Dict[str, SensorSpec]] = None,
-    per_model_fetches: Optional[Dict[str, FetchSpec]] = None,
-    per_model_modalities: Optional[Dict[str, str]] = None,
-) -> Any
+    input_prep: Optional[InputPrepSpec | str] = None,
+) -> List[dict] | dict
 ```
 
 Use `export_batch(...)` when you want to export one or many ROIs, one or many models, and the corresponding inputs, embeddings, and manifests together.
@@ -43,9 +41,9 @@ Think about `export_batch(...)` as 4 decisions:
 1. What to export: `spatials`, `temporal`, `models`
 2. Where to write: `target=ExportTarget(...)`
 3. How to run: `config=ExportConfig(...)`
-4. Any shared or per-model settings: `backend`, `device`, `output`, `fetch`, `sensor`, `modality`, `per_model_*`
+4. Any shared or per-model settings: `backend`, `device`, `output`, `fetch`, `sensor`, `modality`, `input_prep`
 
-For new code, prefer `target=ExportTarget(...)` and `config=ExportConfig(...)`, then use `models=[..., ExportModelRequest(...)]` when one model really needs special overrides.
+Prefer `target=ExportTarget(...)` and `config=ExportConfig(...)`, then use `models=[..., ExportModelRequest(...)]` when one model really needs special overrides.
 
 ### Default Pattern
 
@@ -104,6 +102,7 @@ These usually apply to all models in the call:
 | `fetch`    | Shared `FetchSpec` for resolution or compositing overrides.                |
 | `sensor`   | Shared `SensorSpec` for advanced on-the-fly source overrides.              |
 | `modality` | Shared modality override for models that expose multiple public branches.  |
+| `input_prep` | Large-ROI policy, usually `"tile"` (the default) or `"resize"`. Same semantics as `get_embedding(input_prep=...)`. |
 
 Use per-model overrides only when one model needs different settings.
 
@@ -111,13 +110,11 @@ Use per-model overrides only when one model needs different settings.
 
 Use `fetch=FetchSpec(...)` for shared resolution or compositing overrides. Use `sensor=SensorSpec(...)` only when a job really needs custom `collection` or `bands`. `fetch` and `sensor` cannot be passed together.
 
-### 4. Legacy dict-style compatibility
+### 4. Per-model overrides
 
-The structured per-model path is `ExportModelRequest(...)` or `ExportModelRequest.configure(...)` inside `models=[...]`.
+The single per-model channel is `ExportModelRequest(...)` or `ExportModelRequest.configure(...)` inside `models=[...]`.
 
-`per_model_sensors`, `per_model_fetches`, and `per_model_modalities` remain accepted as legacy dict-style per-model overrides keyed by model name. They are kept for compatibility with older calling patterns.
-
-If both are provided, inline values on `ExportModelRequest(...)` take precedence over `per_model_*`, and `per_model_*` takes precedence over the corresponding global `sensor` / `fetch` / `modality`.
+Inline values on `ExportModelRequest(...)` take precedence over the corresponding global `sensor` / `fetch` / `modality`.
 
 ### 5. ExportConfig: the knobs that matter most
 
@@ -132,11 +129,10 @@ The most important ones are:
 | `save_embeddings` | Save embedding arrays.                            |
 | `save_manifest`   | Save JSON manifest metadata.                      |
 | `resume`          | Skip items already exported.                      |
-| `input_prep`      | Large-ROI policy, usually `"resize"` or `"tile"`. |
 
 You can usually ignore the rest until you need performance tuning or failure recovery.
 
-`config` is optional; the default is `ExportConfig()`.
+`config` is optional; the default is `ExportConfig()`. `ExportConfig(input_prep=...)` is also accepted and is equivalent to the top-level `input_prep` parameter (recommended); passing both raises `ModelError`.
 
 ### 6. Advanced runtime controls
 
@@ -155,7 +151,6 @@ config = ExportConfig(
     save_embeddings=True,
     save_manifest=True,
     resume=True,
-    input_prep="resize",
 )
 ```
 
@@ -197,15 +192,13 @@ Typical use cases are when one model needs its own `FetchSpec`, `modality="s1"`,
 
 This also matches the implementation path: string model IDs are first converted into `ExportModelRequest(name=...)`, then resolved.
 
-The same class of overrides can also be expressed with `per_model_sensors={...}`, `per_model_fetches={...}`, and `per_model_modalities={...}` keyed by model name. Those dict-style parameters remain accepted mainly for compatibility with older calling patterns.
-
 ### Rules
 
 `export_batch(...)` accepts a global `modality`, one model can override it through `ExportModelRequest(...)`, and unsupported modality choices raise `ModelError`.
 
 `export_batch(...)` does not have one global model-settings parameter shared across all models. Pass per-model settings through `ExportModelRequest.configure("model", variant=...)`. Unsupported keyword arguments raise `ModelError`.
 
-For `sensor` / `fetch` / `modality`, the effective precedence is: inline `ExportModelRequest(...)` value first, then `per_model_*`, then the corresponding global argument.
+For `sensor` / `fetch` / `modality`, the effective precedence is: inline `ExportModelRequest(...)` value first, then the corresponding global argument.
 
 ---
 
@@ -213,9 +206,9 @@ For `sensor` / `fetch` / `modality`, the effective precedence is: inline `Export
 
 ### Return Shape
 
-`ExportTarget.per_item(...)` returns `List[dict]`, while `ExportTarget.combined(...)` returns `dict`.
+`ExportTarget.per_item(...)` returns `List[dict]` — one manifest per spatial point, ordered by `point_index`. Stable keys per manifest: `point_index`, `status` (`"ok"` / `"partial"` / `"failed"`), `models` (one entry per model with `model`, `status`, and `error` when failed), `summary` (`total_models` / `ok_models` / `failed_models`), and the written file path under the format-specific key (`npz_path` or `nc_path`). Points skipped by `config.resume` instead carry `resume_skipped=True` and `resume_output_path`.
 
-In both cases, the return value is manifest-style metadata describing what was exported.
+`ExportTarget.combined(...)` returns a single `dict` manifest for the whole run with `status`, `n_items`, `models`, `summary`, and the output path under the format-specific key (`npz_path` or `nc_path`). When `config.resume` finds the export already complete, the manifest carries `resume_skipped=True` and `resume_output_path`.
 
 ---
 
@@ -251,10 +244,10 @@ export_batch(
     models=["remoteclip", "prithvi"],
     target=ExportTarget.per_item("exports", names=["p1", "p2"]),
     config=ExportConfig(
-        input_prep="tile",
         chunk_size=32,
         num_workers=8,
     ),
+    input_prep="tile",
 )
 ```
 

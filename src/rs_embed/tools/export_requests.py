@@ -115,14 +115,14 @@ def resolve_export_model_configs(
     sensor: SensorSpec | None,
     fetch: FetchSpec | None,
     modality: str | None,
-    per_model_sensors: dict[str, SensorSpec] | None,
-    per_model_fetches: dict[str, FetchSpec] | None,
-    per_model_modalities: dict[str, str] | None,
 ) -> tuple[list[ModelConfig], dict[str, str]]:
     """Resolve per-model configurations for a batch export.
 
     Validates each requested model, resolves its effective backend and
     sensor, and returns ready-to-use :class:`ModelConfig` instances.
+    Per-model overrides come exclusively from :class:`ExportModelRequest`
+    fields; the global ``sensor`` / ``fetch`` / ``modality`` apply to every
+    model that does not override them.
 
     Parameters
     ----------
@@ -135,17 +135,12 @@ def resolve_export_model_configs(
     output : OutputSpec
         Output representation policy applied to all models.
     sensor : SensorSpec or None
-        Global sensor override (applied when no per-model override exists).
+        Global sensor override (applied when the request has no per-model
+        override).
     fetch : FetchSpec or None
         Global fetch-policy override.
     modality : str or None
         Global modality selector.
-    per_model_sensors : dict[str, SensorSpec] or None
-        Per-model sensor overrides keyed by model name.
-    per_model_fetches : dict[str, FetchSpec] or None
-        Per-model fetch-policy overrides keyed by model name.
-    per_model_modalities : dict[str, str] or None
-        Per-model modality overrides keyed by model name.
 
     Returns
     -------
@@ -162,10 +157,6 @@ def resolve_export_model_configs(
     """
     if not isinstance(models, list) or len(models) == 0:
         raise ModelError("models must be a non-empty list[str] or list[ExportModelRequest].")
-
-    per_model_sensors = per_model_sensors or {}
-    per_model_fetches = per_model_fetches or {}
-    per_model_modalities = per_model_modalities or {}
 
     requests: list[ExportModelRequest] = []
     for item in models:
@@ -217,17 +208,9 @@ def resolve_export_model_configs(
         except Exception as _e:
             desc = {}
 
-        modality_eff = req.modality
-        if modality_eff is None:
-            modality_eff = per_model_modalities.get(model_name, modality)
-
-        sensor_eff = req.sensor
-        if sensor_eff is None:
-            sensor_eff = per_model_sensors.get(model_name, sensor)
-
-        fetch_eff = req.fetch
-        if fetch_eff is None:
-            fetch_eff = per_model_fetches.get(model_name, fetch)
+        modality_eff = req.modality if req.modality is not None else modality
+        sensor_eff = req.sensor if req.sensor is not None else sensor
+        fetch_eff = req.fetch if req.fetch is not None else fetch
 
         model_configs.append(
             ModelConfig(

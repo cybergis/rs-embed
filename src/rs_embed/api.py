@@ -410,10 +410,8 @@ def export_batch(
     sensor: SensorSpec | None = None,
     fetch: FetchSpec | None = None,
     modality: str | None = None,
-    per_model_sensors: dict[str, SensorSpec] | None = None,
-    per_model_fetches: dict[str, FetchSpec] | None = None,
-    per_model_modalities: dict[str, str] | None = None,
-) -> Any:
+    input_prep: InputPrepSpec | str | None = None,
+) -> list[dict[str, Any]] | dict[str, Any]:
     """Export inputs + embeddings for many spatials and many models.
 
     This is the recommended high-level entrypoint for batch export.
@@ -426,9 +424,11 @@ def export_batch(
     temporal : TemporalSpec or None
         Optional temporal filter applied to all spatial requests.
     models : list[str | ExportModelRequest]
-        Model identifiers or per-model request objects.  To pass model-specific
-        settings (e.g. variant selection), use
-        :meth:`ExportModelRequest.configure` instead of raw strings::
+        Model identifiers or per-model request objects.
+        :class:`ExportModelRequest` is the single per-model channel: use it
+        to give one model its own ``sensor``, ``fetch``, or ``modality``, and
+        use :meth:`ExportModelRequest.configure` to pass model-specific
+        settings (e.g. variant selection)::
 
             models=[ExportModelRequest.configure("dofa", variant="large")]
     target : ExportTarget
@@ -444,31 +444,51 @@ def export_batch(
     output : OutputSpec
         Embedding output representation policy.
     sensor : SensorSpec or None
-        Default sensor for all models unless overridden.
+        Default sensor for all models unless overridden per model via
+        :class:`ExportModelRequest`.
     fetch : FetchSpec or None
-        Default fetch-policy override for all models unless overridden.
-        Cannot be combined with ``sensor``.
+        Default fetch-policy override for all models unless overridden per
+        model via :class:`ExportModelRequest`. Cannot be combined with
+        ``sensor``.
     modality : str or None
         Optional global modality selector applied to models that expose
-        public modality switching.
-    per_model_sensors : dict[str, SensorSpec] or None
-        Per-model sensor overrides keyed by model name.
-    per_model_fetches : dict[str, FetchSpec] or None
-        Per-model fetch-policy overrides keyed by model name. Cannot be
-        combined with sensor overrides for the same model.
-    per_model_modalities : dict[str, str] or None
-        Optional per-model modality overrides keyed by model name.
+        public modality switching; override per model via
+        :class:`ExportModelRequest`.
+    input_prep : InputPrepSpec or str or None
+        API-side input preprocessing policy, resolved per model exactly as
+        :func:`get_embedding` does. ``None`` (the default) uses the package
+        default ``"tile"`` (large inputs are tiled + stitched to preserve
+        native resolution). Pass ``"resize"`` to downsample to the model
+        image size, or ``"auto"`` to tile only when beneficial. This is the
+        recommended way to set the policy; ``config.input_prep`` is
+        equivalent, but passing both raises :class:`ModelError`.
 
     Returns
     -------
-    Any
-        Export result object returned by :class:`BatchExporter`.
+    list[dict[str, Any]] or dict[str, Any]
+        For :meth:`ExportTarget.per_item` targets: a list with one manifest
+        dict per spatial point, ordered by ``point_index``. Stable keys per
+        manifest: ``point_index`` (int), ``status`` (``"ok"``, ``"partial"``,
+        or ``"failed"``), ``models`` (one entry per model with ``model``,
+        ``status``, and ``error`` when failed), ``summary``
+        (``total_models`` / ``ok_models`` / ``failed_models``), and the
+        written file's path under the format-specific key (``npz_path`` or
+        ``nc_path``). Points skipped by ``config.resume`` instead carry
+        ``resume_skipped=True`` and ``resume_output_path``.
+
+        For :meth:`ExportTarget.combined` targets: a single manifest dict
+        for the whole run with ``status``, ``n_items``, ``models``,
+        ``summary``, and the output path under the format-specific key
+        (``npz_path`` or ``nc_path``). When ``config.resume`` finds the
+        export already complete, the returned manifest carries
+        ``resume_skipped=True`` and ``resume_output_path``.
 
     Raises
     ------
     ModelError
         If arguments are invalid or unsupported (for example empty inputs,
-        unsupported format, or incompatible model/backend settings).
+        unsupported format, incompatible model/backend settings, or
+        ``input_prep`` passed both top-level and via ``config``).
     SpecError
         If spatial or temporal specifications fail validation.
     """
@@ -476,6 +496,15 @@ def export_batch(
 
     if not isinstance(spatials, list) or len(spatials) == 0:
         raise ModelError("spatials must be a non-empty list[SpatialSpec].")
+
+    if input_prep is not None and config.input_prep is not None:
+        raise ModelError(
+            "input_prep was passed both as export_batch(input_prep=...) and as "
+            "ExportConfig(input_prep=...); pass it once (the top-level "
+            "parameter is recommended)."
+        )
+    if input_prep is not None:
+        config = replace(config, input_prep=input_prep)
 
     if config.input_prep is not None:
         model_names_n = {
@@ -509,9 +538,6 @@ def export_batch(
         sensor=sensor,
         fetch=fetch,
         modality=modality,
-        per_model_sensors=per_model_sensors,
-        per_model_fetches=per_model_fetches,
-        per_model_modalities=per_model_modalities,
     )
 
     resume_manifest = _maybe_return_completed_combined_resume(
