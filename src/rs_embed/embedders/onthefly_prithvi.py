@@ -37,6 +37,9 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
@@ -664,10 +667,7 @@ def _load_prithvi_cached(
                 f"Failed to load Prithvi checkpoint '{ckpt_path}': {type(e).__name__}: {e}"
             ) from e
 
-    try:
-        m = m.to(dev).eval()
-    except Exception as _e:
-        pass
+    m = _move_model_to_device(m, dev, model_name="Prithvi")
 
     meta = {
         "model_key": model_key,

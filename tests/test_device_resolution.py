@@ -90,16 +90,19 @@ class TestAutoResolution:
             assert resolve_device_auto_torch("auto") == "cpu"
 
     def test_cpu_fallback_when_torch_missing(self):
-        """cpu is returned safely when torch is not installed at all."""
+        """cpu is returned safely (with a warning) when torch is not installed."""
         with _patch_torch(None):  # simulates missing package
-            assert resolve_device_auto_torch("auto") == "cpu"
+            with pytest.warns(UserWarning, match="falling back to 'cpu'"):
+                assert resolve_device_auto_torch("auto") == "cpu"
 
     def test_cpu_fallback_on_unexpected_exception(self):
-        """cpu is returned safely when torch.cuda.is_available() raises."""
+        """cpu is returned with a diagnostic warning when torch.cuda.is_available()
+        raises — a broken CUDA install must not look identical to a CPU machine."""
         broken = _make_torch_mock(cuda=False, mps=False)
         broken.cuda.is_available.side_effect = RuntimeError("driver error")
         with _patch_torch(broken):
-            assert resolve_device_auto_torch("auto") == "cpu"
+            with pytest.warns(UserWarning, match="driver error"):
+                assert resolve_device_auto_torch("auto") == "cpu"
 
 
 # ---------------------------------------------------------------------------

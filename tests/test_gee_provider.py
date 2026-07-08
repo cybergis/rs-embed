@@ -1095,3 +1095,27 @@ def test_normalize_s1_vvvh_rejects_db_scale_input():
     out = normalize_s1_vvvh_chw(linear)
     assert out.shape == (2, 4, 4)
     assert float(out.min()) >= 0.0 and float(out.max()) <= 1.0
+
+
+# ── provider registry diagnostics ───────────────────────────────────────────
+
+
+def test_get_provider_unknown_reports_recorded_import_error(monkeypatch):
+    """A provider whose import failed must surface the cause instead of
+    silently looking unregistered (M11)."""
+    import rs_embed.providers as providers
+
+    monkeypatch.setitem(
+        providers._PROVIDER_IMPORT_ERRORS, "fakeprov", ImportError("no optional dep")
+    )
+    with pytest.raises(ValueError, match="no optional dep"):
+        providers.get_provider("fakeprov")
+
+
+def test_get_provider_unknown_mentions_other_import_errors(monkeypatch):
+    """Even for a name with no recorded failure, known import errors are listed."""
+    import rs_embed.providers as providers
+
+    monkeypatch.setitem(providers._PROVIDER_IMPORT_ERRORS, "otherprov", ImportError("dep missing"))
+    with pytest.raises(ValueError, match="otherprov: ImportError: dep missing"):
+        providers.get_provider("definitely-not-registered")

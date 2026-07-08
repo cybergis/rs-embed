@@ -31,6 +31,9 @@ from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
 from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
@@ -772,10 +775,7 @@ def _load_satvision_toa_cached(
     if matched <= 0:
         raise ModelError("SatVision-TOA checkpoint load failed: no parameters matched model keys.")
 
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="SatVision-TOA")
 
     p0 = None
     for _, p in model.named_parameters():

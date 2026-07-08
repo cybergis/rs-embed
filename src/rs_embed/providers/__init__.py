@@ -21,6 +21,10 @@ import importlib
 from .base import ProviderBase
 
 _PROVIDER_REGISTRY: dict[str, type[ProviderBase]] = {}
+# Import failures of optional built-in providers, keyed by provider name, so
+# an unavailable provider can report WHY it is missing instead of silently
+# looking unregistered (mirrors core.registry._REGISTRY_IMPORT_ERRORS).
+_PROVIDER_IMPORT_ERRORS: dict[str, Exception] = {}
 _BUILTINS_LOADED = False
 
 
@@ -35,9 +39,11 @@ def _register_builtin_providers() -> None:
         mod = importlib.import_module(f"{__name__}.gee")
         cls = mod.GEEProvider
         _PROVIDER_REGISTRY.setdefault("gee", cls)
-    except Exception as _e:
-        # Keep registry usable even when optional backend deps are unavailable.
-        pass
+        _PROVIDER_IMPORT_ERRORS.pop("gee", None)
+    except Exception as e:
+        # Keep registry usable even when optional backend deps are unavailable,
+        # but record the cause for get_provider's error message.
+        _PROVIDER_IMPORT_ERRORS["gee"] = e
 
 
 def register_provider(name: str, provider_cls: type[ProviderBase]) -> None:
@@ -46,6 +52,7 @@ def register_provider(name: str, provider_cls: type[ProviderBase]) -> None:
     if not key:
         raise ValueError("Provider name must be a non-empty string.")
     _PROVIDER_REGISTRY[key] = provider_cls
+    _PROVIDER_IMPORT_ERRORS.pop(key, None)
 
 
 def get_provider(name: str, **kwargs) -> ProviderBase:
@@ -56,7 +63,16 @@ def get_provider(name: str, **kwargs) -> ProviderBase:
     provider_cls = _PROVIDER_REGISTRY.get(key)
     if provider_cls is None:
         available = ", ".join(sorted(_PROVIDER_REGISTRY.keys()))
-        raise ValueError(f"Unknown provider '{name}'. Available providers: {available}")
+        msg = f"Unknown provider '{name}'. Available providers: {available}."
+        if key in _PROVIDER_IMPORT_ERRORS:
+            err = _PROVIDER_IMPORT_ERRORS[key]
+            msg += f" Import error for '{key}': {type(err).__name__}: {err}"
+        elif _PROVIDER_IMPORT_ERRORS:
+            parts = [
+                f"{pid}: {type(e).__name__}: {e}" for pid, e in _PROVIDER_IMPORT_ERRORS.items()
+            ]
+            msg += f" Provider import errors: {'; '.join(parts)}"
+        raise ValueError(msg)
     return provider_cls(**kwargs)
 
 

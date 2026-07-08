@@ -40,6 +40,9 @@ from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
 from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
@@ -567,10 +570,7 @@ def _load_galileo_cached(
         # compatibility with src.galileo signature without device
         encoder = load_fn(model_folder)
 
-    try:
-        encoder = encoder.to(dev).eval()
-    except Exception as _e:
-        pass
+    encoder = _move_model_to_device(encoder, dev, model_name="Galileo")
 
     p0 = None
     for _, p in encoder.named_parameters():
@@ -746,10 +746,7 @@ def _galileo_forward(
     import torch
 
     dev = _resolve_device(device)
-    try:
-        encoder = encoder.to(dev).eval()
-    except Exception as _e:
-        pass
+    encoder = _move_model_to_device(encoder, dev, model_name="Galileo")
 
     with torch.no_grad():
         out = encoder(
