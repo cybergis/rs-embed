@@ -16,6 +16,7 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 ### Changed
 
 - **Silent failure paths now warn (M11).** Embedder loaders no longer swallow a failed `model.to(device)` move — they emit a `UserWarning` naming the model, the requested device, and the underlying error, then continue on the model's current device (previously meta could claim a device the model never reached). `resolve_device_auto_torch("auto")` warns with the underlying exception before falling back to `"cpu"`, so a broken torch/CUDA install no longer looks identical to a CPU machine. The provider registry records built-in provider import failures (`rs_embed.providers._PROVIDER_IMPORT_ERRORS`) and `get_provider()` includes the recorded import error in its "unknown provider" message, mirroring the embedder registry.
+- **Typed pipeline errors (M5).** The export pipelines now raise `ProviderError` for prefetch/fetch failures and `ModelError` for pipeline contract violations (missing prefetched input, missing provider factory, input-inspection failure, wrong batch-embedding count) instead of bare `RuntimeError` (both from `rs_embed.core.errors`). Code that caught `RuntimeError` on these paths must catch the new types; manifest `error` strings now show `ProviderError(...)`/`ModelError(...)`.
 
 ## [0.2.0] — 2026-06-30
 
