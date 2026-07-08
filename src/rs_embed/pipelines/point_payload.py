@@ -8,10 +8,14 @@ fallback chain and records model-level success/failure metadata.
 from __future__ import annotations
 
 from collections.abc import Callable
-from typing import Any
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
+if TYPE_CHECKING:
+    from .prefetch import PrefetchManager
+
+from ..core.errors import ModelError, ProviderError
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig
 from ..providers import fetch as _providers_fetch
@@ -47,18 +51,19 @@ def build_one_point_payload(
     resolved_sensor: dict[str, SensorSpec | None],
     resolved_model_config: dict[str, dict[str, Any] | None],
     model_type: dict[str, str],
-    inputs_cache: dict[tuple[int, str], np.ndarray],
-    input_reports: dict[tuple[int, str], dict[str, Any]],
-    prefetch_errors: dict[tuple[int, str], str],
+    prefetch: PrefetchManager,
     pass_input_into_embedder: bool,
     config: ExportConfig,
     provider_factory: Callable[[], Any] | None = None,
     model_progress_cb: Callable[[str], None] | None = None,
     fetch_fn: Callable[..., np.ndarray] | None = None,
     inspect_fn: Callable[..., dict[str, Any]] | None = None,
-    fetch_meta_cache: dict[tuple[int, str], dict[str, Any]] | None = None,
 ) -> tuple[dict[str, np.ndarray], dict[str, Any]]:
     """Build arrays + manifest payload for one point across all models.
+
+    ``prefetch`` supplies the shared caches (``cache``, ``input_reports``,
+    ``errors``, ``fetch_meta``); at runtime it is duck-typed, so tests may
+    pass any object exposing those mappings.
 
     Input resolution order for provider-backed models:
     1. local per-point cache,
@@ -149,19 +154,19 @@ def build_one_point_payload(
                 if skey in local_inp:
                     input_chw = local_inp[skey]
                 else:
-                    cached = inputs_cache.get((point_index, skey))
+                    cached = prefetch.cache.get((point_index, skey))
                     if cached is not None:
                         input_chw = cached
                         local_inp[skey] = input_chw
                     else:
-                        pref_err = prefetch_errors.get((point_index, skey))
+                        pref_err = prefetch.errors.get((point_index, skey))
                         if pref_err and continue_on_error:
-                            raise RuntimeError(
+                            raise ProviderError(
                                 f"Prefetch previously failed for model={m}, "
                                 f"index={point_index}, sensor={skey}: {pref_err}"
                             )
                         if provider_factory is None:
-                            raise RuntimeError(
+                            raise ModelError(
                                 f"Missing provider factory for model={m}, index={point_index}, sensor={skey}"
                             )
                         prov = _get_provider()
@@ -188,13 +193,13 @@ def build_one_point_payload(
                             local_fetch_meta[skey] = jsonable(fetch_result.meta)
                         local_inp[skey] = input_chw
 
-                report = input_reports.get((point_index, skey))
+                report = prefetch.input_reports.get((point_index, skey))
                 if report is None and input_chw is not None:
                     report = inspect(input_chw, sensor=sspec, name=f"gee_input_{skey}")
 
                 if fail_on_bad_input and report is not None and (not bool(report.get("ok", True))):
                     issues = (report.get("report", {}) or {}).get("issues", [])
-                    raise RuntimeError(f"Input inspection failed for model={m}: {issues}")
+                    raise ModelError(f"Input inspection failed for model={m}: {issues}")
 
                 if save_inputs and input_chw is not None:
                     if skey in local_input_meta:
@@ -219,8 +224,8 @@ def build_one_point_payload(
 
             # Resolve fetch-time metadata from the prefetch cache.
             _fmeta: dict[str, Any] | None = None
-            if fetch_meta_cache and sspec is not None:
-                _fmeta = fetch_meta_cache.get((point_index, sensor_cache_key(sspec))) or None
+            if prefetch.fetch_meta and sspec is not None:
+                _fmeta = prefetch.fetch_meta.get((point_index, sensor_cache_key(sspec))) or None
             if _fmeta is None and sspec is not None:
                 _fmeta = local_fetch_meta.get(sensor_cache_key(sspec)) or None
             if _fmeta:

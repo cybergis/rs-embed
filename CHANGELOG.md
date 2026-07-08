@@ -8,6 +8,16 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- **`model_config` channels for `terramind`, `remoteclip`, and `terrafm`.** These models previously took model-specific settings only via env vars; they now accept `model_config` on `get_embedding` / `get_embeddings_batch` / `get_embeddings_batch_from_inputs` like their siblings (thor, dofa): `terramind` supports `model_key` (over `RS_EMBED_TERRAMIND_MODEL_KEY`) and `modality` (precedence: `sensor.modality` > `model_config` > `RS_EMBED_TERRAMIND_MODALITY` > default), `remoteclip` supports `model_id` (over the legacy `sensor.collection="hf:<id>"` prefix and a new `RS_EMBED_REMOTECLIP_ID` env fallback), and `terrafm` supports `cache_dir` (over the HF cache env chain). Env vars stay as fallbacks; behavior without `model_config` is unchanged. `describe()` documents the keys.
+- **`tessera`/`copernicus` filesystem paths moved to `model_config`.** `tessera` accepts `model_config={"cache_dir": ...}` and `copernicus` accepts `model_config={"data_dir": ...}` on the single and batch paths. The legacy `sensor.collection="cache:<dir>"` / `"dir:<dir>"` conventions still work but now emit a `DeprecationWarning` pointing at the `model_config` key; precedence is `model_config` > legacy collection prefix > env var (`RS_EMBED_TESSERA_CACHE` / `RS_EMBED_COP_DIR`) > default.
+
+### Changed
+
+- **Silent failure paths now warn (M11).** Embedder loaders no longer swallow a failed `model.to(device)` move — they emit a `UserWarning` naming the model, the requested device, and the underlying error, then continue on the model's current device (previously meta could claim a device the model never reached). `resolve_device_auto_torch("auto")` warns with the underlying exception before falling back to `"cpu"`, so a broken torch/CUDA install no longer looks identical to a CPU machine. The provider registry records built-in provider import failures (`rs_embed.providers._PROVIDER_IMPORT_ERRORS`) and `get_provider()` includes the recorded import error in its "unknown provider" message, mirroring the embedder registry.
+- **Typed pipeline errors (M5).** The export pipelines now raise `ProviderError` for prefetch/fetch failures and `ModelError` for pipeline contract violations (missing prefetched input, missing provider factory, input-inspection failure, wrong batch-embedding count) instead of bare `RuntimeError` (both from `rs_embed.core.errors`). Code that caught `RuntimeError` on these paths must catch the new types; manifest `error` strings now show `ProviderError(...)`/`ModelError(...)`.
+
 ## [0.2.0] — 2026-06-30
 
 This release adds the OlmoEarth model family, makes the temporal models (`prithvi`, `galileo`, `olmoearth`) sample window-adaptively by default, flips the package-wide default `input_prep` from `resize` to `tile` so all models preserve native resolution by default, and fixes several `export_batch` correctness issues where a point's embedding differed between the single and batch/tiled paths. Some defaults that change embedding behavior are noted below; pin explicit options where strict reproducibility across versions is required.

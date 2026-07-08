@@ -23,6 +23,9 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
@@ -294,10 +297,7 @@ def _load_scalemae_cached(model_id: str, dev: str):
         ) from e
 
     model = ScaleMAE.from_pretrained(model_id)
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="ScaleMAE")
 
     meta = {"model_id": model_id, "device": dev}
     return model, meta

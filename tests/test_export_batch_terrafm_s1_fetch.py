@@ -1,4 +1,5 @@
 import threading
+from types import SimpleNamespace
 
 import numpy as np
 
@@ -192,9 +193,7 @@ def test_build_one_point_payload_fallback_uses_embedder_fetch_input(monkeypatch)
         },
         resolved_model_config={"dummy_fallback_s1": None},
         model_type={"dummy_fallback_s1": "onthefly"},
-        inputs_cache={},
-        input_reports={},
-        prefetch_errors={},
+        prefetch=SimpleNamespace(cache={}, input_reports={}, errors={}, fetch_meta={}),
         pass_input_into_embedder=True,
         config=type(
             "Cfg",
@@ -213,7 +212,6 @@ def test_build_one_point_payload_fallback_uses_embedder_fetch_input(monkeypatch)
             AssertionError("generic fetch_fn should not be used when embedder.fetch_input exists")
         ),
         inspect_fn=lambda x_chw, *, sensor, name: {"ok": True, "name": name},
-        fetch_meta_cache={},
     )
 
     np.testing.assert_allclose(arrays["input_chw__dummy_fallback_s1"], np.full((2, 2, 2), 7.0))

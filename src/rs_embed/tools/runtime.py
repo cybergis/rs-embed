@@ -53,8 +53,34 @@ def resolve_device_auto_torch(device: str) -> str:
         if torch.backends.mps.is_available():
             return "mps"
         return "cpu"
-    except Exception as _e:
+    except Exception as exc:
+        warnings.warn(
+            f"device='auto' resolution failed ({exc!r}); falling back to 'cpu'. "
+            "A broken torch/CUDA install would otherwise be indistinguishable "
+            "from a CPU-only machine.",
+            UserWarning,
+            stacklevel=2,
+        )
         return "cpu"
+
+
+def move_model_to_device(model: _T, dev: str, *, model_name: str) -> _T:
+    """Move *model* to *dev* and switch to eval mode, warning on failure.
+
+    A failed device move keeps the model usable on its current device but must
+    be loud: silently passing left meta claiming the requested device while
+    inference actually ran elsewhere.
+    """
+    try:
+        return model.to(dev).eval()
+    except Exception as exc:
+        warnings.warn(
+            f"{model_name}: failed to move model to device {dev!r} ({exc!r}); "
+            "continuing on the model's current device.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return model
 
 
 def load_cached_with_device(

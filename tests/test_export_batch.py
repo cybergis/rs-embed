@@ -6,6 +6,7 @@ import pytest
 
 from rs_embed.core import registry
 from rs_embed.core.embedding import Embedding
+from rs_embed.core.errors import ModelError
 from rs_embed.core.specs import (
     InputPrepSpec,
     ModelInputSpec,
@@ -1343,7 +1344,7 @@ def test_export_batch_combined_fail_on_bad_input(tmp_path, monkeypatch):
     )
     get_embedder_bundle_cached.cache_clear()
 
-    with pytest.raises(RuntimeError, match="Input inspection failed"):
+    with pytest.raises(ModelError, match="Input inspection failed"):
         api.export_batch(
             spatials=[PointBuffer(lon=0, lat=0, buffer_m=10)],
             temporal=TemporalSpec.year(2022),

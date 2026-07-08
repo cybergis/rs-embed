@@ -13,7 +13,7 @@ from typing import Any, NamedTuple
 import numpy as np
 
 from ..core.embedding import Embedding
-from ..core.errors import ModelError
+from ..core.errors import ModelError, ProviderError
 from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, ModelConfig, TaskResult
 from ..tools.output import normalize_embedding_output
@@ -237,7 +237,7 @@ class InferenceEngine:
     def _warn_batch_fallback(tier: str, model_name: str, exc: Exception) -> None:
         """Batch-tier failures must not be silent: the whole batch is re-run
         point by point, doubling inference cost and hiding the root cause
-        (including the deliberate returned-wrong-count RuntimeError)."""
+        (including the deliberate returned-wrong-count ModelError)."""
         import warnings
 
         warnings.warn(
@@ -325,7 +325,7 @@ class InferenceEngine:
                     backoff_s=cfg.retry_backoff_s,
                 )
                 if len(batch_out) != len(sub_idx):
-                    raise RuntimeError(
+                    raise ModelError(
                         f"Model {model_name} returned {len(batch_out)} embeddings "
                         f"for {len(sub_idx)} prefetched inputs."
                     )
@@ -392,7 +392,7 @@ class InferenceEngine:
                     backoff_s=cfg.retry_backoff_s,
                 )
                 if len(batch_out) != len(sub_idx):
-                    raise RuntimeError(
+                    raise ModelError(
                         f"Model {model_name} returned {len(batch_out)} embeddings "
                         f"for {len(sub_idx)} inputs."
                     )
@@ -566,7 +566,7 @@ class InferenceEngine:
                     backoff_s=cfg.retry_backoff_s,
                 )
                 if len(sub_embs) != len(sub_tiles):
-                    raise RuntimeError(
+                    raise ModelError(
                         f"Model {model_name} returned {len(sub_embs)} embeddings "
                         f"for {len(sub_tiles)} tiles."
                     )
@@ -793,14 +793,14 @@ class InferenceEngine:
 
             def _get_input(i: int, _ctx=ctx, _mc=mc) -> np.ndarray:
                 if not _ctx.needs_provider_input or _ctx.skey is None:
-                    raise RuntimeError(f"Missing prefetched input for model={_mc.name}, index={i}")
+                    raise ModelError(f"Missing prefetched input for model={_mc.name}, index={i}")
                 hit = prefetch_cache.get((i, _ctx.skey))
                 if hit is not None:
                     return hit
                 err = prefetch_errors.get((i, _ctx.skey))
                 if err:
-                    raise RuntimeError(f"Prefetch failed for model={_mc.name}, index={i}: {err}")
-                raise RuntimeError(f"Missing prefetched input for model={_mc.name}, index={i}")
+                    raise ProviderError(f"Prefetch failed for model={_mc.name}, index={i}: {err}")
+                raise ModelError(f"Missing prefetched input for model={_mc.name}, index={i}")
 
             def _get_fmeta(i: int, _ctx=ctx) -> dict[str, Any] | None:
                 if prefetch_meta is None or not _ctx.needs_provider_input or _ctx.skey is None:

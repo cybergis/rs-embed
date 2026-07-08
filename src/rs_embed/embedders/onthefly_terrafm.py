@@ -49,10 +49,28 @@ from ..tools.shape import (
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
+from .config import model_config_value
 from .meta import build_meta, temporal_to_range
 
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"
+
+
+def _resolve_terrafm_cache_dir(model_config: dict[str, Any] | None) -> str | None:
+    """Resolve the TerraFM weight cache directory.
+
+    ``model_config['cache_dir']`` wins; the Hugging Face cache env chain
+    (HUGGINGFACE_HUB_CACHE > HF_HOME > HUGGINGFACE_HOME) is the fallback;
+    ``None`` uses the huggingface_hub default cache.
+    """
+    v = model_config_value(model_config, "cache_dir")
+    if v is not None and str(v).strip():
+        return str(v).strip()
+    return (
+        os.environ.get("HUGGINGFACE_HUB_CACHE")
+        or os.environ.get("HF_HOME")
+        or os.environ.get("HUGGINGFACE_HOME")
+    )
 
 
 # -----------------------------
@@ -442,6 +460,9 @@ class TerraFMBEmbedder(EmbedderBase):
         input_chw=True,
         fetch_meta=True,
         batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:
@@ -484,6 +505,17 @@ class TerraFMBEmbedder(EmbedderBase):
                 "s1_require_iw": True,
                 "s1_relax_iw_on_empty": True,
                 "image_size": 224,
+            },
+            "model_config": {
+                "cache_dir": {
+                    "type": "string",
+                    "default": None,
+                    "description": (
+                        "Weight cache directory for the TerraFM checkpoint download. "
+                        "Precedence: model_config > HUGGINGFACE_HUB_CACHE/HF_HOME/"
+                        "HUGGINGFACE_HOME env vars > huggingface_hub default cache."
+                    ),
+                },
             },
             "notes": "grid output is model feature-map grid (not pixel grid).",
         }
@@ -589,6 +621,7 @@ class TerraFMBEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        model_config: dict[str, Any] | None = None,
         fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
@@ -612,11 +645,7 @@ class TerraFMBEmbedder(EmbedderBase):
         )
 
         image_size = 224
-        cache_dir = (
-            os.environ.get("HUGGINGFACE_HUB_CACHE")
-            or os.environ.get("HF_HOME")
-            or os.environ.get("HUGGINGFACE_HOME")
-        )
+        cache_dir = _resolve_terrafm_cache_dir(model_config)
 
         # For optional on-the-fly input inspection
         check_meta: dict[str, Any] = {}
@@ -832,6 +861,7 @@ class TerraFMBEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -918,6 +948,7 @@ class TerraFMBEmbedder(EmbedderBase):
             fetch_metas=prefetched_meta,
             temporal=temporal,
             sensor=sensor,
+            model_config=model_config,
             output=output,
             backend=backend,
             device=device,
@@ -931,6 +962,7 @@ class TerraFMBEmbedder(EmbedderBase):
         fetch_metas: list[dict[str, Any] | None] | None = None,
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -962,11 +994,7 @@ class TerraFMBEmbedder(EmbedderBase):
         )
 
         image_size = 224
-        cache_dir = (
-            os.environ.get("HUGGINGFACE_HUB_CACHE")
-            or os.environ.get("HF_HOME")
-            or os.environ.get("HUGGINGFACE_HOME")
-        )
+        cache_dir = _resolve_terrafm_cache_dir(model_config)
 
         x_bchw_all: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):

@@ -25,6 +25,9 @@ from ..providers.resolution import (
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
 )
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
@@ -367,10 +370,7 @@ def _load_satmaepp_from_snapshot(*, SatMAEPP: Any, model_id: str, dev: str):
 
     state_dict = _unwrap_satmaepp_state_dict(payload)
     model.load_state_dict(state_dict, strict=True)
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="SatMAE++")
 
     meta = {
         "model_id": model_id,
@@ -408,10 +408,7 @@ def _load_satmaepp_cached(model_id: str, dev: str):
         raise ModelError(
             f"SatMAE++ RGB adapter expects a 3-channel checkpoint, but {model_id!r} has in_chans={in_chans}."
         )
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="SatMAE++")
 
     meta = {"model_id": model_id, "device": dev, "in_chans": in_chans, "load_mode": load_mode}
     return model, meta

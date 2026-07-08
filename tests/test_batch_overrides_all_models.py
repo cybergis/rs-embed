@@ -838,7 +838,10 @@ def test_satmaepp_batch_outputs_align_with_spatials(monkeypatch):
 
 @pytest.mark.parametrize(
     "embedder_cls",
-    [AgriFMEmbedder, GSEAnnualEmbedder, TesseraEmbedder, CopernicusEmbedder],
+    # tessera/copernicus dropped out of this list when their get_embedding
+    # gained a model_config channel (cache_dir/data_dir); their batch guard
+    # now passes and forwards model_config per item instead of raising.
+    [AgriFMEmbedder, GSEAnnualEmbedder],
 )
 def test_batch_rejects_unsupported_model_config_with_model_error(embedder_cls):
     """Regression (review M7): these batch overrides had no model_config
@@ -850,3 +853,90 @@ def test_batch_rejects_unsupported_model_config_with_model_error(embedder_cls):
             spatials=_spatials(1),
             model_config={"variant": "large"},
         )
+
+
+# ── model_config channels for terramind / remoteclip / terrafm (M2) ─────────
+
+
+def test_terramind_runtime_config_precedence(monkeypatch):
+    from rs_embed.embedders.onthefly_terramind import _resolve_terramind_runtime_config
+
+    monkeypatch.setenv("RS_EMBED_TERRAMIND_MODEL_KEY", "terramind_v1_base")
+    monkeypatch.setenv("RS_EMBED_TERRAMIND_MODALITY", "ENVMOD")
+
+    # model_config wins over env vars.
+    cfg = _resolve_terramind_runtime_config(
+        model_config={"model_key": "terramind_v1_large", "modality": "S1GRD"},
+        sensor=None,
+        default_model_key="terramind_v1_small",
+        default_modality="S2L2A",
+    )
+    assert cfg["model_key"] == "terramind_v1_large"
+    assert cfg["modality"] == "S1GRD"
+
+    # Env vars stay the fallback when model_config is absent.
+    cfg = _resolve_terramind_runtime_config(
+        model_config=None,
+        sensor=None,
+        default_model_key="terramind_v1_small",
+        default_modality="S2L2A",
+    )
+    assert cfg["model_key"] == "terramind_v1_base"
+    assert cfg["modality"] == "ENVMOD"
+
+    # sensor.modality keeps the highest precedence for modality.
+    cfg = _resolve_terramind_runtime_config(
+        model_config={"modality": "S1GRD"},
+        sensor=SensorSpec(collection="x", bands=(), modality="DEM"),
+        default_model_key="terramind_v1_small",
+        default_modality="S2L2A",
+    )
+    assert cfg["modality"] == "DEM"
+
+    # Defaults when nothing is configured.
+    monkeypatch.delenv("RS_EMBED_TERRAMIND_MODEL_KEY")
+    monkeypatch.delenv("RS_EMBED_TERRAMIND_MODALITY")
+    cfg = _resolve_terramind_runtime_config(
+        model_config=None,
+        sensor=None,
+        default_model_key="terramind_v1_small",
+        default_modality="S2L2A",
+    )
+    assert cfg["model_key"] == "terramind_v1_small"
+    assert cfg["modality"] == "S2L2A"
+
+
+def test_remoteclip_model_id_precedence(monkeypatch):
+    from rs_embed.embedders.onthefly_remoteclip import (
+        _DEFAULT_REMOTECLIP_ID,
+        _resolve_remoteclip_model_id,
+    )
+
+    monkeypatch.delenv("RS_EMBED_REMOTECLIP_ID", raising=False)
+    assert _resolve_remoteclip_model_id(None, None) == _DEFAULT_REMOTECLIP_ID
+
+    monkeypatch.setenv("RS_EMBED_REMOTECLIP_ID", "org/env-ckpt")
+    assert _resolve_remoteclip_model_id(None, None) == "org/env-ckpt"
+
+    # Legacy sensor.collection='hf:...' wins over env.
+    sensor = SensorSpec(collection="hf:org/legacy-ckpt", bands=())
+    assert _resolve_remoteclip_model_id(None, sensor) == "org/legacy-ckpt"
+
+    # model_config wins over everything.
+    assert _resolve_remoteclip_model_id({"model_id": "org/mc-ckpt"}, sensor) == "org/mc-ckpt"
+
+
+def test_terrafm_cache_dir_precedence(monkeypatch):
+    from rs_embed.embedders.onthefly_terrafm import _resolve_terrafm_cache_dir
+
+    for key in ("HUGGINGFACE_HUB_CACHE", "HF_HOME", "HUGGINGFACE_HOME"):
+        monkeypatch.delenv(key, raising=False)
+    assert _resolve_terrafm_cache_dir(None) is None
+
+    monkeypatch.setenv("HF_HOME", "/tmp/hf-home")
+    assert _resolve_terrafm_cache_dir(None) == "/tmp/hf-home"
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", "/tmp/hub-cache")
+    assert _resolve_terrafm_cache_dir(None) == "/tmp/hub-cache"
+
+    # model_config wins over the env chain.
+    assert _resolve_terrafm_cache_dir({"cache_dir": "/tmp/mc-cache"}) == "/tmp/mc-cache"
