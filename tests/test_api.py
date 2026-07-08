@@ -434,6 +434,20 @@ def test_validate_specs_rejects_legacy_output_scale_m():
         _validate_specs(spatial=_SPATIAL, temporal=None, output=bad_output)
 
 
+def test_output_spec_rejects_invalid_values_at_construction():
+    """Regression (review M8): an invalid mode/pooling must be impossible to
+    construct — several embedders dispatch pooling with a plain if/else where
+    an unvalidated typo silently produced mean-pooled results."""
+    from rs_embed.core.errors import SpecError
+
+    with pytest.raises(SpecError, match="Unknown output mode"):
+        OutputSpec(mode="gird")
+    with pytest.raises(SpecError, match="Unknown pooling"):
+        OutputSpec(mode="pooled", pooling="median")
+    with pytest.raises(SpecError, match="Unknown grid_orientation"):
+        OutputSpec(mode="grid", grid_orientation="south_up")
+
+
 def test_validate_specs_bad_pooling():
     bad_output = OutputSpec.__new__(OutputSpec)
     object.__setattr__(bad_output, "mode", "pooled")

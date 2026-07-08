@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 
 from rs_embed.core.embedding import Embedding
+from rs_embed.core.errors import ModelError
 from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
 from rs_embed.embedders.onthefly_agrifm import AgriFMEmbedder
 from rs_embed.embedders.onthefly_anysat import AnySatEmbedder
@@ -832,3 +834,19 @@ def test_satmaepp_batch_outputs_align_with_spatials(monkeypatch):
 
     assert sum(slice_sizes) == len(spatials)
     assert [float(e.data[0]) for e in out] == [10.0, 11.0, 12.0, 13.0]
+
+
+@pytest.mark.parametrize(
+    "embedder_cls",
+    [AgriFMEmbedder, GSEAnnualEmbedder, TesseraEmbedder, CopernicusEmbedder],
+)
+def test_batch_rejects_unsupported_model_config_with_model_error(embedder_cls):
+    """Regression (review M7): these batch overrides had no model_config
+    parameter at all, so the pipeline forwarding one crashed with TypeError
+    instead of the base contract's ModelError."""
+    emb = embedder_cls()
+    with pytest.raises(ModelError, match="does not accept model-specific"):
+        emb.get_embeddings_batch(
+            spatials=_spatials(1),
+            model_config={"variant": "large"},
+        )

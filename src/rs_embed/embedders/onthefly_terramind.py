@@ -679,6 +679,10 @@ class TerraMindEmbedder(EmbedderBase):
                     "backend='tensor' requires input_chw as CHW. "
                     "Use get_embeddings_batch_from_inputs(...) for batches."
                 )
+            # Tensor inputs: record the caller's resolved window when supplied
+            # (it describes their data); otherwise it is genuinely unknown.
+            if temporal is not None:
+                temporal_used = temporal_to_range(temporal)
             x_bchw = _prepare_terramind_input_chw(
                 input_chw,
                 image_size=image_size,
@@ -930,7 +934,9 @@ class TerraMindEmbedder(EmbedderBase):
 
         backend_l = backend.lower().strip()
         uses_provider = backend_l != "tensor"
-        t = None
+        # Tensor inputs: record the caller's resolved window when supplied
+        # (it describes their data); otherwise it is genuinely unknown.
+        t = temporal_to_range(temporal) if temporal is not None else None
         fill_value = 0.0
         source = None
         sensor_meta = None

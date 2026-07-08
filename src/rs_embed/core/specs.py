@@ -350,6 +350,21 @@ class OutputSpec:
     # - native: keep model/provider native orientation.
     grid_orientation: Literal["north_up", "native"] = "north_up"
 
+    def __post_init__(self) -> None:
+        # Validate at construction so an invalid mode/pooling can never reach
+        # an embedder: several pooling implementations dispatch with a plain
+        # if/else, where an unvalidated typo would silently produce a wrong
+        # (mean-pooled) result instead of an error.
+        if self.mode not in ("grid", "pooled"):
+            raise SpecError(f"Unknown output mode: {self.mode!r} (expected 'grid' or 'pooled').")
+        if self.pooling not in ("mean", "max"):
+            raise SpecError(f"Unknown pooling: {self.pooling!r} (expected 'mean' or 'max').")
+        if self.grid_orientation not in ("north_up", "native"):
+            raise SpecError(
+                f"Unknown grid_orientation: {self.grid_orientation!r} "
+                "(expected 'north_up' or 'native')."
+            )
+
     @staticmethod
     def grid(
         *,
