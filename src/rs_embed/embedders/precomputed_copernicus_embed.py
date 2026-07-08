@@ -107,6 +107,7 @@ class CopernicusEmbedder(EmbedderBase):
     # match the actual method signatures (tests/test_capabilities_contract.py).
     capabilities = EmbedderCapabilities(
         batch_fetch_metas=True,
+        model_config_batch=True,
         model_config_batch_inputs=True,
     )
 
@@ -223,7 +224,7 @@ class CopernicusEmbedder(EmbedderBase):
             backend="vendored_geotiff",
             source="hf://torchgeo/copernicus_embed/embed_map_310k.tif",
             sensor=None,
-            temporal=None,
+            temporal=temporal,
             image_size=None,
             extra={
                 "data_dir": data_dir,
@@ -271,10 +272,15 @@ class CopernicusEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if model_config is not None:
+            # Same contract as the base batch path: an unsupported
+            # model_config raises ModelError instead of TypeError/silence.
+            self._require_model_config_support(model_config)
         if not spatials:
             return []
 

@@ -219,7 +219,8 @@ class InferenceEngine:
         can_batch_no_input = (
             prefer_batch and supports_batch_api(embedder) and not needs_provider_input
         )
-        # Tier 1.5: batch across multiple spatial points, each tiled internally.
+        # Tiled batch (third in the dispatch order — see _dispatch_model_tiers):
+        # batch across multiple spatial points, each tiled internally.
         # Only for explicit tile mode — auto mode requires per-image size inspection
         # which can't be batched without first fetching every image.
         can_batch_tiled = (

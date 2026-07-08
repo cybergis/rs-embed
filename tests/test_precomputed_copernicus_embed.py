@@ -59,6 +59,9 @@ def test_copernicus_embedder_pooled_output_uses_vendored_meta(monkeypatch):
         )
 
     np.testing.assert_allclose(emb.data, np.array([4.0, 5.0], dtype=np.float32))
+    # Regression (review M9): the served year must be recorded, not {"mode": None}.
+    assert emb.meta["temporal"]["mode"] == "year"
+    assert emb.meta["temporal"]["year"] == 2021
     assert emb.meta["backend"] == "vendored_geotiff"
     assert emb.meta["source"] == "hf://torchgeo/copernicus_embed/embed_map_310k.tif"
     assert emb.meta["dataset_path"] == "/tmp/copernicus/embed_map_310k.tif"

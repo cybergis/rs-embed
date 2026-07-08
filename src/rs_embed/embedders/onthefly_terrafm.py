@@ -724,7 +724,12 @@ class TerraFMBEmbedder(EmbedderBase):
             want_grid=(output.mode == "grid" or cropped_to_roi),
         )
 
-        temporal_used = temporal_to_range(temporal) if uses_provider else None
+        # Provider fetches always record the resolved window. Tensor inputs
+        # record it only when the caller supplied a temporal (it describes
+        # their data); otherwise the window is genuinely unknown -> None.
+        temporal_used = (
+            temporal_to_range(temporal) if (uses_provider or temporal is not None) else None
+        )
         sensor_meta = None
         source = None
         if uses_provider:
@@ -982,7 +987,12 @@ class TerraFMBEmbedder(EmbedderBase):
         dev = str(wmeta.get("device", _auto_device(device)))
         infer_bs = self._resolve_infer_batch(dev)
 
-        temporal_used = temporal_to_range(temporal) if uses_provider else None
+        # Provider fetches always record the resolved window. Tensor inputs
+        # record it only when the caller supplied a temporal (it describes
+        # their data); otherwise the window is genuinely unknown -> None.
+        temporal_used = (
+            temporal_to_range(temporal) if (uses_provider or temporal is not None) else None
+        )
         sensor_meta = None
         source = None
         if uses_provider and modality == "s2":

@@ -616,6 +616,7 @@ class AgriFMEmbedder(EmbedderBase):
         input_chw=True,
         fetch_meta=True,
         batch_fetch_metas=True,
+        model_config_batch=True,
         model_config_batch_inputs=True,
     )
 
@@ -832,10 +833,15 @@ class AgriFMEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if model_config is not None:
+            # Same contract as the base batch path: an unsupported
+            # model_config raises ModelError instead of TypeError/silence.
+            self._require_model_config_support(model_config)
         if not spatials:
             return []
         if not is_provider_backend(backend, allow_auto=True):

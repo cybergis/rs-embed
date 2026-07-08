@@ -770,6 +770,10 @@ class FoMoEmbedder(EmbedderBase):
         device: str = "auto",
         fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
+        if len(spatials) != len(input_chws):
+            raise ValueError(
+                f"spatials/input_chws length mismatch: {len(spatials)} != {len(input_chws)}"
+            )
         if not input_chws:
             return []
 

@@ -76,7 +76,7 @@ def _pool(chw: np.ndarray, pooling: str) -> np.ndarray:
         return chw.mean(axis=(1, 2)).astype(np.float32)
     if pooling == "max":
         return chw.max(axis=(1, 2)).astype(np.float32)
-    raise ModelError(f"Unknown pooling: {pooling}")
+    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
 
 
 def _to_hwc(arr: np.ndarray) -> np.ndarray:
@@ -294,6 +294,7 @@ class TesseraEmbedder(EmbedderBase):
     # match the actual method signatures (tests/test_capabilities_contract.py).
     capabilities = EmbedderCapabilities(
         batch_fetch_metas=True,
+        model_config_batch=True,
         model_config_batch_inputs=True,
     )
 
@@ -434,10 +435,15 @@ class TesseraEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if model_config is not None:
+            # Same contract as the base batch path: an unsupported
+            # model_config raises ModelError instead of TypeError/silence.
+            self._require_model_config_support(model_config)
         if not spatials:
             return []
 
