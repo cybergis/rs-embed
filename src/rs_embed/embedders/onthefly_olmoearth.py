@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -36,6 +35,7 @@ from ..providers.resolution import is_provider_backend
 from ..tools.runtime import load_cached_with_device as _load_cached_with_device
 from ..tools.shape import (
     crop_grid_to_roi,
+    parallel_indexed_fetch,
     prepare_square,
     roi_fetch_meta,
     roi_is_full,
@@ -1176,27 +1176,23 @@ class OlmoEarthEmbedder(EmbedderBase):
         geo_rois: list[tuple[float, float, float, float] | None] = [None] * n
 
         def _fetch_one(
-            i: int, sp: SpatialSpec
-        ) -> tuple[int, np.ndarray, tuple[float, float, float, float] | None]:
+            i: int,
+        ) -> tuple[np.ndarray, tuple[float, float, float, float] | None]:
             fr = self.fetch_input(
-                provider, spatial=sp, temporal=t, sensor=sensor, temporal_mode=temporal_mode
+                provider,
+                spatial=spatials[i],
+                temporal=t,
+                sensor=sensor,
+                temporal_mode=temporal_mode,
             )
             assert fr is not None
-            return i, np.asarray(fr.data, dtype=np.float32), (fr.meta or {}).get("roi_window_geo")
+            return np.asarray(fr.data, dtype=np.float32), (fr.meta or {}).get("roi_window_geo")
 
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw, gr = _fetch_one(i, sp)
-                prefetched[ii] = raw
-                geo_rois[ii] = gr
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    ii, raw, gr = fut.result()
-                    prefetched[ii] = raw
-                    geo_rois[ii] = gr
+        for i, (raw, gr) in enumerate(
+            parallel_indexed_fetch(n, _fetch_one, max_workers=self._resolve_fetch_workers(n))
+        ):
+            prefetched[i] = raw
+            geo_rois[i] = gr
 
         raw_inputs: list[np.ndarray] = []
         for i, raw in enumerate(prefetched):
