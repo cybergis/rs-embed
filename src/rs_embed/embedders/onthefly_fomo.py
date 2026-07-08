@@ -472,7 +472,7 @@ def _tokens_to_grid(
     expected_per_mod = expected_gs * expected_gs if expected_gs > 0 else 0
     expected_tokens = n_modalities * expected_per_mod
 
-    if n_modalities <= 0 or n_tokens % n_modalities != 0:
+    def _vector_as_1x1() -> tuple[np.ndarray, dict[str, Any]]:
         vec = np.mean(tokens_nd, axis=0).astype(np.float32)
         return vec[:, None, None], {
             "grid_kind": "vector_as_1x1",
@@ -481,16 +481,13 @@ def _tokens_to_grid(
             "grid_expected_tokens": int(expected_tokens),
         }
 
+    if n_modalities <= 0 or n_tokens % n_modalities != 0:
+        return _vector_as_1x1()
+
     per_mod = n_tokens // n_modalities
     gs = int(round(float(per_mod) ** 0.5))
     if gs * gs != per_mod:
-        vec = np.mean(tokens_nd, axis=0).astype(np.float32)
-        return vec[:, None, None], {
-            "grid_kind": "vector_as_1x1",
-            "grid_hw": (1, 1),
-            "grid_shape": (int(vec.shape[0]), 1, 1),
-            "grid_expected_tokens": int(expected_tokens),
-        }
+        return _vector_as_1x1()
 
     toks = tokens_nd.reshape(n_modalities, gs, gs, dim)  # [K,H,W,D]
     grid = toks.mean(axis=0).transpose(2, 0, 1).astype(np.float32)  # [D,H,W]

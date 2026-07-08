@@ -373,60 +373,14 @@ def _terramind_forward_tokens(
     layer_index: int,
     device: str,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    ensure_torch()
-    import torch
-
-    dev = _resolve_device(device)
-    model = model.to(dev).eval()
-    x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
-
-    with torch.no_grad():
-        out = None
-        # Preferred path: explicit modality dict
-        try:
-            out = model({str(modality): x})
-        except Exception as _e:
-            # Fallback for wrappers that accept plain tensor
-            out = model(x)
-
-    def _pick_from_sequence(seq: Any, idx: int) -> torch.Tensor | None:
-        if not isinstance(seq, (list, tuple)) or len(seq) == 0:
-            return None
-        cand = None
-        try:
-            cand = seq[idx]
-        except Exception as _e:
-            cand = None
-        if torch.is_tensor(cand) and cand.ndim == 3:
-            return cand
-        for v in reversed(seq):
-            if torch.is_tensor(v) and v.ndim == 3:
-                return v
-        return None
-
-    toks_t = None
-    if isinstance(out, (list, tuple)):
-        toks_t = _pick_from_sequence(out, layer_index)
-    elif isinstance(out, dict):
-        vals = list(out.values())
-        toks_t = _pick_from_sequence(vals, layer_index)
-        if toks_t is None:
-            for v in vals:
-                if torch.is_tensor(v) and v.ndim == 3:
-                    toks_t = v
-                    break
-    elif hasattr(out, "last_hidden_state") and torch.is_tensor(out.last_hidden_state):
-        if out.last_hidden_state.ndim == 3:
-            toks_t = out.last_hidden_state
-    elif torch.is_tensor(out) and out.ndim == 3:
-        toks_t = out
-
-    if toks_t is None:
-        raise ModelError(
-            f"TerraMind forward did not return token tensor [B,N,D]. Got type={type(out)}."
-        )
-
-    tokens = toks_t[0].detach().float().cpu().numpy().astype(np.float32)
+    tokens_bnd, _bmeta = _terramind_forward_tokens_batch(
+        model,
+        x_bchw,
+        modality=modality,
+        layer_index=layer_index,
+        device=device,
+    )
+    tokens = tokens_bnd[0]
     meta = {
         "tokens_shape": tuple(tokens.shape),
         "layer_index": int(layer_index),
@@ -452,9 +406,11 @@ def _terramind_forward_tokens_batch(
 
     with torch.no_grad():
         out = None
+        # Preferred path: explicit modality dict
         try:
             out = model({str(modality): x})
         except Exception as _e:
+            # Fallback for wrappers that accept plain tensor
             out = model(x)
 
     def _pick_from_sequence(seq: Any, idx: int) -> torch.Tensor | None:
