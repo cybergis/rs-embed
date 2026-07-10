@@ -1742,10 +1742,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-legacy-dict-style-compatibility" class="md-nav__link">
+  <a href="#4-per-model-overrides" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Legacy dict-style compatibility
+        4. Per-model overrides
       
     </span>
   </a>
@@ -2560,10 +2560,10 @@
 </li>
         
           <li class="md-nav__item">
-  <a href="#4-legacy-dict-style-compatibility" class="md-nav__link">
+  <a href="#4-per-model-overrides" class="md-nav__link">
     <span class="md-ellipsis">
       
-        4. Legacy dict-style compatibility
+        4. Per-model overrides
       
     </span>
   </a>
@@ -2825,10 +2825,8 @@
     <span class="n">sensor</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">SensorSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">fetch</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">FetchSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">modality</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">per_model_sensors</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">SensorSpec</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">per_model_fetches</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">FetchSpec</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">per_model_modalities</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="nb">str</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Any</span>
+    <span class="n">input_prep</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">InputPrepSpec</span> <span class="o">|</span> <span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+<span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span> <span class="o">|</span> <span class="nb">dict</span>
 </code></pre></div>
 <p>Use <code>export_batch(...)</code> when you want to export one or many ROIs, one or many models, and the corresponding inputs, embeddings, and manifests together.</p>
 <p>Although the public function still exposes many keyword arguments, the implementation first normalizes requests into <code>ExportTarget</code>, <code>ExportConfig</code>, and <code>ExportModelRequest</code> entries.</p>
@@ -2839,9 +2837,9 @@
 <li>What to export: <code>spatials</code>, <code>temporal</code>, <code>models</code></li>
 <li>Where to write: <code>target=ExportTarget(...)</code></li>
 <li>How to run: <code>config=ExportConfig(...)</code></li>
-<li>Any shared or per-model settings: <code>backend</code>, <code>device</code>, <code>output</code>, <code>fetch</code>, <code>sensor</code>, <code>modality</code>, <code>per_model_*</code></li>
+<li>Any shared or per-model settings: <code>backend</code>, <code>device</code>, <code>output</code>, <code>fetch</code>, <code>sensor</code>, <code>modality</code>, <code>input_prep</code></li>
 </ol>
-<p>For new code, prefer <code>target=ExportTarget(...)</code> and <code>config=ExportConfig(...)</code>, then use <code>models=[..., ExportModelRequest(...)]</code> when one model really needs special overrides.</p>
+<p>Prefer <code>target=ExportTarget(...)</code> and <code>config=ExportConfig(...)</code>, then use <code>models=[..., ExportModelRequest(...)]</code> when one model really needs special overrides.</p>
 <h3 id="default-pattern">Default Pattern<a class="headerlink" href="#default-pattern" title="Permanent link">&para;</a></h3>
 <p>If you are not sure what to pass, this is the default pattern:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">export_batch</span><span class="p">,</span> <span class="n">ExportConfig</span><span class="p">,</span> <span class="n">ExportTarget</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span>
@@ -2923,15 +2921,18 @@
 <td><code>modality</code></td>
 <td>Shared modality override for models that expose multiple public branches.</td>
 </tr>
+<tr>
+<td><code>input_prep</code></td>
+<td>Large-ROI policy, usually <code>"tile"</code> (the default) or <code>"resize"</code>. Same semantics as <code>get_embedding(input_prep=...)</code>.</td>
+</tr>
 </tbody>
 </table>
 <p>Use per-model overrides only when one model needs different settings.</p>
 <h4 id="rule-of-thumb">Rule Of Thumb<a class="headerlink" href="#rule-of-thumb" title="Permanent link">&para;</a></h4>
 <p>Use <code>fetch=FetchSpec(...)</code> for shared resolution or compositing overrides. Use <code>sensor=SensorSpec(...)</code> only when a job really needs custom <code>collection</code> or <code>bands</code>. <code>fetch</code> and <code>sensor</code> cannot be passed together.</p>
-<h3 id="4-legacy-dict-style-compatibility">4. Legacy dict-style compatibility<a class="headerlink" href="#4-legacy-dict-style-compatibility" title="Permanent link">&para;</a></h3>
-<p>The structured per-model path is <code>ExportModelRequest(...)</code> or <code>ExportModelRequest.configure(...)</code> inside <code>models=[...]</code>.</p>
-<p><code>per_model_sensors</code>, <code>per_model_fetches</code>, and <code>per_model_modalities</code> remain accepted as legacy dict-style per-model overrides keyed by model name. They are kept for compatibility with older calling patterns.</p>
-<p>If both are provided, inline values on <code>ExportModelRequest(...)</code> take precedence over <code>per_model_*</code>, and <code>per_model_*</code> takes precedence over the corresponding global <code>sensor</code> / <code>fetch</code> / <code>modality</code>.</p>
+<h3 id="4-per-model-overrides">4. Per-model overrides<a class="headerlink" href="#4-per-model-overrides" title="Permanent link">&para;</a></h3>
+<p>The single per-model channel is <code>ExportModelRequest(...)</code> or <code>ExportModelRequest.configure(...)</code> inside <code>models=[...]</code>.</p>
+<p>Inline values on <code>ExportModelRequest(...)</code> take precedence over the corresponding global <code>sensor</code> / <code>fetch</code> / <code>modality</code>.</p>
 <h3 id="5-exportconfig-the-knobs-that-matter-most">5. ExportConfig: the knobs that matter most<a class="headerlink" href="#5-exportconfig-the-knobs-that-matter-most" title="Permanent link">&para;</a></h3>
 <p><code>config=ExportConfig(...)</code> is the recommended place for runtime settings.</p>
 <p>The most important ones are:</p>
@@ -2963,14 +2964,10 @@
 <td><code>resume</code></td>
 <td>Skip items already exported.</td>
 </tr>
-<tr>
-<td><code>input_prep</code></td>
-<td>Large-ROI policy, usually <code>"resize"</code> or <code>"tile"</code>.</td>
-</tr>
 </tbody>
 </table>
 <p>You can usually ignore the rest until you need performance tuning or failure recovery.</p>
-<p><code>config</code> is optional; the default is <code>ExportConfig()</code>.</p>
+<p><code>config</code> is optional; the default is <code>ExportConfig()</code>. <code>ExportConfig(input_prep=...)</code> is also accepted and is equivalent to the top-level <code>input_prep</code> parameter (recommended); passing both raises <code>ModelError</code>.</p>
 <h3 id="6-advanced-runtime-controls">6. Advanced runtime controls<a class="headerlink" href="#6-advanced-runtime-controls" title="Permanent link">&para;</a></h3>
 <p>These matter mainly for larger runs. <code>chunk_size</code> controls how many ROIs are processed at a time, <code>infer_batch_size</code> controls model batch size when batching is supported, and <code>num_workers</code> controls provider fetch concurrency. The remaining knobs such as <code>continue_on_error</code>, retry settings, asynchronous writing, progress display, and <code>fail_on_bad_input</code> mostly matter when you are tuning larger or less reliable runs.</p>
 <p>If you do not know what these mean, leave them at defaults.</p>
@@ -2983,7 +2980,6 @@
     <span class="n">save_embeddings</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
     <span class="n">save_manifest</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
     <span class="n">resume</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-    <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;resize&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <hr />
@@ -3010,16 +3006,15 @@
 </code></pre></div>
 <p>Typical use cases are when one model needs its own <code>FetchSpec</code>, <code>modality="s1"</code>, a different <code>SensorSpec</code>, a different variant such as <code>variant="large"</code>, or some override of the shared export settings.</p>
 <p>This also matches the implementation path: string model IDs are first converted into <code>ExportModelRequest(name=...)</code>, then resolved.</p>
-<p>The same class of overrides can also be expressed with <code>per_model_sensors={...}</code>, <code>per_model_fetches={...}</code>, and <code>per_model_modalities={...}</code> keyed by model name. Those dict-style parameters remain accepted mainly for compatibility with older calling patterns.</p>
 <h3 id="rules">Rules<a class="headerlink" href="#rules" title="Permanent link">&para;</a></h3>
 <p><code>export_batch(...)</code> accepts a global <code>modality</code>, one model can override it through <code>ExportModelRequest(...)</code>, and unsupported modality choices raise <code>ModelError</code>.</p>
 <p><code>export_batch(...)</code> does not have one global model-settings parameter shared across all models. Pass per-model settings through <code>ExportModelRequest.configure("model", variant=...)</code>. Unsupported keyword arguments raise <code>ModelError</code>.</p>
-<p>For <code>sensor</code> / <code>fetch</code> / <code>modality</code>, the effective precedence is: inline <code>ExportModelRequest(...)</code> value first, then <code>per_model_*</code>, then the corresponding global argument.</p>
+<p>For <code>sensor</code> / <code>fetch</code> / <code>modality</code>, the effective precedence is: inline <code>ExportModelRequest(...)</code> value first, then the corresponding global argument.</p>
 <hr />
 <h2 id="what-gets-returned">What Gets Returned<a class="headerlink" href="#what-gets-returned" title="Permanent link">&para;</a></h2>
 <h3 id="return-shape">Return Shape<a class="headerlink" href="#return-shape" title="Permanent link">&para;</a></h3>
-<p><code>ExportTarget.per_item(...)</code> returns <code>List[dict]</code>, while <code>ExportTarget.combined(...)</code> returns <code>dict</code>.</p>
-<p>In both cases, the return value is manifest-style metadata describing what was exported.</p>
+<p><code>ExportTarget.per_item(...)</code> returns <code>List[dict]</code> — one manifest per spatial point, ordered by <code>point_index</code>. Stable keys per manifest: <code>point_index</code>, <code>status</code> (<code>"ok"</code> / <code>"partial"</code> / <code>"failed"</code>), <code>models</code> (one entry per model with <code>model</code>, <code>status</code>, and <code>error</code> when failed), <code>summary</code> (<code>total_models</code> / <code>ok_models</code> / <code>failed_models</code>), and the written file path under the format-specific key (<code>npz_path</code> or <code>nc_path</code>). Points skipped by <code>config.resume</code> instead carry <code>resume_skipped=True</code> and <code>resume_output_path</code>.</p>
+<p><code>ExportTarget.combined(...)</code> returns a single <code>dict</code> manifest for the whole run with <code>status</code>, <code>n_items</code>, <code>models</code>, <code>summary</code>, and the output path under the format-specific key (<code>npz_path</code> or <code>nc_path</code>). When <code>config.resume</code> finds the export already complete, the manifest carries <code>resume_skipped=True</code> and <code>resume_output_path</code>.</p>
 <hr />
 <h2 id="common-patterns">Common Patterns<a class="headerlink" href="#common-patterns" title="Permanent link">&para;</a></h2>
 <h3 id="one-combined-export-file">One combined export file<a class="headerlink" href="#one-combined-export-file" title="Permanent link">&para;</a></h3>
@@ -3047,10 +3042,10 @@
     <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span> <span class="s2">&quot;prithvi&quot;</span><span class="p">],</span>
     <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">&quot;exports&quot;</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;p1&quot;</span><span class="p">,</span> <span class="s2">&quot;p2&quot;</span><span class="p">]),</span>
     <span class="n">config</span><span class="o">=</span><span class="n">ExportConfig</span><span class="p">(</span>
-        <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;tile&quot;</span><span class="p">,</span>
         <span class="n">chunk_size</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span>
         <span class="n">num_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
     <span class="p">),</span>
+    <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;tile&quot;</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="one-model-needs-its-own-modality">One model needs its own modality<a class="headerlink" href="#one-model-needs-its-own-modality" title="Permanent link">&para;</a></h3>
