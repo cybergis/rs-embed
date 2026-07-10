@@ -403,9 +403,6 @@ def test_resolve_export_model_configs_rejects_duplicate_names():
             sensor=None,
             fetch=None,
             modality=None,
-            per_model_sensors=None,
-            per_model_fetches=None,
-            per_model_modalities=None,
         )
 
     # Distinct spellings that sanitize to the same npz key collide too.
@@ -418,7 +415,4 @@ def test_resolve_export_model_configs_rejects_duplicate_names():
             sensor=None,
             fetch=None,
             modality=None,
-            per_model_sensors=None,
-            per_model_fetches=None,
-            per_model_modalities=None,
         )

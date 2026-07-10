@@ -303,9 +303,7 @@ ExportModelRequest("terrafm", modality="s1", sensor=my_s1_sensor)
 ExportModelRequest.configure("thor", variant="large")
 ```
 
-`ExportTarget` controls where outputs are written, `ExportConfig` controls how the export runs, and `ExportModelRequest` carries optional per-model overrides when one job mixes different settings such as sensor, modality, or variant. Use `ExportModelRequest.configure(...)` when you want to pass model settings as keyword arguments.
-
-Legacy `out + layout`, `out_dir` / `out_path`, and per-model dict overrides are still accepted for backward compatibility.
+`ExportTarget` controls where outputs are written, `ExportConfig` controls how the export runs, and `ExportModelRequest` carries the per-model overrides when one job mixes different settings such as sensor, modality, or variant — it is the only per-model channel. Use `ExportModelRequest.configure(...)` when you want to pass model settings as keyword arguments.
 
 ---
 

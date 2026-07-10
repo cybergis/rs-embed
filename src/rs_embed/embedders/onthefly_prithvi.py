@@ -699,17 +699,7 @@ def _prithvi_forward_tokens(
             out = model(x, temporal_coords=temporal_coords, location_coords=location_coords)
 
     # normalize output -> tokens
-    tokens = None
-    if isinstance(out, (tuple, list)):
-        tokens = out[-1]
-    elif hasattr(out, "last_hidden_state"):
-        tokens = out.last_hidden_state
-    elif isinstance(out, dict):
-        tokens = out.get("tokens") or out.get("last_hidden_state") or out.get("hidden_states")
-        if isinstance(tokens, (tuple, list)):
-            tokens = tokens[-1]
-    else:
-        tokens = out
+    tokens = _extract_tokens(out)
 
     if tokens is None:
         raise ModelError("Prithvi forward did not return tokens.")
@@ -765,17 +755,7 @@ def _prithvi_forward_tokens_batch(
         else:
             out = model(xb, temporal_coords=temporal_coords, location_coords=location_coords)
 
-    tokens = None
-    if isinstance(out, (tuple, list)):
-        tokens = out[-1]
-    elif hasattr(out, "last_hidden_state"):
-        tokens = out.last_hidden_state
-    elif isinstance(out, dict):
-        tokens = out.get("tokens") or out.get("last_hidden_state") or out.get("hidden_states")
-        if isinstance(tokens, (tuple, list)):
-            tokens = tokens[-1]
-    else:
-        tokens = out
+    tokens = _extract_tokens(out)
 
     if tokens is None:
         raise ModelError("Prithvi forward did not return tokens.")

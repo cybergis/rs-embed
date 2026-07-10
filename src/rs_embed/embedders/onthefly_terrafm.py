@@ -3,7 +3,6 @@ from __future__ import annotations
 
 import importlib
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -43,6 +42,7 @@ from ..tools.shape import (
     crop_grid_and_pool,
     crop_grid_to_roi,
     geo_roi_from_meta,
+    parallel_indexed_fetch,
     roi_fetch_meta,
     roi_is_full,
 )
@@ -860,10 +860,10 @@ class TerraFMBEmbedder(EmbedderBase):
         prefetched_raw: list[np.ndarray | None] = [None] * n
         prefetched_meta: list[dict[str, Any] | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray, dict[str, Any] | None]:
+        def _fetch_one(i: int) -> tuple[np.ndarray, dict[str, Any] | None]:
             # Fetch-square each ROI; the ROI window rides in the per-item meta
             # (roi_window_geo) so from_inputs crops each output back to it.
-            sq, geo_roi = square_spatial(sp)
+            sq, geo_roi = square_spatial(spatials[i])
             if modality == "s2":
                 x_chw = _fetch_s2_sr_12_chw(
                     provider,
@@ -875,7 +875,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 )
                 # get_embedding(input_chw=...) expects raw S2 SR in [0..10000]
                 raw = np.clip(x_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
-                return i, raw, roi_fetch_meta(geo_roi)
+                return raw, roi_fetch_meta(geo_roi)
             if modality == "s1":
                 raw, fetch_meta = _fetch_s1_vvvh_raw_chw_with_meta(
                     provider,
@@ -887,22 +887,14 @@ class TerraFMBEmbedder(EmbedderBase):
                     require_iw=s1_require_iw,
                     relax_iw_on_empty=s1_relax_iw_on_empty,
                 )
-                return i, raw, {**fetch_meta, **(roi_fetch_meta(geo_roi) or {})}
+                return raw, {**fetch_meta, **(roi_fetch_meta(geo_roi) or {})}
             raise ModelError("modality must be 's2' or 's1'.")
 
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw, fetch_meta = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-                prefetched_meta[ii] = fetch_meta
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw, fetch_meta = fut.result()
-                    prefetched_raw[i] = raw
-                    prefetched_meta[i] = fetch_meta
+        for i, (raw, fetch_meta) in enumerate(
+            parallel_indexed_fetch(n, _fetch_one, max_workers=self._resolve_fetch_workers(n))
+        ):
+            prefetched_raw[i] = raw
+            prefetched_meta[i] = fetch_meta
 
         raw_inputs: list[np.ndarray] = []
         for i, raw in enumerate(prefetched_raw):
