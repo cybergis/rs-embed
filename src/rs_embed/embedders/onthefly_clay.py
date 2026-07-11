@@ -8,7 +8,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -20,6 +19,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers import ProviderBase
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
@@ -29,6 +29,9 @@ from ..tools.normalization import (
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
 )
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device_auto,
@@ -42,7 +45,9 @@ from ..tools.shape import (
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
+from .config import model_config_value as _model_config_value
 from .meta import build_meta, temporal_midpoint_str, temporal_to_range
+from .shared import grid_to_dataarray, verify_loaded_params
 
 # -----------------------------
 # Defaults: Sentinel-2 L2A (official Clay v1.5 metadata.yaml, sentinel-2-l2a)
@@ -275,17 +280,6 @@ _CLAY_MODEL_SIZE_DEFAULT = "large"
 _CLAY_VERSION_LABEL = "v1.5"
 
 
-def _model_config_value(
-    model_config: dict[str, Any] | None,
-    key: str,
-) -> Any | None:
-    if model_config is None:
-        return None
-    if isinstance(model_config, dict):
-        return model_config.get(key)
-    return getattr(model_config, key, None)
-
-
 def _resolve_clay_model_size(
     *,
     model_config: dict[str, Any] | None,
@@ -382,18 +376,14 @@ def _load_clay_model_cached(model_size: str, dev: str):
             f"{'...' if len(missing) > 5 else ''}. Checkpoint/model_size mismatch?"
         )
 
-    model = model.to(dev).eval()
+    model = _move_model_to_device(model, dev, model_name="Clay")
 
-    # sanity
-    p0 = None
-    for _, p in model.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("Clay model has no parameters; unexpected.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("Clay parameters contain NaN/Inf; weight load likely failed.")
+    verify_loaded_params(
+        model,
+        model_name="Clay",
+        no_params_msg="Clay model has no parameters; unexpected.",
+        nonfinite_msg="Clay parameters contain NaN/Inf; weight load likely failed.",
+    )
 
     meta = {
         "model_size": size_l,
@@ -525,17 +515,7 @@ def build_clay_embedding(
             "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
             "patch_size": int(patch_size),
         }
-        da = xr.DataArray(
-            grid,
-            dims=("d", "y", "x"),
-            coords={
-                "d": np.arange(grid.shape[0]),
-                "y": np.arange(grid.shape[1]),
-                "x": np.arange(grid.shape[2]),
-            },
-            name="embedding",
-            attrs=meta,
-        )
+        da = grid_to_dataarray(grid, meta=meta)
         return Embedding(data=da, meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")
@@ -576,6 +556,17 @@ class ClayEmbedder(EmbedderBase):
         expected_channels=10,
     )
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
@@ -605,7 +596,7 @@ class ClayEmbedder(EmbedderBase):
                     "type": "string",
                     "default": _CLAY_MODEL_SIZE_DEFAULT,
                     "choices": ["tiny", "small", "base", "large"],
-                    "note": "must match the checkpoint; the published v1.5 ckpt is 'large'",
+                    "note": "the published v1.5 ckpt is 'large'; other sizes are for custom checkpoints",
                 }
             },
         }
