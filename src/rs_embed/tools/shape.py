@@ -315,6 +315,33 @@ def crop_grid_and_pool(
     return g, vec
 
 
+def parallel_indexed_fetch(
+    n: int,
+    fetch_one: Callable[[int], Any],
+    *,
+    max_workers: int = 1,
+) -> list[Any]:
+    """Call ``fetch_one(i)`` for ``i in range(n)`` and return results ordered by i.
+
+    Sequential when ``max_workers <= 1``; otherwise a ``ThreadPoolExecutor``
+    slots each result back into its submitted index. Exceptions raised by
+    ``fetch_one`` propagate (via ``fut.result()`` on the threaded path).
+
+    Collapses the per-model "sequential-or-threaded fan-out with index slotting"
+    boilerplate that several embedders' batch fetch loops repeat.
+    """
+    results: list[Any] = [None] * n
+    if max_workers <= 1:
+        for i in range(n):
+            results[i] = fetch_one(i)
+    else:
+        with ThreadPoolExecutor(max_workers=max_workers) as ex:
+            futs = {ex.submit(fetch_one, i): i for i in range(n)}
+            for fut in as_completed(futs):
+                results[futs[fut]] = fut.result()
+    return results
+
+
 def square_fetch_batch(
     spatials: list[SpatialSpec],
     fetch_fn: Callable[[SpatialSpec], np.ndarray],
@@ -332,24 +359,16 @@ def square_fetch_batch(
     pool boilerplate into one call. Use :func:`roi_fetch_meta` to turn each
     ``geo_rois[i]`` into the ``fetch_meta`` passed back into ``get_embedding``.
     """
-    n = len(spatials)
-    raws: list[np.ndarray | None] = [None] * n
-    geo_rois: list[tuple[float, float, float, float]] = [FULL_WINDOW] * n
 
-    def _one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray, tuple[float, float, float, float]]:
-        sq, geo_roi = square_spatial(sp)
-        return i, fetch_fn(sq), geo_roi
+    def _one(i: int) -> tuple[np.ndarray | None, tuple[float, float, float, float]]:
+        sq, geo_roi = square_spatial(spatials[i])
+        return fetch_fn(sq), geo_roi
 
-    if max_workers <= 1:
-        for i, sp in enumerate(spatials):
-            _, raws[i], geo_rois[i] = _one(i, sp)
-    else:
-        with ThreadPoolExecutor(max_workers=max_workers) as ex:
-            for fut in as_completed([ex.submit(_one, i, sp) for i, sp in enumerate(spatials)]):
-                i, raw, geo_roi = fut.result()
-                raws[i], geo_rois[i] = raw, geo_roi
+    results = parallel_indexed_fetch(len(spatials), _one, max_workers=max_workers)
+    raws = [r for r, _ in results]
+    geo_rois = [g for _, g in results]
 
     missing = [i for i, r in enumerate(raws) if r is None]
     if missing:
         raise ModelError(f"square_fetch_batch: fetch_fn returned None at indices {missing}.")
-    return [r for r in raws if r is not None], geo_rois
+    return raws, geo_rois

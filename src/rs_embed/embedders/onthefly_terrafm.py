@@ -3,12 +3,10 @@ from __future__ import annotations
 
 import importlib
 import os
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -20,7 +18,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-from ..core.types import FetchResult
+from ..core.types import EmbedderCapabilities, FetchResult
 from ..providers import ProviderBase
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
@@ -44,15 +42,31 @@ from ..tools.shape import (
     crop_grid_and_pool,
     crop_grid_to_roi,
     geo_roi_from_meta,
+    parallel_indexed_fetch,
     roi_fetch_meta,
     roi_is_full,
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
+from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, resolve_hf_cache_dir, verify_loaded_params
 
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"
+
+
+def _resolve_terrafm_cache_dir(model_config: dict[str, Any] | None) -> str | None:
+    """Resolve the TerraFM weight cache directory.
+
+    ``model_config['cache_dir']`` wins; the Hugging Face cache env chain
+    (HUGGINGFACE_HUB_CACHE > HF_HOME > HUGGINGFACE_HOME) is the fallback;
+    ``None`` uses the huggingface_hub default cache.
+    """
+    v = model_config_value(model_config, "cache_dir")
+    if v is not None and str(v).strip():
+        return str(v).strip()
+    return resolve_hf_cache_dir()
 
 
 # -----------------------------
@@ -265,25 +279,7 @@ def _load_terrafm_module():
 
 def _assert_weights_loaded(model) -> dict[str, float]:
     """Same philosophy as your RemoteCLIP: param stats should not be near-zero."""
-    import torch
-
-    p = None
-    for _, param in model.named_parameters():
-        if param is not None and param.numel() > 0:
-            p = param.detach()
-            break
-    if p is None:
-        raise ModelError("TerraFM model has no parameters; cannot verify weights.")
-    if not torch.isfinite(p).all():
-        raise ModelError("TerraFM parameters contain NaN/Inf; load likely failed.")
-
-    p_f = p.float()
-    std = float(p_f.std().cpu())
-    mx = float(p_f.abs().max().cpu())
-    mean = float(p_f.mean().cpu())
-    if std < 1e-6 and mx < 1e-5:
-        raise ModelError("TerraFM parameters look uninitialized (near-zero stats).")
-    return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+    return verify_loaded_params(model, model_name="TerraFM", check_near_zero=True)
 
 
 @lru_cache(maxsize=4)
@@ -436,6 +432,17 @@ class TerraFMBEmbedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 64
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
@@ -476,6 +483,17 @@ class TerraFMBEmbedder(EmbedderBase):
                 "s1_require_iw": True,
                 "s1_relax_iw_on_empty": True,
                 "image_size": 224,
+            },
+            "model_config": {
+                "cache_dir": {
+                    "type": "string",
+                    "default": None,
+                    "description": (
+                        "Weight cache directory for the TerraFM checkpoint download. "
+                        "Precedence: model_config > HUGGINGFACE_HUB_CACHE/HF_HOME/"
+                        "HUGGINGFACE_HOME env vars > huggingface_hub default cache."
+                    ),
+                },
             },
             "notes": "grid output is model feature-map grid (not pixel grid).",
         }
@@ -581,6 +599,7 @@ class TerraFMBEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        model_config: dict[str, Any] | None = None,
         fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
@@ -604,11 +623,7 @@ class TerraFMBEmbedder(EmbedderBase):
         )
 
         image_size = 224
-        cache_dir = (
-            os.environ.get("HUGGINGFACE_HUB_CACHE")
-            or os.environ.get("HF_HOME")
-            or os.environ.get("HUGGINGFACE_HOME")
-        )
+        cache_dir = _resolve_terrafm_cache_dir(model_config)
 
         # For optional on-the-fly input inspection
         check_meta: dict[str, Any] = {}
@@ -716,7 +731,12 @@ class TerraFMBEmbedder(EmbedderBase):
             want_grid=(output.mode == "grid" or cropped_to_roi),
         )
 
-        temporal_used = temporal_to_range(temporal) if uses_provider else None
+        # Provider fetches always record the resolved window. Tensor inputs
+        # record it only when the caller supplied a temporal (it describes
+        # their data); otherwise the window is genuinely unknown -> None.
+        temporal_used = (
+            temporal_to_range(temporal) if (uses_provider or temporal is not None) else None
+        )
         sensor_meta = None
         source = None
         if uses_provider:
@@ -798,17 +818,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 "grid_type": "feature_map",
                 "grid_shape": tuple(grid.shape),
             }
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -819,6 +829,7 @@ class TerraFMBEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -849,10 +860,10 @@ class TerraFMBEmbedder(EmbedderBase):
         prefetched_raw: list[np.ndarray | None] = [None] * n
         prefetched_meta: list[dict[str, Any] | None] = [None] * n
 
-        def _fetch_one(i: int, sp: SpatialSpec) -> tuple[int, np.ndarray, dict[str, Any] | None]:
+        def _fetch_one(i: int) -> tuple[np.ndarray, dict[str, Any] | None]:
             # Fetch-square each ROI; the ROI window rides in the per-item meta
             # (roi_window_geo) so from_inputs crops each output back to it.
-            sq, geo_roi = square_spatial(sp)
+            sq, geo_roi = square_spatial(spatials[i])
             if modality == "s2":
                 x_chw = _fetch_s2_sr_12_chw(
                     provider,
@@ -864,7 +875,7 @@ class TerraFMBEmbedder(EmbedderBase):
                 )
                 # get_embedding(input_chw=...) expects raw S2 SR in [0..10000]
                 raw = np.clip(x_chw * 10000.0, 0.0, 10000.0).astype(np.float32)
-                return i, raw, roi_fetch_meta(geo_roi)
+                return raw, roi_fetch_meta(geo_roi)
             if modality == "s1":
                 raw, fetch_meta = _fetch_s1_vvvh_raw_chw_with_meta(
                     provider,
@@ -876,22 +887,14 @@ class TerraFMBEmbedder(EmbedderBase):
                     require_iw=s1_require_iw,
                     relax_iw_on_empty=s1_relax_iw_on_empty,
                 )
-                return i, raw, {**fetch_meta, **(roi_fetch_meta(geo_roi) or {})}
+                return raw, {**fetch_meta, **(roi_fetch_meta(geo_roi) or {})}
             raise ModelError("modality must be 's2' or 's1'.")
 
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw, fetch_meta = _fetch_one(i, sp)
-                prefetched_raw[ii] = raw
-                prefetched_meta[ii] = fetch_meta
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    i, raw, fetch_meta = fut.result()
-                    prefetched_raw[i] = raw
-                    prefetched_meta[i] = fetch_meta
+        for i, (raw, fetch_meta) in enumerate(
+            parallel_indexed_fetch(n, _fetch_one, max_workers=self._resolve_fetch_workers(n))
+        ):
+            prefetched_raw[i] = raw
+            prefetched_meta[i] = fetch_meta
 
         raw_inputs: list[np.ndarray] = []
         for i, raw in enumerate(prefetched_raw):
@@ -905,6 +908,7 @@ class TerraFMBEmbedder(EmbedderBase):
             fetch_metas=prefetched_meta,
             temporal=temporal,
             sensor=sensor,
+            model_config=model_config,
             output=output,
             backend=backend,
             device=device,
@@ -918,6 +922,7 @@ class TerraFMBEmbedder(EmbedderBase):
         fetch_metas: list[dict[str, Any] | None] | None = None,
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -949,11 +954,7 @@ class TerraFMBEmbedder(EmbedderBase):
         )
 
         image_size = 224
-        cache_dir = (
-            os.environ.get("HUGGINGFACE_HUB_CACHE")
-            or os.environ.get("HF_HOME")
-            or os.environ.get("HUGGINGFACE_HOME")
-        )
+        cache_dir = _resolve_terrafm_cache_dir(model_config)
 
         x_bchw_all: list[np.ndarray] = []
         for i, input_chw in enumerate(input_chws):
@@ -974,7 +975,12 @@ class TerraFMBEmbedder(EmbedderBase):
         dev = str(wmeta.get("device", _auto_device(device)))
         infer_bs = self._resolve_infer_batch(dev)
 
-        temporal_used = temporal_to_range(temporal) if uses_provider else None
+        # Provider fetches always record the resolved window. Tensor inputs
+        # record it only when the caller supplied a temporal (it describes
+        # their data); otherwise the window is genuinely unknown -> None.
+        temporal_used = (
+            temporal_to_range(temporal) if (uses_provider or temporal is not None) else None
+        )
         sensor_meta = None
         source = None
         if uses_provider and modality == "s2":
@@ -1092,17 +1098,7 @@ class TerraFMBEmbedder(EmbedderBase):
                         "grid_type": "feature_map",
                         "grid_shape": tuple(grid.shape),
                     }
-                    da = xr.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(grid.shape[1]),
-                            "x": np.arange(grid.shape[2]),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
+                    da = grid_to_dataarray(grid, meta=meta)
                     out[i] = Embedding(data=da, meta=meta)
                     continue
 

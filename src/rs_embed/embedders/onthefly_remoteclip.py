@@ -8,7 +8,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -20,6 +19,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers import ProviderBase
 
 # -----------------------------
@@ -32,6 +32,9 @@ from ..providers.resolution import (
     is_provider_backend,
 )
 from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
+)
+from ..tools.runtime import (
     resolve_device_auto_torch,
 )
 from ..tools.shape import (
@@ -42,7 +45,30 @@ from ..tools.shape import (
 )
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
+from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, resolve_hf_cache_dir, verify_loaded_params
+
+_DEFAULT_REMOTECLIP_ID = "MVRL/remote-clip-vit-base-patch32"
+
+
+def _resolve_remoteclip_model_id(
+    model_config: dict[str, Any] | None,
+    sensor: SensorSpec | None,
+) -> str:
+    """Resolve the RemoteCLIP checkpoint id (HF repo id or local path).
+
+    Precedence: ``model_config['model_id']`` > legacy
+    ``sensor.collection='hf:<id>'`` > ``RS_EMBED_REMOTECLIP_ID`` env var >
+    default checkpoint.
+    """
+    v = model_config_value(model_config, "model_id")
+    if v is not None and str(v).strip():
+        return str(v).strip()
+    collection = getattr(sensor, "collection", None) if sensor else None
+    if isinstance(collection, str) and collection.startswith("hf:"):
+        return collection.replace("hf:", "", 1).strip()
+    return os.environ.get("RS_EMBED_REMOTECLIP_ID", "").strip() or _DEFAULT_REMOTECLIP_ID
 
 
 def _s2_rgb_u8_from_chw(s2_chw):
@@ -150,26 +176,8 @@ def _ensure_hf_weights(
 
 def _assert_weights_loaded(model) -> dict[str, float]:
     """Best-effort sanity check that weights are loaded (do not trust rshf warnings)."""
-    import torch
-
     core = getattr(model, "model", model)
-    p = None
-    for _, param in core.named_parameters():
-        if param is not None and param.numel() > 0:
-            p = param.detach()
-            break
-    if p is None:
-        raise ModelError("RemoteCLIP model has no parameters; cannot verify weights.")
-    if not torch.isfinite(p).all():
-        raise ModelError("RemoteCLIP parameters contain NaN/Inf; load likely failed.")
-
-    p_f = p.float()
-    std = float(p_f.std().cpu())
-    mx = float(p_f.abs().max().cpu())
-    mean = float(p_f.mean().cpu())
-    if std < 1e-6 and mx < 1e-5:
-        raise ModelError("RemoteCLIP parameters look uninitialized (near-zero stats).")
-    return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+    return verify_loaded_params(core, model_name="RemoteCLIP", check_near_zero=True)
 
 
 @contextmanager
@@ -212,10 +220,7 @@ def _load_remoteclip_on_device(ckpt: str, cache_dir: str, dev: str) -> tuple[Any
         require_pretrained=True,
         cache_dir=(cache_dir or None),
     )
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="RemoteCLIP")
     return model, wmeta
 
 
@@ -578,6 +583,17 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         expected_channels=3,
     )
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
@@ -592,8 +608,19 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 "scale_m": self.input_spec.scale_m,
                 "cloudy_pct": self.input_spec.cloudy_pct,
                 "composite": self.input_spec.composite,
-                "ckpt": "MVRL/remote-clip-vit-base-patch32",
+                "ckpt": _DEFAULT_REMOTECLIP_ID,
                 "image_size": self.input_spec.image_size,
+            },
+            "model_config": {
+                "model_id": {
+                    "type": "string",
+                    "default": _DEFAULT_REMOTECLIP_ID,
+                    "description": (
+                        "RemoteCLIP checkpoint (HF repo id or local path). Precedence: "
+                        "model_config > legacy sensor.collection='hf:<id>' > "
+                        "RS_EMBED_REMOTECLIP_ID > default."
+                    ),
+                },
             },
             "notes": "grid output is ViT token grid (patch-level), typically 7x7 for ViT-B/32 at 224px.",
         }
@@ -640,6 +667,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        model_config: dict[str, Any] | None = None,
         fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         if not is_provider_backend(backend, allow_auto=True):
@@ -651,10 +679,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         cloudy_pct = sensor.cloudy_pct if sensor else 30
         composite = sensor.composite if sensor else "median"
 
-        ckpt = "MVRL/remote-clip-vit-base-patch32"
-        # v0.1 convention: sensor.collection="hf:<repo_id_or_local_path>"
-        if sensor and isinstance(sensor.collection, str) and sensor.collection.startswith("hf:"):
-            ckpt = sensor.collection.replace("hf:", "", 1).strip()
+        ckpt = _resolve_remoteclip_model_id(model_config, sensor)
 
         image_size = 224
 
@@ -736,11 +761,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         rgb_u8 = _s2_rgb_u8_from_chw(s2_rgb_chw)
 
         # HF cache dir
-        cache_dir = (
-            os.environ.get("HUGGINGFACE_HUB_CACHE")
-            or os.environ.get("HF_HOME")
-            or os.environ.get("HUGGINGFACE_HOME")
-        )
+        cache_dir = resolve_hf_cache_dir()
 
         # load model once per (ckpt, cache_dir, device)
         model, wmeta, dev = self._get_model(ckpt=ckpt, cache_dir=cache_dir, device=device)
@@ -834,17 +855,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 "grid_type": "vit_tokens",
             }  # patch grid, not pixel grid
 
-            da = xr.DataArray(
-                grid_dhw,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid_dhw.shape[0]),
-                    "y": np.arange(grid_dhw.shape[1]),
-                    "x": np.arange(grid_dhw.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid_dhw, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -855,6 +866,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -893,6 +905,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
             input_chws=raw_inputs,
             temporal=temporal,
             sensor=sensor,
+            model_config=model_config,
             output=output,
             backend=backend,
             device=device,
@@ -906,6 +919,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         input_chws: list[np.ndarray],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -932,15 +946,9 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
         composite = sensor.composite if sensor else "median"
         image_size = 224
 
-        ckpt = "MVRL/remote-clip-vit-base-patch32"
-        if sensor and isinstance(sensor.collection, str) and sensor.collection.startswith("hf:"):
-            ckpt = sensor.collection.replace("hf:", "", 1).strip()
+        ckpt = _resolve_remoteclip_model_id(model_config, sensor)
 
-        cache_dir = (
-            os.environ.get("HUGGINGFACE_HUB_CACHE")
-            or os.environ.get("HF_HOME")
-            or os.environ.get("HUGGINGFACE_HOME")
-        )
+        cache_dir = resolve_hf_cache_dir()
         model, wmeta, dev = self._get_model(ckpt=ckpt, cache_dir=cache_dir, device=device)
         infer_bs = self._resolve_infer_batch(str(dev))
 
@@ -1054,17 +1062,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 meta = _base_meta_for(
                     {**tmeta, **gmeta, "batch_infer": False, "grid_type": "vit_tokens"}
                 )
-                da = xr.DataArray(
-                    grid_dhw,
-                    dims=("d", "y", "x"),
-                    coords={
-                        "d": np.arange(grid_dhw.shape[0]),
-                        "y": np.arange(grid_dhw.shape[1]),
-                        "x": np.arange(grid_dhw.shape[2]),
-                    },
-                    name="embedding",
-                    attrs=meta,
-                )
+                da = grid_to_dataarray(grid_dhw, meta=meta)
                 out[i] = Embedding(data=da, meta=meta)
         else:
             raise ModelError(f"Unknown output mode: {output.mode}")

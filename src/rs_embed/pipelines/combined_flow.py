@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from ..core.errors import ModelError
 from ..core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, Status, TaskResult
 from ..tools.checkpoint_utils import drop_model_arrays
@@ -19,7 +20,6 @@ from ..tools.normalization import normalize_model_name
 from ..tools.progress import create_progress
 from ..tools.runtime import (
     get_embedder_bundle_cached,
-    sensor_key,
 )
 from ..tools.serialization import (
     jsonable,
@@ -43,15 +43,8 @@ def run_pending_models(
     resolved_backend: dict[str, str] | None = None,
     provider_enabled: bool,
     device: str,
-    save_inputs: bool,
-    save_embeddings: bool,
-    continue_on_error: bool,
-    chunk_size: int,
+    config: ExportConfig,
     inference_strategy: str,
-    infer_batch_size: int,
-    max_retries: int,
-    retry_backoff_s: float,
-    show_progress: bool,
     input_refs_by_sensor: dict[str, dict[str, Any]],
     get_or_fetch_input_fn: Callable[[int, str, SensorSpec], np.ndarray],
     get_fetch_meta_fn: Callable[[int, str], dict[str, Any]] | None = None,
@@ -66,6 +59,9 @@ def run_pending_models(
     If *inference_engine* is ``None`` a temporary one is built (keeps older
     call-sites and tests working without changes).
 
+    ``config`` supplies the behavioral flags (save_inputs, save_embeddings,
+    continue_on_error, chunk/batch sizes, retries, show_progress).
+
     Callback contracts
     ------------------
     ``get_or_fetch_input_fn`` must return a CHW ndarray for
@@ -73,6 +69,11 @@ def run_pending_models(
     ``write_checkpoint_fn`` must accept ``stage=...`` and return an updated
     combined manifest dict.
     """
+    save_inputs = config.save_inputs
+    save_embeddings = config.save_embeddings
+    continue_on_error = config.continue_on_error
+    show_progress = config.show_progress
+
     if inference_engine is None:
         from .inference import InferenceEngine
 
@@ -83,10 +84,10 @@ def run_pending_models(
                 save_inputs=save_inputs,
                 save_embeddings=save_embeddings,
                 continue_on_error=continue_on_error,
-                chunk_size=chunk_size,
-                infer_batch_size=infer_batch_size,
-                max_retries=max_retries,
-                retry_backoff_s=retry_backoff_s,
+                chunk_size=config.effective_chunk_size,
+                infer_batch_size=config.effective_infer_batch_size,
+                max_retries=config.max_retries,
+                retry_backoff_s=config.retry_backoff_s,
                 show_progress=show_progress,
                 input_prep=input_prep,
             ),
@@ -115,10 +116,7 @@ def run_pending_models(
             is_precomputed = "precomputed" in (model_type.get(m) or "")
 
             # Resolve embedder just for describe()
-            sensor_k = sensor_key(sspec)
-            embedder, _lock = get_embedder_bundle_cached(
-                normalize_model_name(m), m_backend, device, sensor_k
-            )
+            embedder, _lock = get_embedder_bundle_cached(normalize_model_name(m), m_backend, device)
             try:
                 m_entry["describe"] = jsonable(embedder.describe())
             except Exception as e:
@@ -237,7 +235,7 @@ def _gather_inputs(
         xs_indices.append(int(i))
 
     if missing and not continue_on_error:
-        raise RuntimeError(f"Missing prefetched inputs for model={m}: {missing}")
+        raise ModelError(f"Missing prefetched inputs for model={m}: {missing}")
 
     if not xs:
         m_entry["inputs"] = None

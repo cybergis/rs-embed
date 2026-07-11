@@ -7,13 +7,15 @@ import numpy as np
 
 from ..core.embedding import Embedding
 from ..core.specs import ModelInputSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..core.types import FetchResult
+from ..core.types import EmbedderCapabilities, FetchResult, declared_capability
 from ..providers.base import ProviderBase
-from ..tools.shape import roi_is_full
 from ..tools.spatial import FULL_WINDOW, square_spatial
 
 
 def _method_accepts_parameter(obj: Any, method_name: str, param_name: str) -> bool:
+    declared = declared_capability(type(obj), method_name, param_name)
+    if declared is not None:
+        return declared
     fn = getattr(type(obj), method_name, None)
     if fn is None:
         return False
@@ -36,6 +38,21 @@ class EmbedderBase:
     model_name: str = "base"
     input_spec: ModelInputSpec | None = None
     _allow_auto_backend: bool = True
+
+    # Explicit routing capabilities (see ``EmbedderCapabilities``).  ``None``
+    # falls back to signature introspection for third-party subclasses; every
+    # in-tree embedder must declare this, enforced by a contract test.
+    capabilities: EmbedderCapabilities | None = None
+
+    # Model-policy flags consumed by generic layers.  Subclasses opt in by
+    # overriding; generic code must branch on these, never on model names.
+    #
+    # Image-level ViT adapters whose "grid" output is a patch-token grid of a
+    # single image-level encoder pass (tiled mosaics of it can show seams).
+    _image_level_vit_patch_grid: bool = False
+    # The embedder performs its own spatial tiling based on request size;
+    # API-side ``input_prep`` has no effect and a non-resize request warns.
+    _manages_own_input_prep: bool = False
 
     def __init__(self) -> None:
         self._providers: dict[str, ProviderBase] = {}
@@ -139,8 +156,9 @@ class EmbedderBase:
 
         from ..providers.fetch import (
             fetch_collection_patch_chw,
-            fetch_s2_multiframe_raw_tchw,
+            fetch_multiframe_patch_raw_tchw,
         )
+        from ..tools.shape import roi_fetch_meta
         from .meta import temporal_to_range
 
         # Embedder entry points resolve temporal via temporal_to_range (None ->
@@ -148,8 +166,11 @@ class EmbedderBase:
         # so normalize here too instead of raising on None / fetching unfiltered.
         temporal = temporal_to_range(temporal)
 
+        # The spec's temporal_mode selects single-composite vs. equal-divided
+        # time-series fetch; both are collection-agnostic and fully driven by
+        # the resolved SensorSpec.
         if spec.temporal_mode == "multi":
-            raw = fetch_s2_multiframe_raw_tchw(
+            raw = fetch_multiframe_patch_raw_tchw(
                 provider,
                 spatial=spatial,
                 temporal=temporal,
@@ -174,8 +195,23 @@ class EmbedderBase:
                 fill_value=fetch_sensor.fill_value,
             )
 
-        meta: dict[str, Any] = {} if roi_is_full(geo_roi) else {"roi_window_geo": geo_roi}
-        return FetchResult(data=raw, meta=meta)
+        return FetchResult(data=raw, meta=roi_fetch_meta(geo_roi) or {})
+
+    def tiled_dispatch_model_config(
+        self,
+        model_config: dict[str, Any] | None,
+        *,
+        tile_size: int,
+    ) -> dict[str, Any] | None:
+        """Adapt ``model_config`` when the generic tiler dispatches pre-tiled inputs.
+
+        The batch tiler slices each image into ``tile_size`` tiles before
+        calling ``get_embeddings_batch_from_inputs``.  Embedders whose forward
+        pass must know this (e.g. to disable internal resizing of the already
+        tile-sized inputs) override this hook and return an augmented config.
+        The default returns *model_config* unchanged.
+        """
+        return model_config
 
     def get_embedding(
         self,

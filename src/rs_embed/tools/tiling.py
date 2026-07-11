@@ -295,13 +295,15 @@ def _augment_model_config_for_tiled_dispatch(
     *,
     tile_size: int,
 ) -> dict[str, Any] | None:
-    model_name = str(getattr(embedder, "model_name", "")).strip().lower()
-    if model_name != "thor":
+    """Let the embedder adapt ``model_config`` for pre-tiled batch dispatch.
+
+    Delegates to ``EmbedderBase.tiled_dispatch_model_config``; embedders that
+    do not override the hook get the config back unchanged.
+    """
+    hook = getattr(embedder, "tiled_dispatch_model_config", None)
+    if hook is None:
         return model_config
-    cfg = dict(model_config or {})
-    cfg["_input_prep_mode"] = "tile"
-    cfg["_input_prep_tile_size"] = int(tile_size)
-    return cfg
+    return hook(model_config, tile_size=int(tile_size))
 
 
 def _tile_yx_starts(*, h: int, w: int, tile_size: int, stride: int) -> tuple[list[int], list[int]]:

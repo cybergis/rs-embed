@@ -13,6 +13,7 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import BBox, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.types import EmbedderCapabilities
 from ..providers.fetch import (
     fetch_collection_patch_all_bands_chw as _fetch_collection_patch_all_bands_chw,
 )
@@ -64,6 +65,17 @@ class GSEAnnualEmbedder(EmbedderBase):
     DEFAULT_BATCH_WORKERS = 4
     _allow_auto_backend = True
     _is_precomputed = True
+    # GSE tiles/aggregates precomputed embeddings itself based on request
+    # size; API-side input_prep is ignored (a non-resize request warns).
+    _manages_own_input_prep = True
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        batch_fetch_metas=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
 
     def describe(self) -> dict[str, Any]:
         return {
@@ -173,15 +185,18 @@ class GSEAnnualEmbedder(EmbedderBase):
                 raise ModelError(f"Unknown pooling='{output.pooling}' (expected 'mean' or 'max').")
             return Embedding(data=vec, meta={**meta, "pooling": output.pooling})
 
-        # grid: return xarray with dims (band,y,x)
-        da = xr.DataArray(
-            emb_chw,
-            dims=("d", "y", "x"),
-            coords={"d": list(band_names)},
-            name="embedding",
-            attrs=meta,
-        )
-        return Embedding(data=da, meta=meta)
+        if output.mode == "grid":
+            # grid: return xarray with dims (band,y,x)
+            da = xr.DataArray(
+                emb_chw,
+                dims=("d", "y", "x"),
+                coords={"d": list(band_names)},
+                name="embedding",
+                attrs=meta,
+            )
+            return Embedding(data=da, meta=meta)
+
+        raise ModelError(f"Unknown output mode: {output.mode}")
 
     def _fetch_tiled(
         self,
@@ -226,10 +241,15 @@ class GSEAnnualEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if model_config is not None:
+            # Same contract as the base batch path: an unsupported
+            # model_config raises ModelError instead of TypeError/silence.
+            self._require_model_config_support(model_config)
         if not spatials:
             return []
         if not is_provider_backend(backend, allow_auto=True):

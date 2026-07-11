@@ -25,7 +25,7 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import get_embedder_cls
 from ..core.specs import InputPrepSpec, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
-from ..core.types import FetchResult
+from ..core.types import FetchResult, declared_capability
 from ..core.validation import assert_supported
 from ..providers import ProviderBase, get_provider, has_provider
 from ..providers.fetch import fetch_sensor_patch_chw as _fetch_sensor_patch_chw
@@ -53,8 +53,34 @@ def resolve_device_auto_torch(device: str) -> str:
         if torch.backends.mps.is_available():
             return "mps"
         return "cpu"
-    except Exception as _e:
+    except Exception as exc:
+        warnings.warn(
+            f"device='auto' resolution failed ({exc!r}); falling back to 'cpu'. "
+            "A broken torch/CUDA install would otherwise be indistinguishable "
+            "from a CPU-only machine.",
+            UserWarning,
+            stacklevel=2,
+        )
         return "cpu"
+
+
+def move_model_to_device(model: _T, dev: str, *, model_name: str) -> _T:
+    """Move *model* to *dev* and switch to eval mode, warning on failure.
+
+    A failed device move keeps the model usable on its current device but must
+    be loud: silently passing left meta claiming the requested device while
+    inference actually ran elsewhere.
+    """
+    try:
+        return model.to(dev).eval()
+    except Exception as exc:
+        warnings.warn(
+            f"{model_name}: failed to move model to device {dev!r} ({exc!r}); "
+            "continuing on the model's current device.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return model
 
 
 def load_cached_with_device(
@@ -84,17 +110,29 @@ class _EmbeddingRequestContext:
     lock: Any
 
 
-_IMAGE_LEVEL_VIT_GRID_MODELS = frozenset(
-    {
-        "satmae",
-        "satmaepp",
-        "scalemae",
-    }
-)
+def _embedder_cls_flag(model_n: str, flag: str) -> bool:
+    """Read a boolean model-policy flag from the registered embedder class.
+
+    Unknown model names resolve to ``False`` (matching the old name-set
+    behavior); the invalid name itself is reported by the embedder lookup on
+    the request path proper.
+    """
+    try:
+        cls = get_embedder_cls(normalize_model_name(model_n))
+    except ModelError:
+        return False
+    return bool(getattr(cls, flag, False))
 
 
+@lru_cache(maxsize=64)
 def _is_image_level_vit_grid_model(model_n: str) -> bool:
-    return str(model_n).strip().lower() in _IMAGE_LEVEL_VIT_GRID_MODELS
+    return _embedder_cls_flag(model_n, "_image_level_vit_patch_grid")
+
+
+@lru_cache(maxsize=64)
+def model_manages_own_input_prep(model_n: str) -> bool:
+    """True when the model's embedder manages spatial tiling itself (input_prep ignored)."""
+    return _embedder_cls_flag(model_n, "_manages_own_input_prep")
 
 
 def _warn_image_level_vit_tiled_grid_seam(model_l: str) -> None:
@@ -163,27 +201,17 @@ def describe_model_cached(model_n: str) -> dict[str, Any]:
 
 
 @lru_cache(maxsize=32)
-def _embedder_bundle_cached(model: str, backend: str, device: str):
-    cls = get_embedder_cls(model)
-    return cls(), RLock()
-
-
-def get_embedder_bundle_cached(model: str, backend: str, device: str, sensor_k: tuple = ()):
+def get_embedder_bundle_cached(model: str, backend: str, device: str):
     """Return (embedder instance, instance lock).
 
-    Instances are constructed bare — no sensor state — so the cache is keyed
-    by (model, backend, device) only. ``sensor_k`` is accepted for
-    call-site compatibility but ignored: keying on it multiplied embedder
-    instances (each holding its own lazily-loaded state) per sensor variation,
-    including fields like check_save_dir that cannot affect the instance.
+    Instances are constructed bare — no sensor state — so the cache keys on
+    (model, backend, device) only.  Sensor identity is deliberately excluded:
+    keying on it multiplied embedder instances (each holding its own
+    lazily-loaded state) per sensor variation, including fields like
+    check_save_dir that cannot affect the instance.
     """
-    _ = sensor_k
-    return _embedder_bundle_cached(str(model), str(backend), str(device))
-
-
-# Preserve the lru_cache management surface on the public wrapper.
-get_embedder_bundle_cached.cache_clear = _embedder_bundle_cached.cache_clear  # type: ignore[attr-defined]
-get_embedder_bundle_cached.cache_info = _embedder_bundle_cached.cache_info  # type: ignore[attr-defined]
+    cls = get_embedder_cls(model)
+    return cls(), RLock()
 
 
 def _clear_loaded_embedder_module_caches() -> int:
@@ -217,51 +245,24 @@ def reset_runtime() -> dict[str, int]:
     import_errors_cleared = len(_runtime_registry._REGISTRY_IMPORT_ERRORS)
     _runtime_registry._REGISTRY_IMPORT_ERRORS.clear()
 
-    get_embedder_bundle_cached.cache_clear()
-    describe_model_cached.cache_clear()
-    _embedder_method_accepts_parameter.cache_clear()
-    embedder_accepts_input_chw.cache_clear()
-    embedder_accepts_model_config.cache_clear()
+    runtime_caches = (
+        get_embedder_bundle_cached,
+        describe_model_cached,
+        _embedder_method_accepts_parameter,
+        embedder_accepts_input_chw,
+        embedder_accepts_model_config,
+        _is_image_level_vit_grid_model,
+        model_manages_own_input_prep,
+    )
+    for cache in runtime_caches:
+        cache.cache_clear()
     embedder_module_caches_cleared = _clear_loaded_embedder_module_caches()
 
     return {
         "import_errors_cleared": int(import_errors_cleared),
-        "runtime_caches_cleared": 5,
+        "runtime_caches_cleared": len(runtime_caches),
         "embedder_module_caches_cleared": int(embedder_module_caches_cleared),
     }
-
-
-def sensor_key(sensor: SensorSpec | None) -> tuple:
-    """Build a hashable cache key from a :class:`SensorSpec`.
-
-    Parameters
-    ----------
-    sensor : SensorSpec or None
-        Sensor to hash. Returns a sentinel tuple when ``None``.
-
-    Returns
-    -------
-    tuple
-        Hashable key representing all sensor fields relevant to caching.
-    """
-    if sensor is None:
-        return ("__none__",)
-    return (
-        sensor.collection,
-        sensor.bands,
-        sensor.scale_m,
-        sensor.cloudy_pct,
-        float(sensor.fill_value),
-        str(sensor.composite),
-        getattr(sensor, "modality", None),
-        getattr(sensor, "orbit", None),
-        bool(getattr(sensor, "use_float_linear", True)),
-        bool(getattr(sensor, "s1_require_iw", True)),
-        bool(getattr(sensor, "s1_relax_iw_on_empty", True)),
-        bool(getattr(sensor, "check_input", False)),
-        bool(getattr(sensor, "check_raise", True)),
-        getattr(sensor, "check_save_dir", None),
-    )
 
 
 def _overrides_base_method(embedder: Any, method_name: str) -> bool:
@@ -290,6 +291,9 @@ def _embedder_method_accepts_parameter(
     method_name: str,
     param_name: str,
 ) -> bool:
+    declared = declared_capability(embedder_cls, method_name, param_name)
+    if declared is not None:
+        return declared
     fn = getattr(embedder_cls, method_name, None)
     if fn is None:
         return False
@@ -444,8 +448,7 @@ def _prepare_embedding_request_context(
     if input_prep_resolved.mode == "tile" and sensor_eff is None:
         sensor_eff = default_sensor_for_model(model_n)
 
-    sensor_k = sensor_key(sensor_eff)
-    embedder, lock = get_embedder_bundle_cached(model_n, backend_n, device_n, sensor_k)
+    embedder, lock = get_embedder_bundle_cached(model_n, backend_n, device_n)
     assert_supported(embedder, backend=backend_n, output=output, temporal=temporal)
 
     return _EmbeddingRequestContext(
@@ -515,6 +518,75 @@ def _annotate_embedding_list(
     ]
 
 
+def embedder_honors_fetch_meta(embedder_cls: type) -> bool:
+    """True when ``get_embedding`` accepts ``fetch_meta`` (the crop-back window).
+
+    This is THE gate for generic fetch-squaring: enlarging a rectangular ROI
+    to a square fetch is only safe when the embedder will crop the output back
+    via ``fetch_meta['roi_window_geo']``.  Every pipeline path (API prefetch,
+    per-item sync fallback, PrefetchManager planning) must use this predicate.
+    """
+    return _embedder_method_accepts_parameter(embedder_cls, "get_embedding", "fetch_meta")
+
+
+def fetch_input_extras_from_model_config(
+    embedder_cls: type,
+    model_config: dict[str, Any] | None,
+) -> dict[str, Any]:
+    """Fetch-affecting ``fetch_input`` kwargs derived from *model_config*.
+
+    Forwarding these (e.g. ``temporal_mode``) makes every prefetch path fetch
+    the SAME input as the direct ``get_embedding`` path; without it a user's
+    ``temporal_mode="single"`` silently became the env/auto default.
+    """
+    extras: dict[str, Any] = {}
+    if model_config and _embedder_method_accepts_parameter(
+        embedder_cls, "fetch_input", "temporal_mode"
+    ):
+        tm = model_config.get("temporal_mode")
+        if tm is not None:
+            extras["temporal_mode"] = tm
+    return extras
+
+
+def fetch_embedder_input(
+    *,
+    embedder: Any,
+    provider: Any,
+    spatial: SpatialSpec,
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec,
+    model_config: dict[str, Any] | None = None,
+    fetch_fn: Callable[..., np.ndarray] | None = None,
+) -> FetchResult:
+    """The single "embedder ``fetch_input``, else generic square fetch" path.
+
+    Every pipeline that fetches provider input on behalf of an embedder goes
+    through here so the fetch geometry is identical everywhere: the embedder's
+    own ``fetch_input`` wins; the generic fallback enlarges the ROI to a
+    fetch-square exactly when :func:`embedder_honors_fetch_meta` says the
+    crop-back window will be honored.
+    """
+    from .shape import square_fetch_request
+
+    fr = embedder.fetch_input(
+        provider,
+        spatial=spatial,
+        temporal=temporal,
+        sensor=sensor,
+        **fetch_input_extras_from_model_config(type(embedder), model_config),
+    )
+    if fr is not None:
+        return fr
+    if embedder_honors_fetch_meta(type(embedder)):
+        fetch_spatial, fmeta = square_fetch_request(spatial)
+    else:
+        fetch_spatial, fmeta = spatial, {}
+    fn = fetch_fn or _fetch_sensor_patch_chw
+    raw = fn(provider, spatial=fetch_spatial, temporal=temporal, sensor=sensor)
+    return FetchResult(data=raw, meta=fmeta)
+
+
 def fetch_api_side_inputs(
     *,
     spatials: list[SpatialSpec],
@@ -560,50 +632,19 @@ def fetch_api_side_inputs(
     if callable(ensure_ready):
         run_with_retry(lambda: ensure_ready(), retries=0, backoff_s=0.0)
 
-    # Forward fetch-affecting model_config (e.g. temporal_mode) so the prefetch
-    # path fetches the SAME input as the direct get_embedding path. Without this
-    # the prefetch used fetch_input's defaults and silently ignored the user's
-    # config (e.g. temporal_mode="single" became multi via the env/auto default).
-    fetch_extra: dict[str, Any] = {}
-    if model_config and _embedder_method_accepts_parameter(
-        type(embedder), "fetch_input", "temporal_mode"
-    ):
-        tm = model_config.get("temporal_mode")
-        if tm is not None:
-            fetch_extra["temporal_mode"] = tm
-
-    # Use the embedder's fetch_input() when available; fall back to generic.
-    # The generic fallback fetch-squares like every other path (fetch_input's
-    # square_input=True default, PrefetchManager's square_fetch_keys) whenever
-    # the embedder honors the crop-back window via fetch_meta.
-    from .shape import square_fetch_request
-
-    square_generic = _embedder_method_accepts_parameter(
-        type(embedder), "get_embedding", "fetch_meta"
-    )
     results: list[FetchResult] = []
     for idx, spatial in enumerate(spatials):
         try:
-            fr = embedder.fetch_input(
-                provider,
-                spatial=spatial,
-                temporal=temporal,
-                sensor=sensor_eff,
-                **fetch_extra,
-            )
-            if fr is not None:
-                results.append(fr)
-            else:
-                fetch_spatial, fmeta = (
-                    square_fetch_request(spatial) if square_generic else (spatial, {})
-                )
-                raw = _fetch_sensor_patch_chw(
-                    provider,
-                    spatial=fetch_spatial,
+            results.append(
+                fetch_embedder_input(
+                    embedder=embedder,
+                    provider=provider,
+                    spatial=spatial,
                     temporal=temporal,
                     sensor=sensor_eff,
+                    model_config=model_config,
                 )
-                results.append(FetchResult(data=raw, meta=fmeta))
+            )
         except Exception as exc:
             raise ModelError(
                 f"Failed to fetch API-side input for spatial[{idx}] ({spatial}): {exc}"

@@ -13,6 +13,7 @@ cropped back to it. These tests pin the export-pipeline half of that contract:
 """
 
 import threading
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -657,9 +658,7 @@ def test_point_payload_sync_fallback_squares_and_reuses_provider():
         resolved_sensor=sensors,
         resolved_model_config={"dummy_payload_a": None, "dummy_payload_b": None},
         model_type={"dummy_payload_a": "onthefly", "dummy_payload_b": "onthefly"},
-        inputs_cache={},
-        input_reports={},
-        prefetch_errors={},
+        prefetch=SimpleNamespace(cache={}, input_reports={}, errors={}, fetch_meta={}),
         pass_input_into_embedder=True,
         config=ExportConfig(save_inputs=False, save_embeddings=True, show_progress=False),
         provider_factory=provider_factory,

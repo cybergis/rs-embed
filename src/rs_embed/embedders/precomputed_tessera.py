@@ -19,11 +19,39 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from .base import EmbedderBase
+from .config import model_config_value
 from .meta import build_meta
 
 _EMBED_DIMS = (64, 128, 256, 512, 768, 1024)
 _TESSERA_PROJECTION_WARNED = False
+
+
+def _resolve_tessera_cache_dir(
+    model_config: dict[str, Any] | None,
+    sensor: SensorSpec | None,
+) -> str | None:
+    """Resolve the GeoTessera tile cache directory.
+
+    Precedence: ``model_config['cache_dir']`` > legacy
+    ``sensor.collection='cache:<dir>'`` (deprecated) > ``RS_EMBED_TESSERA_CACHE``
+    env var > geotessera default cache.
+    """
+    v = model_config_value(model_config, "cache_dir")
+    if v is not None and str(v).strip():
+        return str(v).strip()
+    cache_dir = os.environ.get("RS_EMBED_TESSERA_CACHE")
+    collection = getattr(sensor, "collection", None) if sensor else None
+    if isinstance(collection, str) and collection.startswith("cache:"):
+        warnings.warn(
+            "tessera: sensor.collection='cache:<dir>' is deprecated; pass "
+            "model_config={'cache_dir': '<dir>'} instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        cache_dir = collection.replace("cache:", "", 1).strip() or cache_dir
+    return cache_dir
 
 
 def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
@@ -75,7 +103,7 @@ def _pool(chw: np.ndarray, pooling: str) -> np.ndarray:
         return chw.mean(axis=(1, 2)).astype(np.float32)
     if pooling == "max":
         return chw.max(axis=(1, 2)).astype(np.float32)
-    raise ModelError(f"Unknown pooling: {pooling}")
+    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
 
 
 def _to_hwc(arr: np.ndarray) -> np.ndarray:
@@ -289,6 +317,15 @@ class TesseraEmbedder(EmbedderBase):
     _is_precomputed = True
     DEFAULT_BATCH_WORKERS = 4
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "precomputed",
@@ -299,6 +336,17 @@ class TesseraEmbedder(EmbedderBase):
             "source": "geotessera.GeoTessera",
             "defaults": {
                 "cache_dir_env": "RS_EMBED_TESSERA_CACHE",
+            },
+            "model_config": {
+                "cache_dir": {
+                    "type": "string",
+                    "default": None,
+                    "description": (
+                        "GeoTessera tile cache directory. Precedence: model_config > "
+                        "legacy sensor.collection='cache:<dir>' (deprecated) > "
+                        "RS_EMBED_TESSERA_CACHE > geotessera default cache."
+                    ),
+                },
             },
             "notes": [
                 "Precomputed GeoTessera tiles use a fixed source path; use backend='auto'.",
@@ -341,6 +389,7 @@ class TesseraEmbedder(EmbedderBase):
         output: OutputSpec,
         backend: str,
         device: str = "auto",
+        model_config: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_n = str(backend).strip().lower()
         if backend_n == "local":
@@ -351,9 +400,7 @@ class TesseraEmbedder(EmbedderBase):
         bbox = _to_bbox_4326(spatial)
         year = _year_from_temporal(temporal, default_year=2021)
 
-        cache_dir = os.environ.get("RS_EMBED_TESSERA_CACHE")
-        if sensor and isinstance(sensor.collection, str) and sensor.collection.startswith("cache:"):
-            cache_dir = sensor.collection.replace("cache:", "", 1).strip() or cache_dir
+        cache_dir = _resolve_tessera_cache_dir(model_config, sensor)
 
         # GeoTessera cache keyed by cache_dir path (empty string for default).
         cache_key = cache_dir or ""
@@ -426,10 +473,15 @@ class TesseraEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if model_config is not None:
+            # Same contract as the base batch path: an unsupported
+            # model_config raises ModelError instead of TypeError/silence.
+            self._require_model_config_support(model_config)
         if not spatials:
             return []
 
@@ -444,6 +496,7 @@ class TesseraEmbedder(EmbedderBase):
                 output=output,
                 backend=backend,
                 device=device,
+                model_config=model_config,
             )
             return i, emb
 

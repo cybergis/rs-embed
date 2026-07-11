@@ -19,7 +19,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-from ..core.types import FetchResult
+from ..core.types import EmbedderCapabilities, FetchResult
 from ..providers import ProviderBase
 from ..providers.fetch import (
     count_distinct_frames,
@@ -29,13 +29,16 @@ from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
 )
 from ..providers.fetch import (
-    fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+    fetch_multiframe_patch_raw_tchw as _fetch_multiframe_patch_raw_tchw,
 )
 from ..providers.resolution import (
     is_provider_backend,
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
     crop_grid_to_roi,
@@ -49,7 +52,8 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from ..tools.temporal import temporal_frame_midpoints as _temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
-from .meta import build_meta, temporal_midpoint_str, temporal_to_range
+from .meta import base_meta, temporal_midpoint_str, temporal_to_range
+from .shared import grid_to_dataarray, import_xarray, pool_from_tokens, tokens_to_grid_dhw
 
 
 def ensure_torch() -> None:
@@ -57,59 +61,6 @@ def ensure_torch() -> None:
         import torch  # noqa: F401
     except Exception as e:
         raise ModelError("This embedder requires torch installed.") from e
-
-
-def base_meta(
-    *,
-    model_name,
-    hf_id,
-    backend,
-    image_size,
-    sensor,
-    temporal=None,
-    source=None,
-    embed_type="on_the_fly",
-    extra=None,
-):
-    m = build_meta(
-        model=model_name,
-        kind=embed_type,
-        backend=backend,
-        source=source or getattr(sensor, "collection", None),
-        sensor=sensor,
-        temporal=temporal,
-        image_size=image_size,
-    )
-    m["hf_id"] = hf_id
-    if extra:
-        m.update(extra)
-    return m
-
-
-def pool_from_tokens(tokens, pooling):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    if len(patch) == 0:
-        return tokens[0].astype("float32"), has_cls
-    if pooling == "mean":
-        return patch.mean(axis=0).astype("float32"), has_cls
-    if pooling == "max":
-        return patch.max(axis=0).astype("float32"), has_cls
-    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
-
-
-def tokens_to_grid_dhw(tokens):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    p, d = patch.shape
-    hw = int(p**0.5)
-    if hw * hw != p:
-        raise ModelError(f"Patch token count {p} is not a perfect square.")
-    return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
 
 def _split_prithvi_patch_tokens(tokens, n_frames: int):
@@ -470,7 +421,7 @@ def _fetch_s2_prithvi6_tchw(
     Bins align with ``temporal_frame_midpoints`` (both use the shared
     ``split_date_range``), so frame ``i`` corresponds to midpoint date ``i``.
     """
-    return _fetch_s2_multiframe_raw_tchw(
+    return _fetch_multiframe_patch_raw_tchw(
         provider,
         spatial=spatial,
         temporal=temporal,
@@ -664,10 +615,7 @@ def _load_prithvi_cached(
                 f"Failed to load Prithvi checkpoint '{ckpt_path}': {type(e).__name__}: {e}"
             ) from e
 
-    try:
-        m = m.to(dev).eval()
-    except Exception as _e:
-        pass
+    m = _move_model_to_device(m, dev, model_name="Prithvi")
 
     meta = {
         "model_key": model_key,
@@ -751,17 +699,7 @@ def _prithvi_forward_tokens(
             out = model(x, temporal_coords=temporal_coords, location_coords=location_coords)
 
     # normalize output -> tokens
-    tokens = None
-    if isinstance(out, (tuple, list)):
-        tokens = out[-1]
-    elif hasattr(out, "last_hidden_state"):
-        tokens = out.last_hidden_state
-    elif isinstance(out, dict):
-        tokens = out.get("tokens") or out.get("last_hidden_state") or out.get("hidden_states")
-        if isinstance(tokens, (tuple, list)):
-            tokens = tokens[-1]
-    else:
-        tokens = out
+    tokens = _extract_tokens(out)
 
     if tokens is None:
         raise ModelError("Prithvi forward did not return tokens.")
@@ -817,17 +755,7 @@ def _prithvi_forward_tokens_batch(
         else:
             out = model(xb, temporal_coords=temporal_coords, location_coords=location_coords)
 
-    tokens = None
-    if isinstance(out, (tuple, list)):
-        tokens = out[-1]
-    elif hasattr(out, "last_hidden_state"):
-        tokens = out.last_hidden_state
-    elif isinstance(out, dict):
-        tokens = out.get("tokens") or out.get("last_hidden_state") or out.get("hidden_states")
-        if isinstance(tokens, (tuple, list)):
-            tokens = tokens[-1]
-    else:
-        tokens = out
+    tokens = _extract_tokens(out)
 
     if tokens is None:
         raise ModelError("Prithvi forward did not return tokens.")
@@ -999,6 +927,18 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         scale_m=30,
         cloudy_pct=30,
         expected_channels=6,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        fetch_temporal_mode=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:
@@ -1340,22 +1280,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 }
             )
 
-            try:
-                import xarray as xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(h),
-                    "x": np.arange(w),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -1516,22 +1441,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                     "cls_removed": bool(cls_removed),
                 }
             )
-            try:
-                import xarray as xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(h),
-                    "x": np.arange(w),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -1710,14 +1620,8 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             shape_groups.setdefault(tuple(x.shape), []).append(i)
 
         out: list[Embedding | None] = [None] * len(spatials)
-        xr_mod = None
         if output.mode == "grid":
-            try:
-                import xarray as xr  # type: ignore
-
-                xr_mod = xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+            import_xarray()  # fail fast before batch inference
 
         for idxs in shape_groups.values():
             for s0 in range(0, len(idxs), infer_bs):
@@ -1799,18 +1703,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                                 "cls_removed": bool(cls_removed),
                             }
                         )
-                        assert xr_mod is not None
-                        da = xr_mod.DataArray(
-                            grid,
-                            dims=("d", "y", "x"),
-                            coords={
-                                "d": np.arange(grid.shape[0]),
-                                "y": np.arange(h),
-                                "x": np.arange(w),
-                            },
-                            name="embedding",
-                            attrs=meta,
-                        )
+                        da = grid_to_dataarray(grid, meta=meta)
                         out[i] = Embedding(data=da, meta=meta)
                         continue
 
@@ -1883,14 +1776,8 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         for i, x in enumerate(prepared):
             shape_groups.setdefault(tuple(x.shape), []).append(i)
 
-        xr_mod = None
         if output.mode == "grid":
-            try:
-                import xarray as xr  # type: ignore
-
-                xr_mod = xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+            import_xarray()  # fail fast before batch inference
 
         out: list[Embedding | None] = [None] * len(spatials)
         for idxs in shape_groups.values():
@@ -1999,18 +1886,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                                 "cls_removed": bool(cls_removed),
                             }
                         )
-                        assert xr_mod is not None
-                        da = xr_mod.DataArray(
-                            grid,
-                            dims=("d", "y", "x"),
-                            coords={
-                                "d": np.arange(grid.shape[0]),
-                                "y": np.arange(h),
-                                "x": np.arange(w),
-                            },
-                            name="embedding",
-                            attrs=meta,
-                        )
+                        da = grid_to_dataarray(grid, meta=meta)
                         out[i] = Embedding(data=da, meta=meta)
                         continue
 

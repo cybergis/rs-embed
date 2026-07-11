@@ -149,3 +149,31 @@ def build_meta(
         meta.update(extra)
 
     return meta
+
+
+def base_meta(
+    *,
+    model_name,
+    hf_id,
+    backend,
+    image_size,
+    sensor,
+    temporal=None,
+    source=None,
+    embed_type="on_the_fly",
+    extra=None,
+):
+    """``build_meta`` wrapper for on-the-fly embedders that record an ``hf_id``."""
+    m = build_meta(
+        model=model_name,
+        kind=embed_type,
+        backend=backend,
+        source=source or getattr(sensor, "collection", None),
+        sensor=sensor,
+        temporal=temporal,
+        image_size=image_size,
+    )
+    m["hf_id"] = hf_id
+    if extra:
+        m.update(extra)
+    return m

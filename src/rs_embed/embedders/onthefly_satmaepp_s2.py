@@ -16,6 +16,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers.base import ProviderBase
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
@@ -25,6 +26,9 @@ from ..providers.resolution import (
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
     crop_grid_and_pool,
@@ -36,7 +40,8 @@ from ..tools.shape import (
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
-from .meta import build_meta, temporal_to_range
+from .meta import base_meta, temporal_to_range
+from .shared import grid_to_dataarray, import_xarray, resolve_hf_cache_dir, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -44,33 +49,6 @@ def ensure_torch() -> None:
         import torch  # noqa: F401
     except Exception as e:
         raise ModelError("This embedder requires torch installed.") from e
-
-
-def base_meta(
-    *,
-    model_name,
-    hf_id,
-    backend,
-    image_size,
-    sensor,
-    temporal=None,
-    source=None,
-    embed_type="on_the_fly",
-    extra=None,
-):
-    m = build_meta(
-        model=model_name,
-        kind=embed_type,
-        backend=backend,
-        source=source or getattr(sensor, "collection", None),
-        sensor=sensor,
-        temporal=temporal,
-        image_size=image_size,
-    )
-    m["hf_id"] = hf_id
-    if extra:
-        m.update(extra)
-    return m
 
 
 # SatMAE++ Sentinel branch in source repo drops [B1, B9, B10] and uses 10 channels.
@@ -235,11 +213,7 @@ def _torch_load_checkpoint_compat(path: str):
 
 
 def _resolve_hf_cache_dir() -> str | None:
-    d = (
-        os.environ.get("HUGGINGFACE_HUB_CACHE")
-        or os.environ.get("HF_HOME")
-        or os.environ.get("HUGGINGFACE_HOME")
-    )
+    d = resolve_hf_cache_dir()
     return str(d) if d else None
 
 
@@ -296,7 +270,6 @@ def _load_satmaepp_s2_cached(
     cache_dir: str | None,
 ):
     ensure_torch()
-    import torch
 
     ckpt_path = _ensure_satmaepp_s2_assets(
         ckpt_repo=ckpt_repo,
@@ -339,20 +312,14 @@ def _load_satmaepp_s2_cached(
             f"Check image/patch/channel config. Error: {type(e).__name__}: {e}"
         ) from e
 
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="SatMAE++ Sentinel-2")
 
-    p0 = None
-    for _, p in model.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("SatMAE++ Sentinel model has no parameters; checkpoint load failed.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("SatMAE++ Sentinel parameters contain NaN/Inf; checkpoint likely invalid.")
+    wstats = verify_loaded_params(
+        model,
+        model_name="SatMAE++ Sentinel",
+        no_params_msg="SatMAE++ Sentinel model has no parameters; checkpoint load failed.",
+        nonfinite_msg="SatMAE++ Sentinel parameters contain NaN/Inf; checkpoint likely invalid.",
+    )
 
     meta = {
         "device": str(dev),
@@ -364,9 +331,7 @@ def _load_satmaepp_s2_cached(
         "patch_size": int(patch_size),
         "in_chans": len(_S2_SR_10_BANDS),
         "channel_groups": tuple(tuple(int(i) for i in g) for g in _S2_10_CHANNEL_GROUPS),
-        "param_mean": float(p0.float().mean().cpu()),
-        "param_std": float(p0.float().std().cpu()),
-        "param_absmax": float(p0.float().abs().max().cpu()),
+        **wstats,
         "torch_weights_only": bool(_env_bool("RS_EMBED_SATMAEPP_S2_WEIGHTS_ONLY", False)),
     }
     return model, meta
@@ -615,6 +580,17 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
     DEFAULT_BATCH_CPU = 8
     DEFAULT_BATCH_CUDA = 32
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",
@@ -835,22 +811,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                 }
             )
 
-            try:
-                import xarray as xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-
-            da = xr.DataArray(
-                grid,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(h),
-                    "x": np.arange(w),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -929,17 +890,11 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         out: list[Embedding | None] = [None] * n
         want_grid = output.mode == "grid"
         any_cropped = any(not roi_is_full(gr) for gr in geo_rois)
-        xr_mod = None
         # group_reduce is needed for grid output, and also for pooled output when an
         # ROI was enlarged to a square (pooled then derives from the cropped grid).
         group_reduce = self._resolve_group_reduce() if (want_grid or any_cropped) else "mean"
         if want_grid:
-            try:
-                import xarray as xr  # type: ignore
-
-                xr_mod = xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+            import_xarray()  # fail fast before batch inference
 
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)
@@ -1002,7 +957,6 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                         )
                     out[i] = Embedding(data=vec.astype(np.float32), meta=meta)
                 elif output.mode == "grid":
-                    assert xr_mod is not None
                     grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(
                         tokens, group_reduce=group_reduce
                     )
@@ -1017,17 +971,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                             **gmeta,
                         }
                     )
-                    da = xr_mod.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(h),
-                            "x": np.arange(w),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
+                    da = grid_to_dataarray(grid, meta=meta)
                     out[i] = Embedding(data=da, meta=meta)
                 else:
                     raise ModelError(f"Unknown output mode: {output.mode}")
@@ -1117,17 +1061,11 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
         out: list[Embedding | None] = [None] * len(spatials)
         want_grid = output.mode == "grid"
         any_cropped = any(not roi_is_full(gr) for gr in geo_rois)
-        xr_mod = None
         # group_reduce is needed for grid output, and also for pooled output when an
         # ROI was enlarged to a square (pooled then derives from the cropped grid).
         group_reduce = self._resolve_group_reduce() if (want_grid or any_cropped) else "mean"
         if want_grid:
-            try:
-                import xarray as xr  # type: ignore
-
-                xr_mod = xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
+            import_xarray()  # fail fast before batch inference
 
         n = len(spatials)
         for s0 in range(0, n, infer_bs):
@@ -1192,7 +1130,6 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                         )
                     out[i] = Embedding(data=vec.astype(np.float32), meta=meta)
                 elif output.mode == "grid":
-                    assert xr_mod is not None
                     grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(
                         tokens, group_reduce=group_reduce
                     )
@@ -1207,17 +1144,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                             **gmeta,
                         }
                     )
-                    da = xr_mod.DataArray(
-                        grid,
-                        dims=("d", "y", "x"),
-                        coords={
-                            "d": np.arange(grid.shape[0]),
-                            "y": np.arange(h),
-                            "x": np.arange(w),
-                        },
-                        name="embedding",
-                        attrs=meta,
-                    )
+                    da = grid_to_dataarray(grid, meta=meta)
                     out[i] = Embedding(data=da, meta=meta)
                 else:
                     raise ModelError(f"Unknown output mode: {output.mode}")

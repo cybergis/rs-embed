@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from ..core.errors import ModelError, ProviderError
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import ExportConfig, FetchResult, ModelConfig
 from ..providers import fetch as _providers_fetch
@@ -156,10 +157,9 @@ class PrefetchManager:
         """
         from ..tools.normalization import normalize_model_name
         from ..tools.runtime import (
-            _embedder_method_accepts_parameter,
             _overrides_base_method,
+            embedder_honors_fetch_meta,
             get_embedder_bundle_cached,
-            sensor_key,
         )
         from ..tools.serialization import sensor_cache_key
 
@@ -179,11 +179,10 @@ class PrefetchManager:
                 normalize_model_name(mc.name),
                 self.resolved_backend.get(mc.name, self.backend),
                 self.device,
-                sensor_key(mc.sensor),
             )
             meta_safe_by_key[fetch_key] = meta_safe_by_key.get(
                 fetch_key, True
-            ) and _embedder_method_accepts_parameter(type(embedder), "get_embedding", "fetch_meta")
+            ) and embedder_honors_fetch_meta(type(embedder))
             # A merged fetch group may represent a union of channels needed by
             # multiple models. Model-specific fetch_input() implementations
             # generally return only that model's own contract, so using one of
@@ -339,7 +338,7 @@ class PrefetchManager:
                         if not bool(rep.get("ok", True)):
                             issues = (rep.get("report", {}) or {}).get("issues", [])
                             mlist = sorted(set(self.sensor_models.get(member_skey, [])))
-                            err = RuntimeError(
+                            err = ModelError(
                                 f"Input inspection failed for index={i}, models={mlist}, sensor={member_skey}: {issues}"
                             )
                             if not cfg.continue_on_error:
@@ -378,8 +377,8 @@ class PrefetchManager:
             return hit
         err = self.errors.get((idx, sensor_key))
         if err:
-            raise RuntimeError(f"Prefetch failed for index={idx}, sensor={sensor_key}: {err}")
-        raise RuntimeError(f"Missing prefetched input for index={idx}, sensor={sensor_key}")
+            raise ProviderError(f"Prefetch failed for index={idx}, sensor={sensor_key}: {err}")
+        raise ModelError(f"Missing prefetched input for index={idx}, sensor={sensor_key}")
 
     def get_or_fetch(
         self,
@@ -395,9 +394,9 @@ class PrefetchManager:
             return hit
         err = self.errors.get((idx, skey))
         if err:
-            raise RuntimeError(f"Prefetch previously failed for index={idx}, sensor={skey}: {err}")
+            raise ProviderError(f"Prefetch previously failed for index={idx}, sensor={skey}: {err}")
         if self.provider is None:
-            raise RuntimeError(f"Missing provider for input fetch: index={idx}, sensor={skey}")
+            raise ModelError(f"Missing provider for input fetch: index={idx}, sensor={skey}")
         cfg = self.config
         fetcher = self.fetcher_by_key.get(skey)
         if fetcher is not None:
@@ -429,7 +428,7 @@ class PrefetchManager:
         rep = self.inspect_fn(x, sensor=sspec, name=f"gee_input_{skey}")
         if cfg.fail_on_bad_input and (not bool(rep.get("ok", True))):
             issues = (rep.get("report", {}) or {}).get("issues", [])
-            raise RuntimeError(f"Input inspection failed for index={idx}, sensor={skey}: {issues}")
+            raise ModelError(f"Input inspection failed for index={idx}, sensor={skey}: {issues}")
         self.cache[(idx, skey)] = x
         self.input_reports[(idx, skey)] = rep
         return x
