@@ -980,6 +980,8 @@
       
         
       
+        
+      
     
     
     
@@ -1101,6 +1103,34 @@
     
   
     DOFA
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../models/clay/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Clay
   
 
     
@@ -2366,7 +2396,7 @@
 <h3 id="temporal-handling">Temporal Handling<a class="headerlink" href="#temporal-handling" title="Permanent link">&para;</a></h3>
 <p>Read this section before comparing any model that accepts <code>TemporalSpec.range(...)</code>.</p>
 <p>For most on-the-fly adapters, <code>TemporalSpec.range(start, end)</code> means "filter imagery in <code>[start, end)</code> and build one composite patch for model input," usually with <code>median</code> and optionally <code>mosaic</code> through <code>SensorSpec.composite</code>.</p>
-<p>The multi-frame adapters <code>agrifm</code>, <code>anysat</code>, and <code>galileo</code> instead split the requested range into sub-windows and composite one frame per bin. Current single-composite adapters include <code>remoteclip</code>, <code>satmae</code>, <code>satmaepp</code>, <code>scalemae</code>, <code>wildsat</code>, <code>prithvi</code>, <code>terrafm</code>, <code>terramind</code>, <code>dofa</code>, <code>fomo</code>, <code>thor</code>, <code>satvision</code>, and <code>olmoearth</code>.</p>
+<p>The multi-frame adapters <code>agrifm</code>, <code>anysat</code>, and <code>galileo</code> instead split the requested range into sub-windows and composite one frame per bin. Current single-composite adapters include <code>remoteclip</code>, <code>satmae</code>, <code>satmaepp</code>, <code>scalemae</code>, <code>wildsat</code>, <code>prithvi</code>, <code>terrafm</code>, <code>terramind</code>, <code>dofa</code>, <code>clay</code>, <code>fomo</code>, <code>thor</code>, <code>satvision</code>, and <code>olmoearth</code>.</p>
 <h3 id="multi-frame-semantics">Multi-frame Semantics<a class="headerlink" href="#multi-frame-semantics" title="Permanent link">&para;</a></h3>
 <p>This section only matters for adapters that construct multi-frame inputs from one requested time window.</p>
 <p>Shared behavior for current multi-frame adapters (<code>agrifm</code>, <code>anysat</code>, <code>galileo</code>):</p>
@@ -2497,6 +2527,13 @@
 <td>Yes: per-band wavelengths (explicit or inferable from bands)</td>
 </tr>
 <tr>
+<td><code>clay</code></td>
+<td>Yes (spectral generalization)</td>
+<td>Yes (multi-band spectral input; S2 path in this adapter)</td>
+<td>Yes (datacube: image + latlon + time + gsd + wavelengths)</td>
+<td>Yes: latlon/time/gsd/wavelengths (all derived automatically)</td>
+</tr>
+<tr>
 <td><code>fomo</code></td>
 <td>No</td>
 <td>No</td>
@@ -2533,7 +2570,7 @@
 </tr>
 </tbody>
 </table>
-<p>In practice, the most obviously multi-input models here are <code>prithvi</code> (image plus temporal and location coordinates), <code>anysat</code> (time series plus <code>s2_dates</code>), <code>galileo</code> (image-derived tensors plus masks and <code>months</code>), <code>dofa</code> (image plus wavelengths), and <code>scalemae</code> (image plus <code>input_res_m</code>).</p>
+<p>In practice, the most obviously multi-input models here are <code>prithvi</code> (image plus temporal and location coordinates), <code>anysat</code> (time series plus <code>s2_dates</code>), <code>galileo</code> (image-derived tensors plus masks and <code>months</code>), <code>dofa</code> (image plus wavelengths), <code>clay</code> (image plus latlon, time, gsd, and wavelengths), and <code>scalemae</code> (image plus <code>input_res_m</code>).</p>
 <h3 id="preprocessing-and-temporal-env-vars">Preprocessing and Temporal Env Vars<a class="headerlink" href="#preprocessing-and-temporal-env-vars" title="Permanent link">&para;</a></h3>
 <p>This table only lists env vars that materially change model input construction or temporal packaging.</p>
 <table>
@@ -2591,6 +2628,10 @@
 <tr>
 <td><code>dofa</code></td>
 <td>image size fixed 224; provider/tensor channels and wavelengths drive preprocessing</td>
+</tr>
+<tr>
+<td><code>clay</code></td>
+<td>image size fixed 256; <code>RS_EMBED_CLAY_MODEL_SIZE</code> (checkpoint-matched), metadata encodings derived from <code>spatial</code>/<code>temporal</code>/<code>sensor.scale_m</code></td>
 </tr>
 <tr>
 <td><code>fomo</code></td>
