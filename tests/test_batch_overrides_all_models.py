@@ -220,6 +220,52 @@ def test_terramind_batch_prefetch_passes_raw_input(monkeypatch):
     assert seen[0][1] >= 1234.0
 
 
+def test_clay_batch_prefetch_passes_raw_input(monkeypatch):
+    import rs_embed.embedders.onthefly_clay as clay
+    from rs_embed.embedders.onthefly_clay import ClayEmbedder
+
+    emb = ClayEmbedder()
+    monkeypatch.setenv("RS_EMBED_CLAY_FETCH_WORKERS", "1")
+    seen_backend = {"value": None}
+
+    def _fake_get_provider(_backend):
+        seen_backend["value"] = _backend
+        return object()
+
+    monkeypatch.setattr(emb, "_get_provider", _fake_get_provider)
+    monkeypatch.setattr(
+        clay,
+        "_fetch_provider_multiband_sr_chw",
+        lambda provider, spatial, temporal, **kw: (
+            np.full((10, 8, 8), 1234.0, dtype=np.float32),
+            {},
+        ),
+    )
+
+    seen = []
+
+    def _fake_batch_from_inputs(**kw):
+        seen.extend((arr.shape[0], float(arr.max())) for arr in kw["input_chws"])
+        assert kw["_roi_windows_geo"] is not None
+        return [
+            Embedding(data=np.array([sp.lon], dtype=np.float32), meta={}) for sp in kw["spatials"]
+        ]
+
+    monkeypatch.setattr(emb, "get_embeddings_batch_from_inputs", _fake_batch_from_inputs)
+
+    out = emb.get_embeddings_batch(
+        spatials=_spatials(2),
+        temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
+        output=OutputSpec.pooled(),
+        backend="auto",
+    )
+
+    assert len(out) == 2
+    assert seen_backend["value"] == "auto"
+    assert seen[0][0] == 10
+    assert seen[0][1] >= 1234.0
+
+
 def test_dofa_tensor_get_embedding_uses_input_chw(monkeypatch):
     import rs_embed.embedders.onthefly_dofa as dofa
 
