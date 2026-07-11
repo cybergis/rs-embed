@@ -363,9 +363,15 @@ def _load_clay_model_cached(model_size: str, dev: str):
     model = clay_encoder(size_l, patch_size=_CLAY_PATCH_SIZE, mask_ratio=0.0, shuffle=False)
 
     weights_path, weights_url = _resolve_clay_weights_path()
-    # Lightning checkpoints pickle non-tensor hyper-parameters, so
-    # weights_only=True cannot load them (PyTorch 2.6+ default change).
-    checkpoint = torch.load(weights_path, map_location="cpu", weights_only=False)
+    # The published v1.5 Lightning ckpt loads under weights_only=True (its
+    # hyper-parameters are all primitives). Unsafe pickle loading is an
+    # explicit opt-in for custom checkpoints only.
+    weights_only = str(os.environ.get("RS_EMBED_CLAY_WEIGHTS_ONLY", "1")).strip() not in (
+        "0",
+        "false",
+        "False",
+    )
+    checkpoint = torch.load(weights_path, map_location="cpu", weights_only=weights_only)
     state_dict = _extract_clay_encoder_state_dict(checkpoint)
     load_result = model.load_state_dict(state_dict, strict=False)
     missing = list(getattr(load_result, "missing_keys", []))

@@ -108,6 +108,7 @@ flowchart LR
 | `RS_EMBED_CLAY_HF_REPO_ID`    | `made-with-clay/Clay` | Hugging Face repo used for checkpoint download     |
 | `RS_EMBED_CLAY_HF_FILENAME`   | `v1.5/clay-v1.5.ckpt` | Checkpoint file inside the repo                    |
 | `RS_EMBED_CLAY_HF_REVISION`   | `main`                | Hugging Face revision used for checkpoint download |
+| `RS_EMBED_CLAY_WEIGHTS_ONLY`  | `1`                   | Safe tensor-only `torch.load`; set `0` only for trusted custom checkpoints that pickle non-tensor objects |
 | `RS_EMBED_CLAY_MODEL_SIZE`    | `large`               | Encoder size (must match the checkpoint)           |
 
 ---
