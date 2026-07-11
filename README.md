@@ -75,7 +75,7 @@ emb = get_embedding(
 
 ```
 
-> **Tip:** Default settings are designed as a trade-off between compute cost and embedding quality. If you have sufficient compute resources, check [Choosing Settings](https://cybergis.github.io/rs-embed/0.1.3/choosing_settings/) and individual [model pages](https://cybergis.github.io/rs-embed/0.1.3/models/) to get the best results.
+> **Tip:** Default settings are designed as a trade-off between compute cost and embedding quality. If you have sufficient compute resources, check [Choosing Settings](https://cybergis.github.io/rs-embed/latest/choosing_settings/) and individual [model pages](https://cybergis.github.io/rs-embed/latest/models/) to get the best results.
 
 See the visualization helper and end-to-end notebook in the repository:
 
