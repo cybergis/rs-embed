@@ -21,23 +21,12 @@ from .core.specs import (
 )
 from .core.validation import assert_supported, validate_specs
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
-from .tools.model_defaults import (
-    default_sensor_for_model,
-    resolve_sensor_for_model,
-)
-from .tools.normalization import (
-    _resolve_embedding_api_backend,
-    normalize_backend_name,
-    normalize_device_name,
-    normalize_model_name,
-)
+from .tools.model_defaults import resolve_sensor_for_model
+from .tools.normalization import normalize_model_name
 from .tools.runtime import (
-    _EmbeddingRequestContext,
-    get_embedder_bundle_cached,
+    _prepare_embedding_request_context,
     require_model_config_support,
-    resolve_model_aware_input_prep,
     run_embedding_request,
-    sensor_key,
 )
 
 
@@ -97,61 +86,35 @@ class Model:
         **model_kwargs: Any,
     ) -> None:
         model_config = model_kwargs or None
-        self._model_n = normalize_model_name(name)
-        self._backend_n = _resolve_embedding_api_backend(
-            self._model_n, normalize_backend_name(backend)
-        )
-        self._device = normalize_device_name(device)
         self._output = output
-        self._model_config = model_config
-        (
-            self._input_prep,
-            self._input_prep_resolved,
-            self._input_prep_requested_mode,
-            self._input_prep_model_policy,
-        ) = resolve_model_aware_input_prep(
-            model_n=self._model_n,
-            input_prep=input_prep,
-            output=output,
-        )
 
-        self._sensor = resolve_sensor_for_model(
-            self._model_n,
+        # Same resolution sequence as api.get_embedding: resolve explicit
+        # sensor/fetch/modality overrides first, then let the shared request
+        # context apply normalization, model-aware input_prep, the tile-mode
+        # sensor default, embedder caching, and backend/output support checks.
+        sensor_eff = resolve_sensor_for_model(
+            normalize_model_name(name),
             sensor=sensor,
             fetch=fetch,
             modality=modality,
-            default_when_missing=(self._input_prep_resolved.mode == "tile"),
+            default_when_missing=False,
         )
-        if self._input_prep_resolved.mode == "tile" and self._sensor is None:
-            self._sensor = default_sensor_for_model(self._model_n)
-
-        sensor_k = sensor_key(self._sensor)
-        self._embedder, self._lock = get_embedder_bundle_cached(
-            self._model_n, self._backend_n, self._device, sensor_k
-        )
-        require_model_config_support(
-            embedder=self._embedder,
-            model_config=self._model_config,
-            method_name="get_embedding",
-        )
-        assert_supported(
-            self._embedder,
-            backend=self._backend_n,
-            output=self._output,
+        self._ctx = _prepare_embedding_request_context(
+            model=name,
             temporal=None,
+            sensor=sensor_eff,
+            model_config=model_config,
+            output=output,
+            backend=backend,
+            device=device,
+            input_prep=input_prep,
         )
-        self._ctx = _EmbeddingRequestContext(
-            model_n=self._model_n,
-            backend_n=self._backend_n,
-            device=self._device,
-            sensor_eff=self._sensor,
-            model_config=self._model_config,
-            input_prep=self._input_prep,
-            input_prep_resolved=self._input_prep_resolved,
-            input_prep_requested_mode=self._input_prep_requested_mode,
-            input_prep_model_policy=self._input_prep_model_policy,
-            embedder=self._embedder,
-            lock=self._lock,
+        # Fail fast at construction when model kwargs are unsupported, instead
+        # of on the first embedding call.
+        require_model_config_support(
+            embedder=self._ctx.embedder,
+            model_config=model_config,
+            method_name="get_embedding",
         )
 
     # ── embedding methods ──────────────────────────────────────────
@@ -177,6 +140,12 @@ class Model:
             Normalized embedding output matching this model's ``output`` spec.
         """
         validate_specs(spatial=spatial, temporal=temporal, output=self._output)
+        assert_supported(
+            self._ctx.embedder,
+            backend=self._ctx.backend_n,
+            output=self._output,
+            temporal=temporal,
+        )
         return run_embedding_request(
             spatials=[spatial],
             temporal=temporal,
@@ -213,6 +182,12 @@ class Model:
             raise ModelError("spatials must be a non-empty list[SpatialSpec].")
         for sp in spatials:
             validate_specs(spatial=sp, temporal=temporal, output=self._output)
+        assert_supported(
+            self._ctx.embedder,
+            backend=self._ctx.backend_n,
+            output=self._output,
+            temporal=temporal,
+        )
         return run_embedding_request(
             spatials=spatials,
             temporal=temporal,
@@ -229,7 +204,7 @@ class Model:
             Capability metadata. Returns ``{}`` if unavailable.
         """
         try:
-            desc = self._embedder.describe()
+            desc = self._ctx.embedder.describe()
             return desc if isinstance(desc, dict) else {}
         except Exception as _e:
             return {}

@@ -292,7 +292,7 @@ def test_base_fetch_input_multi_defaults_temporal_like_get_embedding(monkeypatch
         seen["temporal"] = temporal
         return np.zeros((2, 1, 4, 4), dtype=np.float32)
 
-    monkeypatch.setattr("rs_embed.providers.fetch.fetch_s2_multiframe_raw_tchw", fake_multi)
+    monkeypatch.setattr("rs_embed.providers.fetch.fetch_multiframe_patch_raw_tchw", fake_multi)
 
     class _MultiModel(EmbedderBase):
         model_name = "multi_dummy"

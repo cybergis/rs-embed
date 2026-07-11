@@ -1,6 +1,8 @@
 import numpy as np
+import pytest
 
 from rs_embed.core.embedding import Embedding
+from rs_embed.core.errors import ModelError
 from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
 from rs_embed.embedders.onthefly_agrifm import AgriFMEmbedder
 from rs_embed.embedders.onthefly_anysat import AnySatEmbedder
@@ -9,6 +11,7 @@ from rs_embed.embedders.onthefly_fomo import FoMoEmbedder
 from rs_embed.embedders.onthefly_galileo import GalileoEmbedder
 from rs_embed.embedders.onthefly_prithvi import PrithviEOV2S2_6B_Embedder
 from rs_embed.embedders.onthefly_remoteclip import RemoteCLIPS2RGBEmbedder
+from rs_embed.embedders.onthefly_satmaepp import SatMAEPPEmbedder
 from rs_embed.embedders.onthefly_satvision_toa import SatVisionTOAEmbedder
 from rs_embed.embedders.onthefly_scalemae import ScaleMAERGBEmbedder
 from rs_embed.embedders.onthefly_terrafm import TerraFMBEmbedder
@@ -214,6 +217,52 @@ def test_terramind_batch_prefetch_passes_raw_input(monkeypatch):
     assert len(out) == 2
     assert seen_backend["value"] == "auto"
     assert seen[0][0] == 12
+    assert seen[0][1] >= 1234.0
+
+
+def test_clay_batch_prefetch_passes_raw_input(monkeypatch):
+    import rs_embed.embedders.onthefly_clay as clay
+    from rs_embed.embedders.onthefly_clay import ClayEmbedder
+
+    emb = ClayEmbedder()
+    monkeypatch.setenv("RS_EMBED_CLAY_FETCH_WORKERS", "1")
+    seen_backend = {"value": None}
+
+    def _fake_get_provider(_backend):
+        seen_backend["value"] = _backend
+        return object()
+
+    monkeypatch.setattr(emb, "_get_provider", _fake_get_provider)
+    monkeypatch.setattr(
+        clay,
+        "_fetch_provider_multiband_sr_chw",
+        lambda provider, spatial, temporal, **kw: (
+            np.full((10, 8, 8), 1234.0, dtype=np.float32),
+            {},
+        ),
+    )
+
+    seen = []
+
+    def _fake_batch_from_inputs(**kw):
+        seen.extend((arr.shape[0], float(arr.max())) for arr in kw["input_chws"])
+        assert kw["_roi_windows_geo"] is not None
+        return [
+            Embedding(data=np.array([sp.lon], dtype=np.float32), meta={}) for sp in kw["spatials"]
+        ]
+
+    monkeypatch.setattr(emb, "get_embeddings_batch_from_inputs", _fake_batch_from_inputs)
+
+    out = emb.get_embeddings_batch(
+        spatials=_spatials(2),
+        temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
+        output=OutputSpec.pooled(),
+        backend="auto",
+    )
+
+    assert len(out) == 2
+    assert seen_backend["value"] == "auto"
+    assert seen[0][0] == 10
     assert seen[0][1] >= 1234.0
 
 
@@ -746,3 +795,194 @@ def test_precomputed_batch_overrides_call_single_embedding(monkeypatch):
         backend="local",
     )
     assert len(out_tes) == 2
+
+
+def test_scalemae_batch_fallback_keeps_per_item_extra_meta(monkeypatch):
+    """Regression (review B1): the per-item fallback used to overwrite
+    ``chunk_extra`` each iteration, stamping every point in the chunk with the
+    LAST point's extra meta. Each embedding must keep its own."""
+    import rs_embed.embedders.onthefly_scalemae as sm
+
+    emb = ScaleMAERGBEmbedder()
+    monkeypatch.setenv("RS_EMBED_SCALEMAE_FETCH_WORKERS", "1")
+    monkeypatch.setattr(emb, "_get_provider", lambda _backend: object())
+
+    def _fake_fetch(*, spatial, temporal, sensor, out_size, provider):
+        return np.full((11, 13, 3), int(spatial.lon) + 10, dtype=np.uint8)
+
+    def _fake_load(*, model_id, device):
+        return object(), {"device": "cpu"}
+
+    def _boom_batch(model, rgb_u8_batch, *, image_size, device, input_res_m):
+        raise RuntimeError("batch forward unavailable")
+
+    def _fake_single(model, rgb_u8, *, image_size, device, input_res_m):
+        val = float(rgb_u8[0, 0, 0])
+        return np.full((4, 2), val, dtype=np.float32), {
+            "tokens_kind": "tokens_forward",
+            "marker": val,
+        }
+
+    monkeypatch.setattr(sm, "fetch_s2_rgb_u8_from_provider", _fake_fetch)
+    monkeypatch.setattr(sm, "_load_scalemae", _fake_load)
+    monkeypatch.setattr(sm, "_scalemae_forward_tokens_or_vec_batch", _boom_batch)
+    monkeypatch.setattr(sm, "_scalemae_forward_tokens_or_vec", _fake_single)
+
+    out = emb.get_embeddings_batch(
+        spatials=_spatials(3),
+        temporal=TemporalSpec.year(2020),
+        output=OutputSpec.pooled(),
+        backend="gee",
+    )
+
+    assert [float(e.data[0]) for e in out] == [10.0, 11.0, 12.0]
+    # Each point keeps ITS OWN extra, not the last point's.
+    assert [e.meta["marker"] for e in out] == [10.0, 11.0, 12.0]
+
+
+def test_satmaepp_batch_outputs_align_with_spatials(monkeypatch):
+    """Regression (review B2): the batch loop used to filter the fetched slice
+    (``if x is not None``) before the forward while re-associating results by
+    position — any dropped item would silently shift every later embedding
+    onto the wrong spatial. Lock the positional alignment and that the
+    forward receives the full unfiltered slice."""
+    import rs_embed.embedders.onthefly_satmaepp as satpp
+
+    emb = SatMAEPPEmbedder()
+    monkeypatch.setenv("RS_EMBED_SATMAEPP_FETCH_WORKERS", "1")
+    monkeypatch.setattr(emb, "_get_provider", lambda _backend: object())
+
+    def _fake_fetch(*, spatial, temporal, sensor, out_size, provider):
+        return np.full((11, 13, 3), int(spatial.lon) + 10, dtype=np.uint8)
+
+    def _fake_load(*, model_id, device):
+        return object(), {"device": "cpu"}
+
+    slice_sizes: list[int] = []
+
+    def _fake_forward_batch(model, rgb_u8_batch, *, image_size, device, model_id):
+        slice_sizes.append(len(rgb_u8_batch))
+        return [
+            np.full((4, 2), float(rgb_u8[0, 0, 0]), dtype=np.float32) for rgb_u8 in rgb_u8_batch
+        ]
+
+    monkeypatch.setattr(satpp, "fetch_s2_rgb_u8_from_provider", _fake_fetch)
+    monkeypatch.setattr(satpp, "_load_satmaepp", _fake_load)
+    monkeypatch.setattr(satpp, "_satmaepp_forward_tokens_batch", _fake_forward_batch)
+
+    spatials = _spatials(4)
+    out = emb.get_embeddings_batch(
+        spatials=spatials,
+        temporal=TemporalSpec.year(2020),
+        output=OutputSpec.pooled(),
+        backend="gee",
+    )
+
+    assert sum(slice_sizes) == len(spatials)
+    assert [float(e.data[0]) for e in out] == [10.0, 11.0, 12.0, 13.0]
+
+
+@pytest.mark.parametrize(
+    "embedder_cls",
+    # tessera/copernicus dropped out of this list when their get_embedding
+    # gained a model_config channel (cache_dir/data_dir); their batch guard
+    # now passes and forwards model_config per item instead of raising.
+    [AgriFMEmbedder, GSEAnnualEmbedder],
+)
+def test_batch_rejects_unsupported_model_config_with_model_error(embedder_cls):
+    """Regression (review M7): these batch overrides had no model_config
+    parameter at all, so the pipeline forwarding one crashed with TypeError
+    instead of the base contract's ModelError."""
+    emb = embedder_cls()
+    with pytest.raises(ModelError, match="does not accept model-specific"):
+        emb.get_embeddings_batch(
+            spatials=_spatials(1),
+            model_config={"variant": "large"},
+        )
+
+
+# ── model_config channels for terramind / remoteclip / terrafm (M2) ─────────
+
+
+def test_terramind_runtime_config_precedence(monkeypatch):
+    from rs_embed.embedders.onthefly_terramind import _resolve_terramind_runtime_config
+
+    monkeypatch.setenv("RS_EMBED_TERRAMIND_MODEL_KEY", "terramind_v1_base")
+    monkeypatch.setenv("RS_EMBED_TERRAMIND_MODALITY", "ENVMOD")
+
+    # model_config wins over env vars.
+    cfg = _resolve_terramind_runtime_config(
+        model_config={"model_key": "terramind_v1_large", "modality": "S1GRD"},
+        sensor=None,
+        default_model_key="terramind_v1_small",
+        default_modality="S2L2A",
+    )
+    assert cfg["model_key"] == "terramind_v1_large"
+    assert cfg["modality"] == "S1GRD"
+
+    # Env vars stay the fallback when model_config is absent.
+    cfg = _resolve_terramind_runtime_config(
+        model_config=None,
+        sensor=None,
+        default_model_key="terramind_v1_small",
+        default_modality="S2L2A",
+    )
+    assert cfg["model_key"] == "terramind_v1_base"
+    assert cfg["modality"] == "ENVMOD"
+
+    # sensor.modality keeps the highest precedence for modality.
+    cfg = _resolve_terramind_runtime_config(
+        model_config={"modality": "S1GRD"},
+        sensor=SensorSpec(collection="x", bands=(), modality="DEM"),
+        default_model_key="terramind_v1_small",
+        default_modality="S2L2A",
+    )
+    assert cfg["modality"] == "DEM"
+
+    # Defaults when nothing is configured.
+    monkeypatch.delenv("RS_EMBED_TERRAMIND_MODEL_KEY")
+    monkeypatch.delenv("RS_EMBED_TERRAMIND_MODALITY")
+    cfg = _resolve_terramind_runtime_config(
+        model_config=None,
+        sensor=None,
+        default_model_key="terramind_v1_small",
+        default_modality="S2L2A",
+    )
+    assert cfg["model_key"] == "terramind_v1_small"
+    assert cfg["modality"] == "S2L2A"
+
+
+def test_remoteclip_model_id_precedence(monkeypatch):
+    from rs_embed.embedders.onthefly_remoteclip import (
+        _DEFAULT_REMOTECLIP_ID,
+        _resolve_remoteclip_model_id,
+    )
+
+    monkeypatch.delenv("RS_EMBED_REMOTECLIP_ID", raising=False)
+    assert _resolve_remoteclip_model_id(None, None) == _DEFAULT_REMOTECLIP_ID
+
+    monkeypatch.setenv("RS_EMBED_REMOTECLIP_ID", "org/env-ckpt")
+    assert _resolve_remoteclip_model_id(None, None) == "org/env-ckpt"
+
+    # Legacy sensor.collection='hf:...' wins over env.
+    sensor = SensorSpec(collection="hf:org/legacy-ckpt", bands=())
+    assert _resolve_remoteclip_model_id(None, sensor) == "org/legacy-ckpt"
+
+    # model_config wins over everything.
+    assert _resolve_remoteclip_model_id({"model_id": "org/mc-ckpt"}, sensor) == "org/mc-ckpt"
+
+
+def test_terrafm_cache_dir_precedence(monkeypatch):
+    from rs_embed.embedders.onthefly_terrafm import _resolve_terrafm_cache_dir
+
+    for key in ("HUGGINGFACE_HUB_CACHE", "HF_HOME", "HUGGINGFACE_HOME"):
+        monkeypatch.delenv(key, raising=False)
+    assert _resolve_terrafm_cache_dir(None) is None
+
+    monkeypatch.setenv("HF_HOME", "/tmp/hf-home")
+    assert _resolve_terrafm_cache_dir(None) == "/tmp/hf-home"
+    monkeypatch.setenv("HUGGINGFACE_HUB_CACHE", "/tmp/hub-cache")
+    assert _resolve_terrafm_cache_dir(None) == "/tmp/hub-cache"
+
+    # model_config wins over the env chain.
+    assert _resolve_terrafm_cache_dir({"cache_dir": "/tmp/mc-cache"}) == "/tmp/mc-cache"

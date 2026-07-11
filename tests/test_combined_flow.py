@@ -17,6 +17,7 @@ import pytest
 
 from rs_embed.core.embedding import Embedding
 from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
+from rs_embed.core.types import ExportConfig
 from rs_embed.pipelines import combined_flow
 from rs_embed.pipelines import inference as inference_mod
 from rs_embed.pipelines.combined_flow import run_pending_models
@@ -50,16 +51,11 @@ def _patch_deps(
         combined_flow, "drop_model_arrays", lambda arrays, m, sanitize_key=None: None
     )
     monkeypatch.setattr(combined_flow, "jsonable", lambda x: x)
-    monkeypatch.setattr(
-        combined_flow,
-        "sensor_key",
-        lambda s: ("__none__",) if s is None else (s.collection,),
-    )
     monkeypatch.setattr(combined_flow, "normalize_model_name", lambda m: m)
     monkeypatch.setattr(
         combined_flow,
         "get_embedder_bundle_cached",
-        lambda model, backend, device, sk: (embedder, lock),
+        lambda model, backend, device: (embedder, lock),
     )
     monkeypatch.setattr(
         combined_flow, "sensor_cache_key", lambda s: s.collection if s else "__none__"
@@ -72,12 +68,7 @@ def _patch_deps(
     monkeypatch.setattr(
         inference_mod,
         "get_embedder_bundle_cached",
-        lambda model, backend, device, sk: (embedder, lock),
-    )
-    monkeypatch.setattr(
-        inference_mod,
-        "sensor_key",
-        lambda s: ("__none__",) if s is None else (s.collection,),
+        lambda model, backend, device: (embedder, lock),
     )
     monkeypatch.setattr(
         inference_mod,
@@ -139,15 +130,17 @@ def _base_kwargs(
         backend="gee",
         provider_enabled=provider_enabled,
         device="cpu",
-        save_inputs=False,
-        save_embeddings=save_embeddings,
-        continue_on_error=continue_on_error,
-        chunk_size=2,
+        config=ExportConfig(
+            save_inputs=False,
+            save_embeddings=save_embeddings,
+            continue_on_error=continue_on_error,
+            chunk_size=2,
+            infer_batch_size=8,
+            max_retries=0,
+            retry_backoff_s=0.0,
+            show_progress=False,
+        ),
         inference_strategy=inference_strategy,
-        infer_batch_size=8,
-        max_retries=0,
-        retry_backoff_s=0.0,
-        show_progress=False,
         input_refs_by_sensor={},
         get_or_fetch_input_fn=lambda i, sk, ss: np.ones((3, 4, 4), dtype=np.float32),
         write_checkpoint_fn=lambda **kw: manifest,

@@ -24,7 +24,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 | Fast baseline / simple pipeline           | `tessera`, `gse`, `copernicus`                              | Precomputed embeddings, fewer runtime dependencies |
 | Simple S2 RGB on-the-fly experiments      | `remoteclip`, `satmae`, `satmaepp`, `scalemae`              | Straightforward RGB input paths                    |
 | Time-series temporal modeling             | `prithvi`, `olmoearth`, `galileo`, `anysat`, `agrifm`       | Native multi-frame temporal packaging — see [Temporal Sampling](temporal_sampling.md) |
-| Multispectral / strict spectral semantics | `satmaepp` (`modality="s2_10b"`), `dofa`, `terramind`, `thor`, `satvision` | Strong channel/schema assumptions                  |
+| Multispectral / strict spectral semantics | `satmaepp` (`modality="s2_10b"`), `dofa`, `clay`, `terramind`, `thor`, `satvision` | Strong channel/schema assumptions                  |
 | Mixed-modality experiments (S1/S2)        | `terrafm`, `thor`                                           | Supports S2 or S1 path (per call)                  |
 
 ## Model Catalog Snapshot
@@ -44,6 +44,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 | `prithvi`         | S2 6-band                       | 768  | 30m                | multi-frame (auto, ≤4)  | required temporal + location side inputs                 | [detail](models/prithvi.md)    |
 | `olmoearth`       | S2 L2A 12-band / S1 VV/VH       | 128–1024 | 10m            | multi-frame (auto, ≤12) | FlexiViT; 4 sizes (nano/tiny/base/large) | [detail](models/olmoearth.md) |
 | `dofa`            | Multispectral + wavelengths     | 768  | 10m                | single composite        | wavelength vector required                              | [detail](models/dofa.md)       |
+| `clay`            | S2 L2A 10-band                  | 1024 | 10m                | single composite        | metadata conditioning (latlon/time/gsd/wavelengths)     | [detail](models/clay.md)       |
 | `terramind`       | S2 12-band                      | 384  | 10m                | single composite        | ViT-S class; strict z-score normalization               | [detail](models/terramind.md)  |
 | `terrafm`         | S2 12-band or S1 VV/VH          | 768  | 10m                | single composite        | dual-modality by channel count                          | [detail](models/terrafm.md)    |
 | `thor`            | S2 10-band or S1 VV/VH          | 768  | 10m                | single composite        | dual-modality; grouped tokens; native-snap              | [detail](models/thor.md)       |

@@ -248,22 +248,23 @@ def _warn_if_backfilled_frames(arr: np.ndarray, *, collection: str) -> None:
     )
 
 
-def fetch_s2_multiframe_raw_tchw(
+def fetch_multiframe_patch_raw_tchw(
     provider: ProviderBase,
     *,
     spatial: SpatialSpec,
     temporal: TemporalSpec,
     bands: Sequence[str],
+    collection: str,
     n_frames: int = 8,
-    collection: str = "COPERNICUS/S2_SR_HARMONIZED",
     scale_m: int = 10,
     cloudy_pct: int | None = 30,
     composite: str = "median",
     fill_value: float = 0.0,
 ) -> np.ndarray:
-    """Fetch an S2 time series as raw float32 [T,C,H,W] in [0,10000].
+    """Fetch a collection time series as raw float32 [T,C,H,W] in native units.
 
-    Empty sub-windows are back-filled with the whole-window composite; a
+    The window is equal-divided into ``n_frames`` sub-windows.  Empty
+    sub-windows are back-filled with the whole-window composite; a
     ``UserWarning`` is emitted (and the count is recoverable via
     :func:`count_distinct_frames`) so the data-availability gap is not silent.
     """
@@ -278,7 +279,6 @@ def fetch_s2_multiframe_raw_tchw(
             cloudy_pct=(int(cloudy_pct) if cloudy_pct is not None else None),
             composite=str(composite),
             fill_value=float(fill_value),
-            # fetch_fn=_fetch,
         )
     except ProviderError as exc:
         raise ModelError(str(exc)) from exc
@@ -350,7 +350,7 @@ def fetch_collection_binned_raw_tchw(
 ) -> tuple[np.ndarray, dict[str, Any]]:
     """Fetch one composite per explicit time bin as raw float32 [T,C,H,W].
 
-    Unlike :func:`fetch_s2_multiframe_raw_tchw` (equal division of one window),
+    Unlike :func:`fetch_multiframe_patch_raw_tchw` (equal division of one window),
     the caller supplies the exact ``(start, end)`` date bins. Bins with no
     imagery yield all-NaN sentinel frames flagged in the returned meta instead
     of failing or duplicating neighbours; at least one bin must have data.

@@ -34,7 +34,6 @@ from rs_embed.core.types import (
 )
 from rs_embed.embedders.base import EmbedderBase
 from rs_embed.tools.output import normalize_embedding_output
-from rs_embed.tools.runtime import sensor_key
 from rs_embed.tools.serialization import sensor_cache_key as _sensor_cache_key
 
 # ── mock embedder ──────────────────────────────────────────────────
@@ -239,7 +238,7 @@ def test_get_embedding_unknown_model():
 
 
 def test_reset_runtime_clears_runtime_and_embedder_module_caches(monkeypatch):
-    rt.get_embedder_bundle_cached("mock_model", "auto", "auto", sensor_key(None))
+    rt.get_embedder_bundle_cached("mock_model", "auto", "auto")
     rt.embedder_accepts_input_chw(type(_MockEmbedder))
     rt.embedder_accepts_model_config(type(_MockVariantEmbedder))
     registry._REGISTRY_IMPORT_ERRORS["remoteclip"] = RuntimeError("boom")
@@ -257,7 +256,7 @@ def test_reset_runtime_clears_runtime_and_embedder_module_caches(monkeypatch):
     summary = reset_runtime()
 
     assert summary["import_errors_cleared"] == 1
-    assert summary["runtime_caches_cleared"] == 5
+    assert summary["runtime_caches_cleared"] == 7
     assert summary["embedder_module_caches_cleared"] >= 1
     assert rt.get_embedder_bundle_cached.cache_info().currsize == 0
     assert rt.embedder_accepts_input_chw.cache_info().currsize == 0
@@ -353,7 +352,7 @@ def test_get_embeddings_batch_empty():
 
 
 def test_get_embeddings_batch_with_sensor():
-    """Ensures sensor param flows through _sensor_key without errors."""
+    """Ensures an explicit sensor flows through the request path without errors."""
 
     sensor = SensorSpec(collection="COLL", bands=("B1",))
     spatials = [PointBuffer(lon=0.0, lat=0.0, buffer_m=256)]
@@ -433,6 +432,20 @@ def test_validate_specs_rejects_legacy_output_scale_m():
     object.__setattr__(bad_output, "pooling", "mean")
     with pytest.raises(ModelError, match="output.scale_m is no longer supported"):
         _validate_specs(spatial=_SPATIAL, temporal=None, output=bad_output)
+
+
+def test_output_spec_rejects_invalid_values_at_construction():
+    """Regression (review M8): an invalid mode/pooling must be impossible to
+    construct — several embedders dispatch pooling with a plain if/else where
+    an unvalidated typo silently produced mean-pooled results."""
+    from rs_embed.core.errors import SpecError
+
+    with pytest.raises(SpecError, match="Unknown output mode"):
+        OutputSpec(mode="gird")
+    with pytest.raises(SpecError, match="Unknown pooling"):
+        OutputSpec(mode="pooled", pooling="median")
+    with pytest.raises(SpecError, match="Unknown grid_orientation"):
+        OutputSpec(mode="grid", grid_orientation="south_up")
 
 
 def test_validate_specs_bad_pooling():
@@ -531,19 +544,8 @@ def test_assert_supported_broken_describe_raises_model_error():
 
 
 # ══════════════════════════════════════════════════════════════════════
-# _sensor_key / _sensor_cache_key
+# _sensor_cache_key
 # ══════════════════════════════════════════════════════════════════════
-
-
-def test_sensor_key_none():
-    assert sensor_key(None) == ("__none__",)
-
-
-def test_sensor_key_deterministic_and_differs():
-    s1 = SensorSpec(collection="A", bands=("B1",), modality="s1")
-    s2 = SensorSpec(collection="A", bands=("B1",), modality="s2")
-    assert sensor_key(s1) == sensor_key(s1)
-    assert sensor_key(s1) != sensor_key(s2)
 
 
 def test_sensor_cache_key_deterministic_and_differs():
@@ -898,6 +900,64 @@ def test_export_batch_export_model_request_preserves_model_config(monkeypatch, t
 
     assert result == {"status": "ok"}
     assert captured["model_config"] == {"variant": "large"}
+
+
+def test_export_batch_top_level_input_prep_flows_into_config(monkeypatch, tmp_path):
+    captured = {}
+
+    def _fake_run(self):
+        captured["input_prep"] = self.config.input_prep
+        return {"status": "ok"}
+
+    monkeypatch.setattr("rs_embed.pipelines.exporter.BatchExporter.run", _fake_run)
+
+    result = export_batch(
+        spatials=[_SPATIAL],
+        temporal=_TEMPORAL,
+        models=["mock_model"],
+        target=ExportTarget.combined(str(tmp_path / "combined")),
+        config=ExportConfig(show_progress=False),
+        backend="auto",
+        input_prep="resize",
+    )
+
+    assert result == {"status": "ok"}
+    assert captured["input_prep"] == "resize"
+
+
+def test_export_batch_config_input_prep_alone_still_works(monkeypatch, tmp_path):
+    captured = {}
+
+    def _fake_run(self):
+        captured["input_prep"] = self.config.input_prep
+        return {"status": "ok"}
+
+    monkeypatch.setattr("rs_embed.pipelines.exporter.BatchExporter.run", _fake_run)
+
+    result = export_batch(
+        spatials=[_SPATIAL],
+        temporal=_TEMPORAL,
+        models=["mock_model"],
+        target=ExportTarget.combined(str(tmp_path / "combined")),
+        config=ExportConfig(show_progress=False, input_prep="resize"),
+        backend="auto",
+    )
+
+    assert result == {"status": "ok"}
+    assert captured["input_prep"] == "resize"
+
+
+def test_export_batch_rejects_input_prep_in_both_places(tmp_path):
+    with pytest.raises(ModelError, match="pass it once"):
+        export_batch(
+            spatials=[_SPATIAL],
+            temporal=_TEMPORAL,
+            models=["mock_model"],
+            target=ExportTarget.combined(str(tmp_path / "combined")),
+            config=ExportConfig(show_progress=False, input_prep="tile"),
+            backend="auto",
+            input_prep="resize",
+        )
 
 
 def test_export_batch_rejects_model_config_for_unsupported_model(tmp_path):

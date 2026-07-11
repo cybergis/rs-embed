@@ -6,6 +6,7 @@ import pytest
 
 from rs_embed.core import registry
 from rs_embed.core.embedding import Embedding
+from rs_embed.core.errors import ModelError
 from rs_embed.core.specs import (
     InputPrepSpec,
     ModelInputSpec,
@@ -1343,7 +1344,7 @@ def test_export_batch_combined_fail_on_bad_input(tmp_path, monkeypatch):
     )
     get_embedder_bundle_cached.cache_clear()
 
-    with pytest.raises(RuntimeError, match="Input inspection failed"):
+    with pytest.raises(ModelError, match="Input inspection failed"):
         api.export_batch(
             spatials=[PointBuffer(lon=0, lat=0, buffer_m=10)],
             temporal=TemporalSpec.year(2022),
@@ -2829,7 +2830,7 @@ def test_export_batch_multiframe_prefetch_accepts_tchw_inputs(tmp_path, monkeypa
         "rs_embed.tools.runtime.get_provider", lambda _name, **_kwargs: DummyProvider()
     )
     monkeypatch.setattr(
-        "rs_embed.providers.fetch.fetch_s2_multiframe_raw_tchw",
+        "rs_embed.providers.fetch.fetch_multiframe_patch_raw_tchw",
         lambda provider, **kwargs: np.stack(
             [
                 np.full((3, 6, 6), fill_value=float(t + 1), dtype=np.float32)

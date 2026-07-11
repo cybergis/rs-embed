@@ -12,7 +12,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -24,19 +23,23 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers import ProviderBase
 from ..providers.fetch import (
     count_distinct_frames,
     frame_diversity_meta,
 )
 from ..providers.fetch import (
-    fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+    fetch_multiframe_patch_raw_tchw as _fetch_multiframe_patch_raw_tchw,
 )
 from ..providers.resolution import (
     is_provider_backend,
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
     crop_grid_to_roi,
@@ -49,6 +52,7 @@ from ..tools.shape import (
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -418,25 +422,12 @@ def _resolve_ckpt_path() -> str:
 
 def _assert_weights_loaded(model) -> dict[str, float]:
     ensure_torch()
-    import torch
-
-    p = None
-    for _, param in model.named_parameters():
-        if param is not None and param.numel() > 0:
-            p = param.detach()
-            break
-    if p is None:
-        raise ModelError("AgriFM model has no parameters; cannot verify weights.")
-    if not torch.isfinite(p).all():
-        raise ModelError("AgriFM parameters contain NaN/Inf; checkpoint load likely failed.")
-
-    p_f = p.float()
-    std = float(p_f.std().cpu())
-    mx = float(p_f.abs().max().cpu())
-    mean = float(p_f.mean().cpu())
-    if std < 1e-6 and mx < 1e-5:
-        raise ModelError("AgriFM parameters look uninitialized (near-zero stats).")
-    return {"param_mean": mean, "param_std": std, "param_absmax": mx}
+    return verify_loaded_params(
+        model,
+        model_name="AgriFM",
+        nonfinite_msg="AgriFM parameters contain NaN/Inf; checkpoint load likely failed.",
+        check_near_zero=True,
+    )
 
 
 @lru_cache(maxsize=6)
@@ -487,10 +478,7 @@ def _load_agrifm_cached(
         backbone_cfg=backbone_cfg,
         init_cfg={"checkpoint": ckpt_path, "strict": False},
     )
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="AgriFM")
 
     stats = _assert_weights_loaded(model)
     meta = {
@@ -528,7 +516,7 @@ def _fetch_s2_10_raw_tchw(
     composite: str = "median",
     fill_value: float = 0.0,
 ) -> np.ndarray:
-    return _fetch_s2_multiframe_raw_tchw(
+    return _fetch_multiframe_patch_raw_tchw(
         provider,
         spatial=spatial,
         temporal=temporal,
@@ -607,6 +595,16 @@ class AgriFMEmbedder(EmbedderBase):
         n_frames=8,
         image_size=224,
         expected_channels=10,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:
@@ -801,17 +799,7 @@ class AgriFMEmbedder(EmbedderBase):
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -822,10 +810,15 @@ class AgriFMEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if model_config is not None:
+            # Same contract as the base batch path: an unsupported
+            # model_config raises ModelError instead of TypeError/silence.
+            self._require_model_config_support(model_config)
         if not spatials:
             return []
         if not is_provider_backend(backend, allow_auto=True):

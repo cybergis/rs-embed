@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import os
 import warnings
-from concurrent.futures import ThreadPoolExecutor, as_completed
 from functools import lru_cache
 from typing import Any
 
@@ -18,7 +17,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
-from ..core.types import FetchResult
+from ..core.types import EmbedderCapabilities, FetchResult
 from ..providers import ProviderBase
 from ..providers.fetch import (
     fetch_collection_binned_raw_tchw as _fetch_collection_binned_raw_tchw,
@@ -36,6 +35,7 @@ from ..providers.resolution import is_provider_backend
 from ..tools.runtime import load_cached_with_device as _load_cached_with_device
 from ..tools.shape import (
     crop_grid_to_roi,
+    parallel_indexed_fetch,
     prepare_square,
     roi_fetch_meta,
     roi_is_full,
@@ -45,6 +45,7 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_midpoint_str, temporal_to_range
+from .shared import grid_to_dataarray
 
 # ---------------------------------------------------------------------------
 # Constants
@@ -766,6 +767,18 @@ class OlmoEarthEmbedder(EmbedderBase):
         expected_channels=_N_BANDS,
     )
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        fetch_temporal_mode=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",
@@ -1163,27 +1176,23 @@ class OlmoEarthEmbedder(EmbedderBase):
         geo_rois: list[tuple[float, float, float, float] | None] = [None] * n
 
         def _fetch_one(
-            i: int, sp: SpatialSpec
-        ) -> tuple[int, np.ndarray, tuple[float, float, float, float] | None]:
+            i: int,
+        ) -> tuple[np.ndarray, tuple[float, float, float, float] | None]:
             fr = self.fetch_input(
-                provider, spatial=sp, temporal=t, sensor=sensor, temporal_mode=temporal_mode
+                provider,
+                spatial=spatials[i],
+                temporal=t,
+                sensor=sensor,
+                temporal_mode=temporal_mode,
             )
             assert fr is not None
-            return i, np.asarray(fr.data, dtype=np.float32), (fr.meta or {}).get("roi_window_geo")
+            return np.asarray(fr.data, dtype=np.float32), (fr.meta or {}).get("roi_window_geo")
 
-        mw = self._resolve_fetch_workers(n)
-        if mw == 1:
-            for i, sp in enumerate(spatials):
-                ii, raw, gr = _fetch_one(i, sp)
-                prefetched[ii] = raw
-                geo_rois[ii] = gr
-        else:
-            with ThreadPoolExecutor(max_workers=mw) as ex:
-                futs = [ex.submit(_fetch_one, i, sp) for i, sp in enumerate(spatials)]
-                for fut in as_completed(futs):
-                    ii, raw, gr = fut.result()
-                    prefetched[ii] = raw
-                    geo_rois[ii] = gr
+        for i, (raw, gr) in enumerate(
+            parallel_indexed_fetch(n, _fetch_one, max_workers=self._resolve_fetch_workers(n))
+        ):
+            prefetched[i] = raw
+            geo_rois[i] = gr
 
         raw_inputs: list[np.ndarray] = []
         for i, raw in enumerate(prefetched):
@@ -1324,12 +1333,10 @@ class OlmoEarthEmbedder(EmbedderBase):
         for i, x in enumerate(prepared):
             shape_groups.setdefault(x.shape, []).append(i)
 
-        xr_mod = None
         if output.mode == "grid":
             try:
-                import xarray as xr  # noqa: PLC0415
-
-                xr_mod = xr
+                # fail fast before batch inference
+                import xarray  # noqa: F401, PLC0415
             except ImportError as exc:
                 raise ModelError(
                     "grid output requires xarray. Install: pip install xarray"
@@ -1446,14 +1453,7 @@ class OlmoEarthEmbedder(EmbedderBase):
                         )
                         d, h, w = grid_np.shape
                         meta.update({"grid_hw": (h, w), "grid_kind": "spatial_tokens"})
-                        assert xr_mod is not None
-                        da = xr_mod.DataArray(
-                            grid_np,
-                            dims=("d", "y", "x"),
-                            coords={"d": np.arange(d), "y": np.arange(h), "x": np.arange(w)},
-                            name="embedding",
-                            attrs=meta,
-                        )
+                        da = grid_to_dataarray(grid_np, meta=meta)
                         out[i] = Embedding(data=da, meta=meta)
                     continue
 
@@ -1547,7 +1547,7 @@ def _make_grid_embedding(
     roi_window: tuple[float, float, float, float] = _FULL_ROI,
 ) -> Embedding:
     try:
-        import xarray as xr  # noqa: PLC0415
+        import xarray  # noqa: F401, PLC0415
     except ImportError as exc:
         raise ModelError("grid output requires xarray. Install: pip install xarray") from exc
 
@@ -1555,11 +1555,5 @@ def _make_grid_embedding(
     grid = crop_grid_to_roi(grid, roi_window)  # crop padded border back to the ROI
     d, h, w = grid.shape
     meta.update({"grid_hw": (h, w), "grid_kind": "spatial_tokens"})
-    da = xr.DataArray(
-        grid,
-        dims=("d", "y", "x"),
-        coords={"d": np.arange(d), "y": np.arange(h), "x": np.arange(w)},
-        name="embedding",
-        attrs=meta,
-    )
+    da = grid_to_dataarray(grid, meta=meta)
     return Embedding(data=da, meta=meta)

@@ -9,7 +9,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -21,6 +20,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers.fetch import (
     fetch_s2_rgb_chw as _fetch_s2_rgb_chw,
 )
@@ -29,6 +29,9 @@ from ..providers.resolution import (
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
 )
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
@@ -45,6 +48,7 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -61,32 +65,6 @@ def resize_rgb_u8(rgb_u8, out_size):
         return rgb_u8
     im = Image.fromarray(rgb_u8, mode="RGB")
     return np.array(im.resize((out_size, out_size), resample=Image.BICUBIC), dtype=np.uint8)
-
-
-def pool_from_tokens(tokens, pooling):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    if len(patch) == 0:
-        return tokens[0].astype("float32"), has_cls
-    if pooling == "mean":
-        return patch.mean(axis=0).astype("float32"), has_cls
-    if pooling == "max":
-        return patch.max(axis=0).astype("float32"), has_cls
-    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
-
-
-def tokens_to_grid_dhw(tokens):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    p, d = patch.shape
-    hw = int(p**0.5)
-    if hw * hw != p:
-        raise ModelError(f"Patch token count {p} is not a perfect square.")
-    return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
 
 _SUPPORTED_ARCHES = {"vitb16", "resnet50", "swint"}
@@ -566,28 +544,16 @@ def _load_wildsat_cached(
         sat_sd, prefer_branch=int(prefer_branch)
     )
 
-    try:
-        backbone = backbone.to(dev).eval()
-    except Exception as _e:
-        pass
+    backbone = _move_model_to_device(backbone, dev, model_name="WildSAT")
     if image_head is not None:
-        try:
-            image_head = image_head.to(dev).eval()
-        except Exception as _e:
-            pass
+        image_head = _move_model_to_device(image_head, dev, model_name="WildSAT image head")
 
-    p0 = None
-    for _, p0cand in backbone.named_parameters():
-        if p0cand is not None and p0cand.numel() > 0:
-            p0 = p0cand.detach()
-            break
-    if p0 is None:
-        raise ModelError("WildSAT backbone has no parameters; cannot verify checkpoint load.")
-    if not torch.isfinite(p0).all():
-        raise ModelError(
-            "WildSAT backbone parameters contain NaN/Inf; checkpoint load likely failed."
-        )
-    p0f = p0.float()
+    wstats = verify_loaded_params(
+        backbone,
+        model_name="WildSAT",
+        no_params_msg="WildSAT backbone has no parameters; cannot verify checkpoint load.",
+        nonfinite_msg="WildSAT backbone parameters contain NaN/Inf; checkpoint load likely failed.",
+    )
 
     meta = {
         "ckpt_path": p,
@@ -600,9 +566,7 @@ def _load_wildsat_cached(
         "backbone_loaded_keys": int(loaded_count),
         "backbone_missing_keys": int(len(getattr(msg, "missing_keys", []))),
         "backbone_unexpected_keys": int(len(getattr(msg, "unexpected_keys", []))),
-        "param_mean": float(p0f.mean().cpu()),
-        "param_std": float(p0f.std().cpu()),
-        "param_absmax": float(p0f.abs().max().cpu()),
+        **wstats,
         **head_meta,
     }
     return backbone, image_head, meta
@@ -684,15 +648,9 @@ def _wildsat_forward(
     dev = _resolve_device(device)
     x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
 
-    try:
-        backbone = backbone.to(dev).eval()
-    except Exception as _e:
-        pass
+    backbone = _move_model_to_device(backbone, dev, model_name="WildSAT")
     if image_head is not None:
-        try:
-            image_head = image_head.to(dev).eval()
-        except Exception as _e:
-            pass
+        image_head = _move_model_to_device(image_head, dev, model_name="WildSAT image head")
 
     with torch.no_grad():
         tok_np: np.ndarray | None = None
@@ -926,6 +884,17 @@ class WildSATEmbedder(EmbedderBase):
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
@@ -1112,17 +1081,7 @@ class WildSATEmbedder(EmbedderBase):
                 "grid_shape": tuple(grid.shape),
                 "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
             }
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=gmeta,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
             return Embedding(data=da, meta=gmeta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -1199,6 +1158,10 @@ class WildSATEmbedder(EmbedderBase):
         device: str = "auto",
         fetch_metas: list[dict[str, Any] | None] | None = None,
     ) -> list[Embedding]:
+        if len(spatials) != len(input_chws):
+            raise ValueError(
+                f"spatials/input_chws length mismatch: {len(spatials)} != {len(input_chws)}"
+            )
         if not input_chws:
             return []
 
@@ -1330,17 +1293,7 @@ class WildSATEmbedder(EmbedderBase):
                     "grid_shape": tuple(grid.shape),
                     "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
                 }
-                da = xr.DataArray(
-                    grid.astype(np.float32),
-                    dims=("d", "y", "x"),
-                    coords={
-                        "d": np.arange(grid.shape[0]),
-                        "y": np.arange(grid.shape[1]),
-                        "x": np.arange(grid.shape[2]),
-                    },
-                    name="embedding",
-                    attrs=gmeta,
-                )
+                da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
                 embeddings.append(Embedding(data=da, meta=gmeta))
             else:
                 raise ModelError(f"Unknown output mode: {output.mode}")

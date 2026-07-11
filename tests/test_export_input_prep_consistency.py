@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import threading
 import warnings
+from types import SimpleNamespace
 
 import numpy as np
 import pytest
@@ -144,9 +145,7 @@ def _run_one_point(monkeypatch, model_name: str) -> tuple[_FakeEmbedder, dict]:
         resolved_sensor={model_name: sensor},
         resolved_model_config={model_name: None},
         model_type={model_name: "onthefly"},
-        inputs_cache={},
-        input_reports={},
-        prefetch_errors={},
+        prefetch=SimpleNamespace(cache={}, input_reports={}, errors={}, fetch_meta={}),
         pass_input_into_embedder=True,
         # Real ExportConfig => input_prep defaults to None, which resolves to
         # the tile default for every model (ViT-grid included).

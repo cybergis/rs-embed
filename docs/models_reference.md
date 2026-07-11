@@ -25,7 +25,7 @@ Read this section before comparing any model that accepts `TemporalSpec.range(..
 
 For most on-the-fly adapters, `TemporalSpec.range(start, end)` means "filter imagery in `[start, end)` and build one composite patch for model input," usually with `median` and optionally `mosaic` through `SensorSpec.composite`.
 
-The multi-frame adapters `agrifm`, `anysat`, and `galileo` instead split the requested range into sub-windows and composite one frame per bin. Current single-composite adapters include `remoteclip`, `satmae`, `satmaepp`, `scalemae`, `wildsat`, `prithvi`, `terrafm`, `terramind`, `dofa`, `fomo`, `thor`, `satvision`, and `olmoearth`.
+The multi-frame adapters `agrifm`, `anysat`, and `galileo` instead split the requested range into sub-windows and composite one frame per bin. Current single-composite adapters include `remoteclip`, `satmae`, `satmaepp`, `scalemae`, `wildsat`, `prithvi`, `terrafm`, `terramind`, `dofa`, `clay`, `fomo`, `thor`, `satvision`, and `olmoearth`.
 
 ### Multi-frame Semantics
 
@@ -63,13 +63,14 @@ Use this table to avoid unfair comparisons between plain image encoders and adap
 | `terrafm`         | Yes (`S1`/`S2`)               | Yes (select one modality per call: `s1` or `s2`)          | No                                                            | No hard extra metadata (optional S1 options: orbit, linear/DB path) |
 | `terramind`       | Yes                           | Usually single selected modality (`S2L2A` default)        | No (single selected modality tensor in this adapter)          | No hard extra metadata                                              |
 | `dofa`            | Yes (spectral generalization) | Yes (multi-band spectral input)                           | Yes (image + wavelength list)                                 | Yes: per-band wavelengths (explicit or inferable from bands)        |
+| `clay`            | Yes (spectral generalization) | Yes (multi-band spectral input; S2 path in this adapter)  | Yes (datacube: image + latlon + time + gsd + wavelengths)     | Yes: latlon/time/gsd/wavelengths (all derived automatically)        |
 | `fomo`            | No                            | No                                                        | No                                                            | No                                                                  |
 | `thor`            | Yes (`S1`/`S2`)               | Yes (select one modality per call: `s1` or `s2`)          | No                                                            | No hard extra metadata (optional S1 options: orbit, linear/DB path) |
 | `agrifm`          | No (this adapter path)        | No                                                        | No extra side tensor, but temporal stack `[T,C,H,W]` required | Temporal coverage is important (no separate metadata tensor)        |
 | `satvision`       | No (this adapter path)        | No                                                        | No separate side tensor                                       | Yes: strict 14-channel order/calibration schema (band semantics)    |
 | `olmoearth`       | Yes (multi-modal architecture) | S2 L2A only in this adapter                              | Yes (image + mask + timestamps; all derived automatically)    | No hard extra metadata (timestamps derived from temporal midpoint)  |
 
-In practice, the most obviously multi-input models here are `prithvi` (image plus temporal and location coordinates), `anysat` (time series plus `s2_dates`), `galileo` (image-derived tensors plus masks and `months`), `dofa` (image plus wavelengths), and `scalemae` (image plus `input_res_m`).
+In practice, the most obviously multi-input models here are `prithvi` (image plus temporal and location coordinates), `anysat` (time series plus `s2_dates`), `galileo` (image-derived tensors plus masks and `months`), `dofa` (image plus wavelengths), `clay` (image plus latlon, time, gsd, and wavelengths), and `scalemae` (image plus `input_res_m`).
 
 ### Preprocessing and Temporal Env Vars
 
@@ -89,6 +90,7 @@ This table only lists env vars that materially change model input construction o
 | `terrafm`         | modality and sensor-side options (`s2`/`s1`); image size fixed to 224 in implementation                                                                                                                                                |
 | `terramind`       | `RS_EMBED_TERRAMIND_NORMALIZE` (default z-score stats), image size fixed 224                                                                                                                                                           |
 | `dofa`            | image size fixed 224; provider/tensor channels and wavelengths drive preprocessing                                                                                                                                                     |
+| `clay`            | image size fixed 256; `RS_EMBED_CLAY_MODEL_SIZE` (checkpoint-matched), metadata encodings derived from `spatial`/`temporal`/`sensor.scale_m`                                                                                           |
 | `fomo`            | `RS_EMBED_FOMO_IMG`, `RS_EMBED_FOMO_NORM`                                                                                                                                                                                              |
 | `thor`            | `RS_EMBED_THOR_IMG`, `RS_EMBED_THOR_NORMALIZE`, plus modality and sensor-side options (`s2`/`s1`)                                                                                                                                      |
 | `agrifm`          | `RS_EMBED_AGRIFM_IMG`, `RS_EMBED_AGRIFM_NORM`, `RS_EMBED_AGRIFM_FRAMES`                                                                                                                                                                |

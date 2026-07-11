@@ -130,7 +130,7 @@ _TEMPORAL = TemporalSpec.year(2024)
 
 def test_model_init_happy_path():
     m = Model("mock_model")
-    assert m._model_n == "mock_model"
+    assert m._ctx.model_n == "mock_model"
 
 
 def test_model_init_unknown_model_raises():
@@ -141,18 +141,18 @@ def test_model_init_unknown_model_raises():
 def test_model_init_with_modality_resolves_sensor():
     registry.register("mock_multi")(_MockMultimodalEmbedder)
     m = Model("mock_multi", modality="s1", backend="gee")
-    assert m._sensor is not None
-    assert m._sensor.modality == "s1"
-    assert m._sensor.collection == "COPERNICUS/S1_GRD_FLOAT"
+    assert m._ctx.sensor_eff is not None
+    assert m._ctx.sensor_eff.modality == "s1"
+    assert m._ctx.sensor_eff.collection == "COPERNICUS/S1_GRD_FLOAT"
 
 
 def test_model_init_with_fetch_resolves_sensor():
     registry.register("mock_multi")(_MockMultimodalEmbedder)
     m = Model("mock_multi", fetch=FetchSpec(scale_m=30), backend="gee")
-    assert m._sensor is not None
-    assert m._sensor.modality == "s2"
-    assert m._sensor.collection == "COPERNICUS/S2_SR_HARMONIZED"
-    assert m._sensor.scale_m == 30
+    assert m._ctx.sensor_eff is not None
+    assert m._ctx.sensor_eff.modality == "s2"
+    assert m._ctx.sensor_eff.collection == "COPERNICUS/S2_SR_HARMONIZED"
+    assert m._ctx.sensor_eff.scale_m == 30
 
 
 def test_model_init_rejects_sensor_and_fetch_together():
@@ -268,7 +268,7 @@ def test_model_describe_returns_dict():
 def test_model_describe_graceful_on_exception(monkeypatch):
     m = Model("mock_model")
     monkeypatch.setattr(
-        m._embedder, "describe", lambda: (_ for _ in ()).throw(RuntimeError("oops"))
+        m._ctx.embedder, "describe", lambda: (_ for _ in ()).throw(RuntimeError("oops"))
     )
     assert m.describe() == {}
 
@@ -302,19 +302,19 @@ def test_model_and_functional_api_produce_same_shape():
 def test_model_reuses_same_embedder_across_calls():
     """Two calls on the same Model must use the same underlying embedder instance."""
     m = Model("mock_model")
-    embedder_id_1 = id(m._embedder)
+    embedder_id_1 = id(m._ctx.embedder)
 
     m.get_embedding(_SPATIAL)
     m.get_embedding(_SPATIAL)
 
-    assert id(m._embedder) == embedder_id_1
+    assert id(m._ctx.embedder) == embedder_id_1
 
 
 def test_two_model_instances_share_cached_embedder():
     """Two Model instances with the same args should share the lru_cache entry."""
     m1 = Model("mock_model")
     m2 = Model("mock_model")
-    assert m1._embedder is m2._embedder
+    assert m1._ctx.embedder is m2._ctx.embedder
 
 
 # ══════════════════════════════════════════════════════════════════════

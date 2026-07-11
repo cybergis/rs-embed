@@ -18,11 +18,15 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers.resolution import (
     is_provider_backend,
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
     crop_grid_to_roi,
@@ -32,10 +36,11 @@ from ..tools.shape import (
 )
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
-from .meta import build_meta, temporal_to_range
+from .meta import base_meta, temporal_to_range
 from .onthefly_satmaepp_s2 import (
     SatMAEPPSentinel10Embedder,
 )
+from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw
 
 
 def ensure_torch() -> None:
@@ -63,59 +68,6 @@ def fetch_s2_rgb_u8_from_provider(provider, *, spatial, temporal, sensor, out_si
 
     im = Image.fromarray(rgb_u8, mode="RGB")
     return np.array(im.resize((out_size, out_size), resample=Image.BICUBIC), dtype=np.uint8)
-
-
-def base_meta(
-    *,
-    model_name,
-    hf_id,
-    backend,
-    image_size,
-    sensor,
-    temporal=None,
-    source=None,
-    embed_type="on_the_fly",
-    extra=None,
-):
-    m = build_meta(
-        model=model_name,
-        kind=embed_type,
-        backend=backend,
-        source=source or getattr(sensor, "collection", None),
-        sensor=sensor,
-        temporal=temporal,
-        image_size=image_size,
-    )
-    m["hf_id"] = hf_id
-    if extra:
-        m.update(extra)
-    return m
-
-
-def pool_from_tokens(tokens, pooling):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    if len(patch) == 0:
-        return tokens[0].astype("float32"), has_cls
-    if pooling == "mean":
-        return patch.mean(axis=0).astype("float32"), has_cls
-    if pooling == "max":
-        return patch.max(axis=0).astype("float32"), has_cls
-    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
-
-
-def tokens_to_grid_dhw(tokens):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    p, d = patch.shape
-    hw = int(p**0.5)
-    if hw * hw != p:
-        raise ModelError(f"Patch token count {p} is not a perfect square.")
-    return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
 
 def build_token_embedding(tokens, *, geo_roi, output, meta):
@@ -150,17 +102,7 @@ def build_token_embedding(tokens, *, geo_roi, output, meta):
         meta.update(
             {"grid_hw": (h, w), "grid_kind": "patch_tokens", "cls_removed": bool(cls_removed)}
         )
-        try:
-            import xarray as xr
-        except Exception as e:
-            raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-        da = xr.DataArray(
-            grid,
-            dims=("d", "y", "x"),
-            coords={"d": np.arange(grid.shape[0]), "y": np.arange(h), "x": np.arange(w)},
-            name="embedding",
-            attrs=meta,
-        )
+        da = grid_to_dataarray(grid, meta=meta)
         return Embedding(data=da, meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")
@@ -366,10 +308,7 @@ def _load_satmaepp_from_snapshot(*, SatMAEPP: Any, model_id: str, dev: str):
 
     state_dict = _unwrap_satmaepp_state_dict(payload)
     model.load_state_dict(state_dict, strict=True)
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="SatMAE++")
 
     meta = {
         "model_id": model_id,
@@ -407,10 +346,7 @@ def _load_satmaepp_cached(model_id: str, dev: str):
         raise ModelError(
             f"SatMAE++ RGB adapter expects a 3-channel checkpoint, but {model_id!r} has in_chans={in_chans}."
         )
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="SatMAE++")
 
     meta = {"model_id": model_id, "device": dev, "in_chans": in_chans, "load_mode": load_mode}
     return model, meta
@@ -495,6 +431,9 @@ class SatMAEPPEmbedder(EmbedderBase):
     # SatMAE++ needs a square token grid → base.fetch_input enlarges a rectangular
     # ROI to a square of real imagery; the output is cropped back to the ROI.
     _requires_square_input = True
+    # Image-level ViT adapter: "grid" output is a patch-token grid, tiled
+    # mosaics of which can show seams (see resolve_model_aware_input_prep).
+    _image_level_vit_patch_grid = True
     DEFAULT_MODEL_ID = "MVRL/satmaepp_ViT-L_pretrain_fmow_rgb"
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
@@ -508,6 +447,17 @@ class SatMAEPPEmbedder(EmbedderBase):
         cloudy_pct=30,
         image_size=224,
         expected_channels=3,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:
@@ -738,10 +688,12 @@ class SatMAEPPEmbedder(EmbedderBase):
 
         for s0 in range(0, n, infer_bs):
             s1 = min(n, s0 + infer_bs)
-            rgb_batch = [x for x in rgb_u8_all[s0:s1] if x is not None]
+            # Feed the slice as-is: square_fetch_batch guarantees no None, and
+            # results are re-associated positionally (i = s0 + j) below, so any
+            # filtering here would silently misalign outputs with spatials.
             toks_batch = _satmaepp_forward_tokens_batch(
                 model,
-                rgb_batch,
+                rgb_u8_all[s0:s1],
                 image_size=image_size,
                 device=dev,
                 model_id=model_id,

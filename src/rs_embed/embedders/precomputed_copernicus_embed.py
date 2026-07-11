@@ -18,12 +18,40 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ._vendor.copernicus_embed import CopernicusEmbedGeoTiff
 from .base import EmbedderBase
+from .config import model_config_value
 from .meta import build_meta
+from .shared import grid_to_dataarray
 
 SUPPORTED_YEARS = {2021}
 _COPERNICUS_PROJECTION_WARNED = False
+
+
+def _resolve_copernicus_data_dir(
+    model_config: dict[str, Any] | None,
+    sensor: SensorSpec | None,
+) -> str:
+    """Resolve the Copernicus embedding GeoTIFF data directory.
+
+    Precedence: ``model_config['data_dir']`` > legacy
+    ``sensor.collection='dir:<dir>'`` (deprecated) > ``RS_EMBED_COP_DIR`` env
+    var > ``data/copernicus_embed``.
+    """
+    v = model_config_value(model_config, "data_dir")
+    if v is not None and str(v).strip():
+        return str(v).strip()
+    collection = getattr(sensor, "collection", None) if sensor else None
+    if isinstance(collection, str) and collection.startswith("dir:"):
+        warnings.warn(
+            "copernicus_embed: sensor.collection='dir:<dir>' is deprecated; pass "
+            "model_config={'data_dir': '<dir>'} instead.",
+            DeprecationWarning,
+            stacklevel=3,
+        )
+        return collection.replace("dir:", "", 1).strip()
+    return os.environ.get("RS_EMBED_COP_DIR", "data/copernicus_embed")
 
 
 def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
@@ -102,6 +130,15 @@ class CopernicusEmbedder(EmbedderBase):
 
     DEFAULT_BATCH_WORKERS = 4
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "precomputed",
@@ -116,6 +153,18 @@ class CopernicusEmbedder(EmbedderBase):
                 "data_dir_env": "RS_EMBED_COP_DIR",
                 "data_dir_default": "data/copernicus_embed",
                 "download": True,
+            },
+            "model_config": {
+                "data_dir": {
+                    "type": "string",
+                    "default": "data/copernicus_embed",
+                    "description": (
+                        "Directory holding (or receiving) the Copernicus embedding "
+                        "GeoTIFF. Precedence: model_config > legacy "
+                        "sensor.collection='dir:<dir>' (deprecated) > RS_EMBED_COP_DIR "
+                        "> default."
+                    ),
+                },
             },
             "notes": [
                 "Uses a vendored GeoTIFF reader with bbox slicing ds[minlon:maxlon, minlat:maxlat].",
@@ -155,6 +204,7 @@ class CopernicusEmbedder(EmbedderBase):
         output: OutputSpec,
         backend: str,
         device: str = "auto",
+        model_config: dict[str, Any] | None = None,
     ) -> Embedding:
         if temporal is None:
             raise ModelError("copernicus_embed requires TemporalSpec.year(YYYY).")
@@ -183,12 +233,7 @@ class CopernicusEmbedder(EmbedderBase):
 
         bbox = _spatial_to_bbox_4326(spatial)
 
-        # data_dir: env var override OR (optional) sensor.collection override
-        data_dir = os.environ.get("RS_EMBED_COP_DIR", "data/copernicus_embed")
-        if sensor and isinstance(sensor.collection, str):
-            # convention: collection="dir:/path/to/cop"
-            if sensor.collection.startswith("dir:"):
-                data_dir = sensor.collection.replace("dir:", "", 1).strip()
+        data_dir = _resolve_copernicus_data_dir(model_config, sensor)
 
         download = True  # v0.1 default
 
@@ -215,7 +260,7 @@ class CopernicusEmbedder(EmbedderBase):
             backend="vendored_geotiff",
             source="hf://torchgeo/copernicus_embed/embed_map_310k.tif",
             sensor=None,
-            temporal=None,
+            temporal=temporal,
             image_size=None,
             extra={
                 "data_dir": data_dir,
@@ -237,22 +282,7 @@ class CopernicusEmbedder(EmbedderBase):
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
-            try:
-                import xarray as xr
-            except Exception as e:
-                raise ModelError("grid output requires xarray. Install: pip install xarray") from e
-
-            da = xr.DataArray(
-                chw,
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(chw.shape[0]),
-                    "y": np.arange(chw.shape[1]),
-                    "x": np.arange(chw.shape[2]),
-                },
-                name="embedding",
-                attrs=meta,
-            )
+            da = grid_to_dataarray(chw, meta=meta)
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -263,10 +293,15 @@ class CopernicusEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
     ) -> list[Embedding]:
+        if model_config is not None:
+            # Same contract as the base batch path: an unsupported
+            # model_config raises ModelError instead of TypeError/silence.
+            self._require_model_config_support(model_config)
         if not spatials:
             return []
 
@@ -281,6 +316,7 @@ class CopernicusEmbedder(EmbedderBase):
                 output=output,
                 backend=backend,
                 device=device,
+                model_config=model_config,
             )
             return i, emb
 

@@ -7,7 +7,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -19,13 +18,14 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers import ProviderBase
 from ..providers.fetch import (
     count_distinct_frames,
     frame_diversity_meta,
 )
 from ..providers.fetch import (
-    fetch_s2_multiframe_raw_tchw as _fetch_s2_multiframe_raw_tchw,
+    fetch_multiframe_patch_raw_tchw as _fetch_multiframe_patch_raw_tchw,
 )
 from ..providers.resolution import (
     is_provider_backend,
@@ -35,6 +35,9 @@ from ..tools.normalization import (
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
     crop_grid_to_roi,
@@ -49,6 +52,7 @@ from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -236,7 +240,7 @@ def _fetch_s2_10_raw_tchw(
     composite: str = "median",
     fill_value: float = 0.0,
 ) -> np.ndarray:
-    raw = _fetch_s2_multiframe_raw_tchw(
+    raw = _fetch_multiframe_patch_raw_tchw(
         provider,
         spatial=spatial,
         temporal=temporal,
@@ -314,7 +318,6 @@ def _load_anysat_cached(
     dev: str,
 ) -> tuple[Any, dict[str, Any]]:
     ensure_torch()
-    import torch
 
     hub = _load_anysat_hub_module()
     if not hasattr(hub, "AnySat"):
@@ -346,21 +349,14 @@ def _load_anysat_cached(
             model = hub.AnySat(model_size=model_size, flash_attn=bool(flash_attn), device=dev)
             loaded_from = "random_init"
 
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="AnySat")
 
-    p0 = None
-    for _, p in model.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("AnySat model has no parameters; cannot verify load.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("AnySat parameters contain NaN/Inf; checkpoint load likely failed.")
-    p0f = p0.float()
+    wstats = verify_loaded_params(
+        model,
+        model_name="AnySat",
+        no_params_msg="AnySat model has no parameters; cannot verify load.",
+        nonfinite_msg="AnySat parameters contain NaN/Inf; checkpoint load likely failed.",
+    )
 
     meta = {
         "model_size": str(model_size),
@@ -369,9 +365,7 @@ def _load_anysat_cached(
         "loaded_from": loaded_from,
         "model_source": "vendored_rs_embed_runtime",
         "device": dev,
-        "param_mean": float(p0f.mean().cpu()),
-        "param_std": float(p0f.std().cpu()),
-        "param_absmax": float(p0f.abs().max().cpu()),
+        **wstats,
     }
     return model, meta
 
@@ -539,6 +533,17 @@ class AnySatEmbedder(EmbedderBase):
         n_frames=8,
         image_size=24,
         expected_channels=10,
+    )
+
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
     )
 
     def describe(self) -> dict[str, Any]:
@@ -775,17 +780,7 @@ class AnySatEmbedder(EmbedderBase):
                 "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
                 "grid_shape": tuple(grid.shape),
             }
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=gmeta,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
             return Embedding(data=da, meta=gmeta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")

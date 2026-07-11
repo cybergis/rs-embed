@@ -6,7 +6,6 @@ from functools import lru_cache
 from typing import Any
 
 import numpy as np
-import xarray as xr
 
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
@@ -18,6 +17,7 @@ from ..core.specs import (
     SpatialSpec,
     TemporalSpec,
 )
+from ..core.types import EmbedderCapabilities
 from ..providers import ProviderBase
 from ..providers.fetch import (
     fetch_collection_patch_chw as _fetch_collection_patch_chw,
@@ -27,6 +27,9 @@ from ..tools.normalization import (
 )
 from ..tools.runtime import (
     load_cached_with_device as _load_cached_with_device,
+)
+from ..tools.runtime import (
+    move_model_to_device as _move_model_to_device,
 )
 from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
@@ -39,7 +42,9 @@ from ..tools.shape import (
 )
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
+from .config import model_config_value
 from .meta import build_meta, temporal_to_range
+from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -47,32 +52,6 @@ def ensure_torch() -> None:
         import torch  # noqa: F401
     except Exception as e:
         raise ModelError("This embedder requires torch installed.") from e
-
-
-def pool_from_tokens(tokens, pooling):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    if len(patch) == 0:
-        return tokens[0].astype("float32"), has_cls
-    if pooling == "mean":
-        return patch.mean(axis=0).astype("float32"), has_cls
-    if pooling == "max":
-        return patch.max(axis=0).astype("float32"), has_cls
-    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
-
-
-def tokens_to_grid_dhw(tokens):
-    n = len(tokens)
-    h2 = int((n - 1) ** 0.5)
-    has_cls = n > 1 and h2 * h2 == n - 1
-    patch = tokens[1:] if has_cls else tokens
-    p, d = patch.shape
-    hw = int(p**0.5)
-    if hw * hw != p:
-        raise ModelError(f"Patch token count {p} is not a perfect square.")
-    return patch.reshape(hw, hw, d).transpose(2, 0, 1).astype("float32"), (hw, hw), has_cls
 
 
 _S2_SR_12_BANDS = [
@@ -332,7 +311,6 @@ def _load_terramind_cached(
     dev: str,
 ) -> tuple[Any, dict[str, Any]]:
     ensure_torch()
-    import torch
 
     BACKBONE_REGISTRY = _import_terramind_backbone_registry()
     _ensure_terramind_backbone_registered(BACKBONE_REGISTRY, model_key=str(model_key))
@@ -355,30 +333,16 @@ def _load_terramind_cached(
             f"{type(e).__name__}: {e}.{hint}"
         ) from e
 
-    try:
-        model = model.to(dev).eval()
-    except Exception as _e:
-        pass
+    model = _move_model_to_device(model, dev, model_name="TerraMind")
 
-    p0 = None
-    for _, p in model.named_parameters():
-        if p is not None and p.numel() > 0:
-            p0 = p.detach()
-            break
-    if p0 is None:
-        raise ModelError("TerraMind model has no parameters; cannot verify weights.")
-    if not torch.isfinite(p0).all():
-        raise ModelError("TerraMind parameters contain NaN/Inf; load likely failed.")
+    wstats = verify_loaded_params(model, model_name="TerraMind")
 
-    p0f = p0.float()
     meta = {
         "model_key": str(model_key),
         "pretrained": bool(pretrained),
         "modality": str(modality),
         "device": str(dev),
-        "param_mean": float(p0f.mean().cpu()),
-        "param_std": float(p0f.std().cpu()),
-        "param_absmax": float(p0f.abs().max().cpu()),
+        **wstats,
     }
     return model, meta
 
@@ -402,6 +366,30 @@ def _load_terramind(
 
 
 def _terramind_forward_tokens(
+    model: Any,
+    x_bchw: np.ndarray,
+    *,
+    modality: str,
+    layer_index: int,
+    device: str,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    tokens_bnd, _bmeta = _terramind_forward_tokens_batch(
+        model,
+        x_bchw,
+        modality=modality,
+        layer_index=layer_index,
+        device=device,
+    )
+    tokens = tokens_bnd[0]
+    meta = {
+        "tokens_shape": tuple(tokens.shape),
+        "layer_index": int(layer_index),
+        "tokens_include_cls": False,
+    }
+    return tokens, meta
+
+
+def _terramind_forward_tokens_batch(
     model: Any,
     x_bchw: np.ndarray,
     *,
@@ -462,74 +450,6 @@ def _terramind_forward_tokens(
             f"TerraMind forward did not return token tensor [B,N,D]. Got type={type(out)}."
         )
 
-    tokens = toks_t[0].detach().float().cpu().numpy().astype(np.float32)
-    meta = {
-        "tokens_shape": tuple(tokens.shape),
-        "layer_index": int(layer_index),
-        "tokens_include_cls": False,
-    }
-    return tokens, meta
-
-
-def _terramind_forward_tokens_batch(
-    model: Any,
-    x_bchw: np.ndarray,
-    *,
-    modality: str,
-    layer_index: int,
-    device: str,
-) -> tuple[np.ndarray, dict[str, Any]]:
-    ensure_torch()
-    import torch
-
-    dev = _resolve_device(device)
-    model = model.to(dev).eval()
-    x = torch.from_numpy(x_bchw.astype(np.float32, copy=False)).to(dev)
-
-    with torch.no_grad():
-        out = None
-        try:
-            out = model({str(modality): x})
-        except Exception as _e:
-            out = model(x)
-
-    def _pick_from_sequence(seq: Any, idx: int) -> torch.Tensor | None:
-        if not isinstance(seq, (list, tuple)) or len(seq) == 0:
-            return None
-        cand = None
-        try:
-            cand = seq[idx]
-        except Exception as _e:
-            cand = None
-        if torch.is_tensor(cand) and cand.ndim == 3:
-            return cand
-        for v in reversed(seq):
-            if torch.is_tensor(v) and v.ndim == 3:
-                return v
-        return None
-
-    toks_t = None
-    if isinstance(out, (list, tuple)):
-        toks_t = _pick_from_sequence(out, layer_index)
-    elif isinstance(out, dict):
-        vals = list(out.values())
-        toks_t = _pick_from_sequence(vals, layer_index)
-        if toks_t is None:
-            for v in vals:
-                if torch.is_tensor(v) and v.ndim == 3:
-                    toks_t = v
-                    break
-    elif hasattr(out, "last_hidden_state") and torch.is_tensor(out.last_hidden_state):
-        if out.last_hidden_state.ndim == 3:
-            toks_t = out.last_hidden_state
-    elif torch.is_tensor(out) and out.ndim == 3:
-        toks_t = out
-
-    if toks_t is None:
-        raise ModelError(
-            f"TerraMind forward did not return token tensor [B,N,D]. Got type={type(out)}."
-        )
-
     tokens = toks_t.detach().float().cpu().numpy().astype(np.float32)
     meta = {
         "tokens_shape": tuple(tokens.shape[1:]),
@@ -538,6 +458,46 @@ def _terramind_forward_tokens_batch(
         "tokens_include_cls": False,
     }
     return tokens, meta
+
+
+def _resolve_terramind_runtime_config(
+    *,
+    model_config: dict[str, Any] | None,
+    sensor: SensorSpec | None,
+    default_model_key: str,
+    default_modality: str,
+) -> dict[str, Any]:
+    """Resolve TerraMind runtime settings.
+
+    ``model_key``: model_config wins over ``RS_EMBED_TERRAMIND_MODEL_KEY``.
+    ``modality``: sensor.modality wins, then model_config, then
+    ``RS_EMBED_TERRAMIND_MODALITY``, then the default.
+    """
+    model_key_v = model_config_value(model_config, "model_key")
+    if model_key_v is not None:
+        model_key = str(model_key_v).strip()
+    else:
+        model_key = os.environ.get("RS_EMBED_TERRAMIND_MODEL_KEY", default_model_key).strip()
+    model_key = model_key or default_model_key
+
+    modality_v = model_config_value(model_config, "modality")
+    modality = str(
+        getattr(sensor, "modality", None)
+        or (str(modality_v).strip() if modality_v is not None else "")
+        or os.environ.get("RS_EMBED_TERRAMIND_MODALITY", default_modality).strip()
+        or default_modality
+    )
+    if modality.strip().lower().replace("-", "_") == "s2_l2a":
+        modality = default_modality
+
+    return {
+        "model_key": model_key,
+        "modality": modality,
+        "normalize_mode": os.environ.get("RS_EMBED_TERRAMIND_NORMALIZE", "zscore").strip(),
+        "layer_index": int(os.environ.get("RS_EMBED_TERRAMIND_LAYER_INDEX", "-1")),
+        "pretrained": os.environ.get("RS_EMBED_TERRAMIND_PRETRAINED", "1").strip()
+        not in {"0", "false", "False"},
+    }
 
 
 def _prepare_terramind_input_chw(
@@ -577,6 +537,17 @@ class TerraMindEmbedder(EmbedderBase):
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_FETCH_WORKERS = 8
 
+    # Explicit pipeline-routing capabilities; the contract test asserts these
+    # match the actual method signatures (tests/test_capabilities_contract.py).
+    capabilities = EmbedderCapabilities(
+        input_chw=True,
+        fetch_meta=True,
+        batch_fetch_metas=True,
+        model_config_single=True,
+        model_config_batch=True,
+        model_config_batch_inputs=True,
+    )
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "on_the_fly",
@@ -604,6 +575,24 @@ class TerraMindEmbedder(EmbedderBase):
                 "cloudy_pct": 30,
                 "composite": "median",
                 "normalization": "zscore_v1_or_v01",
+            },
+            "model_config": {
+                "model_key": {
+                    "type": "string",
+                    "default": self.DEFAULT_MODEL_KEY,
+                    "description": (
+                        "TerraMind backbone key (e.g. terramind_v1_small); wins over "
+                        "the RS_EMBED_TERRAMIND_MODEL_KEY env var."
+                    ),
+                },
+                "modality": {
+                    "type": "string",
+                    "default": self.DEFAULT_MODALITY,
+                    "description": (
+                        "Modality passed to TerraMind. Precedence: sensor.modality > "
+                        "model_config > RS_EMBED_TERRAMIND_MODALITY > default."
+                    ),
+                },
             },
             "notes": [
                 "Loads TerraMind backbone via terratorch BACKBONE_REGISTRY.",
@@ -635,6 +624,7 @@ class TerraMindEmbedder(EmbedderBase):
         backend: str,
         device: str = "auto",
         input_chw: np.ndarray | None = None,
+        model_config: dict[str, Any] | None = None,
         fetch_meta: dict[str, Any] | None = None,
     ) -> Embedding:
         backend_l = backend.lower().strip()
@@ -642,21 +632,17 @@ class TerraMindEmbedder(EmbedderBase):
         # fetch_meta when the API prefetched a square. Output is cropped back to it.
         geo_roi = geo_roi_from_meta(fetch_meta)
 
-        model_key = os.environ.get("RS_EMBED_TERRAMIND_MODEL_KEY", self.DEFAULT_MODEL_KEY).strip()
-        modality = str(
-            getattr(sensor, "modality", None)
-            or os.environ.get("RS_EMBED_TERRAMIND_MODALITY", self.DEFAULT_MODALITY).strip()
-            or self.DEFAULT_MODALITY
+        runtime_cfg = _resolve_terramind_runtime_config(
+            model_config=model_config,
+            sensor=sensor,
+            default_model_key=self.DEFAULT_MODEL_KEY,
+            default_modality=self.DEFAULT_MODALITY,
         )
-        if modality.strip().lower().replace("-", "_") == "s2_l2a":
-            modality = self.DEFAULT_MODALITY
-        normalize_mode = os.environ.get("RS_EMBED_TERRAMIND_NORMALIZE", "zscore").strip()
-        layer_index = int(os.environ.get("RS_EMBED_TERRAMIND_LAYER_INDEX", "-1"))
-        pretrained = os.environ.get("RS_EMBED_TERRAMIND_PRETRAINED", "1").strip() not in {
-            "0",
-            "false",
-            "False",
-        }
+        model_key = str(runtime_cfg["model_key"])
+        modality = str(runtime_cfg["modality"])
+        normalize_mode = str(runtime_cfg["normalize_mode"])
+        layer_index = int(runtime_cfg["layer_index"])
+        pretrained = bool(runtime_cfg["pretrained"])
         image_size = self.DEFAULT_IMAGE_SIZE
 
         check_meta: dict[str, Any] = {}
@@ -670,6 +656,10 @@ class TerraMindEmbedder(EmbedderBase):
                     "backend='tensor' requires input_chw as CHW. "
                     "Use get_embeddings_batch_from_inputs(...) for batches."
                 )
+            # Tensor inputs: record the caller's resolved window when supplied
+            # (it describes their data); otherwise it is genuinely unknown.
+            if temporal is not None:
+                temporal_used = temporal_to_range(temporal)
             x_bchw = _prepare_terramind_input_chw(
                 input_chw,
                 image_size=image_size,
@@ -825,17 +815,7 @@ class TerraMindEmbedder(EmbedderBase):
                 "grid_shape": tuple(grid.shape),
                 "cls_removed": bool(cls_removed),
             }
-            da = xr.DataArray(
-                grid.astype(np.float32),
-                dims=("d", "y", "x"),
-                coords={
-                    "d": np.arange(grid.shape[0]),
-                    "y": np.arange(grid.shape[1]),
-                    "x": np.arange(grid.shape[2]),
-                },
-                name="embedding",
-                attrs=gmeta,
-            )
+            da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
             return Embedding(data=da, meta=gmeta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
@@ -846,6 +826,7 @@ class TerraMindEmbedder(EmbedderBase):
         spatials: list[SpatialSpec],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -888,6 +869,7 @@ class TerraMindEmbedder(EmbedderBase):
             input_chws=raw_inputs,
             temporal=temporal,
             sensor=sensor,
+            model_config=model_config,
             output=output,
             backend=backend,
             device=device,
@@ -901,6 +883,7 @@ class TerraMindEmbedder(EmbedderBase):
         input_chws: list[np.ndarray],
         temporal: TemporalSpec | None = None,
         sensor: SensorSpec | None = None,
+        model_config: dict[str, Any] | None = None,
         output: OutputSpec = OutputSpec.pooled(),
         backend: str = "auto",
         device: str = "auto",
@@ -921,7 +904,9 @@ class TerraMindEmbedder(EmbedderBase):
 
         backend_l = backend.lower().strip()
         uses_provider = backend_l != "tensor"
-        t = None
+        # Tensor inputs: record the caller's resolved window when supplied
+        # (it describes their data); otherwise it is genuinely unknown.
+        t = temporal_to_range(temporal) if temporal is not None else None
         fill_value = 0.0
         source = None
         sensor_meta = None
@@ -948,21 +933,17 @@ class TerraMindEmbedder(EmbedderBase):
             cloudy_pct = None
             composite = None
 
-        model_key = os.environ.get("RS_EMBED_TERRAMIND_MODEL_KEY", self.DEFAULT_MODEL_KEY).strip()
-        modality = str(
-            getattr(sensor, "modality", None)
-            or os.environ.get("RS_EMBED_TERRAMIND_MODALITY", self.DEFAULT_MODALITY).strip()
-            or self.DEFAULT_MODALITY
+        runtime_cfg = _resolve_terramind_runtime_config(
+            model_config=model_config,
+            sensor=sensor,
+            default_model_key=self.DEFAULT_MODEL_KEY,
+            default_modality=self.DEFAULT_MODALITY,
         )
-        if modality.strip().lower().replace("-", "_") == "s2_l2a":
-            modality = self.DEFAULT_MODALITY
-        normalize_mode = os.environ.get("RS_EMBED_TERRAMIND_NORMALIZE", "zscore").strip()
-        layer_index = int(os.environ.get("RS_EMBED_TERRAMIND_LAYER_INDEX", "-1"))
-        pretrained = os.environ.get("RS_EMBED_TERRAMIND_PRETRAINED", "1").strip() not in {
-            "0",
-            "false",
-            "False",
-        }
+        model_key = str(runtime_cfg["model_key"])
+        modality = str(runtime_cfg["modality"])
+        normalize_mode = str(runtime_cfg["normalize_mode"])
+        layer_index = int(runtime_cfg["layer_index"])
+        pretrained = bool(runtime_cfg["pretrained"])
         image_size = self.DEFAULT_IMAGE_SIZE
 
         x_bchw = np.stack(

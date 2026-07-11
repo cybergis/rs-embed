@@ -11,6 +11,10 @@ _TEMPORAL = TemporalSpec.range("2022-06-01", "2022-09-01")
 
 
 class _FakeImageLevelVitGridEmbedder:
+    # The tile-default policy is driven by this class flag (it used to key on
+    # the model name), so the fake must declare it like the real adapters do.
+    _image_level_vit_patch_grid = True
+
     def describe(self):
         return {"type": "mock", "output": ["pooled", "grid"]}
 
