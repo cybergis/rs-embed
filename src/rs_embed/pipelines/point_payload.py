@@ -22,6 +22,7 @@ from ..providers import fetch as _providers_fetch
 from ..tools.manifest import summarize_status
 from ..tools.normalization import normalize_model_name
 from ..tools.runtime import (
+    embedder_fetch_semantics,
     fetch_embedder_input,
     get_embedder_bundle_cached,
     resolve_model_aware_input_prep,
@@ -29,9 +30,9 @@ from ..tools.runtime import (
 )
 from ..tools.serialization import (
     embedding_to_numpy,
+    input_cache_key,
     jsonable,
     sanitize_key,
-    sensor_cache_key,
     sha1,
     utc_ts,
 )
@@ -149,8 +150,16 @@ def build_one_point_payload(
                 pass_input_into_embedder and save_embeddings and needs_provider_input
             )
             needs_input_for_export = bool(save_inputs and needs_provider_input)
+            # Cache key = sensor identity + this model's temporal fetch
+            # semantics, so same-sensor models with different binning (e.g.
+            # clay vs. agrifm) never share one prefetched input.
+            skey_m = (
+                input_cache_key(sspec, embedder_fetch_semantics(embedder))
+                if sspec is not None
+                else None
+            )
             if needs_input_for_embed or needs_input_for_export:
-                skey = sensor_cache_key(sspec)
+                skey = skey_m
                 if skey in local_inp:
                     input_chw = local_inp[skey]
                 else:
@@ -224,10 +233,10 @@ def build_one_point_payload(
 
             # Resolve fetch-time metadata from the prefetch cache.
             _fmeta: dict[str, Any] | None = None
-            if prefetch.fetch_meta and sspec is not None:
-                _fmeta = prefetch.fetch_meta.get((point_index, sensor_cache_key(sspec))) or None
-            if _fmeta is None and sspec is not None:
-                _fmeta = local_fetch_meta.get(sensor_cache_key(sspec)) or None
+            if prefetch.fetch_meta and skey_m is not None:
+                _fmeta = prefetch.fetch_meta.get((point_index, skey_m)) or None
+            if _fmeta is None and skey_m is not None:
+                _fmeta = local_fetch_meta.get(skey_m) or None
             if _fmeta:
                 m_entry["fetch_meta"] = jsonable(_fmeta)
 

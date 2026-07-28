@@ -28,7 +28,9 @@ from ..tools.manifest import (
 from ..tools.manifest import (
     summarize_status,
 )
-from ..tools.serialization import jsonable, sanitize_key, sensor_cache_key, utc_ts
+from ..tools.normalization import normalize_model_name
+from ..tools.runtime import fetch_semantics_for_model
+from ..tools.serialization import input_cache_key, jsonable, sanitize_key, utc_ts
 from ..writers import write_arrays
 from .runner import run_with_retry
 
@@ -285,7 +287,7 @@ class CheckpointManager:
                 continue
             pref = prev.get("inputs")
             if isinstance(pref, dict):
-                sk = sensor_cache_key(ps)
+                sk = input_cache_key(ps, fetch_semantics_for_model(normalize_model_name(pm)))
                 clean = dict(pref)
                 clean.pop("dedup_reused", None)
                 refs.setdefault(sk, clean)

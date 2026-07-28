@@ -58,7 +58,9 @@ def _patch_deps(
         lambda model, backend, device: (embedder, lock),
     )
     monkeypatch.setattr(
-        combined_flow, "sensor_cache_key", lambda s: s.collection if s else "__none__"
+        combined_flow,
+        "input_cache_key",
+        lambda s, sem="single": s.collection if s else "__none__",
     )
     monkeypatch.setattr(
         combined_flow, "sanitize_key", lambda s: s.replace("/", "_").replace(" ", "_")
@@ -72,8 +74,8 @@ def _patch_deps(
     )
     monkeypatch.setattr(
         inference_mod,
-        "sensor_cache_key",
-        lambda s: s.collection if s else "__none__",
+        "input_cache_key",
+        lambda s, sem="single": s.collection if s else "__none__",
     )
     monkeypatch.setattr(
         inference_mod,
