@@ -22,6 +22,7 @@ from ..providers.prefetch_plan import (
 )
 from ..tools.normalization import normalize_input_array
 from ..tools.progress import FetchStats
+from ..tools.runtime import fetch_embedder_input
 from ..tools.shape import square_fetch_request
 from .runner import run_with_retry
 
@@ -76,6 +77,10 @@ class PrefetchManager:
         self.backend = backend
         self.device = device
         self.fetcher_by_key: dict[str, Any] = fetcher_by_key or {}
+        # fetch_key → model_config of the model whose embedder drives that
+        # fetch, so fetch-affecting settings (e.g. temporal_mode) are forwarded
+        # exactly like the direct get_embedding path.
+        self.fetcher_config_by_key: dict[str, dict[str, Any] | None] = {}
         # Fetch keys whose GENERIC fetches must enlarge a rectangular ROI to a
         # square (with the crop-back window in fetch meta), mirroring the
         # fetch-square behavior every model-specific ``fetch_input`` applies by
@@ -84,6 +89,7 @@ class PrefetchManager:
         # Resolved by plan() when ``model_configs`` is provided.
         self.square_fetch_keys: set[str] = set()
         self._plan_resolve_bands_fn: Callable[..., Any] | None = None
+        self._fetch_semantics_by_model: dict[str, str] = {}
 
         # Caches populated by fetch_chunk / restored from checkpoint
         self.cache: dict[tuple[int, str], np.ndarray] = {}
@@ -127,6 +133,18 @@ class PrefetchManager:
         fetch-square for every chunk after the first).
         """
         self._plan_resolve_bands_fn = resolve_bands_fn
+        fetch_semantics_by_model: dict[str, str] = {}
+        if self.model_configs is not None:
+            from ..tools.normalization import normalize_model_name
+            from ..tools.runtime import fetch_semantics_for_model
+
+            for mc in self.model_configs:
+                if mc.sensor is None or "precomputed" in mc.model_type.lower():
+                    continue
+                fetch_semantics_by_model[mc.name] = fetch_semantics_for_model(
+                    normalize_model_name(mc.name)
+                )
+        self._fetch_semantics_by_model = fetch_semantics_by_model
         (
             self.sensor_by_key,
             self.fetch_sensor_by_key,
@@ -138,43 +156,57 @@ class PrefetchManager:
             resolved_sensor=self.resolved_sensor,
             model_type=self.model_type,
             resolve_bands_fn=resolve_bands_fn,
+            fetch_semantics_by_model=fetch_semantics_by_model or None,
         )
         if self.model_configs is not None:
-            self.fetcher_by_key, self.square_fetch_keys = self._resolve_fetchers()
+            (
+                self.fetcher_by_key,
+                self.square_fetch_keys,
+                self.fetcher_config_by_key,
+            ) = self._resolve_fetchers()
 
-    def _resolve_fetchers(self) -> tuple[dict[str, Any], set[str]]:
-        """fetch_key → embedder for model-specific fetches, and the generic
-        fetch keys that must fetch-square.
+    def _resolve_fetchers(
+        self,
+    ) -> tuple[dict[str, Any], set[str], dict[str, dict[str, Any] | None]]:
+        """fetch_key → embedder for model-driven fetches, plus the generic
+        fetch keys that must fetch-square and per-fetcher model configs.
 
-        The canonical single-embedding path always enlarges a rectangular ROI
-        to a square fetch (``fetch_input``'s ``square_input=True`` default) and
-        crops the output back via ``roi_window_geo``. Model-specific
-        ``fetch_input`` fetches inherit that for free; generic fetches (merged
-        multi-model band-union groups, models without a custom ``fetch_input``)
-        are squared by the prefetch itself whenever every member model's
-        ``get_embedding`` accepts ``fetch_meta`` and thus honors the crop-back
-        window.
+        Fetch groups are semantics-homogeneous by construction (the plan keys
+        members by :func:`~rs_embed.tools.serialization.input_cache_key`), so
+        the group's temporal fetch fingerprint decides the fetch:
+
+        - ``custom:*`` — the member embedder's own ``fetch_input`` (its class
+          fingerprint makes the group a singleton);
+        - ``multi:*`` — any member's spec-driven base ``fetch_input``, which
+          honors the group's band-union sensor, so merged dedup keeps working
+          for equal-division time-series models;
+        - ``single`` — the generic whole-window composite fetch, squared by
+          the prefetch itself whenever every member model's ``get_embedding``
+          accepts ``fetch_meta`` and thus honors the crop-back window (the
+          canonical single-embedding path always enlarges a rectangular ROI to
+          a square fetch and crops the output back via ``roi_window_geo``).
         """
         from ..tools.normalization import normalize_model_name
         from ..tools.runtime import (
-            _overrides_base_method,
+            embedder_fetch_semantics,
             embedder_honors_fetch_meta,
             get_embedder_bundle_cached,
         )
-        from ..tools.serialization import sensor_cache_key
+        from ..tools.serialization import input_cache_key
 
         fetcher_by_key: dict[str, Any] = {}
+        fetcher_config_by_key: dict[str, dict[str, Any] | None] = {}
         # fetch_key → True while every member seen so far honors fetch_meta.
         meta_safe_by_key: dict[str, bool] = {}
         for mc in self.model_configs or []:
             if mc.sensor is None or "precomputed" in mc.model_type.lower():
                 continue
-            member_skey = sensor_cache_key(mc.sensor)
+            sem = self._fetch_semantics_by_model.get(mc.name, "single")
+            member_skey = input_cache_key(mc.sensor, sem)
             mapping = self.sensor_to_fetch.get(member_skey)
             if mapping is None:
                 continue
             fetch_key = mapping[0]
-            member_keys = self.fetch_members.get(fetch_key, [])
             embedder, _lock = get_embedder_bundle_cached(
                 normalize_model_name(mc.name),
                 self.resolved_backend.get(mc.name, self.backend),
@@ -183,22 +215,15 @@ class PrefetchManager:
             meta_safe_by_key[fetch_key] = meta_safe_by_key.get(
                 fetch_key, True
             ) and embedder_honors_fetch_meta(type(embedder))
-            # A merged fetch group may represent a union of channels needed by
-            # multiple models. Model-specific fetch_input() implementations
-            # generally return only that model's own contract, so using one of
-            # them for a shared union fetch can truncate the prefetched tensor.
-            if len(member_keys) != 1:
-                continue
             if fetch_key in fetcher_by_key:
                 continue
-            if getattr(embedder, "has_custom_fetch", False) or _overrides_base_method(
-                embedder, "fetch_input"
-            ):
+            if embedder_fetch_semantics(embedder) != "single":
                 fetcher_by_key[fetch_key] = embedder
+                fetcher_config_by_key[fetch_key] = mc.model_config
         square_fetch_keys = {
             k for k, safe in meta_safe_by_key.items() if safe and k not in fetcher_by_key
         }
-        return fetcher_by_key, square_fetch_keys
+        return fetcher_by_key, square_fetch_keys, fetcher_config_by_key
 
     def clone(self) -> PrefetchManager:
         """A sibling manager with the same plan and fresh per-chunk caches."""
@@ -272,11 +297,14 @@ class PrefetchManager:
             fetcher = self.fetcher_by_key.get(skey)
             if fetcher is not None:
                 fr: FetchResult = run_with_retry(
-                    lambda: fetcher.fetch_input(
-                        provider,
+                    lambda: fetch_embedder_input(
+                        embedder=fetcher,
+                        provider=provider,
                         spatial=spatials[i],
                         temporal=temporal,
                         sensor=sspec,
+                        model_config=self.fetcher_config_by_key.get(skey),
+                        fetch_fn=self.fetch_fn,
                     ),
                     retries=cfg.max_retries,
                     backoff_s=cfg.retry_backoff_s,
@@ -401,11 +429,14 @@ class PrefetchManager:
         fetcher = self.fetcher_by_key.get(skey)
         if fetcher is not None:
             fr: FetchResult = run_with_retry(
-                lambda: fetcher.fetch_input(
-                    self.provider,
+                lambda: fetch_embedder_input(
+                    embedder=fetcher,
+                    provider=self.provider,
                     spatial=spatial,
                     temporal=temporal,
                     sensor=sspec,
+                    model_config=self.fetcher_config_by_key.get(skey),
+                    fetch_fn=self.fetch_fn,
                 ),
                 retries=cfg.max_retries,
                 backoff_s=cfg.retry_backoff_s,

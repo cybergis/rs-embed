@@ -117,3 +117,18 @@ def sensor_cache_key(sensor: SensorSpec) -> str:
     obj = sensor_identity_fields(sensor)
     data = json.dumps(obj, sort_keys=True).encode("utf-8")
     return sanitize_key(hashlib.sha1(data).hexdigest()[:12])
+
+
+def input_cache_key(sensor: SensorSpec, fetch_semantics: str = "single") -> str:
+    """Prefetch cache/plan key for one model's provider input.
+
+    Sensor identity plus the model's temporal fetch semantics
+    (:func:`~rs_embed.tools.runtime.embedder_fetch_semantics`): models may
+    share a prefetched input only when both match. ``"single"`` (the generic
+    whole-window composite) keeps the bare :func:`sensor_cache_key` so
+    persisted manifest refs from prior exports stay valid for the common case.
+    """
+    skey = sensor_cache_key(sensor)
+    if fetch_semantics and fetch_semantics != "single":
+        return f"{skey}--{sanitize_key(fetch_semantics)}"
+    return skey
