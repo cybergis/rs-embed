@@ -22,6 +22,7 @@ demo_export/
 !examples/plot_utils.py
 !examples/quickstart.py
 !examples/demo.ipynb
+!examples/play_with_embedding.ipynb
 !examples/utils_demo.py
 !examples/iguide_demo_helpers.py
 !examples/build_demo_cache.py
@@ -40,3 +41,4 @@ examples/webapp/downloads/
 .DS_Store
 /global_0.1_degree_representation/
 /global_0.1_degree_tiff_all/
+iguide_dataset/
