@@ -29,6 +29,8 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from typing import Any
 
+import numpy as np
+
 from .core.embedding import Embedding
 from .core.errors import ModelError, ProviderError
 from .core.registry import get_embedder_cls as _get_embedder_cls
@@ -55,6 +57,7 @@ from .core.validation import (
     validate_specs as _validate_specs,
 )
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
+from .embedders.meta import temporal_to_range as _temporal_to_range
 from .providers.fetch import fetch_sensor_patch_chw as _fetch_sensor_patch_chw
 from .providers.resolution import create_provider_for_backend
 from .tools.export_requests import (
@@ -89,6 +92,9 @@ from .tools.runtime import (
 )
 from .tools.runtime import (
     describe_model_cached as _describe_model_cached,
+)
+from .tools.runtime import (
+    fetch_embedder_input as _fetch_embedder_input,
 )
 from .tools.runtime import (
     model_manages_own_input_prep as _model_manages_own_input_prep,
@@ -690,3 +696,194 @@ def inspect_gee_patch(
         value_range=value_range,
         return_array=return_array,
     )
+
+
+def _rgb_quicklook_band_indices(
+    bands: tuple[str, ...] | None, *, n_channels: int
+) -> tuple[int, int, int]:
+    """Best-effort (R, G, B) channel indices for quicklooks of a fetched frame."""
+    names = [str(b).upper() for b in (bands or ())]
+    if len(names) == n_channels:
+        try:
+            return (names.index("B4"), names.index("B3"), names.index("B2"))
+        except ValueError:
+            pass
+    return (0, 1, 2)
+
+
+def inspect_model_input(
+    model: str,
+    *,
+    spatial: SpatialSpec,
+    temporal: TemporalSpec | None = None,
+    sensor: SensorSpec | None = None,
+    fetch: FetchSpec | None = None,
+    modality: str | None = None,
+    backend: str = "gee",
+    value_range: tuple[float, float] | None = None,
+    return_arrays: bool = False,
+    **model_kwargs: Any,
+) -> dict[str, Any]:
+    """Fetch and inspect the raw provider input a model would actually receive.
+
+    Unlike :func:`inspect_provider_patch` (a generic sensor fetch), this goes
+    through the embedder's own ``fetch_input`` — the same shared path every
+    embedding pipeline uses — so bands, temporal binning, fetch-square
+    geometry, and empty-bin handling all match what the model sees at embed
+    time. Does **not** load model weights or run inference.
+
+    For multi-frame models (e.g. ``temporal_mode="multi"``) the result contains
+    one entry per temporal bin, including empty bins the model would drop.
+
+    Parameters
+    ----------
+    model : str
+        Model identifier or alias.
+    spatial : SpatialSpec
+        Spatial location to inspect.
+    temporal : TemporalSpec or None
+        Optional temporal filter (same semantics as :func:`get_embedding`).
+    sensor : SensorSpec or None
+        Optional sensor override; ``None`` uses the model's default sensor.
+    fetch : FetchSpec or None
+        Lightweight fetch-policy override applied to the model default sensor.
+        Cannot be combined with ``sensor``.
+    modality : str or None
+        Optional modality selector for models with multiple input branches.
+    backend : str
+        Provider backend name (default ``"gee"``).
+    value_range : tuple[float, float] or None
+        Optional ``(min, max)`` range for value-range checks in per-frame
+        reports.
+    return_arrays : bool
+        If ``True``, attach each frame's raw ``np.ndarray`` as ``array_chw``
+        in the frame entries (not JSON-serializable).
+    **model_kwargs
+        Model-specific settings, as in :func:`get_embedding` (e.g.
+        ``temporal_mode="multi"``). Only fetch-relevant keys affect the result.
+
+    Returns
+    -------
+    dict[str, Any]
+        Report with keys ``ok``, ``model``, ``backend``, ``n_frames``,
+        ``n_empty``, ``frames`` (one entry per temporal frame with ``start``,
+        ``end``, ``empty``, and ``report``), ``fetch_meta``, ``sensor``,
+        ``temporal``, and ``artifacts``.
+
+    Raises
+    ------
+    ModelError
+        If the model is unknown, precomputed (no provider input), or has no
+        applicable sensor.
+    ProviderError
+        If the backend name is empty or the provider fails to initialize.
+    """
+    model_config = model_kwargs or None
+    model_n = _normalize_model_name(model)
+    backend_name = str(backend).strip().lower()
+    if not backend_name:
+        raise ProviderError("backend must be a non-empty provider name.")
+
+    embedder_cls = _get_embedder_cls(model_n)
+    if getattr(embedder_cls, "_is_precomputed", False):
+        raise ModelError(
+            f"Model '{model_n}' serves precomputed embeddings; it has no provider "
+            "input to inspect. Use inspect_provider_patch for raw imagery checks."
+        )
+    sensor_eff = _resolve_sensor_for_model(
+        model_n,
+        sensor=sensor,
+        fetch=fetch,
+        modality=modality,
+        default_when_missing=True,
+    )
+    if sensor_eff is None:
+        raise ModelError(f"Model '{model_n}' has no default sensor; pass sensor=... explicitly.")
+    try:
+        provider = create_provider_for_backend(backend_name, allow_auto=False)
+    except ModelError as exc:
+        raise ProviderError(str(exc)) from exc
+
+    fr = _fetch_embedder_input(
+        embedder=embedder_cls(),
+        provider=provider,
+        spatial=spatial,
+        temporal=temporal,
+        sensor=sensor_eff,
+        model_config=model_config,
+    )
+
+    x = fr.data
+    fetch_meta = dict(fr.meta or {})
+    bin_meta = fetch_meta.pop("frames", None)
+    fetch_meta.pop("n_empty", None)
+    if x.ndim == 4:
+        frames_arr = [x[i] for i in range(x.shape[0])]
+        if not (isinstance(bin_meta, list) and len(bin_meta) == len(frames_arr)):
+            bin_meta = [{} for _ in frames_arr]
+    elif x.ndim == 3:
+        frames_arr = [x]
+        if temporal is not None:
+            t_res = _temporal_to_range(temporal)
+            bin_meta = [{"start": str(t_res.start), "end": str(t_res.end)}]
+        else:
+            bin_meta = [{}]
+    else:
+        raise ModelError(
+            f"Model '{model_n}' fetch_input returned ndim={x.ndim}; expected [C,H,W] or [T,C,H,W]."
+        )
+
+    save_dir = checks_save_dir(sensor_eff)
+    rgb_bands = _rgb_quicklook_band_indices(
+        sensor_eff.bands, n_channels=int(frames_arr[0].shape[0])
+    )
+    frames_out: list[dict[str, Any]] = []
+    artifacts: dict[str, Any] = {}
+    n_empty = 0
+    for i, (frame, bm) in enumerate(zip(frames_arr, bin_meta, strict=True)):
+        empty = bool(bm.get("empty", False)) or bool(np.isnan(frame).all())
+        entry: dict[str, Any] = {
+            "index": i,
+            "start": bm.get("start"),
+            "end": bm.get("end"),
+            "empty": empty,
+        }
+        if empty:
+            n_empty += 1
+        else:
+            entry["report"] = inspect_chw(
+                frame,
+                name=f"{model_n}_input_t{i}",
+                value_range=value_range,
+                fill_value=sensor_eff.fill_value,
+            )
+            if save_dir and frame.ndim == 3 and frame.shape[0] >= 3:
+                try:
+                    import datetime as _dt
+                    import os
+
+                    ts = _dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+                    path = os.path.join(save_dir, f"{model_n}_input_t{i}_{ts}.png")
+                    save_quicklook_rgb(frame, path=path, bands=rgb_bands)
+                    artifacts[f"quicklook_rgb_t{i}"] = path
+                except Exception as e:
+                    artifacts[f"quicklook_rgb_t{i}_error"] = repr(e)
+        if return_arrays:
+            entry["array_chw"] = frame
+        frames_out.append(entry)
+
+    ok = n_empty < len(frames_out) and all(
+        f.get("report", {}).get("ok", True) for f in frames_out if not f["empty"]
+    )
+    return {
+        "ok": bool(ok),
+        "model": model_n,
+        "backend": backend_name,
+        "n_frames": len(frames_out),
+        "n_empty": n_empty,
+        "frames": frames_out,
+        "fetch_meta": fetch_meta or None,
+        "sensor": asdict(sensor_eff),
+        "temporal": asdict(temporal) if temporal is not None else None,
+        "artifacts": artifacts or None,
+    }

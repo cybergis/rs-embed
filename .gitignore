@@ -22,4 +22,6 @@ demo_export/
 !examples/plot_utils.py
 !examples/quickstart.py
 !examples/demo.ipynb
+!examples/play_with_embedding.ipynb
 !examples/utils_demo.py
+iguide_dataset/

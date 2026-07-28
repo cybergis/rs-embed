@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- **`inspect_model_input`** — fetch and inspect the raw provider input a model would actually receive, without loading weights or running inference. Goes through the embedder's own `fetch_input` path (same bands, temporal binning, fetch-square geometry, and empty-bin handling as embed time); multi-frame models return one report entry per temporal bin, flagging empty bins the model would drop. `examples/playground.ipynb` §3.3 now uses it instead of hand-reconstructing the olmoearth bin loop.
+
 ## [0.2.0] — 2026-06-30
 
 Two new models (Clay v1.5, OlmoEarth), window-adaptive temporal sampling, a new package-wide `input_prep="tile"` default, and a large batch of correctness fixes that make `get_embedding`, the batch APIs, and `export_batch` return identical embeddings for the same point. **Default embeddings differ from 0.1.x** (see Changed); pin `input_prep`/`temporal_mode` explicitly where strict reproducibility is required.

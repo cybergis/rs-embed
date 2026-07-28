@@ -14,6 +14,7 @@ from .api import (
     get_embedding,
     get_embeddings_batch,
     inspect_gee_patch,
+    inspect_model_input,
     inspect_provider_patch,
     list_models,
     reset_runtime,
@@ -74,6 +75,7 @@ __all__ = [
     "ExportResult",
     "ModelResult",
     # Inspection
+    "inspect_model_input",
     "inspect_provider_patch",
     # Backward-compatible alias for inspect_provider_patch
     "inspect_gee_patch",
