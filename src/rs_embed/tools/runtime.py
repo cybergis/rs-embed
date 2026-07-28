@@ -529,6 +529,34 @@ def embedder_honors_fetch_meta(embedder_cls: type) -> bool:
     return _embedder_method_accepts_parameter(embedder_cls, "get_embedding", "fetch_meta")
 
 
+def embedder_fetch_semantics(embedder: Any) -> str:
+    """Fingerprint of the temporal semantics of an embedder's provider fetch.
+
+    Two models may share one prefetched input (sensor dedup / band-union
+    merging) only when their fetch semantics are identical — a whole-window
+    composite is not derivable from a binned series or vice versa. Sensor
+    identity alone cannot express this (e.g. clay/agrifm/galileo resolve to
+    the same SensorSpec but need single / equal-division / custom-binned
+    fetches), so cache and plan keys must include this fingerprint.
+
+    - ``"custom:<Class>"`` — overrides ``fetch_input`` (own binning/band contract);
+    - ``"multi:<n>"`` — spec-driven equal-division series (``[T,C,H,W]``);
+    - ``"single"`` — whole-window composite (``[C,H,W]``, the generic default).
+    """
+    if _overrides_base_method(embedder, "fetch_input"):
+        return f"custom:{type(embedder).__name__}"
+    spec = getattr(embedder, "input_spec", None)
+    if spec is not None and str(getattr(spec, "temporal_mode", "single")) == "multi":
+        return f"multi:{int(getattr(spec, 'n_frames', None) or 8)}"
+    return "single"
+
+
+@lru_cache(maxsize=128)
+def fetch_semantics_for_model(model_n: str) -> str:
+    """Cached :func:`embedder_fetch_semantics` by canonical model name."""
+    return embedder_fetch_semantics(get_embedder_cls(model_n)())
+
+
 def fetch_input_extras_from_model_config(
     embedder_cls: type,
     model_config: dict[str, Any] | None,

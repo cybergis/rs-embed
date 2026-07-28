@@ -19,12 +19,13 @@ from ..tools.checkpoint_utils import drop_model_arrays
 from ..tools.normalization import normalize_model_name
 from ..tools.progress import create_progress
 from ..tools.runtime import (
+    embedder_fetch_semantics,
     get_embedder_bundle_cached,
 )
 from ..tools.serialization import (
+    input_cache_key,
     jsonable,
     sanitize_key,
-    sensor_cache_key,
 )
 
 
@@ -123,7 +124,13 @@ def run_pending_models(
                 m_entry["describe"] = {"error": repr(e)}
 
             needs_provider_input = provider_enabled and sspec is not None and not is_precomputed
-            skey = sensor_cache_key(sspec) if needs_provider_input and sspec is not None else None
+            # Sensor identity + temporal fetch semantics: same-sensor models
+            # with different binning must not share one prefetched input.
+            skey = (
+                input_cache_key(sspec, embedder_fetch_semantics(embedder))
+                if needs_provider_input and sspec is not None
+                else None
+            )
 
             # ── Save inputs ─────────────────────────────────────
             _gather_inputs(

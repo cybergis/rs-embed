@@ -6,7 +6,7 @@ from collections.abc import Callable
 import numpy as np
 
 from ..core.specs import SensorSpec
-from ..tools.serialization import sensor_cache_key as _sensor_cache_key
+from ..tools.serialization import input_cache_key as _input_cache_key
 from ..tools.serialization import sensor_identity_fields as _sensor_identity_fields
 
 _LEGACY_RESOLVE_BANDS_WARNED = False
@@ -61,6 +61,7 @@ def build_prefetch_plan(
     resolved_sensor: dict[str, SensorSpec | None],
     model_type: dict[str, str],
     resolve_bands_fn: Callable[..., tuple[str, ...]] | None = None,
+    fetch_semantics_by_model: dict[str, str] | None = None,
 ) -> tuple[
     dict[str, SensorSpec],  # sensor_by_key
     dict[str, SensorSpec],  # fetch_sensor_by_key
@@ -68,22 +69,32 @@ def build_prefetch_plan(
     dict[str, list[str]],  # sensor_models
     dict[str, list[str]],  # fetch_members
 ]:
+    """Plan provider prefetches: sensor dedup + band-union merged fetch groups.
+
+    ``fetch_semantics_by_model`` carries each model's temporal fetch fingerprint
+    (:func:`~rs_embed.tools.runtime.embedder_fetch_semantics`). It qualifies both
+    the member cache keys and the merge grouping, so models only ever share a
+    fetch (or a cached input) when their temporal semantics match — an identical
+    SensorSpec is not sufficient (a whole-window composite cannot stand in for a
+    binned series). Missing entries default to ``"single"``.
+    """
+    semantics = fetch_semantics_by_model or {}
     sensor_by_key: dict[str, SensorSpec] = {}
     sensor_models: dict[str, list[str]] = {}
+    semantics_by_key: dict[str, str] = {}
     for m in models:
         sspec = resolved_sensor.get(m)
         if sspec is None or "precomputed" in (model_type.get(m) or ""):
             continue
-        skey = _sensor_cache_key(sspec)
+        sem = str(semantics.get(m) or "single")
+        skey = _input_cache_key(sspec, sem)
         sensor_by_key.setdefault(skey, sspec)
         sensor_models.setdefault(skey, []).append(m)
+        semantics_by_key[skey] = sem
 
-    groups: dict[
-        tuple[str, int, int, float, str, str | None, str | None, bool, bool, bool],
-        list[tuple[str, SensorSpec, tuple[str, ...]]],
-    ] = {}
+    groups: dict[tuple, list[tuple[str, SensorSpec, tuple[str, ...]]]] = {}
     for skey, sspec in sensor_by_key.items():
-        gkey = sensor_fetch_group_key(sspec)
+        gkey = (sensor_fetch_group_key(sspec), semantics_by_key[skey])
         if resolve_bands_fn is None:
             rbands = tuple(str(b) for b in sspec.bands)
         else:
@@ -113,7 +124,7 @@ def build_prefetch_plan(
     sensor_to_fetch: dict[str, tuple[str, tuple[int, ...]]] = {}
     fetch_members: dict[str, list[str]] = {}
 
-    for members in groups.values():
+    for (_gkey, group_sem), members in groups.items():
         union_bands: list[str] = []
         seen: set[str] = set()
         for _, _, rbands in members:
@@ -145,7 +156,7 @@ def build_prefetch_plan(
             check_raise=bool(getattr(base, "check_raise", True)),
             check_save_dir=getattr(base, "check_save_dir", None),
         )
-        fetch_key = _sensor_cache_key(fetch_sensor)
+        fetch_key = _input_cache_key(fetch_sensor, group_sem)
         fetch_sensor_by_key[fetch_key] = fetch_sensor
         fetch_members.setdefault(fetch_key, [])
 

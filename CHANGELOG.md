@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- **Export prefetch no longer collapses temporal-model inputs to a single composite.** Multi-model exports could silently degrade time-series models: a band-union merged fetch group (e.g. olmoearth exported alongside terrafm) dropped the model's own `fetch_input`, and same-sensor models with different temporal semantics (e.g. clay vs. agrifm/anysat/galileo, which resolve to an identical SensorSpec) shared one cached single-frame input. Both the saved `input_chw__*` arrays and the computed embeddings were affected (`temporal_mode: single`, duplicated frames). Prefetch cache and plan keys now include each model's temporal fetch fingerprint (`custom:*` / `multi:n` / `single`): models share a fetch only when sensor identity **and** temporal semantics match, custom-`fetch_input` models always fetch through their own path, and spec-driven equal-division models still band-union merge among themselves. Temporal-model inputs cached by resumed exports under the old keys are refetched (their cached values were wrong). Re-export any multi-model runs that included olmoearth/agrifm/anysat/galileo/prithvi alongside other models sharing a collection.
+
 ### Added
 
 - **`inspect_model_input`** — fetch and inspect the raw provider input a model would actually receive, without loading weights or running inference. Goes through the embedder's own `fetch_input` path (same bands, temporal binning, fetch-square geometry, and empty-bin handling as embed time); multi-frame models return one report entry per temporal bin, flagging empty bins the model would drop. `examples/playground.ipynb` §3.3 now uses it instead of hand-reconstructing the olmoearth bin loop.

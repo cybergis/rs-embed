@@ -20,6 +20,7 @@ from ..tools.output import normalize_embedding_output
 from ..tools.runtime import (
     _embedder_method_accepts_parameter,
     embedder_accepts_model_config,
+    embedder_fetch_semantics,
     get_embedder_bundle_cached,
     require_model_config_support,
     resolve_model_aware_input_prep,
@@ -27,7 +28,7 @@ from ..tools.runtime import (
     supports_prefetched_batch_api,
 )
 from ..tools.runtime import call_embedder_get_embedding as _runtime_call_embedder_get_embedding
-from ..tools.serialization import embedding_to_numpy, jsonable, sensor_cache_key
+from ..tools.serialization import embedding_to_numpy, input_cache_key, jsonable
 from ..tools.shape import geo_roi_from_meta
 from ..tools.tiling import (
     _aggregate_tiled_embeddings,
@@ -181,13 +182,15 @@ class InferenceEngine:
         """Resolve embedder bundle and provider-input requirements for one model."""
         from ..tools.normalization import normalize_model_name
 
-        skey = (
-            sensor_cache_key(sensor)
-            if provider_enabled and sensor is not None and not is_precomputed
-            else None
-        )
         embedder, lock = get_embedder_bundle_cached(
             normalize_model_name(name), backend, self.device
+        )
+        # Sensor identity + temporal fetch semantics: same-sensor models with
+        # different binning must not share one prefetched input.
+        skey = (
+            input_cache_key(sensor, embedder_fetch_semantics(embedder))
+            if provider_enabled and sensor is not None and not is_precomputed
+            else None
         )
         return _ModelContext(
             embedder=embedder,
