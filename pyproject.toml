@@ -74,9 +74,19 @@ terramind = [
 # Kept as an empty compatibility extra now that olmoearth-pretrain-minimal
 # is part of the base installation.
 olmoearth = []
+# Aurora (Microsoft atmospheric FM): official model package plus the zarr/GCS
+# stack used to read pressure-level ERA5 from the public ARCO-ERA5 mirror.
+aurora = [
+  "microsoft-aurora>=2.0",
+  "zarr>=3.0",
+  "gcsfs>=2024.6",
+]
 full = [
   "matplotlib>=3.10",
   "terratorch==1.2.1",
+  "microsoft-aurora>=2.0",
+  "zarr>=3.0",
+  "gcsfs>=2024.6",
 ]
 dev = [
   "pytest>=7.4",
