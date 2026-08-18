@@ -386,6 +386,60 @@ def fetch_collection_binned_raw_tchw(
     )
 
 
+def fetch_latlon_grid_bins_tchw(
+    provider: ProviderBase,
+    *,
+    collection: str,
+    bands: Sequence[str],
+    bins: Sequence[tuple[str, str]],
+    lat_max: float,
+    lon_min: float,
+    n_lat: int,
+    n_lon: int,
+    grid_deg: float,
+    fill_value: float = 0.0,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Fetch one lat/lon-regular grid composite per explicit time bin as [T,C,H,W].
+
+    The lat/lon-grid sibling of :func:`fetch_collection_binned_raw_tchw`: rows
+    are uniform in latitude with pixel centers pinned to the requested grid
+    points (see ``ProviderBase.fetch_latlon_grid_chw``), and the ``(start,
+    end)`` bins accept hour-precision ISO datetimes. Bins with no imagery
+    yield all-NaN sentinel frames flagged in the returned meta; at least one
+    bin must have data.
+    """
+    if not bins:
+        raise ModelError("fetch_latlon_grid_bins_tchw requires at least one time bin.")
+    frames: list[np.ndarray | None] = []
+    last_error: str | None = None
+    for start, end in bins:
+        try:
+            frames.append(
+                provider.fetch_latlon_grid_chw(
+                    collection=str(collection),
+                    bands=tuple(str(b) for b in bands),
+                    start=str(start),
+                    end=str(end),
+                    lat_max=float(lat_max),
+                    lon_min=float(lon_min),
+                    n_lat=int(n_lat),
+                    n_lon=int(n_lon),
+                    grid_deg=float(grid_deg),
+                    fill_value=float(fill_value),
+                )
+            )
+        except ProviderError as exc:
+            last_error = str(exc)
+            frames.append(None)
+    return _stack_binned_frames(
+        frames,
+        bins,
+        expected_channels=len(tuple(bands)),
+        context=f"lat/lon grid binned fetch of {collection}",
+        last_error=last_error,
+    )
+
+
 def fetch_s1_vvvh_binned_raw_tchw(
     provider: ProviderBase,
     *,

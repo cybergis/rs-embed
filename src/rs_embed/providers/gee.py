@@ -206,6 +206,96 @@ class GEEProvider(ProviderBase):
             to_float_image=bool(to_float_image),
         )
 
+    def fetch_latlon_grid_chw(
+        self,
+        *,
+        collection: str,
+        bands: Sequence[str],
+        start: str,
+        end: str,
+        lat_max: float,
+        lon_min: float,
+        n_lat: int,
+        n_lon: int,
+        grid_deg: float,
+        fill_value: float = 0.0,
+    ) -> np.ndarray:
+        """Sample a collection composite on a regular lat/lon (EPSG:4326) grid.
+
+        The ``crsTransform`` pins pixel centers to the requested grid points —
+        pixel ``(0, 0)`` is centered on ``(lat_max, lon_min)`` — so collections
+        whose native raster is a lat/lon grid (reanalysis/climate products such
+        as ERA5 0.25°) are sampled at their exact grid-point values instead of
+        being resampled onto the EPSG:3857 meter grid the patch fetches use.
+        The transform's negative latitude step makes the output north-up by
+        construction. ``start``/``end`` go to ``filterDate`` verbatim, so
+        hour-precision ISO datetimes select individual hourly assets. No cloud
+        filter is applied (the intended collections have no cloud property).
+        """
+        self.ensure_ready()
+        import ee
+
+        if int(n_lat) < 1 or int(n_lon) < 1 or float(grid_deg) <= 0.0:
+            raise ProviderError(
+                f"lat/lon-grid fetch needs n_lat/n_lon >= 1 and grid_deg > 0, "
+                f"got n_lat={n_lat}, n_lon={n_lon}, grid_deg={grid_deg}."
+            )
+        half = float(grid_deg) / 2.0
+        # Region hugs the grid-point centers (a hair inside the outer pixel
+        # edges) so sampleRectangle returns exactly n_lat x n_lon cells.
+        eps = float(grid_deg) * 1e-3
+        lat_min = float(lat_max) - (int(n_lat) - 1) * float(grid_deg)
+        lon_max = float(lon_min) + (int(n_lon) - 1) * float(grid_deg)
+        region = ee.Geometry.Rectangle(
+            [
+                float(lon_min) - half + eps,
+                lat_min - half + eps,
+                lon_max + half - eps,
+                float(lat_max) + half - eps,
+            ],
+            proj="EPSG:4326",
+            geodesic=False,
+        )
+
+        ic = (
+            ee.ImageCollection(str(collection))
+            .filterDate(str(start), str(end))
+            .select([str(b) for b in bands])
+        )
+        _raise_if_empty_collection(ic, collection=str(collection))
+        img = ic.median().reproject(
+            crs="EPSG:4326",
+            crsTransform=[
+                float(grid_deg),
+                0.0,
+                float(lon_min) - half,
+                0.0,
+                -float(grid_deg),
+                float(lat_max) + half,
+            ],
+        )
+        rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
+        props = rect.get("properties", {}) if isinstance(rect, dict) else {}
+        if not props:
+            raise ProviderError(_no_images_found_message(collection=str(collection)))
+        try:
+            raw = np.stack(
+                [np.array(props.get(str(b), []), dtype=np.float32) for b in bands],
+                axis=0,
+            ).astype(np.float32)
+        except Exception as e:
+            raise ProviderError(
+                f"Failed to sample lat/lon grid from GEE collection {collection!r}."
+            ) from e
+        expected = (len(tuple(bands)), int(n_lat), int(n_lon))
+        if raw.shape != expected:
+            raise ProviderError(
+                f"lat/lon-grid fetch of {collection!r} returned shape {raw.shape}, "
+                f"expected {expected}. The requested window may cross the grid "
+                "edge or the collection may not be a lat/lon-gridded product."
+            )
+        return raw
+
     def fetch_s1_vvvh_raw_chw(
         self,
         *,

@@ -230,6 +230,63 @@ class ProviderBase:
             f"Provider '{self.name}' does not implement all-band collection patch fetch support."
         )
 
+    def fetch_latlon_grid_chw(
+        self,
+        *,
+        collection: str,
+        bands: Sequence[str],
+        start: str,
+        end: str,
+        lat_max: float,
+        lon_min: float,
+        n_lat: int,
+        n_lon: int,
+        grid_deg: float,
+        fill_value: float = 0.0,
+    ) -> np.ndarray:
+        """Fetch a composite sampled on a regular lat/lon (EPSG:4326) grid.
+
+        Pixel ``(0, 0)`` is centered on ``(lat_max, lon_min)`` and rows step
+        ``-grid_deg`` in latitude (north-up), so rows are uniform in
+        *latitude* rather than in projected meters — the sampling that
+        reanalysis/climate grids (e.g. ERA5 0.25°) require for exact
+        grid-point values.
+
+        Parameters
+        ----------
+        collection : str
+            Collection identifier.
+        bands : Sequence[str]
+            Band names and order to fetch.
+        start, end : str
+            ISO date or datetime strings filtering the collection; passed to
+            the provider verbatim, so hour precision is supported (unlike
+            ``TemporalSpec``, which is date-only).
+        lat_max : float
+            Latitude of the northernmost grid points (degrees).
+        lon_min : float
+            Longitude of the westernmost grid points (degrees).
+        n_lat, n_lon : int
+            Grid points per axis.
+        grid_deg : float
+            Grid spacing in degrees.
+        fill_value : float
+            Fill value for masked pixels.
+
+        Returns
+        -------
+        np.ndarray
+            Array with shape ``[C, n_lat, n_lon]``.
+
+        Raises
+        ------
+        ProviderError
+            If this provider does not implement lat/lon-grid fetch support.
+        """
+        raise ProviderError(
+            f"Provider '{self.name}' does not implement lat/lon-grid fetch support."
+        )
+
     def fetch_sensor_patch_chw(
         self,
         *,
