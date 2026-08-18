@@ -8,6 +8,11 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- **New model `aurora`** — Microsoft Aurora 0.25° atmospheric foundation model (Nature 2025), encoder-only (Perceiver3D encoder; the Swin3D backbone and decoder are dropped after checkpoint load): embeds ERA5 weather states instead of satellite imagery. Input is a fixed 32×32 window on the global 0.25° lattice at the last 6 h UTC boundary before the range end plus the state 6 h earlier — surface variables (2t/10u/10v/msl) from GEE `ECMWF/ERA5_HOURLY`, pressure-level variables (t/u/v/q/z @ 13 levels) from the public ARCO-ERA5 zarr (global slab cached per timestamp), static variables from the official HF pickle. `pooled` is the (ROI-cropped) mean over level-averaged column tokens; `grid` is the `[D, 8, 8]` column-token map. Variants `pretrained` (default, 512-d, 5 GB) and `small` (256-d, 451 MB) via `model_config={"variant": ...}`. Requires the `aurora` extra (`microsoft-aurora`, `zarr`, `gcsfs`); see [docs/models/aurora.md](docs/models/aurora.md).
+- **Provider primitive `fetch_latlon_grid_chw` / `fetch_latlon_grid_bins_tchw`** — generic lat/lon-regular (EPSG:4326 `crsTransform`) grid sampling with pixel centers pinned to requested grid points, plus a binned wrapper accepting hour-precision ISO datetime bins (NaN sentinel frames for empty bins). Built for reanalysis/climate collections whose native raster is a lat/lon grid; the EPSG:3857 patch fetches remain unchanged for imagery.
+
 ## [0.2.1] — 2026-07-27
 
 An export-correctness fix for time-series models plus a new input-inspection API. Multi-model exports that combined a temporal model (olmoearth/agrifm/anysat/galileo/prithvi) with other models on a shared collection should be re-exported (see Fixed).

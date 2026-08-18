@@ -58,6 +58,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 | `scalemae`        | S2 RGB + scale                  | 1024 | 10m                | single composite        | `sensor.scale_m` is a model input                       | [detail](models/scalemae.md)   |
 | `satmae`          | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | single composite        | ViT-L; MAE token/grid                                   | [detail](models/satmae.md)     |
 | `satmaepp`        | S2 RGB (`B4,B3,B2`) or S2 10-band | 1024 | 10m              | single composite        | `modality=rgb` (default) or `s2_10b`; ViT-L; fMoW eval preprocessing; 10-band uses strict band order + grouped-channel tokens | [detail](models/satmaepp.md)   |
+| `aurora`          | ERA5 weather state (not imagery) | 512  | 0.25° (~28km)      | 6h snapshot pair (T=2)  | `aurora` extra; GEE surf + ARCO-ERA5 pressure levels + HF static; encoder-only | [detail](models/aurora.md)     |
 
 ---
 
