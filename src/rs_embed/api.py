@@ -46,6 +46,7 @@ from .core.types import (
     ExportConfig,
     ExportModelRequest,
     ExportTarget,
+    UserData,
 )
 from .core.validation import (
     assert_supported as _assert_supported,
@@ -59,6 +60,9 @@ from .core.validation import (
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
 from .embedders.meta import temporal_to_range as _temporal_to_range
 from .providers.fetch import fetch_sensor_patch_chw as _fetch_sensor_patch_chw
+from .providers.prefetch_plan import (
+    select_prefetched_channels as _select_prefetched_channels,
+)
 from .providers.resolution import create_provider_for_backend
 from .tools.export_requests import (
     maybe_return_completed_combined_resume as _maybe_return_completed_combined_resume,
@@ -105,7 +109,19 @@ from .tools.runtime import (
 from .tools.runtime import (
     run_embedding_request as _run_embedding_request_shared,
 )
+from .tools.runtime import (
+    run_user_input_request as _run_user_input_request,
+)
 from .tools.tiling import _resolve_input_prep_spec as _resolve_input_prep_spec
+from .tools.user_data import (
+    match_user_data_to_sensor as _match_user_data_to_sensor,
+)
+from .tools.user_data import (
+    normalize_collection_id as _normalize_collection_id,
+)
+from .tools.user_data import (
+    warn_on_suspicious_value_range as _warn_on_suspicious_value_range,
+)
 
 # -----------------------------------------------------------------------------
 # Internal helpers
@@ -396,6 +412,260 @@ def get_embeddings_batch(
         output=output,
         ctx=ctx,
     )
+
+
+# -----------------------------------------------------------------------------
+# Public: embeddings from user-provided data
+# -----------------------------------------------------------------------------
+
+
+def _resolve_user_data_sensor(model_n: str, *, modality: str | None) -> SensorSpec:
+    """Resolve the sensor a user-data request must satisfy, or refuse."""
+    embedder_cls = _get_embedder_cls(model_n)
+    if getattr(embedder_cls, "_is_precomputed", False):
+        raise ModelError(
+            f"Model '{model_n}' serves precomputed embeddings; it does not "
+            "embed user-provided imagery. Use an on-the-fly model instead."
+        )
+    sensor_eff = _resolve_sensor_for_model(
+        model_n,
+        sensor=None,
+        fetch=None,
+        modality=modality,
+        default_when_missing=True,
+    )
+    if sensor_eff is None:
+        raise ModelError(
+            f"Model '{model_n}' declares no input sensor"
+            + (f" for modality='{modality}'" if modality else "")
+            + "; there is nothing to match user-provided data against."
+        )
+    return sensor_eff
+
+
+def _prepare_user_data_inputs(
+    model_n: str,
+    datas: list[UserData],
+    sensor_eff: SensorSpec,
+) -> tuple[list[np.ndarray], list[dict[str, Any]]]:
+    """Validate, match, and slice each user-data item to model band order."""
+    arrays: list[np.ndarray] = []
+    metas: list[dict[str, Any]] = []
+    for data in datas:
+        data.validate()
+        idx = _match_user_data_to_sensor(data, sensor_eff, model_name=model_n)
+        _warn_on_suspicious_value_range(data)
+        arrays.append(_select_prefetched_channels(np.asarray(data.data, dtype=np.float32), idx))
+        metas.append(
+            {
+                "source": "user_data",
+                "collection": _normalize_collection_id(data.collection),
+                "declared_bands": list(data.bands),
+                "bands_used": list(sensor_eff.bands),
+                "channel_indices": list(idx),
+                "declared_scale_m": data.scale_m,
+            }
+        )
+    return arrays, metas
+
+
+def get_embedding_from_data(
+    model: str,
+    *,
+    data: UserData,
+    spatial: SpatialSpec,
+    temporal: TemporalSpec | None = None,
+    modality: str | None = None,
+    output: OutputSpec = OutputSpec.pooled(),
+    device: str = "auto",
+    **model_kwargs: Any,
+) -> Embedding:
+    """Compute an embedding from user-provided imagery (no provider fetch).
+
+    The bring-your-own-data counterpart of :func:`get_embedding`: instead of
+    fetching imagery from a provider, the caller supplies a
+    :class:`~rs_embed.UserData` declaring what the pixels are (collection +
+    band names, raw provider units). The declaration is matched against the
+    model's input sensor — superset band sets are sliced and reordered
+    automatically, while a collection mismatch or missing band refuses the
+    request with a :class:`ModelError` naming what is missing. Call
+    :func:`list_models_for_data` to see which models a declaration can serve.
+
+    Parameters
+    ----------
+    model : str
+        Model identifier or alias. Precomputed models are refused (they have
+        no imagery input).
+    data : UserData
+        The imagery and its declaration. ``data.data`` must be ``[C,H,W]``
+        (or ``[T,C,H,W]`` for time-series models) with raw provider values in
+        the declared band order.
+    spatial : SpatialSpec
+        Where the imagery is located. Required: several models condition on
+        geometry (e.g. lat/lon or GSD embeddings), and embedding metadata
+        records it.
+    temporal : TemporalSpec or None
+        When the imagery was acquired, for models that condition on time.
+    modality : str or None
+        Optional modality selector for models with multiple input branches;
+        the declaration is matched against that modality's sensor profile.
+    output : OutputSpec
+        Output representation policy.
+    device : str
+        Target inference device.
+    **model_kwargs
+        Model-specific settings, as in :func:`get_embedding`.
+
+    Returns
+    -------
+    Embedding
+        Normalized embedding; ``meta['user_input']`` records the declaration
+        and the channel selection that was fed to the model.
+
+    Raises
+    ------
+    ModelError
+        If the model cannot take user data (precomputed / no input sensor) or
+        the declaration does not satisfy the model's sensor.
+    SpecError
+        If *data*, *spatial*, or *temporal* fail validation.
+
+    Examples
+    --------
+    >>> emb = get_embedding_from_data(
+    ...     "galileo",
+    ...     data=UserData(data=chw, collection="s2", bands=("B2", "B3", "B4", ...)),
+    ...     spatial=PointBuffer(lon=-88.2, lat=40.1, buffer_m=640),
+    ...     temporal=TemporalSpec.year(2022),
+    ... )
+    """
+    return get_embeddings_batch_from_data(
+        model,
+        datas=[data],
+        spatials=[spatial],
+        temporal=temporal,
+        modality=modality,
+        output=output,
+        device=device,
+        **model_kwargs,
+    )[0]
+
+
+def get_embeddings_batch_from_data(
+    model: str,
+    *,
+    datas: list[UserData],
+    spatials: list[SpatialSpec],
+    temporal: TemporalSpec | None = None,
+    modality: str | None = None,
+    output: OutputSpec = OutputSpec.pooled(),
+    device: str = "auto",
+    **model_kwargs: Any,
+) -> list[Embedding]:
+    """Compute embeddings for multiple user-provided inputs.
+
+    Batch counterpart of :func:`get_embedding_from_data`; each item is
+    matched independently, so items may declare different band orders as long
+    as every declaration satisfies the model.
+
+    Parameters
+    ----------
+    model : str
+        Model identifier or alias.
+    datas : list[UserData]
+        User imagery declarations, one per item.
+    spatials : list[SpatialSpec]
+        Locations aligned with *datas*.
+    temporal : TemporalSpec or None
+        Shared acquisition-time filter.
+    modality : str or None
+        Optional modality selector.
+    output : OutputSpec
+        Output representation policy.
+    device : str
+        Target inference device.
+    **model_kwargs
+        Model-specific settings, as in :func:`get_embedding`.
+
+    Returns
+    -------
+    list[Embedding]
+        Embeddings in the same order as *datas*.
+
+    Raises
+    ------
+    ModelError
+        If lengths mismatch, the model cannot take user data, or any
+        declaration does not satisfy the model's sensor.
+    SpecError
+        If any spec fails validation.
+    """
+    model_config = model_kwargs or None
+    model_n = _normalize_model_name(model)
+    if not isinstance(datas, list) or len(datas) == 0:
+        raise ModelError("datas must be a non-empty list[UserData].")
+    if len(datas) != len(spatials):
+        raise ModelError(f"datas/spatials length mismatch: {len(datas)} != {len(spatials)}")
+    _validate_spatial_list(spatials=spatials, temporal=temporal, output=output)
+    sensor_eff = _resolve_user_data_sensor(model_n, modality=modality)
+    arrays, metas = _prepare_user_data_inputs(model_n, datas, sensor_eff)
+    return _run_user_input_request(
+        model_n=model_n,
+        spatials=spatials,
+        input_arrays=arrays,
+        temporal=temporal,
+        sensor=sensor_eff,
+        model_config=model_config,
+        output=output,
+        device=device,
+        input_metas=metas,
+    )
+
+
+def list_models_for_data(data: UserData) -> list[dict[str, Any]]:
+    """Report which catalog models a user-data declaration can serve.
+
+    Runs the same matching as :func:`get_embedding_from_data` against every
+    model in the catalog without loading any weights.
+
+    Parameters
+    ----------
+    data : UserData
+        The imagery declaration to check. ``data.data`` may be a small dummy
+        array; only its shape is validated here.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        One entry per catalog model, sorted by name, with keys ``model``
+        (str), ``compatible`` (bool), ``bands_used`` (the model's band order,
+        or ``None``), and ``reason`` (why the model is incompatible, or
+        ``None``).
+
+    Examples
+    --------
+    >>> report = list_models_for_data(my_s2_declaration)
+    >>> [r["model"] for r in report if r["compatible"]]
+    """
+    data.validate()
+    report: list[dict[str, Any]] = []
+    for model_id in sorted(MODEL_SPECS.keys()):
+        entry: dict[str, Any] = {
+            "model": model_id,
+            "compatible": False,
+            "bands_used": None,
+            "reason": None,
+        }
+        try:
+            sensor = _resolve_user_data_sensor(model_id, modality=None)
+            _match_user_data_to_sensor(data, sensor, model_name=model_id)
+        except ModelError as exc:
+            entry["reason"] = str(exc)
+        else:
+            entry["compatible"] = True
+            entry["bands_used"] = list(sensor.bands)
+        report.append(entry)
+    return report
 
 
 # -----------------------------------------------------------------------------

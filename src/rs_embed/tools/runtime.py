@@ -802,3 +802,95 @@ def run_embedding_request(
         ctx=ctx,
         output=output,
     )
+
+
+def run_user_input_request(
+    *,
+    model_n: str,
+    spatials: list[SpatialSpec],
+    input_arrays: list[np.ndarray],
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec,
+    model_config: dict[str, Any] | None,
+    output: OutputSpec,
+    device: str,
+    input_metas: list[dict[str, Any]] | None = None,
+) -> list[Embedding]:
+    """Run an embedding request over user-provided inputs (no provider fetch).
+
+    *input_arrays* must already be matched and sliced to the model's band
+    order for *sensor* (see ``tools.user_data.match_user_data_to_sensor``);
+    this function only dispatches them through the embedder's prefetched-input
+    path. ``backend="auto"`` is passed through so the cached embedder instance
+    is shared with the default fetch path, but with an input array present no
+    embedder resolves a provider, so no provider auth is required.
+
+    Parameters
+    ----------
+    model_n : str
+        Canonical model name.
+    spatials : list[SpatialSpec]
+        Spatial metadata per input (location context for models that condition
+        on geometry, and for embedding meta).
+    input_arrays : list[np.ndarray]
+        Model-band-order arrays aligned with *spatials*.
+    temporal : TemporalSpec or None
+        Temporal metadata for models that condition on time.
+    sensor : SensorSpec
+        The model's resolved input sensor (band order authority).
+    model_config : dict or None
+        Optional model-specific settings.
+    output : OutputSpec
+        Requested output layout.
+    device : str
+        Target inference device.
+    input_metas : list of dict or None
+        Optional per-item provenance recorded as ``meta['user_input']``.
+
+    Returns
+    -------
+    list[Embedding]
+        Embeddings aligned with *spatials*.
+
+    Raises
+    ------
+    ModelError
+        If lengths mismatch or the embedder cannot take prefetched inputs.
+    """
+    if len(spatials) != len(input_arrays):
+        raise ModelError(
+            f"spatials/input arrays length mismatch: {len(spatials)} != {len(input_arrays)}"
+        )
+    device_n = normalize_device_name(device)
+    embedder, lock = get_embedder_bundle_cached(model_n, "auto", device_n)
+    if not embedder_accepts_input_chw(type(embedder)):
+        raise ModelError(
+            f"Model '{model_n}' does not accept prefetched inputs (input_chw); "
+            "it cannot embed user-provided data."
+        )
+    assert_supported(embedder, backend="auto", output=output, temporal=temporal)
+
+    kwargs: dict[str, Any] = {
+        "spatials": spatials,
+        "input_chws": input_arrays,
+        "temporal": temporal,
+        "sensor": sensor,
+        "output": output,
+        "backend": "auto",
+        "device": device_n,
+    }
+    if model_config is not None:
+        require_model_config_support(
+            embedder=embedder,
+            model_config=model_config,
+            method_name="get_embeddings_batch_from_inputs",
+        )
+        kwargs["model_config"] = model_config
+    with lock:
+        embs = embedder.get_embeddings_batch_from_inputs(**kwargs)
+    embs = [normalize_embedding_output(emb=emb, output=output) for emb in embs]
+    if input_metas is not None:
+        for emb, item_meta in zip(embs, input_metas, strict=False):
+            if item_meta and isinstance(getattr(emb, "meta", None), dict):
+                emb.meta.setdefault("user_input", item_meta)
+    return embs
