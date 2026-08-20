@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Added
+
+- **Bring-your-own-data API** — compute embeddings from imagery you already have, without any provider fetch or provider auth. `UserData(data, collection, bands, scale_m=None)` declares what an array is (collection + one band name per channel, raw provider units, `[C,H,W]` or `[T,C,H,W]`); `get_embedding_from_data` / `get_embeddings_batch_from_data` match the declaration against the model's input sensor — superset band sets are sliced and reordered into model band order automatically, while a collection mismatch or missing band refuses the request with a `ModelError` naming what is missing (precomputed models always refuse). `list_models_for_data` reports, without loading weights, which catalog models a declaration can serve and why the rest cannot. Matching shares the provider band-alias vocabulary (`"RED"` → `"B4"`, `"NIR_NARROW"` → `"B8A"`), collection shorthand aliases (`"s2"`, `"s1"`) resolve to full ids, and S2 declarations whose values look already normalized (max ≤ 1.5) warn about the raw-DN contract. Results carry `meta["user_input"]` provenance (declared bands, bands used, channel indices). See [docs/user_data.md](docs/user_data.md).
+
 ## [0.2.1] — 2026-07-27
 
 An export-correctness fix for time-series models plus a new input-inspection API. Multi-model exports that combined a temporal model (olmoearth/agrifm/anysat/galileo/prithvi) with other models on a shared collection should be re-exported (see Fixed).
