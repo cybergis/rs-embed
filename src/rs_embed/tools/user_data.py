@@ -20,7 +20,7 @@ import warnings
 
 import numpy as np
 
-from ..core.errors import ModelError
+from ..core.errors import ModelError, SpecError
 from ..core.specs import SensorSpec
 from ..core.types import UserData
 from ..providers.gee_utils import resolve_band_aliases
@@ -43,6 +43,26 @@ _COLLECTION_ALIASES: dict[str, str] = {
 # only for the best-effort "looks already normalized" warning below.
 _DN_0_10000_COLLECTION_MARKERS: tuple[str, ...] = ("COPERNICUS/S2",)
 
+# Canonical full band order per collection, used when a declaration omits
+# ``bands``. Only collections with one unambiguous canonical order belong
+# here; a declaration whose channel order differs must name its bands.
+_DEFAULT_BANDS_BY_COLLECTION: dict[str, tuple[str, ...]] = {
+    "COPERNICUS/S2_SR_HARMONIZED": (
+        "B1",
+        "B2",
+        "B3",
+        "B4",
+        "B5",
+        "B6",
+        "B7",
+        "B8",
+        "B8A",
+        "B9",
+        "B11",
+        "B12",
+    ),
+}
+
 
 def normalize_collection_id(collection: str) -> str:
     """Resolve a user-facing collection alias to a full collection id."""
@@ -55,6 +75,42 @@ def canonical_band_names(collection_id: str, bands: tuple[str, ...]) -> tuple[st
     """Alias-resolve band names and fold case for comparison."""
     resolved = resolve_band_aliases(collection_id, tuple(str(b) for b in bands))
     return tuple(b.upper() for b in resolved)
+
+
+def resolve_declared_bands(data: UserData) -> tuple[str, ...]:
+    """Return the band names a declaration covers, defaulting when omitted.
+
+    A ``bands=None`` declaration means "the collection's canonical full band
+    order"; that default only exists for collections listed in
+    ``_DEFAULT_BANDS_BY_COLLECTION`` and only when the array's channel count
+    matches exactly — anything else must name its bands, because guessing
+    band identity from channel count is precisely the silent-wrongness this
+    layer exists to refuse.
+
+    Raises
+    ------
+    SpecError
+        If ``bands`` is omitted and the collection has no canonical order,
+        or the channel count does not match that order.
+    """
+    if data.bands is not None:
+        return tuple(data.bands)
+    collection_id = normalize_collection_id(data.collection)
+    default = _DEFAULT_BANDS_BY_COLLECTION.get(collection_id.upper())
+    if default is None:
+        raise SpecError(
+            f"UserData.bands was omitted, but collection '{data.collection}' "
+            "has no canonical band order to default to; declare one band "
+            "name per channel."
+        )
+    channels = int(np.asarray(data.data).shape[-3])
+    if channels != len(default):
+        raise SpecError(
+            f"UserData.bands was omitted; the canonical order for "
+            f"'{collection_id}' has {len(default)} bands {list(default)}, but "
+            f"the array has {channels} channels. Declare bands explicitly."
+        )
+    return default
 
 
 def match_user_data_to_sensor(
@@ -87,6 +143,9 @@ def match_user_data_to_sensor(
     ModelError
         If the declared collection does not match the model's, the
         declaration repeats a band name, or a required band is missing.
+    SpecError
+        If ``bands`` was omitted and no canonical default applies (see
+        :func:`resolve_declared_bands`).
     """
     user_collection = normalize_collection_id(data.collection)
     model_collection = normalize_collection_id(sensor.collection)
@@ -98,7 +157,7 @@ def match_user_data_to_sensor(
             "this data cannot serve the model."
         )
 
-    user_bands = canonical_band_names(user_collection, tuple(data.bands))
+    user_bands = canonical_band_names(user_collection, resolve_declared_bands(data))
     if len(set(user_bands)) != len(user_bands):
         dupes = sorted({b for b in user_bands if user_bands.count(b) > 1})
         raise ModelError(

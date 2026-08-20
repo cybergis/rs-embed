@@ -8,17 +8,19 @@ import numpy as np
 import pytest
 
 from rs_embed.core.errors import ModelError, SpecError
-from rs_embed.core.specs import SensorSpec
+from rs_embed.core.specs import PointBuffer, SensorSpec
 from rs_embed.core.types import UserData
 from rs_embed.providers.prefetch_plan import select_prefetched_channels
 from rs_embed.tools.user_data import (
     canonical_band_names,
     match_user_data_to_sensor,
     normalize_collection_id,
+    resolve_declared_bands,
     warn_on_suspicious_value_range,
 )
 
 S2 = "COPERNICUS/S2_SR_HARMONIZED"
+_POINT = PointBuffer(lon=-88.2, lat=40.1, buffer_m=320)
 
 
 def _user_data(bands, *, collection=S2, shape_hw=(4, 4), tchw=False, fill=None):
@@ -29,7 +31,7 @@ def _user_data(bands, *, collection=S2, shape_hw=(4, 4), tchw=False, fill=None):
     else:
         base = np.full((c, *shape_hw), fill, dtype=np.float32)
     data = np.repeat(base[None, ...], 2, axis=0) if tchw else base
-    return UserData(data=data, collection=collection, bands=tuple(bands))
+    return UserData(data=data, collection=collection, spatial=_POINT, bands=tuple(bands))
 
 
 def _sensor(bands, *, collection=S2):
@@ -45,20 +47,39 @@ def test_validate_accepts_chw_and_tchw():
 
 
 def test_validate_rejects_channel_band_mismatch():
-    bad = UserData(data=np.zeros((3, 4, 4), dtype=np.float32), collection=S2, bands=("B2", "B3"))
+    bad = UserData(
+        data=np.zeros((3, 4, 4), dtype=np.float32),
+        collection=S2,
+        spatial=_POINT,
+        bands=("B2", "B3"),
+    )
     with pytest.raises(SpecError, match="3 channels"):
         bad.validate()
 
 
+def test_validate_accepts_missing_spatial():
+    # spatial is optional at the declaration level; georef-conditioned models
+    # refuse at request time instead (never fabricate coordinates).
+    UserData(
+        data=np.zeros((2, 4, 4), dtype=np.float32),
+        collection=S2,
+        bands=("B2", "B3"),
+    ).validate()
+
+
 def test_validate_rejects_bad_ndim_and_empty_fields():
     with pytest.raises(SpecError, match=r"\[C,H,W\]"):
-        UserData(data=np.zeros((4, 4)), collection=S2, bands=("B2",)).validate()
+        UserData(data=np.zeros((4, 4)), collection=S2, spatial=_POINT, bands=("B2",)).validate()
     with pytest.raises(SpecError, match="collection"):
-        UserData(data=np.zeros((1, 4, 4)), collection="  ", bands=("B2",)).validate()
+        UserData(
+            data=np.zeros((1, 4, 4)), collection="  ", spatial=_POINT, bands=("B2",)
+        ).validate()
     with pytest.raises(SpecError, match="bands"):
-        UserData(data=np.zeros((1, 4, 4)), collection=S2, bands=()).validate()
+        UserData(data=np.zeros((1, 4, 4)), collection=S2, spatial=_POINT, bands=()).validate()
     with pytest.raises(SpecError, match="scale_m"):
-        UserData(data=np.zeros((1, 4, 4)), collection=S2, bands=("B2",), scale_m=0).validate()
+        UserData(
+            data=np.zeros((1, 4, 4)), collection=S2, spatial=_POINT, bands=("B2",), scale_m=0
+        ).validate()
 
 
 # ── collection + band normalization ───────────────────────────────
@@ -76,6 +97,43 @@ def test_collection_aliases_resolve_and_full_ids_pass_through():
 def test_canonical_band_names_resolve_aliases_and_case():
     assert canonical_band_names(S2, ("RED", "green", "b2")) == ("B4", "B3", "B2")
     assert canonical_band_names(S2, ("SWIR_1", "NIR_NARROW")) == ("B11", "B8A")
+
+
+# ── default band order (bands=None) ────────────────────────────────
+
+_S2_CANONICAL_12 = ("B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12")
+
+
+def test_omitted_bands_default_to_canonical_s2_order():
+    data = UserData(
+        data=np.zeros((12, 4, 4), dtype=np.float32),
+        collection="s2",
+        spatial=_POINT,
+    )
+    data.validate()
+    assert resolve_declared_bands(data) == _S2_CANONICAL_12
+    idx = match_user_data_to_sensor(data, _sensor(["B4", "B3", "B2"]), model_name="m")
+    assert idx == (3, 2, 1)
+
+
+def test_omitted_bands_with_wrong_channel_count_refuse():
+    data = UserData(
+        data=np.zeros((10, 4, 4), dtype=np.float32),
+        collection="s2",
+        spatial=_POINT,
+    )
+    with pytest.raises(SpecError, match="Declare bands explicitly"):
+        resolve_declared_bands(data)
+
+
+def test_omitted_bands_without_canonical_order_refuse():
+    data = UserData(
+        data=np.zeros((2, 4, 4), dtype=np.float32),
+        collection="s1",
+        spatial=_POINT,
+    )
+    with pytest.raises(SpecError, match="no canonical band order"):
+        resolve_declared_bands(data)
 
 
 # ── matching ───────────────────────────────────────────────────────
@@ -137,6 +195,7 @@ def test_duplicate_user_bands_refuse():
     data = UserData(
         data=np.zeros((3, 4, 4), dtype=np.float32),
         collection=S2,
+        spatial=_POINT,
         bands=("B2", "RED", "B4"),  # RED aliases to B4 -> duplicate
     )
     with pytest.raises(ModelError, match="duplicate"):
