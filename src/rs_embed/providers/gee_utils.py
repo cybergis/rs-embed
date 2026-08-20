@@ -269,7 +269,12 @@ def _gee_error_message(exc: Exception) -> str:
 # ── Band alias resolution ─────────────────────────────────────────────────────
 
 
-def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str, ...]:
+def resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str, ...]:
+    """Resolve human-friendly band aliases to collection-native band names.
+
+    Pure lookup over static alias tables (no provider access); unknown names
+    and unknown collections pass through unchanged.
+    """
     if not bands:
         return bands
     c = (collection or "").upper()
@@ -286,6 +291,10 @@ def _resolve_band_aliases(collection: str, bands: tuple[str, ...]) -> tuple[str,
     else:
         amap = {}
     return tuple(amap.get((b or "").upper(), b) for b in bands)
+
+
+# Backwards-compatible alias kept for existing imports/tests.
+_resolve_band_aliases = resolve_band_aliases
 
 
 # ── Cloud-cover filtering ─────────────────────────────────────────────────────

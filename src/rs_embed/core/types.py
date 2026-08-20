@@ -12,6 +12,7 @@ from typing import Any
 
 import numpy as np
 
+from .errors import SpecError
 from .specs import FetchSpec, InputPrepSpec, SensorSpec
 
 # ── Enums ──────────────────────────────────────────────────────────
@@ -141,6 +142,69 @@ class FetchResult:
 
     data: np.ndarray
     meta: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class UserData:
+    """User-provided imagery with a declaration of what the pixels are.
+
+    The bring-your-own-data entrypoints (:func:`rs_embed.get_embedding_from_data`
+    and friends) match this declaration against a model's input sensor and
+    refuse the request when the data cannot satisfy it — so the declaration,
+    not the array shape, is the contract.
+
+    Values must be raw provider units for *collection* (e.g. Sentinel-2 L2A
+    surface-reflectance DN in ``0..10000``), exactly what a provider fetch
+    would return; per-model normalization stays the embedder's job.
+
+    Attributes
+    ----------
+    data : np.ndarray
+        Pixel array, ``[C,H,W]`` or ``[T,C,H,W]`` with channels in *bands*
+        order. Multi-frame arrays are only meaningful for time-series models;
+        single-frame models reject them.
+    collection : str
+        Provider collection the pixels came from, e.g.
+        ``"COPERNICUS/S2_SR_HARMONIZED"`` or a short alias like ``"s2"``.
+    bands : tuple[str, ...]
+        Band name per channel, e.g. ``("B2", "B3", "B4", ...)``. Aliases like
+        ``"RED"`` resolve the same way provider fetches resolve them.
+    scale_m : int or None
+        Optional nominal pixel size in meters, recorded as provenance.
+    """
+
+    data: np.ndarray
+    collection: str
+    bands: tuple[str, ...]
+    scale_m: int | None = None
+
+    def validate(self) -> None:
+        """Validate the declaration's internal consistency.
+
+        Raises
+        ------
+        SpecError
+            If the collection/bands declaration is empty or malformed, or the
+            array is not CHW/TCHW with one channel per declared band.
+        """
+        if not str(self.collection or "").strip():
+            raise SpecError("UserData.collection must be a non-empty collection id or alias.")
+        if not self.bands or any(not str(b or "").strip() for b in self.bands):
+            raise SpecError("UserData.bands must be a non-empty tuple of band names.")
+        arr = np.asarray(self.data)
+        if arr.ndim not in (3, 4):
+            raise SpecError(
+                "UserData.data must be [C,H,W] or [T,C,H,W], "
+                f"got shape={tuple(int(v) for v in arr.shape)}."
+            )
+        channels = int(arr.shape[-3])
+        if channels != len(self.bands):
+            raise SpecError(
+                f"UserData.data has {channels} channels but declares "
+                f"{len(self.bands)} bands; one band name per channel is required."
+            )
+        if self.scale_m is not None and int(self.scale_m) <= 0:
+            raise SpecError("UserData.scale_m must be positive when provided.")
 
 
 # ── Typed results ──────────────────────────────────────────────────
