@@ -145,8 +145,7 @@ _user_overridable_params = {
 
 def _format_overridable_params() -> str:
     return ", ".join(
-        f"{key}: {_user_overridable_params[key]}"
-        for key in sorted(_user_overridable_params)
+        f"{key}: {_user_overridable_params[key]}" for key in sorted(_user_overridable_params)
     )
 
 
@@ -220,9 +219,7 @@ lookup_band = {
     "S9_BT_IN": "S3:S9_BT_in",
 }
 
-AVAILABLE_GROUPS = {
-    f"group{i}": group for i, group in enumerate(_default_input_params["groups"])
-}
+AVAILABLE_GROUPS = {f"group{i}": group for i, group in enumerate(_default_input_params["groups"])}
 
 name_mapping = {
     "thor_vit_base_encoder_alibi_patch_size_embed_v1": "thor_v1_base",
@@ -302,9 +299,7 @@ def process_thor_bands(
             raise NotImplementedError(f"This band is not implemented in THOR: {band_name}") from exc
 
     if any(thor_bands.count(b) > 1 for b in set(thor_bands)):
-        duplicates = [
-            (b, bands[i]) for i, b in enumerate(thor_bands) if thor_bands.count(b) > 1
-        ]
+        duplicates = [(b, bands[i]) for i, b in enumerate(thor_bands) if thor_bands.count(b) > 1]
         msg = (
             "Duplicate bands are not allowed/implemented. "
             "Make sure to only use one sigma0 product. "
@@ -342,10 +337,9 @@ class THOREncoderWrapper(nn.Module):
         self.groups = self.model.get_available_groups(dict.fromkeys(self.bands, None))
 
         AVAILABLE_GROUPS.clear()
-        AVAILABLE_GROUPS.update({
-            f"group{i}": group
-            for i, group in enumerate(_default_input_params["groups"])
-        })
+        AVAILABLE_GROUPS.update(
+            {f"group{i}": group for i, group in enumerate(_default_input_params["groups"])}
+        )
         for group_name in list(AVAILABLE_GROUPS.keys()):
             if group_name not in self.groups:
                 del AVAILABLE_GROUPS[group_name]
@@ -527,10 +521,7 @@ def load_thor_model(
     if input_params:
         _ensure_allowed_input_params(input_params.keys())
         for key, value in input_params.items():
-            if (
-                key in model_config["input_params"]
-                and model_config["input_params"][key] != value
-            ):
+            if key in model_config["input_params"] and model_config["input_params"][key] != value:
                 warnings.warn(
                     f"Overwriting input param {key} for model {model_checkpoint_key} "
                     f"from {model_config['input_params'][key]} to {value}",
@@ -539,17 +530,17 @@ def load_thor_model(
             model_config["input_params"][key] = value
 
     if pretrained and model_config["ckpt"] is None:
-        from huggingface_hub import hf_hub_download
+        from ..shared import hf_hub_download_cache_first
 
         variant = name_mapping[model_name]
-        model_config["ckpt"] = hf_hub_download(
+        model_config["ckpt"] = hf_hub_download_cache_first(
             repo_id=pretrained_weights[variant]["hf_hub_id"],
             filename=pretrained_weights[variant]["hf_hub_filename"],
         )
 
-    model = _get_vendored_model_registry().build(
-        model_cfgs={model_checkpoint_key: model_config}
-    )[model_checkpoint_key]
+    model = _get_vendored_model_registry().build(model_cfgs={model_checkpoint_key: model_config})[
+        model_checkpoint_key
+    ]
     return THOREncoderWrapper(
         model=model,
         bands=bands,

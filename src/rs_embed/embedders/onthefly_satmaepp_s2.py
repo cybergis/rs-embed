@@ -41,7 +41,13 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import base_meta, temporal_to_range
-from .shared import grid_to_dataarray, import_xarray, resolve_hf_cache_dir, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    hf_hub_download_cache_first,
+    import_xarray,
+    resolve_hf_cache_dir,
+    verify_loaded_params,
+)
 
 
 def ensure_torch() -> None:
@@ -223,14 +229,9 @@ def _ensure_satmaepp_s2_assets(
     ckpt_file: str,
     cache_dir: str | None,
 ) -> str:
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as e:
-        raise ModelError(
-            "SatMAE++ Sentinel checkpoint download requires huggingface_hub. Install: pip install huggingface_hub"
-        ) from e
-
-    ckpt_path = hf_hub_download(repo_id=ckpt_repo, filename=ckpt_file, cache_dir=cache_dir)
+    ckpt_path = hf_hub_download_cache_first(
+        repo_id=ckpt_repo, filename=ckpt_file, cache_dir=cache_dir
+    )
     if not os.path.exists(ckpt_path):
         raise ModelError(f"Failed to download checkpoint {ckpt_repo}/{ckpt_file}")
 

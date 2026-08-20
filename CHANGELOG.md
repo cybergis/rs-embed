@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- **Warm-cache model loading no longer touches the Hugging Face Hub.** Every checkpoint download (`hf_hub_download`/`snapshot_download` across all embedders, plus the rshf `from_pretrained` loaders for satmae/scalemae/satmaepp) now resolves against the local HF cache first and only goes online on a cache miss. Previously each fresh process issued a HEAD request to huggingface.co even when weights were fully cached, so Hub outages, 429 rate limits, or blocked networks froze `get_embedding` indefinitely — hit hardest by agent integrations that spawn a new process per call. Consequence of cache-first: cached weights are never re-checked against the Hub; delete the cached file to force a re-download. Shared helpers: `hf_hub_download_cache_first` / `snapshot_download_cache_first` / `resolve_pretrained_source_cache_first` in `embedders/shared.py`.
+
 ## [0.2.1] — 2026-07-27
 
 An export-correctness fix for time-series models plus a new input-inspection API. Multi-model exports that combined a temporal model (olmoearth/agrifm/anysat/galileo/prithvi) with other models on a shared collection should be re-exported (see Fixed).

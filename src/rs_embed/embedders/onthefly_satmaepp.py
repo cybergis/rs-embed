@@ -40,7 +40,13 @@ from .meta import base_meta, temporal_to_range
 from .onthefly_satmaepp_s2 import (
     SatMAEPPSentinel10Embedder,
 )
-from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw
+from .shared import (
+    grid_to_dataarray,
+    pool_from_tokens,
+    resolve_pretrained_source_cache_first,
+    snapshot_download_cache_first,
+    tokens_to_grid_dhw,
+)
 
 
 def ensure_torch() -> None:
@@ -269,20 +275,20 @@ def _unwrap_satmaepp_state_dict(payload: Any) -> dict[str, Any]:
 
 
 def _load_satmaepp_from_snapshot(*, SatMAEPP: Any, model_id: str, dev: str):
-    try:
-        from huggingface_hub import snapshot_download
-    except Exception as e:
-        raise ModelError(
-            "SatMAE++ fallback loading requires huggingface_hub. Install: pip install huggingface_hub"
-        ) from e
-
     ensure_torch()
     import torch
 
     snap_dir = Path(
-        snapshot_download(
+        snapshot_download_cache_first(
             repo_id=model_id,
             allow_patterns=["config.json", "pytorch_model.bin", "model.safetensors"],
+            validate=lambda d: (
+                os.path.isfile(os.path.join(d, "config.json"))
+                and any(
+                    os.path.isfile(os.path.join(d, w))
+                    for w in ("pytorch_model.bin", "model.safetensors")
+                )
+            ),
         )
     )
     config_path = snap_dir / "config.json"
@@ -330,7 +336,7 @@ def _load_satmaepp_cached(model_id: str, dev: str):
         raise ModelError("SatMAE++ requires rshf. Install: pip install rshf") from e
 
     try:
-        model = SatMAEPP.from_pretrained(model_id)
+        model = SatMAEPP.from_pretrained(resolve_pretrained_source_cache_first(model_id))
         load_mode = "from_pretrained"
     except AttributeError as e:
         # Some rshf / transformers combinations instantiate a generic

@@ -45,7 +45,13 @@ from ..tools.shape import (
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .meta import base_meta, temporal_to_range
-from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    pool_from_tokens,
+    snapshot_download_cache_first,
+    tokens_to_grid_dhw,
+    verify_loaded_params,
+)
 
 
 def ensure_torch() -> None:
@@ -606,20 +612,17 @@ def _resolve_ckpt(
         ckpt_file = _find_ckpt_file(local_ckpt)
         return ckpt_file, "local"
 
-    try:
-        from huggingface_hub import snapshot_download
-    except Exception as e:
-        raise ModelError(
-            "SatVision-TOA requires huggingface_hub when RS_EMBED_SATVISION_TOA_CKPT is not set. "
-            "Install: pip install huggingface_hub"
-        ) from e
-
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+
+    def _has_ckpt(d: str) -> bool:
+        return any(fn.lower().endswith((".pth", ".pt", ".ckpt", ".bin")) for fn in os.listdir(d))
+
     try:
-        snap = snapshot_download(
+        snap = snapshot_download_cache_first(
             repo_id=model_id,
             token=token,
             local_files_only=not bool(auto_download),
+            validate=_has_ckpt,
             allow_patterns=[
                 "*.pth",
                 "*.pt",

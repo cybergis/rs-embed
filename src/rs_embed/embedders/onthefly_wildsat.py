@@ -48,7 +48,13 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    hf_hub_download_cache_first,
+    pool_from_tokens,
+    tokens_to_grid_dhw,
+    verify_loaded_params,
+)
 
 
 def ensure_torch() -> None:
@@ -155,15 +161,7 @@ def _download_wildsat_ckpt_from_hf(
     cache_dir: str | None,
     min_bytes: int,
 ) -> str:
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as e:
-        raise ModelError(
-            "WildSAT auto-download from Hugging Face requires huggingface_hub. "
-            "Install: pip install huggingface_hub"
-        ) from e
-
-    p = hf_hub_download(repo_id=repo_id, filename=filename, cache_dir=cache_dir)
+    p = hf_hub_download_cache_first(repo_id=repo_id, filename=filename, cache_dir=cache_dir)
     if not os.path.exists(p):
         raise ModelError(f"Failed to download WildSAT checkpoint: {repo_id}/{filename}")
     sz = os.path.getsize(p)

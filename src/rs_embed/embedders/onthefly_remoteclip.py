@@ -47,7 +47,12 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, resolve_hf_cache_dir, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    resolve_hf_cache_dir,
+    snapshot_download_cache_first,
+    verify_loaded_params,
+)
 
 _DEFAULT_REMOTECLIP_ID = "MVRL/remote-clip-vit-base-patch32"
 
@@ -137,25 +142,12 @@ def _ensure_hf_weights(
                 )
         return repo_id_or_path, wf
 
-    try:
-        from huggingface_hub import snapshot_download
-    except Exception as e:
-        raise ModelError(
-            "Install huggingface_hub to download/verify weights: pip install huggingface_hub"
-        ) from e
-
-    if auto_download:
-        local_dir = snapshot_download(
-            repo_id=repo_id_or_path,
-            cache_dir=cache_dir,
-            local_files_only=False,
-        )
-    else:
-        local_dir = snapshot_download(
-            repo_id=repo_id_or_path,
-            cache_dir=cache_dir,
-            local_files_only=True,
-        )
+    local_dir = snapshot_download_cache_first(
+        repo_id=repo_id_or_path,
+        cache_dir=cache_dir,
+        local_files_only=not auto_download,
+        validate=lambda d: _find_weight_file(d) is not None,
+    )
 
     wf = _find_weight_file(local_dir)
     if require_pretrained:
