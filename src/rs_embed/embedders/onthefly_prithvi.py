@@ -53,7 +53,13 @@ from ..tools.temporal import temporal_frame_midpoints as _temporal_frame_midpoin
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import base_meta, temporal_midpoint_str, temporal_to_range
-from .shared import grid_to_dataarray, import_xarray, pool_from_tokens, tokens_to_grid_dhw
+from .shared import (
+    grid_to_dataarray,
+    hf_hub_download_cache_first,
+    import_xarray,
+    pool_from_tokens,
+    tokens_to_grid_dhw,
+)
 
 
 def ensure_torch() -> None:
@@ -355,14 +361,7 @@ def _torch_load_checkpoint_compat(path: str):
 
 @lru_cache(maxsize=16)
 def _download_prithvi_file(repo_id: str, filename: str, cache_dir: str | None) -> str:
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as e:
-        raise ModelError(
-            "Prithvi checkpoint download requires huggingface_hub. "
-            "Install: pip install huggingface_hub"
-        ) from e
-    return str(hf_hub_download(repo_id=repo_id, filename=filename, cache_dir=cache_dir))
+    return hf_hub_download_cache_first(repo_id=repo_id, filename=filename, cache_dir=cache_dir)
 
 
 def _load_prithvi_module():

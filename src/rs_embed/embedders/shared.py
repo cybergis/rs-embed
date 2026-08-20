@@ -96,6 +96,89 @@ def resolve_hf_cache_dir() -> str | None:
     )
 
 
+def import_hf_hub():
+    """Import huggingface_hub or raise ModelError with an install hint."""
+    try:
+        import huggingface_hub
+    except Exception as e:
+        raise ModelError(
+            "Downloading model assets from Hugging Face requires huggingface_hub. "
+            "Install: pip install huggingface_hub"
+        ) from e
+    return huggingface_hub
+
+
+def hf_hub_download_cache_first(**kwargs: Any) -> str:
+    """``hf_hub_download`` that tries the local cache before touching the network.
+
+    A plain ``hf_hub_download`` issues a HEAD request to huggingface.co even on a
+    warm cache (to resolve a branch revision to a commit), so every fresh process
+    blocks on Hub availability, rate limits, and cache file locks. Trying
+    ``local_files_only=True`` first makes warm-cache loads fully offline; the
+    network path only runs on a cache miss, where any real error surfaces as
+    before. Cached files are never re-checked against the Hub — delete the cached
+    file (or pass ``force_download=True`` at a call site) to force a re-download.
+    """
+    hub = import_hf_hub()
+    try:
+        return str(hub.hf_hub_download(local_files_only=True, **kwargs))
+    except Exception:
+        return str(hub.hf_hub_download(local_files_only=False, **kwargs))
+
+
+def snapshot_download_cache_first(
+    *, validate: Any = None, local_files_only: bool = False, **kwargs: Any
+) -> str:
+    """``snapshot_download`` with the same cache-first behavior as ``hf_hub_download_cache_first``.
+
+    With ``local_files_only=True`` the Hub returns a cached snapshot dir without
+    verifying it is complete, so callers that need specific files pass
+    ``validate`` (snap_dir -> bool); a snapshot failing validation falls back to
+    the network download. ``local_files_only=True`` keeps the offline-only
+    contract of the underlying call: cache miss raises instead of downloading.
+    """
+    hub = import_hf_hub()
+    try:
+        snap = str(hub.snapshot_download(local_files_only=True, **kwargs))
+    except Exception:
+        if local_files_only:
+            raise
+        snap = None
+    if snap is not None and (validate is None or validate(snap)):
+        return snap
+    if local_files_only:
+        raise ModelError(
+            f"Cached Hugging Face snapshot is incomplete for {kwargs.get('repo_id')!r} "
+            "and auto-download is disabled."
+        )
+    return str(hub.snapshot_download(local_files_only=False, **kwargs))
+
+
+def resolve_pretrained_source_cache_first(model_id: str, *, weight_names: tuple = ()) -> str:
+    """Map a HF repo id to its cached snapshot dir so ``from_pretrained`` stays offline.
+
+    ``Mixin.from_pretrained(repo_id)`` re-resolves config and weights against the
+    Hub on every fresh process even when cached. If a cached snapshot exists and
+    holds ``config.json`` plus one of ``weight_names`` (default: the standard
+    safetensors/bin names), return its path — ``from_pretrained`` accepts a local
+    dir and skips the network entirely. On any miss return ``model_id`` unchanged
+    so the caller keeps the exact previous online behavior.
+    """
+    if os.path.exists(model_id):
+        return model_id
+    try:
+        hub = import_hf_hub()
+        snap = str(hub.snapshot_download(repo_id=model_id, local_files_only=True))
+    except Exception:
+        return model_id
+    names = weight_names or ("model.safetensors", "pytorch_model.bin")
+    if os.path.isfile(os.path.join(snap, "config.json")) and any(
+        os.path.isfile(os.path.join(snap, n)) for n in names
+    ):
+        return snap
+    return model_id
+
+
 def normalize_s2(
     raw: np.ndarray,
     *,

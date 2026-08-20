@@ -35,7 +35,12 @@ from ..tools.shape import (
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import base_meta, temporal_to_range
-from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw
+from .shared import (
+    grid_to_dataarray,
+    pool_from_tokens,
+    resolve_pretrained_source_cache_first,
+    tokens_to_grid_dhw,
+)
 
 
 def ensure_torch() -> None:
@@ -229,7 +234,7 @@ def _load_scalemae_cached(model_id: str, dev: str):
             "ScaleMAE requires rshf with rshf.scalemae.ScaleMAE. Try: pip install -U rshf"
         ) from e
 
-    model = ScaleMAE.from_pretrained(model_id)
+    model = ScaleMAE.from_pretrained(resolve_pretrained_source_cache_first(model_id))
     model = _move_model_to_device(model, dev, model_name="ScaleMAE")
 
     meta = {"model_id": model_id, "device": dev}

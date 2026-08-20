@@ -57,7 +57,12 @@ from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, normalize_s2, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    normalize_s2,
+    snapshot_download_cache_first,
+    verify_loaded_params,
+)
 
 
 def ensure_torch() -> None:
@@ -330,20 +335,15 @@ def _download_galileo_model_folder(
     hf_repo: str,
     cache_dir: str | None,
 ) -> str:
-    try:
-        from huggingface_hub import snapshot_download
-    except Exception as e:
-        raise ModelError(
-            "Galileo auto-download requires huggingface_hub. Install: pip install huggingface_hub"
-        ) from e
-
-    snap = snapshot_download(
+    required = [
+        f"models/{model_size}/config.json",
+        f"models/{model_size}/encoder.pt",
+    ]
+    snap = snapshot_download_cache_first(
         repo_id=hf_repo,
         cache_dir=cache_dir,
-        allow_patterns=[
-            f"models/{model_size}/config.json",
-            f"models/{model_size}/encoder.pt",
-        ],
+        allow_patterns=required,
+        validate=lambda d: all(os.path.isfile(os.path.join(d, f)) for f in required),
     )
     model_root = os.path.join(snap, "models", str(model_size))
     cfg = os.path.join(model_root, "config.json")

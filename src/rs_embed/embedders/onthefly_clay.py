@@ -47,7 +47,7 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value as _model_config_value
 from .meta import build_meta, temporal_midpoint_str, temporal_to_range
-from .shared import grid_to_dataarray, verify_loaded_params
+from .shared import grid_to_dataarray, hf_hub_download_cache_first, verify_loaded_params
 
 # -----------------------------
 # Defaults: Sentinel-2 L2A (official Clay v1.5 metadata.yaml, sentinel-2-l2a)
@@ -305,7 +305,7 @@ def _resolve_clay_weights_path() -> tuple[str, str]:
     repo_id = os.environ.get("RS_EMBED_CLAY_HF_REPO_ID", _CLAY_HF_REPO_ID_DEFAULT)
     revision = os.environ.get("RS_EMBED_CLAY_HF_REVISION", _CLAY_HF_REVISION_DEFAULT)
     try:
-        from huggingface_hub import hf_hub_download, hf_hub_url
+        from huggingface_hub import hf_hub_url
     except Exception as e:
         raise ModelError(
             "Clay requires huggingface-hub to download weights, or set "
@@ -313,7 +313,9 @@ def _resolve_clay_weights_path() -> tuple[str, str]:
         ) from e
 
     try:
-        local_path = hf_hub_download(repo_id=repo_id, filename=filename, revision=revision)
+        local_path = hf_hub_download_cache_first(
+            repo_id=repo_id, filename=filename, revision=revision
+        )
         remote_url = hf_hub_url(repo_id=repo_id, filename=filename, revision=revision)
         return local_path, remote_url
     except Exception as e:
