@@ -912,6 +912,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
     # ROI to a square of real imagery (base.fetch_input for the single-frame
     # path; the multi-frame fetch_input below for multi) and crop back to the ROI.
     _requires_square_input = True
+    # The TL checkpoints condition on location coords derived from the request
+    # geometry, so a request without a spatial must be refused.
+    _requires_georef = True
     DEFAULT_MODEL_KEY = "prithvi_eo_v2_100_tl"
     DEFAULT_IMAGE_SIZE = 224
     DEFAULT_IMAGE_SCALE_M = 30  # notebook used 30m

@@ -53,6 +53,10 @@ class EmbedderBase:
     # The embedder performs its own spatial tiling based on request size;
     # API-side ``input_prep`` has no effect and a non-resize request warns.
     _manages_own_input_prep: bool = False
+    # The forward pass conditions on request geometry (e.g. lat/lon or GSD
+    # encodings derived from ``spatial``); requests without a spatial (such as
+    # ungeoreferenced user-provided data) must be refused, never fabricated.
+    _requires_georef: bool = False
 
     def __init__(self) -> None:
         self._providers: dict[str, ProviderBase] = {}
