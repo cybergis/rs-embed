@@ -922,7 +922,8 @@ class ClayEmbedder(EmbedderBase):
                 backend=backend,
                 device=device,
             )
-        self._get_provider(backend)
+        # Inputs are prefetched — same lazy-provider convention as the single
+        # path: never acquire a provider (and its live auth) without a fetch.
         t = temporal_to_range(temporal)
 
         ss = sensor or self._default_sensor()
