@@ -10,6 +10,7 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ### Fixed
 
+- **Warm-cache model loading no longer touches the Hugging Face Hub.** Every checkpoint download (`hf_hub_download`/`snapshot_download` across all embedders, plus the rshf `from_pretrained` loaders for satmae/scalemae/satmaepp) now resolves against the local HF cache first and only goes online on a cache miss. Previously each fresh process issued a HEAD request to huggingface.co even when weights were fully cached, so Hub outages, 429 rate limits, or blocked networks froze `get_embedding` indefinitely — hit hardest by agent integrations that spawn a new process per call. Consequence of cache-first: cached weights are never re-checked against the Hub; delete the cached file to force a re-download. Shared helpers: `hf_hub_download_cache_first` / `snapshot_download_cache_first` / `resolve_pretrained_source_cache_first` in `embedders/shared.py`.
 - **Clay batch prefetched-input path no longer acquires a provider.** `ClayEmbedder.get_embeddings_batch_from_inputs` unconditionally initialized the provider even though prefetched inputs never fetch — invisible in exports (the provider was already live) but it forced Earth Engine auth on machines without GEE when embedding user-provided data. The single-embedding path already followed the lazy-provider convention; the batch path now matches it, with a regression test.
 
 ### Added

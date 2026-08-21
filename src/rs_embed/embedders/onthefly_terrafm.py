@@ -50,7 +50,12 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, resolve_hf_cache_dir, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    hf_hub_download_cache_first,
+    resolve_hf_cache_dir,
+    verify_loaded_params,
+)
 
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"
@@ -243,12 +248,9 @@ def _ensure_hf_terrafm_weights(
     min_bytes: int = 50 * 1024 * 1024,
 ) -> str:
     """Returns local TerraFM weight path."""
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as e:
-        raise ModelError("Install huggingface_hub: pip install huggingface_hub") from e
-
-    wt_path = hf_hub_download(repo_id=repo_id, filename=HF_WEIGHT_FILE_B, cache_dir=cache_dir)
+    wt_path = hf_hub_download_cache_first(
+        repo_id=repo_id, filename=HF_WEIGHT_FILE_B, cache_dir=cache_dir
+    )
 
     if not os.path.exists(wt_path):
         raise ModelError(f"Failed to download '{HF_WEIGHT_FILE_B}' from {repo_id}.")

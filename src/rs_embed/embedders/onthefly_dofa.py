@@ -43,7 +43,7 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from ._vendor.dofa_vit import vit_base_patch16, vit_large_patch16
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, verify_loaded_params
+from .shared import grid_to_dataarray, hf_hub_download_cache_first, verify_loaded_params
 
 # -----------------------------
 # Defaults: Sentinel-2 SR (official DOFA 9-band order)
@@ -422,7 +422,7 @@ def _resolve_dofa_weights_path(spec: dict[str, str]) -> tuple[str, str]:
             return local_path, local_path
 
     try:
-        from huggingface_hub import hf_hub_download, hf_hub_url
+        from huggingface_hub import hf_hub_url
     except Exception as e:
         raise ModelError(
             "DOFA requires huggingface-hub to download weights, or set "
@@ -430,7 +430,7 @@ def _resolve_dofa_weights_path(spec: dict[str, str]) -> tuple[str, str]:
         ) from e
 
     try:
-        local_path = hf_hub_download(
+        local_path = hf_hub_download_cache_first(
             repo_id=spec["repo_id"],
             filename=spec["filename"],
             revision=spec["revision"],
