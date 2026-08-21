@@ -41,6 +41,11 @@ from .output import normalize_embedding_output
 
 _T = TypeVar("_T")
 
+# A flexible-size model consuming a user input natively beyond this side
+# length gets a UserWarning: ViT attention cost grows quadratically with
+# token count, so very large native passes can be slow or exhaust GPU memory.
+_FLEX_NATIVE_WARN_PX = 512
+
 
 def resolve_device_auto_torch(device: str) -> str:
     if device != "auto":
@@ -913,42 +918,89 @@ def run_user_input_request(
         _model_policy,
     ) = resolve_model_aware_input_prep(model_n=model_n, input_prep=input_prep, output=output)
 
-    # Route per item: arrays larger than the model's tile size go through the
-    # shared tiler (native resolution preserved); everything else — resize
-    # mode, no known tile size, or an array a single tile already covers —
-    # keeps the efficient batched dispatch (there is nothing to tile).
+    # Route per item. Fixed-size models: arrays larger than the model's tile
+    # size go through the shared tiler (native resolution preserved via
+    # tiles), everything else keeps the efficient batched dispatch.
+    # Flexible-size models (resolve_input_image_size adapts to input_hw)
+    # consume any array as one seamless native pass instead — no tiling, with
+    # a warning above _FLEX_NATIVE_WARN_PX since attention cost grows
+    # quadratically with token count. An explicitly configured size restores
+    # fixed-size behavior.
     tiled_set: set[int] = set()
+    native_sizes: dict[int, int | None] = {}
     if str(getattr(input_prep_resolved, "mode", "tile")) != "resize":
-        params = _resolve_tile_params(embedder, input_prep_resolved)
-        if params.tile_size > 0:
-            for i, x in enumerate(input_arrays):
-                if int(x.shape[-2]) > params.tile_size or int(x.shape[-1]) > params.tile_size:
-                    tiled_set.add(i)
-    direct_indices = [i for i in range(len(input_arrays)) if i not in tiled_set]
+        params = _resolve_tile_params(embedder, input_prep_resolved, model_config)
+        for i, x in enumerate(input_arrays):
+            h, w = int(x.shape[-2]), int(x.shape[-1])
+            native: int | None = None
+            try:
+                v = embedder.resolve_input_image_size(model_config, input_hw=(h, w))
+                native = int(v) if v is not None and int(v) > 0 else None
+            except ModelError:
+                raise
+            except Exception as _e:
+                native = None
+            threshold = native if native is not None else params.tile_size
+            if threshold > 0 and (h > threshold or w > threshold):
+                tiled_set.add(i)
+            else:
+                native_sizes[i] = native
+    else:
+        native_sizes = dict.fromkeys(range(len(input_arrays)))
+
+    max_native = max((v for v in native_sizes.values() if v is not None), default=0)
+    if max_native > _FLEX_NATIVE_WARN_PX:
+        warnings.warn(
+            f"Model '{model_n}' will consume a {max_native}px input as one "
+            f"native pass (> {_FLEX_NATIVE_WARN_PX}px). Attention cost grows "
+            "quadratically with token count; expect high GPU memory/time. "
+            "Pass input_prep=InputPrepSpec(mode='tile', tile_size=...) to "
+            "tile instead, or 'resize' to downsample.",
+            UserWarning,
+            stacklevel=3,
+        )
 
     results: list[Embedding | None] = [None] * len(input_arrays)
 
-    step = int(batch_size) if batch_size is not None else max(1, len(direct_indices))
-    for s0 in range(0, len(direct_indices), step):
-        chunk = direct_indices[s0 : s0 + step]
-        kwargs: dict[str, Any] = {
-            "spatials": [spatials[i] for i in chunk],
-            "input_chws": [input_arrays[i] for i in chunk],
-            "temporal": temporal,
-            "sensor": sensor,
-            "output": output,
-            "backend": "auto",
-            "device": device_n,
-        }
-        if model_config is not None:
-            kwargs["model_config"] = model_config
-        with lock:
-            out = embedder.get_embeddings_batch_from_inputs(**kwargs)
-        for i, emb in zip(chunk, out, strict=True):
-            emb = normalize_embedding_output(emb=emb, output=output)
-            results[i] = _stamp_input_prep_meta(
-                emb, requested_mode=requested_mode, resolved_mode="resize"
+    # Direct items grouped by native size: one embedder batch call per group,
+    # with the size injected via tiled_dispatch_model_config so a flexible
+    # model consumes the group's inputs at exactly that size.
+    direct_groups: dict[int | None, list[int]] = {}
+    for i in sorted(native_sizes):
+        direct_groups.setdefault(native_sizes[i], []).append(i)
+    for native, indices in direct_groups.items():
+        group_config = model_config
+        if native is not None:
+            group_config = embedder.tiled_dispatch_model_config(model_config, tile_size=native)
+        if group_config is not None and group_config is not model_config:
+            require_model_config_support(
+                embedder=embedder,
+                model_config=group_config,
+                method_name="get_embeddings_batch_from_inputs",
             )
+        step = int(batch_size) if batch_size is not None else max(1, len(indices))
+        for s0 in range(0, len(indices), step):
+            chunk = indices[s0 : s0 + step]
+            kwargs: dict[str, Any] = {
+                "spatials": [spatials[i] for i in chunk],
+                "input_chws": [input_arrays[i] for i in chunk],
+                "temporal": temporal,
+                "sensor": sensor,
+                "output": output,
+                "backend": "auto",
+                "device": device_n,
+            }
+            if group_config is not None:
+                kwargs["model_config"] = group_config
+            with lock:
+                out = embedder.get_embeddings_batch_from_inputs(**kwargs)
+            for i, emb in zip(chunk, out, strict=True):
+                emb = normalize_embedding_output(emb=emb, output=output)
+                results[i] = _stamp_input_prep_meta(
+                    emb,
+                    requested_mode=requested_mode,
+                    resolved_mode="native" if native is not None else "resize",
+                )
 
     for i in sorted(tiled_set):
         with lock:

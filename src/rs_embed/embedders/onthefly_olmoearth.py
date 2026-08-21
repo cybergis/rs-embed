@@ -779,6 +779,41 @@ class OlmoEarthEmbedder(EmbedderBase):
         model_config_batch_inputs=True,
     )
 
+    def resolve_input_image_size(
+        self,
+        model_config: dict[str, Any] | None,
+        *,
+        input_hw: tuple[int, int] | None = None,
+    ) -> int:
+        """FlexiViT accepts any patch-divisible size; adapt to the input.
+
+        An explicitly configured size (``model_config['image_size']`` or the
+        env override) wins and behaves like a fixed-size model (larger inputs
+        tile at it). Otherwise, when the input shape is known, the encoder
+        consumes it natively — the longer side snapped up to a patch
+        multiple — so user-provided data of any size runs as one seamless
+        pass instead of being tiled at the 256-px training tile size.
+        """
+        explicit = model_config_value(model_config, "image_size") is not None or bool(
+            os.environ.get("RS_EMBED_OLMOEARTH_IMAGE_SIZE", "").strip()
+        )
+        if explicit or input_hw is None:
+            return _resolve_geometry(model_config)[0]
+        patch_size = _resolve_patch_size(model_config)
+        side = max(int(input_hw[0]), int(input_hw[1]))
+        return max(patch_size, -(-side // patch_size) * patch_size)
+
+    def tiled_dispatch_model_config(
+        self,
+        model_config: dict[str, Any] | None,
+        *,
+        tile_size: int,
+    ) -> dict[str, Any] | None:
+        """Consume dispatched inputs at exactly *tile_size* (no internal resize)."""
+        out = dict(model_config or {})
+        out["image_size"] = int(tile_size)
+        return out
+
     def describe(self) -> dict[str, Any]:
         return {
             "type": "onthefly",

@@ -113,6 +113,22 @@ class _MockTiledFromDataEmbedder(_MockFromDataEmbedder):
         )
 
 
+class _MockFlexTiledEmbedder(_MockTiledFromDataEmbedder):
+    """Flexible-size model: adapts to the input (patch multiple of 4) unless
+    an explicit model_config image_size restores fixed-size behavior."""
+
+    model_name = "mock_from_data_flex"
+
+    def resolve_input_image_size(self, model_config, *, input_hw=None):
+        explicit = (model_config or {}).get("image_size")
+        if explicit is not None:
+            return int(explicit)
+        if input_hw is None:
+            return 4
+        side = max(int(input_hw[0]), int(input_hw[1]))
+        return max(4, -(-side // 4) * 4)
+
+
 @pytest.fixture(autouse=True)
 def register_mocks():
     registry.register("mock_from_data")(_MockFromDataEmbedder)
@@ -120,9 +136,12 @@ def register_mocks():
     registry.register("mock_from_data_georef")(_MockGeorefFromDataEmbedder)
     registry.register("mock_from_data_chunks")(_MockChunkTrackingEmbedder)
     registry.register("mock_from_data_tiled")(_MockTiledFromDataEmbedder)
+    registry.register("mock_from_data_flex")(_MockFlexTiledEmbedder)
     _MockChunkTrackingEmbedder.seen_chunk_sizes = []
     _MockTiledFromDataEmbedder.seen_input_shapes = []
     _MockTiledFromDataEmbedder.from_inputs_calls = 0
+    _MockFlexTiledEmbedder.seen_input_shapes = []
+    _MockFlexTiledEmbedder.from_inputs_calls = 0
     _MockFromDataEmbedder.last_input = None
     _MockFromDataEmbedder.last_sensor = None
     _MockFromDataEmbedder.last_model_config = None
@@ -323,6 +342,41 @@ def test_tile_sized_inputs_keep_batched_dispatch_under_tile_default():
     assert _MockTiledFromDataEmbedder.from_inputs_calls == 1
     assert _MockTiledFromDataEmbedder.seen_input_shapes == [(3, 4, 4)] * 2
     assert all(e.meta["input_prep"]["resolved_mode"] == "resize" for e in embs)
+
+
+def test_flexible_model_consumes_large_input_natively_by_default():
+    emb = get_embedding_from_data("mock_from_data_flex", _twelve_band_userdata(hw=(8, 8)))
+    assert _MockFlexTiledEmbedder.seen_input_shapes == [(3, 8, 8)]
+    assert emb.meta["input_prep"]["resolved_mode"] == "native"
+
+
+def test_flexible_native_pass_warns_above_threshold(monkeypatch):
+    import rs_embed.tools.runtime as rt
+
+    monkeypatch.setattr(rt, "_FLEX_NATIVE_WARN_PX", 6)
+    with pytest.warns(UserWarning, match="native pass"):
+        get_embedding_from_data("mock_from_data_flex", _twelve_band_userdata(hw=(8, 8)))
+
+
+def test_flexible_explicit_image_size_restores_tiling():
+    emb = get_embedding_from_data(
+        "mock_from_data_flex", _twelve_band_userdata(hw=(8, 8)), image_size=4
+    )
+    assert _MockFlexTiledEmbedder.seen_input_shapes == [(3, 4, 4)] * 4
+    assert emb.meta["input_prep"]["resolved_mode"] == "tile"
+
+
+def test_flexible_items_group_by_native_size():
+    datas = [
+        _twelve_band_userdata(hw=(8, 8)),
+        _twelve_band_userdata(hw=(12, 12)),
+        _twelve_band_userdata(hw=(8, 8)),
+    ]
+    embs = get_embeddings_batch_from_data("mock_from_data_flex", datas)
+    # two distinct native sizes -> two batch dispatches, all full-size inputs
+    assert _MockFlexTiledEmbedder.from_inputs_calls == 2
+    assert sorted(_MockFlexTiledEmbedder.seen_input_shapes) == [(3, 8, 8), (3, 8, 8), (3, 12, 12)]
+    assert len(embs) == 3
 
 
 # ── list_models_for_data over the real catalog ─────────────────────
