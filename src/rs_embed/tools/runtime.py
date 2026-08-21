@@ -815,6 +815,7 @@ def run_user_input_request(
     output: OutputSpec,
     device: str,
     input_metas: list[dict[str, Any]] | None = None,
+    batch_size: int | None = None,
 ) -> list[Embedding]:
     """Run an embedding request over user-provided inputs (no provider fetch).
 
@@ -846,6 +847,12 @@ def run_user_input_request(
         Target inference device.
     input_metas : list of dict or None
         Optional per-item provenance recorded as ``meta['user_input']``.
+    batch_size : int or None
+        Upper bound on how many items reach one embedder batch call: the
+        dispatch is chunked to this size. Embedders with a smaller internal
+        per-device forward batch still split further, so this caps GPU memory
+        but cannot raise a model's own default. ``None`` dispatches all items
+        in one call (the embedder's internal chunking applies).
 
     Returns
     -------
@@ -855,12 +862,15 @@ def run_user_input_request(
     Raises
     ------
     ModelError
-        If lengths mismatch or the embedder cannot take prefetched inputs.
+        If lengths mismatch, ``batch_size`` is invalid, or the embedder
+        cannot take prefetched inputs.
     """
     if len(spatials) != len(input_arrays):
         raise ModelError(
             f"spatials/input arrays length mismatch: {len(spatials)} != {len(input_arrays)}"
         )
+    if batch_size is not None and int(batch_size) < 1:
+        raise ModelError(f"batch_size must be >= 1, got {batch_size}.")
     device_n = normalize_device_name(device)
     embedder, lock = get_embedder_bundle_cached(model_n, "auto", device_n)
     if not embedder_accepts_input_chw(type(embedder)):
@@ -870,24 +880,28 @@ def run_user_input_request(
         )
     assert_supported(embedder, backend="auto", output=output, temporal=temporal)
 
-    kwargs: dict[str, Any] = {
-        "spatials": spatials,
-        "input_chws": input_arrays,
-        "temporal": temporal,
-        "sensor": sensor,
-        "output": output,
-        "backend": "auto",
-        "device": device_n,
-    }
     if model_config is not None:
         require_model_config_support(
             embedder=embedder,
             model_config=model_config,
             method_name="get_embeddings_batch_from_inputs",
         )
-        kwargs["model_config"] = model_config
-    with lock:
-        embs = embedder.get_embeddings_batch_from_inputs(**kwargs)
+    step = int(batch_size) if batch_size is not None else len(spatials)
+    embs: list[Embedding] = []
+    for s0 in range(0, len(spatials), step):
+        kwargs: dict[str, Any] = {
+            "spatials": spatials[s0 : s0 + step],
+            "input_chws": input_arrays[s0 : s0 + step],
+            "temporal": temporal,
+            "sensor": sensor,
+            "output": output,
+            "backend": "auto",
+            "device": device_n,
+        }
+        if model_config is not None:
+            kwargs["model_config"] = model_config
+        with lock:
+            embs.extend(embedder.get_embeddings_batch_from_inputs(**kwargs))
     embs = [normalize_embedding_output(emb=emb, output=output) for emb in embs]
     if input_metas is not None:
         for emb, item_meta in zip(embs, input_metas, strict=False):

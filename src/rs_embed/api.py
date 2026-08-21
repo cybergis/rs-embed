@@ -574,6 +574,7 @@ def get_embeddings_batch_from_data(
     modality: str | None = None,
     output: OutputSpec = OutputSpec.pooled(),
     device: str = "auto",
+    batch_size: int | None = None,
     **model_kwargs: Any,
 ) -> list[Embedding]:
     """Compute embeddings for multiple user-provided inputs.
@@ -596,6 +597,12 @@ def get_embeddings_batch_from_data(
         Output representation policy.
     device : str
         Target inference device.
+    batch_size : int or None
+        Upper bound on how many items reach one model forward batch — use a
+        small value to fit a small GPU. Models keep their own per-device
+        internal default as a further cap, so this lowers but does not raise
+        a model's forward batch (raise via the model's
+        ``RS_EMBED_<MODEL>_BATCH_SIZE`` environment variable).
     **model_kwargs
         Model-specific settings, as in :func:`get_embedding`.
 
@@ -607,8 +614,9 @@ def get_embeddings_batch_from_data(
     Raises
     ------
     ModelError
-        If *datas* is empty, the model cannot take user data, or any
-        declaration does not satisfy the model's sensor.
+        If *datas* is empty, ``batch_size`` is invalid, the model cannot
+        take user data, or any declaration does not satisfy the model's
+        sensor.
     SpecError
         If any declaration fails validation.
     """
@@ -638,6 +646,7 @@ def get_embeddings_batch_from_data(
             output=output,
             device=device,
             input_metas=[metas[i] for i in indices],
+            batch_size=batch_size,
         )
         for i, emb in zip(indices, embs, strict=True):
             results[i] = emb

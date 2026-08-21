@@ -77,11 +77,24 @@ class _MockGeorefFromDataEmbedder(_MockFromDataEmbedder):
     _requires_georef = True
 
 
+class _MockChunkTrackingEmbedder(_MockFromDataEmbedder):
+    model_name = "mock_from_data_chunks"
+    seen_chunk_sizes: list = []
+
+    def get_embeddings_batch_from_inputs(self, *, spatials, input_chws, **kwargs):
+        type(self).seen_chunk_sizes.append(len(input_chws))
+        return super().get_embeddings_batch_from_inputs(
+            spatials=spatials, input_chws=input_chws, **kwargs
+        )
+
+
 @pytest.fixture(autouse=True)
 def register_mocks():
     registry.register("mock_from_data")(_MockFromDataEmbedder)
     registry.register("mock_from_data_precomputed")(_MockPrecomputedFromDataEmbedder)
     registry.register("mock_from_data_georef")(_MockGeorefFromDataEmbedder)
+    registry.register("mock_from_data_chunks")(_MockChunkTrackingEmbedder)
+    _MockChunkTrackingEmbedder.seen_chunk_sizes = []
     _MockFromDataEmbedder.last_input = None
     _MockFromDataEmbedder.last_sensor = None
     _MockFromDataEmbedder.last_model_config = None
@@ -234,6 +247,24 @@ def test_batch_groups_by_temporal_and_preserves_order():
 def test_batch_empty_refuses():
     with pytest.raises(ModelError, match="non-empty"):
         get_embeddings_batch_from_data("mock_from_data", [])
+
+
+def test_batch_size_chunks_the_dispatch():
+    datas = [_twelve_band_userdata() for _ in range(5)]
+    embs = get_embeddings_batch_from_data("mock_from_data_chunks", datas, batch_size=2)
+    assert len(embs) == 5
+    assert _MockChunkTrackingEmbedder.seen_chunk_sizes == [2, 2, 1]
+
+
+def test_batch_size_default_dispatches_once():
+    datas = [_twelve_band_userdata() for _ in range(3)]
+    get_embeddings_batch_from_data("mock_from_data_chunks", datas)
+    assert _MockChunkTrackingEmbedder.seen_chunk_sizes == [3]
+
+
+def test_invalid_batch_size_refuses():
+    with pytest.raises(ModelError, match="batch_size"):
+        get_embeddings_batch_from_data("mock_from_data", [_twelve_band_userdata()], batch_size=0)
 
 
 # ── list_models_for_data over the real catalog ─────────────────────

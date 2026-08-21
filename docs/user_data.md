@@ -70,10 +70,12 @@ Returns one `Embedding`; `meta["user_input"]` records the declaration and the ch
 ### get_embeddings_batch_from_data
 
 ```python
-embs = get_embeddings_batch_from_data("galileo", datas)   # datas: list[UserData]
+embs = get_embeddings_batch_from_data("galileo", datas, batch_size=8)   # datas: list[UserData]
 ```
 
 Each item is matched independently and carries its own `spatial` / `temporal`, so one batch can mix locations, dates, and even band orders. Items sharing a temporal are dispatched together (models with true batching benefit); results always come back in input order.
+
+`batch_size` caps how many items reach one model forward batch — set a small value to fit a small GPU. Models keep their own per-device internal default (e.g. clay 32 on CUDA / 4 on CPU) as a further cap, so `batch_size` lowers but does not raise a model's forward batch; to raise it, use the model's `RS_EMBED_<MODEL>_BATCH_SIZE` environment variable.
 
 ### list_models_for_data
 
@@ -85,6 +87,18 @@ report = list_models_for_data(data)
 ```
 
 Runs the same matching against every catalog model without loading weights. Each entry has `model`, `compatible`, `bands_used`, and `reason` (why the model is incompatible).
+
+---
+
+## Input size handling
+
+User arrays are fed to the model as-is spatially: each embedder resizes them to its fixed input size (224 for most image-level ViTs, 256 for clay; prithvi can pad instead via `RS_EMBED_PRITHVI_PREP=pad`). Concretely:
+
+- **Much larger than the model input** (e.g. 2048×2048): downsampled in one step — fine detail is lost. The provider-fetch path's `input_prep="tile"` machinery (tile at native resolution + stitch grids) does **not** apply to user data yet; if you need native-resolution detail over a large scene, split it into patches yourself and pass them as separate items.
+- **Much smaller** (e.g. 16×16): upsampled to the model input size. It runs, but the information content is what your pixels carry — expect weak embeddings below roughly half the model's input size.
+- **Non-square**: plain resize distorts the aspect ratio. The fetch path protects square-input models (clay, prithvi) by fetching enlarged squares and cropping back; user data has no such protection, so provide near-square patches for best fidelity.
+
+Rule of thumb: patches near the model's native input size at its native scale (~224–256 px at 10 m for the S2 models) are the sweet spot.
 
 ---
 
