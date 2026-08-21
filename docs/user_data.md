@@ -51,26 +51,73 @@ Multi-frame `[T,C,H,W]` arrays are only meaningful for time-series models (galil
 
 ### get_embedding_from_data
 
-```python
-import numpy as np
-from rs_embed import UserData, get_embedding_from_data
-from rs_embed.core.specs import PointBuffer, TemporalSpec
+A complete example, starting from a file on disk. Say you have a Sentinel-2 L2A patch saved as a GeoTIFF — 12 bands in the canonical order `B1..B8, B8A, B9, B11, B12`, raw surface-reflectance DN (`0..10000`, i.e. exactly as downloaded, not rescaled to `0..1`):
 
+```python
+import rasterio                        # example only; not an rs-embed dependency
+from rasterio.warp import transform_bounds
+
+from rs_embed import UserData, get_embedding_from_data
+from rs_embed.core.specs import BBox, TemporalSpec
+
+# 1. Load the pixels and the footprint from the file.
+with rasterio.open("maize_field_2022.tif") as src:
+    pixels = src.read()                             # numpy array, shape [12, H, W]
+    left, bottom, right, top = transform_bounds(    # footprint -> lon/lat degrees
+        src.crs, "EPSG:4326", *src.bounds
+    )
+
+# 2. Register the imagery: the pixels plus everything that describes them.
 data = UserData(
-    data=cube,                                     # [12, H, W] raw S2 L2A DN
-    collection="s2",
-    spatial=PointBuffer(lon=-88.2, lat=40.1, buffer_m=640),
-    temporal=TemporalSpec.year(2022),
+    data=pixels,                                    # [C,H,W], raw provider values
+    collection="s2",                                # which sensor product this is
+    spatial=BBox(minlon=left, minlat=bottom, maxlon=right, maxlat=top),
+    temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),   # acquisition window
+    # bands= omitted: 12 channels in canonical S2 order is the documented default.
+    # If your file has other bands or another order, declare them explicitly:
+    #   bands=("B4", "B3", "B2")  for an RGB-only file, etc.
 )
+
+# 3. Embed — just name the model. Band selection is automatic: galileo slices
+#    out its 10 bands, an RGB model would slice B4/B3/B2, all from this one
+#    declaration.
 emb = get_embedding_from_data("galileo", data)
+
+print(emb.data.shape)                # pooled feature vector, shape [D]
+print(emb.meta["user_input"])        # which bands/channels were actually used
 ```
+
+If your data is already a numpy array (e.g. one sample from a training dataset), skip step 1 — anything `[C,H,W]` in raw provider units works as `data=`.
 
 Returns one `Embedding`; `meta["user_input"]` records the declaration and the channel selection actually fed to the model (`declared_bands`, `bands_used`, `channel_indices`).
 
 ### get_embeddings_batch_from_data
 
+Continuing the example above — a whole directory of patches into one feature matrix:
+
 ```python
-embs = get_embeddings_batch_from_data("galileo", datas, batch_size=8)   # datas: list[UserData]
+from pathlib import Path
+
+import numpy as np
+
+from rs_embed import get_embeddings_batch_from_data
+
+datas = []
+for path in sorted(Path("patches/").glob("*.tif")):
+    with rasterio.open(path) as src:
+        left, bottom, right, top = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
+        datas.append(
+            UserData(
+                data=src.read(),
+                collection="s2",
+                spatial=BBox(minlon=left, minlat=bottom, maxlon=right, maxlat=top),
+                temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+            )
+        )
+
+embs = get_embeddings_batch_from_data("galileo", datas, batch_size=16)
+
+X = np.stack([e.data for e in embs])   # [N, D] — ready for sklearn, clustering, ...
 ```
 
 Each item is matched independently and carries its own `spatial` / `temporal`, so one batch can mix locations, dates, and even band orders. Items sharing a temporal are dispatched together (models with true batching benefit); results always come back in input order.

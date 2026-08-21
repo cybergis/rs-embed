@@ -549,9 +549,10 @@ def get_embedding_from_data(
 
     Examples
     --------
+    >>> pixels = np.load("s2_patch.npy")  # [12, H, W] raw S2 L2A DN (0..10000)
     >>> data = UserData(
-    ...     data=chw,
-    ...     collection="s2",
+    ...     data=pixels,
+    ...     collection="s2",  # 12 channels in canonical order -> bands may be omitted
     ...     spatial=PointBuffer(lon=-88.2, lat=40.1, buffer_m=640),
     ...     temporal=TemporalSpec.year(2022),
     ... )

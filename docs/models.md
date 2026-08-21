@@ -39,25 +39,27 @@ Some detail-page filenames still use older names for compatibility, but the cano
 
 ### On-the-fly Foundation Models
 
-| Model ID          | Primary Input                    | Dim  | Default Resolution | Temporal style          | Notable requirements                                    | Detail                         |
-| ----------------- | -------------------------------- | ---- | ------------------ | ----------------------- | ------------------------------------------------------- | ------------------------------ |
-| `prithvi`         | S2 6-band                       | 768  | 30m                | multi-frame (auto, ≤4)  | required temporal + location side inputs                 | [detail](models/prithvi.md)    |
-| `olmoearth`       | S2 L2A 12-band / S1 VV/VH       | 128–1024 | 10m            | multi-frame (auto, ≤12) | FlexiViT; 4 sizes (nano/tiny/base/large) | [detail](models/olmoearth.md) |
-| `dofa`            | Multispectral + wavelengths     | 768  | 10m                | single composite        | wavelength vector required                              | [detail](models/dofa.md)       |
-| `clay`            | S2 L2A 10-band                  | 1024 | 10m                | single composite        | metadata conditioning (latlon/time/gsd/wavelengths)     | [detail](models/clay.md)       |
-| `terramind`       | S2 12-band                      | 384  | 10m                | single composite        | ViT-S class; strict z-score normalization               | [detail](models/terramind.md)  |
-| `terrafm`         | S2 12-band or S1 VV/VH          | 768  | 10m                | single composite        | dual-modality by channel count                          | [detail](models/terrafm.md)    |
-| `thor`            | S2 10-band or S1 VV/VH          | 768  | 10m                | single composite        | dual-modality; grouped tokens; native-snap              | [detail](models/thor.md)       |
-| `galileo`         | S2 10-band time series          | 128  | 10m                | multi-frame (auto, ≤12) | nano default; month tokens                              | [detail](models/galileo.md)    |
-| `anysat`          | S2 10-band time series          | 768  | 10m                | multi-frame (fixed `T`) | JEPA; `s2_dates` DOY side input                         | [detail](models/anysat.md)     |
-| `agrifm`          | S2 10-band time series          | 1024 | 10m                | multi-frame (fixed `T`) | Video Swin; fixed `T` frame stack                       | [detail](models/agrifm.md)     |
-| `fomo`            | S2 12-band                      | 768  | 10m                | single composite        | per-channel spectral modality keys                      | [detail](models/fomo.md)       |
-| `wildsat`         | S2 RGB                          | 256  | 10m                | single composite        | biodiversity training; image_head default               | [detail](models/wildsat.md)    |
-| `satvision`       | TOA 14-channel (MODIS)          | 4096 | 1000m              | single composite        | SwinV2 Giant; strict channel calibration                | [detail](models/satvision.md)  |
-| `remoteclip`      | S2 RGB (`B4,B3,B2`)             | 512  | 10m                | single composite        | CLIP projection; RGB preprocessing                      | [detail](models/remoteclip.md) |
-| `scalemae`        | S2 RGB + scale                  | 1024 | 10m                | single composite        | `sensor.scale_m` is a model input                       | [detail](models/scalemae.md)   |
-| `satmae`          | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | single composite        | ViT-L; MAE token/grid                                   | [detail](models/satmae.md)     |
-| `satmaepp`        | S2 RGB (`B4,B3,B2`) or S2 10-band | 1024 | 10m              | single composite        | `modality=rgb` (default) or `s2_10b`; ViT-L; fMoW eval preprocessing; 10-band uses strict band order + grouped-channel tokens | [detail](models/satmaepp.md)   |
+| Model ID          | Primary Input                    | Dim  | Default Resolution | Input size (px) | Temporal style          | Notable requirements                                    | Detail                         |
+| ----------------- | -------------------------------- | ---- | ------------------ | --------------- | ----------------------- | ------------------------------------------------------- | ------------------------------ |
+| `prithvi`         | S2 6-band                       | 768  | 30m                | 224             | multi-frame (auto, ≤4)  | required temporal + location side inputs                 | [detail](models/prithvi.md)    |
+| `olmoearth`       | S2 L2A 12-band / S1 VV/VH       | 128–1024 | 10m            | 256 (flexible)  | multi-frame (auto, ≤12) | FlexiViT; 4 sizes (nano/tiny/base/large) | [detail](models/olmoearth.md) |
+| `dofa`            | Multispectral + wavelengths     | 768  | 10m                | 224             | single composite        | wavelength vector required                              | [detail](models/dofa.md)       |
+| `clay`            | S2 L2A 10-band                  | 1024 | 10m                | 256             | single composite        | metadata conditioning (latlon/time/gsd/wavelengths)     | [detail](models/clay.md)       |
+| `terramind`       | S2 12-band                      | 384  | 10m                | 224             | single composite        | ViT-S class; strict z-score normalization               | [detail](models/terramind.md)  |
+| `terrafm`         | S2 12-band or S1 VV/VH          | 768  | 10m                | 224             | single composite        | dual-modality by channel count                          | [detail](models/terrafm.md)    |
+| `thor`            | S2 10-band or S1 VV/VH          | 768  | 10m                | 288             | single composite        | dual-modality; grouped tokens; native-snap              | [detail](models/thor.md)       |
+| `galileo`         | S2 10-band time series          | 128  | 10m                | 64              | multi-frame (auto, ≤12) | nano default; month tokens                              | [detail](models/galileo.md)    |
+| `anysat`          | S2 10-band time series          | 768  | 10m                | 24              | multi-frame (fixed `T`) | JEPA; `s2_dates` DOY side input                         | [detail](models/anysat.md)     |
+| `agrifm`          | S2 10-band time series          | 1024 | 10m                | 224             | multi-frame (fixed `T`) | Video Swin; fixed `T` frame stack                       | [detail](models/agrifm.md)     |
+| `fomo`            | S2 12-band                      | 768  | 10m                | 64              | single composite        | per-channel spectral modality keys                      | [detail](models/fomo.md)       |
+| `wildsat`         | S2 RGB                          | 256  | 10m                | 224             | single composite        | biodiversity training; image_head default               | [detail](models/wildsat.md)    |
+| `satvision`       | TOA 14-channel (MODIS)          | 4096 | 1000m              | 128             | single composite        | SwinV2 Giant; strict channel calibration                | [detail](models/satvision.md)  |
+| `remoteclip`      | S2 RGB (`B4,B3,B2`)             | 512  | 10m                | 224             | single composite        | CLIP projection; RGB preprocessing                      | [detail](models/remoteclip.md) |
+| `scalemae`        | S2 RGB + scale                  | 1024 | 10m                | 224             | single composite        | `sensor.scale_m` is a model input                       | [detail](models/scalemae.md)   |
+| `satmae`          | S2 RGB (`B4,B3,B2`)             | 1024 | 10m                | 224             | single composite        | ViT-L; MAE token/grid                                   | [detail](models/satmae.md)     |
+| `satmaepp`        | S2 RGB (`B4,B3,B2`) or S2 10-band | 1024 | 10m              | 224 (rgb) / 96 (s2_10b) | single composite | `modality=rgb` (default) or `s2_10b`; ViT-L; fMoW eval preprocessing; 10-band uses strict band order + grouped-channel tokens | [detail](models/satmaepp.md)   |
+
+**Input size (px)** is the fixed spatial size each model's encoder consumes: inputs are resized to it before the forward pass (in the default `input_prep="tile"` fetch mode, large ROIs are instead cut into tiles of this size at native resolution and the grids stitched; user-provided data is always resized — see [User Data API](user_data.md)). Together with Default Resolution it gives the native footprint of one forward pass, e.g. galileo 64 px × 10 m ≈ 640 m. `olmoearth` (FlexiViT) accepts any size divisible by its patch size and manages its own tiling; 256 is its training tile size. `anysat` and `prithvi` sizes are env-tunable (`RS_EMBED_ANYSAT_IMG`, `RS_EMBED_PRITHVI_IMG`).
 
 ---
 
