@@ -88,13 +88,41 @@ class _MockChunkTrackingEmbedder(_MockFromDataEmbedder):
         )
 
 
+class _MockTiledFromDataEmbedder(_MockFromDataEmbedder):
+    """Advertises a tile size (defaults.image_size) so the tiler engages."""
+
+    model_name = "mock_from_data_tiled"
+    seen_input_shapes: list = []
+    from_inputs_calls: int = 0
+
+    def describe(self):
+        desc = super().describe()
+        desc["defaults"] = {"image_size": 4}
+        return desc
+
+    def get_embedding(self, **kwargs):
+        x = kwargs.get("input_chw")
+        if x is not None:
+            type(self).seen_input_shapes.append(tuple(np.asarray(x).shape))
+        return super().get_embedding(**kwargs)
+
+    def get_embeddings_batch_from_inputs(self, *, spatials, input_chws, **kwargs):
+        type(self).from_inputs_calls += 1
+        return super().get_embeddings_batch_from_inputs(
+            spatials=spatials, input_chws=input_chws, **kwargs
+        )
+
+
 @pytest.fixture(autouse=True)
 def register_mocks():
     registry.register("mock_from_data")(_MockFromDataEmbedder)
     registry.register("mock_from_data_precomputed")(_MockPrecomputedFromDataEmbedder)
     registry.register("mock_from_data_georef")(_MockGeorefFromDataEmbedder)
     registry.register("mock_from_data_chunks")(_MockChunkTrackingEmbedder)
+    registry.register("mock_from_data_tiled")(_MockTiledFromDataEmbedder)
     _MockChunkTrackingEmbedder.seen_chunk_sizes = []
+    _MockTiledFromDataEmbedder.seen_input_shapes = []
+    _MockTiledFromDataEmbedder.from_inputs_calls = 0
     _MockFromDataEmbedder.last_input = None
     _MockFromDataEmbedder.last_sensor = None
     _MockFromDataEmbedder.last_model_config = None
@@ -265,6 +293,36 @@ def test_batch_size_default_dispatches_once():
 def test_invalid_batch_size_refuses():
     with pytest.raises(ModelError, match="batch_size"):
         get_embeddings_batch_from_data("mock_from_data", [_twelve_band_userdata()], batch_size=0)
+
+
+# ── input_prep: tile default vs resize ─────────────────────────────
+
+
+def test_large_input_is_tiled_by_default():
+    # 8x8 input, model tile size 4 -> 2x2 grid of native-resolution 4x4 tiles.
+    emb = get_embedding_from_data("mock_from_data_tiled", _twelve_band_userdata(hw=(8, 8)))
+    assert _MockTiledFromDataEmbedder.seen_input_shapes == [(3, 4, 4)] * 4
+    prep = emb.meta["input_prep"]
+    assert prep["resolved_mode"] == "tile"
+    assert emb.meta["user_input"]["bands_used"] == ["B4", "B3", "B2"]
+
+
+def test_input_prep_resize_opts_out_of_tiling():
+    emb = get_embedding_from_data(
+        "mock_from_data_tiled", _twelve_band_userdata(hw=(8, 8)), input_prep="resize"
+    )
+    # One call with the full-size array; the embedder handles the downsample.
+    assert _MockTiledFromDataEmbedder.seen_input_shapes == [(3, 8, 8)]
+    assert emb.meta["input_prep"]["resolved_mode"] == "resize"
+
+
+def test_tile_sized_inputs_keep_batched_dispatch_under_tile_default():
+    # Items a single tile already covers cannot tile -> one batched dispatch.
+    datas = [_twelve_band_userdata(hw=(4, 4)), _twelve_band_userdata(hw=(4, 4))]
+    embs = get_embeddings_batch_from_data("mock_from_data_tiled", datas)
+    assert _MockTiledFromDataEmbedder.from_inputs_calls == 1
+    assert _MockTiledFromDataEmbedder.seen_input_shapes == [(3, 4, 4)] * 2
+    assert all(e.meta["input_prep"]["resolved_mode"] == "resize" for e in embs)
 
 
 # ── list_models_for_data over the real catalog ─────────────────────

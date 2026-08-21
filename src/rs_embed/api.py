@@ -498,6 +498,7 @@ def get_embedding_from_data(
     modality: str | None = None,
     output: OutputSpec = OutputSpec.pooled(),
     device: str = "auto",
+    input_prep: InputPrepSpec | str | None = None,
     **model_kwargs: Any,
 ) -> Embedding:
     """Compute an embedding from user-provided imagery (no provider fetch).
@@ -530,6 +531,15 @@ def get_embedding_from_data(
         Output representation policy.
     device : str
         Target inference device.
+    input_prep : InputPrepSpec or str or None
+        How arrays larger than the model's input size are handled. ``None``
+        (the default) uses the package default ``"tile"``: the array is cut
+        into model-native tiles at its own resolution and the outputs
+        stitched — every model sees the full detail, regardless of its input
+        size (galileo's 64 px and clay's 256 px get equal treatment). Pass
+        ``"resize"`` to instead downsample the whole array to the model input
+        size in one step. Arrays a single tile already covers are unaffected
+        either way.
     **model_kwargs
         Model-specific settings, as in :func:`get_embedding`.
 
@@ -537,7 +547,8 @@ def get_embedding_from_data(
     -------
     Embedding
         Normalized embedding; ``meta['user_input']`` records the declaration
-        and the channel selection that was fed to the model.
+        and the channel selection that was fed to the model, and
+        ``meta['input_prep']`` records how the array was prepared.
 
     Raises
     ------
@@ -564,6 +575,7 @@ def get_embedding_from_data(
         modality=modality,
         output=output,
         device=device,
+        input_prep=input_prep,
         **model_kwargs,
     )[0]
 
@@ -576,6 +588,7 @@ def get_embeddings_batch_from_data(
     output: OutputSpec = OutputSpec.pooled(),
     device: str = "auto",
     batch_size: int | None = None,
+    input_prep: InputPrepSpec | str | None = None,
     **model_kwargs: Any,
 ) -> list[Embedding]:
     """Compute embeddings for multiple user-provided inputs.
@@ -603,7 +616,14 @@ def get_embeddings_batch_from_data(
         small value to fit a small GPU. Models keep their own per-device
         internal default as a further cap, so this lowers but does not raise
         a model's forward batch (raise via the model's
-        ``RS_EMBED_<MODEL>_BATCH_SIZE`` environment variable).
+        ``RS_EMBED_<MODEL>_BATCH_SIZE`` environment variable). Items large
+        enough to be tiled are processed one at a time (their tiles are
+        batched by the model internally).
+    input_prep : InputPrepSpec or str or None
+        How arrays larger than the model's input size are handled, as in
+        :func:`get_embedding_from_data`: ``None`` uses the package default
+        ``"tile"`` (native-resolution tiles + stitched outputs), ``"resize"``
+        downsamples instead.
     **model_kwargs
         Model-specific settings, as in :func:`get_embedding`.
 
@@ -648,6 +668,7 @@ def get_embeddings_batch_from_data(
             device=device,
             input_metas=[metas[i] for i in indices],
             batch_size=batch_size,
+            input_prep=input_prep,
         )
         for i, emb in zip(indices, embs, strict=True):
             results[i] = emb

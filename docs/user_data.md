@@ -139,13 +139,13 @@ Runs the same matching against every catalog model without loading weights. Each
 
 ## Input size handling
 
-User arrays are fed to the model as-is spatially: each embedder resizes them to its fixed input size (224 for most image-level ViTs, 256 for clay; prithvi can pad instead via `RS_EMBED_PRITHVI_PREP=pad`). Concretely:
+User data follows the package-wide `input_prep` policy, defaulting to **`"tile"`** — the same fairness semantics as the provider-fetch path:
 
-- **Much larger than the model input** (e.g. 2048×2048): downsampled in one step — fine detail is lost. The provider-fetch path's `input_prep="tile"` machinery (tile at native resolution + stitch grids) does **not** apply to user data yet; if you need native-resolution detail over a large scene, split it into patches yourself and pass them as separate items.
-- **Much smaller** (e.g. 16×16): upsampled to the model input size. It runs, but the information content is what your pixels carry — expect weak embeddings below roughly half the model's input size.
-- **Non-square**: plain resize distorts the aspect ratio. The fetch path protects square-input models (clay, prithvi) by fetching enlarged squares and cropping back; user data has no such protection, so provide near-square patches for best fidelity.
+- **Larger than the model's input size**: the array is cut into model-native tiles at its own resolution, each tile embedded, and the outputs stitched. Every model sees the full detail regardless of its input size — a 256×256 patch reaches clay as one 256-px pass and galileo as a 4×4 grid of 64-px tiles, instead of galileo silently losing 15/16 of the pixels to a resize. Pass `input_prep="resize"` to opt into one-step downsampling instead (faster, lossy; `meta["input_prep"]` records which path ran).
+- **At or below the model's input size**: nothing to tile — the array goes straight to the embedder, which resizes up if needed (prithvi can pad instead via `RS_EMBED_PRITHVI_PREP=pad`). Very small arrays (e.g. 16×16 into a 224 model) run fine but carry only the information your pixels have — expect weak embeddings below roughly half the model's input size.
+- **Non-square**: tiling handles rectangles cleanly (edge tiles are padded, outputs cropped back). Under `"resize"`, a plain resize distorts the aspect ratio — another reason to keep the tile default for non-square patches.
 
-Rule of thumb: patches near the model's native input size at its native scale (~224–256 px at 10 m for the S2 models) are the sweet spot.
+Rule of thumb: any patch at the model's native scale (10 m for the S2 models) is handled faithfully under the tile default; patches at or below the model's input size are also the cheapest (single forward pass).
 
 ---
 

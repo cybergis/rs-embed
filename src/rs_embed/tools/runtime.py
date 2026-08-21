@@ -816,6 +816,7 @@ def run_user_input_request(
     device: str,
     input_metas: list[dict[str, Any]] | None = None,
     batch_size: int | None = None,
+    input_prep: Any | None = None,
 ) -> list[Embedding]:
     """Run an embedding request over user-provided inputs (no provider fetch).
 
@@ -825,6 +826,13 @@ def run_user_input_request(
     path. ``backend="auto"`` is passed through so the cached embedder instance
     is shared with the default fetch path, but with an input array present no
     embedder resolves a provider, so no provider auth is required.
+
+    Input prep follows the package default: under ``"tile"`` (the default),
+    arrays larger than the model's tile size go through the shared tiler
+    (native-resolution tiles + stitched grids — the same fairness semantics as
+    the fetch path), while arrays that cannot tile keep the efficient batched
+    dispatch. ``"resize"`` sends every array straight to the embedder, which
+    downsamples to its fixed input size.
 
     Parameters
     ----------
@@ -852,7 +860,12 @@ def run_user_input_request(
         dispatch is chunked to this size. Embedders with a smaller internal
         per-device forward batch still split further, so this caps GPU memory
         but cannot raise a model's own default. ``None`` dispatches all items
-        in one call (the embedder's internal chunking applies).
+        in one call (the embedder's internal chunking applies). Items routed
+        through the tiler are processed one at a time regardless (their tiles
+        are batched by the embedder internally).
+    input_prep : InputPrepSpec or str or None
+        API-side input preprocessing policy; ``None`` uses the package
+        default ``"tile"``. See the function description.
 
     Returns
     -------
@@ -886,12 +899,41 @@ def run_user_input_request(
             model_config=model_config,
             method_name="get_embeddings_batch_from_inputs",
         )
-    step = int(batch_size) if batch_size is not None else len(spatials)
-    embs: list[Embedding] = []
-    for s0 in range(0, len(spatials), step):
+
+    from .tiling import (
+        _call_embedder_get_embedding_with_input_prep,
+        _resolve_tile_params,
+        _stamp_input_prep_meta,
+    )
+
+    (
+        input_prep_eff,
+        input_prep_resolved,
+        requested_mode,
+        _model_policy,
+    ) = resolve_model_aware_input_prep(model_n=model_n, input_prep=input_prep, output=output)
+
+    # Route per item: arrays larger than the model's tile size go through the
+    # shared tiler (native resolution preserved); everything else — resize
+    # mode, no known tile size, or an array a single tile already covers —
+    # keeps the efficient batched dispatch (there is nothing to tile).
+    tiled_set: set[int] = set()
+    if str(getattr(input_prep_resolved, "mode", "tile")) != "resize":
+        params = _resolve_tile_params(embedder, input_prep_resolved)
+        if params.tile_size > 0:
+            for i, x in enumerate(input_arrays):
+                if int(x.shape[-2]) > params.tile_size or int(x.shape[-1]) > params.tile_size:
+                    tiled_set.add(i)
+    direct_indices = [i for i in range(len(input_arrays)) if i not in tiled_set]
+
+    results: list[Embedding | None] = [None] * len(input_arrays)
+
+    step = int(batch_size) if batch_size is not None else max(1, len(direct_indices))
+    for s0 in range(0, len(direct_indices), step):
+        chunk = direct_indices[s0 : s0 + step]
         kwargs: dict[str, Any] = {
-            "spatials": spatials[s0 : s0 + step],
-            "input_chws": input_arrays[s0 : s0 + step],
+            "spatials": [spatials[i] for i in chunk],
+            "input_chws": [input_arrays[i] for i in chunk],
             "temporal": temporal,
             "sensor": sensor,
             "output": output,
@@ -901,8 +943,31 @@ def run_user_input_request(
         if model_config is not None:
             kwargs["model_config"] = model_config
         with lock:
-            embs.extend(embedder.get_embeddings_batch_from_inputs(**kwargs))
-    embs = [normalize_embedding_output(emb=emb, output=output) for emb in embs]
+            out = embedder.get_embeddings_batch_from_inputs(**kwargs)
+        for i, emb in zip(chunk, out, strict=True):
+            emb = normalize_embedding_output(emb=emb, output=output)
+            results[i] = _stamp_input_prep_meta(
+                emb, requested_mode=requested_mode, resolved_mode="resize"
+            )
+
+    for i in sorted(tiled_set):
+        with lock:
+            results[i] = _call_embedder_get_embedding_with_input_prep(
+                embedder=embedder,
+                spatial=spatials[i],
+                temporal=temporal,
+                sensor=sensor,
+                output=output,
+                backend="auto",
+                device=device_n,
+                input_chw=input_arrays[i],
+                input_prep=input_prep_eff,
+                model_config=model_config,
+            )
+
+    embs = [emb for emb in results if emb is not None]
+    if len(embs) != len(input_arrays):
+        raise ModelError("Internal error: user-input dispatch lost items.")
     if input_metas is not None:
         for emb, item_meta in zip(embs, input_metas, strict=False):
             if item_meta and isinstance(getattr(emb, "meta", None), dict):
