@@ -551,6 +551,9 @@ class ClayEmbedder(EmbedderBase):
     # Clay needs a square token grid → base.fetch_input enlarges a rectangular
     # ROI to a square of real imagery; the output is cropped back to the ROI.
     _requires_square_input = True
+    # The encoder conditions on lat/lon (and GSD) metadata derived from the
+    # request geometry, so a request without a spatial must be refused.
+    _requires_georef = True
     DEFAULT_FETCH_WORKERS = 8
     DEFAULT_BATCH_CPU = 4
     DEFAULT_BATCH_CUDA = 32
@@ -921,7 +924,8 @@ class ClayEmbedder(EmbedderBase):
                 backend=backend,
                 device=device,
             )
-        self._get_provider(backend)
+        # Inputs are prefetched — same lazy-provider convention as the single
+        # path: never acquire a provider (and its live auth) without a fetch.
         t = temporal_to_range(temporal)
 
         ss = sensor or self._default_sensor()

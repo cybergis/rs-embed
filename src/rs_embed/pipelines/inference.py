@@ -438,7 +438,7 @@ class InferenceEngine:
         spec = input_prep_resolved if input_prep_resolved is not None else self.input_prep_resolved
         out: dict[int, TaskResult] = {}
         try:
-            params = _resolve_tile_params(embedder, spec)
+            params = _resolve_tile_params(embedder, spec, model_config)
             tile_size = params.tile_size
             if tile_size <= 0:
                 return out, False

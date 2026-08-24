@@ -12,11 +12,14 @@ from .api import (
     describe_model,
     export_batch,
     get_embedding,
+    get_embedding_from_data,
     get_embeddings_batch,
+    get_embeddings_batch_from_data,
     inspect_gee_patch,
     inspect_model_input,
     inspect_provider_patch,
     list_models,
+    list_models_for_data,
     reset_runtime,
 )
 from .core._warnings import disable_pretty_warnings, enable_pretty_warnings
@@ -35,6 +38,7 @@ from .core.types import (
     ExportModelRequest,
     ExportTarget,
     ModelConfig,
+    UserData,
 )
 from .load import ExportResult, ModelResult, load_export
 from .model import Model
@@ -68,6 +72,11 @@ __all__ = [
     "list_models",
     "describe_model",
     "reset_runtime",
+    # User-provided data API
+    "UserData",
+    "get_embedding_from_data",
+    "get_embeddings_batch_from_data",
+    "list_models_for_data",
     # Export API
     "export_batch",
     # Load API

@@ -53,6 +53,10 @@ class EmbedderBase:
     # The embedder performs its own spatial tiling based on request size;
     # API-side ``input_prep`` has no effect and a non-resize request warns.
     _manages_own_input_prep: bool = False
+    # The forward pass conditions on request geometry (e.g. lat/lon or GSD
+    # encodings derived from ``spatial``); requests without a spatial (such as
+    # ungeoreferenced user-provided data) must be refused, never fabricated.
+    _requires_georef: bool = False
 
     def __init__(self) -> None:
         self._providers: dict[str, ProviderBase] = {}
@@ -196,6 +200,25 @@ class EmbedderBase:
             )
 
         return FetchResult(data=raw, meta=roi_fetch_meta(geo_roi) or {})
+
+    def resolve_input_image_size(
+        self,
+        model_config: dict[str, Any] | None,
+        *,
+        input_hw: tuple[int, int] | None = None,
+    ) -> int | None:
+        """The input size the encoder will consume for this request, or ``None``.
+
+        Generic layers (the tiler's tile-size resolution and the user-data
+        routing) consult this before falling back to the static
+        ``describe().defaults.image_size``. Flexible-size embedders
+        (FlexiViT-style models) override it: an explicitly configured
+        ``model_config`` size wins, and otherwise — when *input_hw* is given —
+        they adapt to the input itself, so any input runs as one native pass
+        instead of being tiled at the training tile size. The default returns
+        ``None`` (fixed-size model; use the static default).
+        """
+        return None
 
     def tiled_dispatch_model_config(
         self,

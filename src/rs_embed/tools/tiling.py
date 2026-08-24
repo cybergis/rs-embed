@@ -230,13 +230,16 @@ class _TileParams:
 def _resolve_tile_params(
     embedder: Any,
     input_prep: _ResolvedInputPrepSpec,
+    model_config: dict[str, Any] | None = None,
 ) -> _TileParams:
     """Resolve tile size/stride and the padding policy for an embedder + spec.
 
-    ``tile_size`` is the explicit ``input_prep.tile_size`` or, failing that, the
-    model's advertised ``describe().defaults.image_size``; ``0`` signals that no
-    tile size could be determined and the caller should fall back to a plain
-    call.
+    ``tile_size`` is the explicit ``input_prep.tile_size``, else the size the
+    embedder resolves for this request via ``resolve_input_image_size(
+    model_config)`` (how flexible-size models raise their tiling threshold),
+    else the model's advertised ``describe().defaults.image_size``; ``0``
+    signals that no tile size could be determined and the caller should fall
+    back to a plain call.
 
     Edge tiles are padded to square whenever ``pad_edges`` is on (the default),
     for every model. The tiling layer must never hand a model a rectangular
@@ -249,7 +252,18 @@ def _resolve_tile_params(
     escape hatch for models that natively handle rectangular inputs with a
     proportional output grid.
     """
-    model_img = _embedder_default_image_size(embedder)
+    model_img: int | None = None
+    hook = getattr(embedder, "resolve_input_image_size", None)
+    if callable(hook):
+        try:
+            v = hook(model_config)
+            model_img = int(v) if v is not None and int(v) > 0 else None
+        except ModelError:
+            raise
+        except Exception as _e:
+            model_img = None
+    if model_img is None:
+        model_img = _embedder_default_image_size(embedder)
     tile_size = int(input_prep.tile_size or model_img or 0)
     stride = int(input_prep.tile_stride or tile_size)
     return _TileParams(
@@ -806,7 +820,7 @@ def _call_embedder_get_embedding_tiled(
     fetch_meta: dict[str, Any] | None = None,
 ) -> Embedding:
     x = np.asarray(input_chw, dtype=np.float32)
-    params = _resolve_tile_params(embedder, input_prep)
+    params = _resolve_tile_params(embedder, input_prep, model_config)
     tile_size = params.tile_size
     model_fixed_size = params.model_fixed_size
     effective_pad_edges = params.effective_pad_edges

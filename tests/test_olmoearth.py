@@ -1421,3 +1421,42 @@ def test_get_embeddings_batch_from_inputs_multi_variable_frames(monkeypatch):
     assert out[1].meta["n_frames"] == 1
     for e in out:
         assert e.data.shape == (128,)
+
+
+# ── resolve_input_image_size (flexible-size tiling threshold) ──────
+
+
+def test_resolve_input_image_size_defaults_to_training_tile():
+    emb = oe.OlmoEarthEmbedder()
+    assert emb.resolve_input_image_size(None) == oe._DEFAULT_IMAGE_SIZE
+
+
+def test_resolve_input_image_size_honors_model_config():
+    emb = oe.OlmoEarthEmbedder()
+    assert emb.resolve_input_image_size({"image_size": 512, "patch_size": 8}) == 512
+
+
+def test_resolve_input_image_size_rejects_non_divisible():
+    emb = oe.OlmoEarthEmbedder()
+    with pytest.raises(ModelError, match="divisible"):
+        emb.resolve_input_image_size({"image_size": 130, "patch_size": 4})
+
+
+def test_resolve_input_image_size_adapts_to_input():
+    emb = oe.OlmoEarthEmbedder()
+    # already patch-divisible -> consumed natively as-is
+    assert emb.resolve_input_image_size(None, input_hw=(300, 300)) == 300
+    # snapped up to the next patch multiple (default patch 4)
+    assert emb.resolve_input_image_size(None, input_hw=(301, 299)) == 304
+    # explicit config wins over the input
+    assert (
+        emb.resolve_input_image_size({"image_size": 512, "patch_size": 8}, input_hw=(300, 300))
+        == 512
+    )
+
+
+def test_tiled_dispatch_model_config_injects_image_size():
+    emb = oe.OlmoEarthEmbedder()
+    assert emb.tiled_dispatch_model_config(None, tile_size=256) == {"image_size": 256}
+    out = emb.tiled_dispatch_model_config({"variant": "base"}, tile_size=128)
+    assert out == {"variant": "base", "image_size": 128}
