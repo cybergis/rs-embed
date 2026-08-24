@@ -11,7 +11,7 @@
       
       
       
-        <link rel="prev" href="../api_embedding/">
+        <link rel="prev" href="../user_data/">
       
       
         <link rel="next" href="../api_load/">
@@ -1461,6 +1461,8 @@
       
         
       
+        
+      
     
     
     
@@ -1580,6 +1582,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2849,8 +2879,8 @@
     <span class="n">models</span><span class="p">:</span> <span class="n">List</span><span class="p">[</span><span class="nb">str</span> <span class="o">|</span> <span class="n">ExportModelRequest</span><span class="p">],</span>
     <span class="n">target</span><span class="p">:</span> <span class="n">ExportTarget</span><span class="p">,</span>
     <span class="n">config</span><span class="p">:</span> <span class="n">ExportConfig</span> <span class="o">=</span> <span class="n">ExportConfig</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
+    <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
     <span class="n">output</span><span class="p">:</span> <span class="n">OutputSpec</span> <span class="o">=</span> <span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
     <span class="n">sensor</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">SensorSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">fetch</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">FetchSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
@@ -2876,9 +2906,9 @@
 
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="p">[</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">)],</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">],</span>
-    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">&quot;exports/run&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">"remoteclip"</span><span class="p">],</span>
+    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">"exports/run"</span><span class="p">),</span>
     <span class="n">config</span><span class="o">=</span><span class="n">ExportConfig</span><span class="p">(),</span>
 <span class="p">)</span>
 </code></pre></div>
@@ -2912,8 +2942,8 @@
 <p>Prefer <code>target=ExportTarget(...)</code> in new code.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExportTarget</span>
 
-<span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">&quot;exports&quot;</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;p1&quot;</span><span class="p">,</span> <span class="s2">&quot;p2&quot;</span><span class="p">])</span>
-<span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">&quot;exports/run&quot;</span><span class="p">)</span>
+<span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">"exports"</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">"p1"</span><span class="p">,</span> <span class="s2">"p2"</span><span class="p">])</span>
+<span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">"exports/run"</span><span class="p">)</span>
 </code></pre></div>
 <p><code>ExportTarget.per_item(...)</code> writes one file per ROI, while <code>ExportTarget.combined(...)</code> writes one merged file for the whole run.</p>
 <p>For <code>combined</code>, the output extension is normalized from <code>config.format</code> if missing. For <code>per_item</code>, <code>names=[...]</code> must have the same length as <code>spatials</code>.</p>
@@ -3005,7 +3035,7 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExportConfig</span>
 
 <span class="n">config</span> <span class="o">=</span> <span class="n">ExportConfig</span><span class="p">(</span>
-    <span class="nb">format</span><span class="o">=</span><span class="s2">&quot;npz&quot;</span><span class="p">,</span>
+    <span class="nb">format</span><span class="o">=</span><span class="s2">"npz"</span><span class="p">,</span>
     <span class="n">save_inputs</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
     <span class="n">save_embeddings</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
     <span class="n">save_manifest</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
@@ -3016,22 +3046,22 @@
 <h2 id="per-model-overrides">Per-Model Overrides<a class="headerlink" href="#per-model-overrides" title="Permanent link">&para;</a></h2>
 <h3 id="when-to-use-them">When To Use Them<a class="headerlink" href="#when-to-use-them" title="Permanent link">&para;</a></h3>
 <p>Most runs should pass plain model IDs:</p>
-<div class="highlight"><pre><span></span><code><span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span> <span class="s2">&quot;prithvi&quot;</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">"remoteclip"</span><span class="p">,</span> <span class="s2">"prithvi"</span><span class="p">]</span>
 </code></pre></div>
 <p>Use <code>ExportModelRequest(...)</code> when a specific model needs its own fetch, sensor, or modality:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExportModelRequest</span><span class="p">,</span> <span class="n">FetchSpec</span>
 
 <span class="n">models</span><span class="o">=</span><span class="p">[</span>
-    <span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span>
-    <span class="n">ExportModelRequest</span><span class="p">(</span><span class="s2">&quot;prithvi&quot;</span><span class="p">,</span> <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">30</span><span class="p">)),</span>
+    <span class="s2">"remoteclip"</span><span class="p">,</span>
+    <span class="n">ExportModelRequest</span><span class="p">(</span><span class="s2">"prithvi"</span><span class="p">,</span> <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">30</span><span class="p">)),</span>
 <span class="p">]</span>
 </code></pre></div>
 <p><code>ExportModelRequest.configure(...)</code> also accepts model-specific settings as keyword arguments, for example:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">ExportModelRequest</span>
 
 <span class="n">models</span><span class="o">=</span><span class="p">[</span>
-    <span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span>
-    <span class="n">ExportModelRequest</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="s2">&quot;thor&quot;</span><span class="p">,</span> <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;large&quot;</span><span class="p">),</span>
+    <span class="s2">"remoteclip"</span><span class="p">,</span>
+    <span class="n">ExportModelRequest</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="s2">"thor"</span><span class="p">,</span> <span class="n">variant</span><span class="o">=</span><span class="s2">"large"</span><span class="p">),</span>
 <span class="p">]</span>
 </code></pre></div>
 <p>Typical use cases are when one model needs its own <code>FetchSpec</code>, <code>modality="s1"</code>, a different <code>SensorSpec</code>, a different variant such as <code>variant="large"</code>, or some override of the shared export settings.</p>
@@ -3052,9 +3082,9 @@
 
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="p">[</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">)],</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">],</span>
-    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">&quot;exports/combined_run&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">"remoteclip"</span><span class="p">],</span>
+    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">"exports/combined_run"</span><span class="p">),</span>
     <span class="n">config</span><span class="o">=</span><span class="n">ExportConfig</span><span class="p">(</span><span class="n">save_inputs</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">resume</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
 <span class="p">)</span>
 </code></pre></div>
@@ -3068,14 +3098,14 @@
 
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="n">spatials</span><span class="p">,</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span> <span class="s2">&quot;prithvi&quot;</span><span class="p">],</span>
-    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">&quot;exports&quot;</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;p1&quot;</span><span class="p">,</span> <span class="s2">&quot;p2&quot;</span><span class="p">]),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">"remoteclip"</span><span class="p">,</span> <span class="s2">"prithvi"</span><span class="p">],</span>
+    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">"exports"</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">"p1"</span><span class="p">,</span> <span class="s2">"p2"</span><span class="p">]),</span>
     <span class="n">config</span><span class="o">=</span><span class="n">ExportConfig</span><span class="p">(</span>
         <span class="n">chunk_size</span><span class="o">=</span><span class="mi">32</span><span class="p">,</span>
         <span class="n">num_workers</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>
     <span class="p">),</span>
-    <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;tile&quot;</span><span class="p">,</span>
+    <span class="n">input_prep</span><span class="o">=</span><span class="s2">"tile"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="one-model-needs-its-own-modality">One model needs its own modality<a class="headerlink" href="#one-model-needs-its-own-modality" title="Permanent link">&para;</a></h3>
@@ -3089,10 +3119,10 @@
 
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="p">[</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">)],</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="n">ExportModelRequest</span><span class="p">(</span><span class="s2">&quot;terrafm&quot;</span><span class="p">,</span> <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s1&quot;</span><span class="p">)],</span>
-    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">&quot;exports/terrafm_s1_run&quot;</span><span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="n">ExportModelRequest</span><span class="p">(</span><span class="s2">"terrafm"</span><span class="p">,</span> <span class="n">modality</span><span class="o">=</span><span class="s2">"s1"</span><span class="p">)],</span>
+    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">"exports/terrafm_s1_run"</span><span class="p">),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="shared-fetch-override-across-models">Shared fetch override across models<a class="headerlink" href="#shared-fetch-override-across-models" title="Permanent link">&para;</a></h3>
@@ -3100,10 +3130,10 @@
 
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="p">[</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">)],</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span> <span class="s2">&quot;prithvi&quot;</span><span class="p">],</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">"remoteclip"</span><span class="p">,</span> <span class="s2">"prithvi"</span><span class="p">],</span>
     <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
-    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">&quot;exports/shared_sampling&quot;</span><span class="p">),</span>
+    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">"exports/shared_sampling"</span><span class="p">),</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="one-model-needs-its-own-variant">One model needs its own variant<a class="headerlink" href="#one-model-needs-its-own-variant" title="Permanent link">&para;</a></h3>
@@ -3117,10 +3147,10 @@
 
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="p">[</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">)],</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="n">ExportModelRequest</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="s2">&quot;thor&quot;</span><span class="p">,</span> <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;large&quot;</span><span class="p">)],</span>
-    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">&quot;exports/thor_large_run&quot;</span><span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="n">ExportModelRequest</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="s2">"thor"</span><span class="p">,</span> <span class="n">variant</span><span class="o">=</span><span class="s2">"large"</span><span class="p">)],</span>
+    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">"exports/thor_large_run"</span><span class="p">),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <hr />

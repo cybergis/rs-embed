@@ -1659,6 +1659,8 @@
       
         
       
+        
+      
     
     
     
@@ -1777,6 +1779,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2731,12 +2761,12 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;thor&quot;</span><span class="p">,</span>
+    <span class="s2">"thor"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;large&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">"large"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <hr />
@@ -2767,11 +2797,11 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;thor&quot;</span><span class="p">,</span>
+    <span class="s2">"thor"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <div class="tabbed-set tabbed-alternate" data-tabs="4:6"><input checked="checked" id="__tabbed_4_1" name="__tabbed_4" type="radio" /><input id="__tabbed_4_2" name="__tabbed_4" type="radio" /><input id="__tabbed_4_3" name="__tabbed_4" type="radio" /><input id="__tabbed_4_4" name="__tabbed_4" type="radio" /><input id="__tabbed_4_5" name="__tabbed_4" type="radio" /><input id="__tabbed_4_6" name="__tabbed_4" type="radio" /><div class="tabbed-labels"><label for="__tabbed_4_1">S1 Via Modality</label><label for="__tabbed_4_2">Common Tuning</label><label for="__tabbed_4_3">Native-Snap</label><label for="__tabbed_4_4">Patch Size</label><label for="__tabbed_4_5">Large ROI / Tile</label><label for="__tabbed_4_6">Variant</label></div>
@@ -2780,12 +2810,12 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;thor&quot;</span><span class="p">,</span>
+    <span class="s2">"thor"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s1&quot;</span><span class="p">,</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">modality</span><span class="o">=</span><span class="s2">"s1"</span><span class="p">,</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <p>This switches THOR onto the default <code>VV,VH</code> Sentinel-1 path. If you need a different provider collection, pass an explicit <code>SensorSpec(..., modality="s1")</code>.
@@ -2827,11 +2857,11 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">InputPrepSpec</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;thor&quot;</span><span class="p">,</span>
+    <span class="s2">"thor"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">4096</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">&quot;mean&quot;</span><span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">"mean"</span><span class="p">),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
     <span class="n">input_prep</span><span class="o">=</span><span class="n">InputPrepSpec</span><span class="o">.</span><span class="n">tile</span><span class="p">(</span><span class="n">tile_size</span><span class="o">=</span><span class="mi">288</span><span class="p">),</span>
 <span class="p">)</span>
 </code></pre></div>
@@ -2841,12 +2871,12 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;thor&quot;</span><span class="p">,</span>
+    <span class="s2">"thor"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">&quot;mean&quot;</span><span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;small&quot;</span><span class="p">,</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">"mean"</span><span class="p">),</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">"small"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <p>Use <code>variant</code> only for backbone size selection. Other THOR runtime knobs such as image size, normalization, patch size, and checkpoint override still use the environment-variable path above.</p>

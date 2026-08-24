@@ -1448,6 +1448,8 @@
       
         
       
+        
+      
     
     
     
@@ -1566,6 +1568,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2208,13 +2238,13 @@ Use <a href="../quickstart/">Quickstart</a> for the first-run path and <a href="
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">FetchSpec</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span>
+    <span class="s2">"remoteclip"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
     <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">device</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+    <span class="n">device</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <p>This is the right path when you are prototyping, inspecting metadata, debugging one location, or applying a quick sampling override through <code>fetch=FetchSpec(...)</code>.</p>
@@ -2229,11 +2259,11 @@ Use <a href="../quickstart/">Quickstart</a> for the first-run path and <a href="
 <span class="p">]</span>
 
 <span class="n">embs</span> <span class="o">=</span> <span class="n">get_embeddings_batch</span><span class="p">(</span>
-    <span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span>
+    <span class="s2">"remoteclip"</span><span class="p">,</span>
     <span class="n">spatials</span><span class="o">=</span><span class="n">spatials</span><span class="p">,</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <p>This path is best when the model is fixed, the ROI list is larger than one point, and you want simpler code than a manual loop while still benefiting from any embedder-level batch inference.</p>
@@ -2250,11 +2280,11 @@ For new code, prefer <code>target=ExportTarget(...)</code> plus <code>config=Exp
 
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="n">spatials</span><span class="p">,</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span> <span class="s2">&quot;prithvi&quot;</span><span class="p">],</span>
-    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">&quot;exports&quot;</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;p1&quot;</span><span class="p">,</span> <span class="s2">&quot;p2&quot;</span><span class="p">]),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">"remoteclip"</span><span class="p">,</span> <span class="s2">"prithvi"</span><span class="p">],</span>
+    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">"exports"</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">"p1"</span><span class="p">,</span> <span class="s2">"p2"</span><span class="p">]),</span>
     <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
     <span class="n">config</span><span class="o">=</span><span class="n">ExportConfig</span><span class="p">(</span><span class="n">save_inputs</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">save_embeddings</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span> <span class="n">resume</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
 <span class="p">)</span>
 </code></pre></div>
@@ -2267,13 +2297,13 @@ For new code, prefer <code>target=ExportTarget(...)</code> plus <code>config=Exp
 
 <span class="n">report</span> <span class="o">=</span> <span class="n">inspect_provider_patch</span><span class="p">(</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">sensor</span><span class="o">=</span><span class="n">SensorSpec</span><span class="p">(</span>
-        <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;COPERNICUS/S2_SR_HARMONIZED&quot;</span><span class="p">,</span>
-        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;B4&quot;</span><span class="p">,</span> <span class="s2">&quot;B3&quot;</span><span class="p">,</span> <span class="s2">&quot;B2&quot;</span><span class="p">),</span>
+        <span class="n">collection</span><span class="o">=</span><span class="s2">"COPERNICUS/S2_SR_HARMONIZED"</span><span class="p">,</span>
+        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">"B4"</span><span class="p">,</span> <span class="s2">"B3"</span><span class="p">,</span> <span class="s2">"B2"</span><span class="p">),</span>
         <span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
     <span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="backward-compatible-alias">Backward-compatible alias<a class="headerlink" href="#backward-compatible-alias" title="Permanent link">&para;</a></h3>
@@ -2284,12 +2314,12 @@ For new code, prefer <code>target=ExportTarget(...)</code> plus <code>config=Exp
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span>
+    <span class="s2">"remoteclip"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">8000</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;tile&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+    <span class="n">input_prep</span><span class="o">=</span><span class="s2">"tile"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <p>Use <code>input_prep="tile"</code> when <code>OutputSpec.grid()</code> matters, when a large-ROI resize would lose too much detail, and when you accept extra runtime cost in exchange for better spatial structure preservation.</p>

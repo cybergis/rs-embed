@@ -1593,6 +1593,8 @@
       
         
       
+        
+      
     
     
     
@@ -1711,6 +1713,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2426,6 +2456,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <th>Primary Input</th>
 <th>Dim</th>
 <th>Default Resolution</th>
+<th>Input size (px)</th>
 <th>Temporal style</th>
 <th>Notable requirements</th>
 <th>Detail</th>
@@ -2437,6 +2468,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 6-band</td>
 <td>768</td>
 <td>30m</td>
+<td>224</td>
 <td>multi-frame (auto, ≤4)</td>
 <td>required temporal + location side inputs</td>
 <td><a href="prithvi/">detail</a></td>
@@ -2446,6 +2478,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 L2A 12-band / S1 VV/VH</td>
 <td>128–1024</td>
 <td>10m</td>
+<td>256 (flexible)</td>
 <td>multi-frame (auto, ≤12)</td>
 <td>FlexiViT; 4 sizes (nano/tiny/base/large)</td>
 <td><a href="olmoearth/">detail</a></td>
@@ -2455,6 +2488,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>Multispectral + wavelengths</td>
 <td>768</td>
 <td>10m</td>
+<td>224</td>
 <td>single composite</td>
 <td>wavelength vector required</td>
 <td><a href="dofa/">detail</a></td>
@@ -2464,6 +2498,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 L2A 10-band</td>
 <td>1024</td>
 <td>10m</td>
+<td>256</td>
 <td>single composite</td>
 <td>metadata conditioning (latlon/time/gsd/wavelengths)</td>
 <td><a href="clay/">detail</a></td>
@@ -2473,6 +2508,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 12-band</td>
 <td>384</td>
 <td>10m</td>
+<td>224</td>
 <td>single composite</td>
 <td>ViT-S class; strict z-score normalization</td>
 <td><a href="terramind/">detail</a></td>
@@ -2482,6 +2518,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 12-band or S1 VV/VH</td>
 <td>768</td>
 <td>10m</td>
+<td>224</td>
 <td>single composite</td>
 <td>dual-modality by channel count</td>
 <td><a href="terrafm/">detail</a></td>
@@ -2491,6 +2528,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 10-band or S1 VV/VH</td>
 <td>768</td>
 <td>10m</td>
+<td>288</td>
 <td>single composite</td>
 <td>dual-modality; grouped tokens; native-snap</td>
 <td><a href="thor/">detail</a></td>
@@ -2500,6 +2538,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 10-band time series</td>
 <td>128</td>
 <td>10m</td>
+<td>64</td>
 <td>multi-frame (auto, ≤12)</td>
 <td>nano default; month tokens</td>
 <td><a href="galileo/">detail</a></td>
@@ -2509,6 +2548,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 10-band time series</td>
 <td>768</td>
 <td>10m</td>
+<td>24</td>
 <td>multi-frame (fixed <code>T</code>)</td>
 <td>JEPA; <code>s2_dates</code> DOY side input</td>
 <td><a href="anysat/">detail</a></td>
@@ -2518,6 +2558,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 10-band time series</td>
 <td>1024</td>
 <td>10m</td>
+<td>224</td>
 <td>multi-frame (fixed <code>T</code>)</td>
 <td>Video Swin; fixed <code>T</code> frame stack</td>
 <td><a href="agrifm/">detail</a></td>
@@ -2527,6 +2568,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 12-band</td>
 <td>768</td>
 <td>10m</td>
+<td>64</td>
 <td>single composite</td>
 <td>per-channel spectral modality keys</td>
 <td><a href="fomo/">detail</a></td>
@@ -2536,6 +2578,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 RGB</td>
 <td>256</td>
 <td>10m</td>
+<td>224</td>
 <td>single composite</td>
 <td>biodiversity training; image_head default</td>
 <td><a href="wildsat/">detail</a></td>
@@ -2545,6 +2588,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>TOA 14-channel (MODIS)</td>
 <td>4096</td>
 <td>1000m</td>
+<td>128</td>
 <td>single composite</td>
 <td>SwinV2 Giant; strict channel calibration</td>
 <td><a href="satvision/">detail</a></td>
@@ -2554,6 +2598,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 RGB (<code>B4,B3,B2</code>)</td>
 <td>512</td>
 <td>10m</td>
+<td>224</td>
 <td>single composite</td>
 <td>CLIP projection; RGB preprocessing</td>
 <td><a href="remoteclip/">detail</a></td>
@@ -2563,6 +2608,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 RGB + scale</td>
 <td>1024</td>
 <td>10m</td>
+<td>224</td>
 <td>single composite</td>
 <td><code>sensor.scale_m</code> is a model input</td>
 <td><a href="scalemae/">detail</a></td>
@@ -2572,6 +2618,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 RGB (<code>B4,B3,B2</code>)</td>
 <td>1024</td>
 <td>10m</td>
+<td>224</td>
 <td>single composite</td>
 <td>ViT-L; MAE token/grid</td>
 <td><a href="satmae/">detail</a></td>
@@ -2581,12 +2628,14 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>S2 RGB (<code>B4,B3,B2</code>) or S2 10-band</td>
 <td>1024</td>
 <td>10m</td>
+<td>224 (rgb) / 96 (s2_10b)</td>
 <td>single composite</td>
 <td><code>modality=rgb</code> (default) or <code>s2_10b</code>; ViT-L; fMoW eval preprocessing; 10-band uses strict band order + grouped-channel tokens</td>
 <td><a href="satmaepp/">detail</a></td>
 </tr>
 </tbody>
 </table>
+<p><strong>Input size (px)</strong> is the fixed spatial size each model's encoder consumes: under the default <code>input_prep="tile"</code>, inputs larger than it are cut into tiles of this size at native resolution and the outputs stitched (both for provider fetches and user-provided data — see <a href="../user_data/">User Data API</a>); under <code>input_prep="resize"</code> they are downsampled to it in one step. Together with Default Resolution it gives the native footprint of one forward pass, e.g. galileo 64 px × 10 m ≈ 640 m. <code>olmoearth</code> (FlexiViT) accepts any size divisible by its patch size — 256 is its training tile size; user-provided data is consumed natively at its own size by default (warning above 512 px), and an explicit <code>model_config</code> <code>image_size</code> restores fixed-size behavior. <code>anysat</code> and <code>prithvi</code> sizes are env-tunable (<code>RS_EMBED_ANYSAT_IMG</code>, <code>RS_EMBED_PRITHVI_IMG</code>).</p>
 <hr />
 <h2 id="temporal-and-comparison-notes-what-people-usually-miss">Temporal and Comparison Notes (What People Usually Miss)<a class="headerlink" href="#temporal-and-comparison-notes-what-people-usually-miss" title="Permanent link">&para;</a></h2>
 <p><code>TemporalSpec.range(start, end)</code> is usually a compositing window rather than a single-scene selector, and <code>OutputSpec.grid()</code> may be a token or patch grid rather than a georeferenced raster, especially for ViT-like backbones. Cross-model comparisons are usually easiest with <code>OutputSpec.pooled()</code> plus fixed ROI, temporal, and compositing settings.</p>

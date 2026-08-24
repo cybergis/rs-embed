@@ -1787,6 +1787,8 @@
       
         
       
+        
+      
     
     
     
@@ -1905,6 +1907,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -3055,13 +3085,13 @@ its <code>(day, month, year)</code> timestamp. The adapter reproduces exactly th
   IW filtering and dB handling apply within each bin.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="n">emb</span> <span class="o">=</span> <span class="n">rs</span><span class="o">.</span><span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;olmoearth&quot;</span><span class="p">,</span>
+    <span class="s2">"olmoearth"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=-</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="mf">6.0</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=-</span><span class="mf">1.9</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="mf">6.1</span><span class="p">),</span>
     <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">year</span><span class="p">(</span><span class="mi">2022</span><span class="p">),</span>       <span class="c1"># → 12 monthly-cadence frames</span>
-    <span class="n">temporal_mode</span><span class="o">=</span><span class="s2">&quot;multi&quot;</span><span class="p">,</span>
+    <span class="n">temporal_mode</span><span class="o">=</span><span class="s2">"multi"</span><span class="p">,</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
 <span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="p">[</span><span class="s2">&quot;n_frames&quot;</span><span class="p">])</span>   <span class="c1"># ≤ 12, depending on data availability</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="p">[</span><span class="s2">"n_frames"</span><span class="p">])</span>   <span class="c1"># ≤ 12, depending on data availability</span>
 </code></pre></div>
 <div class="admonition note">
 <p class="admonition-title">Multi-frame <code>input_chw</code> contract</p>
@@ -3077,7 +3107,7 @@ all-NaN frames. Plain <code>[C, H, W]</code> inputs are always treated as single
 <h3 id="grid-outputspecgrid">Grid (<code>OutputSpec.grid()</code>)<a class="headerlink" href="#grid-outputspecgrid" title="Permanent link">&para;</a></h3>
 <p>Returns a <code>(D, H', W')</code> spatial token map as an <code>xarray.DataArray</code> with dimensions <code>(d, y, x)</code>. The temporal (<code>T</code>) and band-set (<code>S</code>) dimensions are averaged out; only the spatial token grid is retained.</p>
 <p>Grid size depends on <code>image_size</code> and <code>patch_size</code>:
-<div class="highlight"><pre><span></span><code>H&#39; = W&#39; = image_size // patch_size
+<div class="highlight"><pre><span></span><code>H' = W' = image_size // patch_size
 </code></pre></div>
 For defaults (256, patch_size=4): <code>64 × 64</code> grid.</p>
 <hr />
@@ -3140,24 +3170,24 @@ of the base install:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">BBox</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;olmoearth&quot;</span><span class="p">,</span>
+    <span class="s2">"olmoearth"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=-</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="mf">6.0</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=-</span><span class="mf">1.9</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="mf">6.1</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="choose-variant-and-modality">Choose variant and modality<a class="headerlink" href="#choose-variant-and-modality" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">BBox</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;olmoearth&quot;</span><span class="p">,</span>
+    <span class="s2">"olmoearth"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=-</span><span class="mf">2.0</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="mf">6.0</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=-</span><span class="mf">1.9</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="mf">6.1</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;tiny_v1_2&quot;</span><span class="p">,</span>
-    <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s1&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">"tiny_v1_2"</span><span class="p">,</span>
+    <span class="n">modality</span><span class="o">=</span><span class="s2">"s1"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <hr />

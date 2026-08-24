@@ -1461,6 +1461,8 @@
       
         
       
+        
+      
     
     
     
@@ -1933,6 +1935,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2791,21 +2821,21 @@
 <h3 id="spatialspec">SpatialSpec<a class="headerlink" href="#spatialspec" title="Permanent link">&para;</a></h3>
 <p><code>SpatialSpec</code> describes the spatial region for which you want to extract an embedding.</p>
 <h4 id="bbox"><code>BBox</code><a class="headerlink" href="#bbox" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">minlat</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">maxlon</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">maxlat</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">crs</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;EPSG:4326&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">minlat</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">maxlon</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">maxlat</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">crs</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"EPSG:4326"</span><span class="p">)</span>
 </code></pre></div>
 <p>This is an <strong>EPSG:4326</strong> latitude/longitude bounding box. The current public API supports only EPSG:4326, and <code>validate()</code> checks that the bounds are valid.</p>
 <h4 id="pointbuffer"><code>PointBuffer</code><a class="headerlink" href="#pointbuffer" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">lat</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">buffer_m</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">crs</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;EPSG:4326&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">lat</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">buffer_m</span><span class="p">:</span> <span class="nb">float</span><span class="p">,</span> <span class="n">crs</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"EPSG:4326"</span><span class="p">)</span>
 </code></pre></div>
 <p>This is a square ROI centered at a point, with size defined in meters and internally projected into the coordinate system required by the provider. <code>buffer_m</code> must be greater than zero.</p>
 <hr />
 <h3 id="temporalspec">TemporalSpec<a class="headerlink" href="#temporalspec" title="Permanent link">&para;</a></h3>
 <p><code>TemporalSpec</code> describes the time range (by year or by date range).</p>
-<div class="highlight"><pre><span></span><code><span class="n">TemporalSpec</span><span class="p">(</span><span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;year&quot;</span><span class="p">,</span> <span class="s2">&quot;range&quot;</span><span class="p">],</span> <span class="n">year</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">start</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">end</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">TemporalSpec</span><span class="p">(</span><span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"year"</span><span class="p">,</span> <span class="s2">"range"</span><span class="p">],</span> <span class="n">year</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">start</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">,</span> <span class="n">end</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span><span class="p">)</span>
 </code></pre></div>
 <p>Recommended constructors:</p>
 <div class="highlight"><pre><span></span><code><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">year</span><span class="p">(</span><span class="mi">2022</span><span class="p">)</span>
-<span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">)</span>
+<span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">)</span>
 </code></pre></div>
 <div class="admonition warning">
 <p class="admonition-title">Temporal range is a window</p>
@@ -2821,7 +2851,7 @@
     <span class="n">scale_m</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">10</span><span class="p">,</span>
     <span class="n">cloudy_pct</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">30</span><span class="p">,</span>
     <span class="n">fill_value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">=</span> <span class="mf">0.0</span><span class="p">,</span>
-    <span class="n">composite</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;median&quot;</span><span class="p">,</span> <span class="s2">&quot;mosaic&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;median&quot;</span><span class="p">,</span>
+    <span class="n">composite</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"median"</span><span class="p">,</span> <span class="s2">"mosaic"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"median"</span><span class="p">,</span>
     <span class="n">modality</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">orbit</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">use_float_linear</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">True</span><span class="p">,</span>
@@ -2906,7 +2936,7 @@ Use it when you want to change common knobs such as resolution or compositing, b
     <span class="n">scale_m</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">cloudy_pct</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">fill_value</span><span class="p">:</span> <span class="nb">float</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
-    <span class="n">composite</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;median&quot;</span><span class="p">,</span> <span class="s2">&quot;mosaic&quot;</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
+    <span class="n">composite</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"median"</span><span class="p">,</span> <span class="s2">"mosaic"</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <table>
@@ -2941,7 +2971,7 @@ Use it when you want to change common knobs such as resolution or compositing, b
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">FetchSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;prithvi&quot;</span><span class="p">,</span>
+    <span class="s2">"prithvi"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=...</span><span class="p">,</span>
     <span class="n">temporal</span><span class="o">=...</span><span class="p">,</span>
     <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span> <span class="n">cloudy_pct</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
@@ -2951,21 +2981,21 @@ Use it when you want to change common knobs such as resolution or compositing, b
 <h3 id="outputspec">OutputSpec<a class="headerlink" href="#outputspec" title="Permanent link">&para;</a></h3>
 <p><code>OutputSpec</code> controls the embedding output shape: a <strong>pooled vector</strong> or a <strong>dense grid</strong>.</p>
 <div class="highlight"><pre><span></span><code><span class="n">OutputSpec</span><span class="p">(</span>
-    <span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;grid&quot;</span><span class="p">,</span> <span class="s2">&quot;pooled&quot;</span><span class="p">],</span>
-    <span class="n">pooling</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;mean&quot;</span><span class="p">,</span> <span class="s2">&quot;max&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;mean&quot;</span><span class="p">,</span>
-    <span class="n">grid_orientation</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;north_up&quot;</span><span class="p">,</span> <span class="s2">&quot;native&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;north_up&quot;</span><span class="p">,</span>
+    <span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"grid"</span><span class="p">,</span> <span class="s2">"pooled"</span><span class="p">],</span>
+    <span class="n">pooling</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"mean"</span><span class="p">,</span> <span class="s2">"max"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"mean"</span><span class="p">,</span>
+    <span class="n">grid_orientation</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"north_up"</span><span class="p">,</span> <span class="s2">"native"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"north_up"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h4 id="recommended-constructors">Recommended Constructors<a class="headerlink" href="#recommended-constructors" title="Permanent link">&para;</a></h4>
 <div class="tabbed-set tabbed-alternate" data-tabs="2:2"><input checked="checked" id="__tabbed_2_1" name="__tabbed_2" type="radio" /><input id="__tabbed_2_2" name="__tabbed_2" type="radio" /><div class="tabbed-labels"><label for="__tabbed_2_1"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M15 3v4.59L7.59 15H3v6h6v-4.58L16.42 9H21V3m-4 2h2v2h-2M5 17h2v2H5"/></svg></span> Pooled (default)</label><label for="__tabbed_2_2"><span class="twemoji"><svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24"><path d="M10 4v4h4V4zm6 0v4h4V4zm0 6v4h4v-4zm0 6v4h4v-4zm-2 4v-4h-4v4zm-6 0v-4H4v4zm0-6v-4H4v4zm0-6V4H4v4zm2 6h4v-4h-4zM4 2h16a2 2 0 0 1 2 2v16a2 2 0 0 1-2 2H4c-1.08 0-2-.9-2-2V4a2 2 0 0 1 2-2"/></svg></span> Grid (spatial)</label></div>
 <div class="tabbed-content">
 <div class="tabbed-block">
-<div class="highlight"><pre><span></span><code><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">&quot;mean&quot;</span><span class="p">)</span>   <span class="c1"># shape: (D,)</span>
+<div class="highlight"><pre><span></span><code><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">"mean"</span><span class="p">)</span>   <span class="c1"># shape: (D,)</span>
 </code></pre></div>
 </div>
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">()</span>         <span class="c1"># shape: (D, H, W), normalized to north-up when possible</span>
-<span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">grid_orientation</span><span class="o">=</span><span class="s2">&quot;native&quot;</span><span class="p">)</span>  <span class="c1"># keep model/provider native orientation</span>
+<span class="n">OutputSpec</span><span class="o">.</span><span class="n">grid</span><span class="p">(</span><span class="n">grid_orientation</span><span class="o">=</span><span class="s2">"native"</span><span class="p">)</span>  <span class="c1"># keep model/provider native orientation</span>
 </code></pre></div>
 </div>
 </div>
@@ -3027,7 +3057,7 @@ v_d = \frac{1}{HW} \sum_{y,x} g_{d,y,x}
 <p><code>InputPrepSpec</code> controls API-level handling of large on-the-fly inputs before model inference.
 This is mainly useful when you want to choose between the model's normal resize path and API-side tiled inference.</p>
 <div class="highlight"><pre><span></span><code><span class="n">InputPrepSpec</span><span class="p">(</span>
-    <span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">&quot;resize&quot;</span><span class="p">,</span> <span class="s2">&quot;tile&quot;</span><span class="p">,</span> <span class="s2">&quot;auto&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="s2">&quot;resize&quot;</span><span class="p">,</span>
+    <span class="n">mode</span><span class="p">:</span> <span class="n">Literal</span><span class="p">[</span><span class="s2">"resize"</span><span class="p">,</span> <span class="s2">"tile"</span><span class="p">,</span> <span class="s2">"auto"</span><span class="p">]</span> <span class="o">=</span> <span class="s2">"resize"</span><span class="p">,</span>
     <span class="n">tile_size</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">tile_stride</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">int</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">max_tiles</span><span class="p">:</span> <span class="nb">int</span> <span class="o">=</span> <span class="mi">9</span><span class="p">,</span>
@@ -3041,9 +3071,9 @@ This is mainly useful when you want to choose between the model's normal resize 
 <span class="n">InputPrepSpec</span><span class="o">.</span><span class="n">tile</span><span class="p">(</span><span class="n">tile_size</span><span class="o">=</span><span class="mi">224</span><span class="p">)</span>    <span class="c1"># explicit tile size override</span>
 </code></pre></div>
 <h4 id="string-shorthand">String Shorthand<a class="headerlink" href="#string-shorthand" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;tile&quot;</span>     <span class="c1"># default</span>
-<span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;resize&quot;</span>
-<span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="n">input_prep</span><span class="o">=</span><span class="s2">"tile"</span>     <span class="c1"># default</span>
+<span class="n">input_prep</span><span class="o">=</span><span class="s2">"resize"</span>
+<span class="n">input_prep</span><span class="o">=</span><span class="s2">"auto"</span>
 </code></pre></div>
 <h4 id="current-tiling-behavior">Current Tiling Behavior<a class="headerlink" href="#current-tiling-behavior" title="Permanent link">&para;</a></h4>
 <p>Tile size defaults to <code>embedder.describe()["defaults"]["image_size"]</code> when available, unless you override it. Boundary tiles use a cover-shift layout such as <code>300 -&gt; [0,224]</code> and <code>[76,300]</code> to avoid edge padding when possible, and grid stitching uses midpoint-cut ownership in overlap regions rather than hard overwrite. <code>tile_stride</code> currently must equal <code>tile_size</code>, so explicit overlap or gap control is not enabled yet, although boundary shifting can still create overlap on the last tile. <code>auto</code> is conservative and currently prefers tiling mainly for <code>OutputSpec.grid()</code> when tile count is small enough.</p>
@@ -3055,8 +3085,8 @@ This is mainly useful when you want to choose between the model's normal resize 
 <h3 id="exporttarget-exportconfig-exportmodelrequest">ExportTarget / ExportConfig / ExportModelRequest<a class="headerlink" href="#exporttarget-exportconfig-exportmodelrequest" title="Permanent link">&para;</a></h3>
 <p><code>export_batch(...)</code> now uses small public request objects so large export jobs do not need dozens of top-level keywords.</p>
 <h4 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h4>
-<div class="highlight"><pre><span></span><code><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">&quot;exports/run&quot;</span><span class="p">)</span>
-<span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">&quot;exports/items&quot;</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;p1&quot;</span><span class="p">,</span> <span class="s2">&quot;p2&quot;</span><span class="p">])</span>
+<div class="highlight"><pre><span></span><code><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">"exports/run"</span><span class="p">)</span>
+<span class="n">ExportTarget</span><span class="o">.</span><span class="n">per_item</span><span class="p">(</span><span class="s2">"exports/items"</span><span class="p">,</span> <span class="n">names</span><span class="o">=</span><span class="p">[</span><span class="s2">"p1"</span><span class="p">,</span> <span class="s2">"p2"</span><span class="p">])</span>
 
 <span class="n">ExportConfig</span><span class="p">(</span>
     <span class="n">save_inputs</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
@@ -3066,9 +3096,9 @@ This is mainly useful when you want to choose between the model's normal resize 
     <span class="n">resume</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
 <span class="p">)</span>
 
-<span class="n">ExportModelRequest</span><span class="p">(</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">)</span>
-<span class="n">ExportModelRequest</span><span class="p">(</span><span class="s2">&quot;terrafm&quot;</span><span class="p">,</span> <span class="n">modality</span><span class="o">=</span><span class="s2">&quot;s1&quot;</span><span class="p">,</span> <span class="n">sensor</span><span class="o">=</span><span class="n">my_s1_sensor</span><span class="p">)</span>
-<span class="n">ExportModelRequest</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="s2">&quot;thor&quot;</span><span class="p">,</span> <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;large&quot;</span><span class="p">)</span>
+<span class="n">ExportModelRequest</span><span class="p">(</span><span class="s2">"remoteclip"</span><span class="p">)</span>
+<span class="n">ExportModelRequest</span><span class="p">(</span><span class="s2">"terrafm"</span><span class="p">,</span> <span class="n">modality</span><span class="o">=</span><span class="s2">"s1"</span><span class="p">,</span> <span class="n">sensor</span><span class="o">=</span><span class="n">my_s1_sensor</span><span class="p">)</span>
+<span class="n">ExportModelRequest</span><span class="o">.</span><span class="n">configure</span><span class="p">(</span><span class="s2">"thor"</span><span class="p">,</span> <span class="n">variant</span><span class="o">=</span><span class="s2">"large"</span><span class="p">)</span>
 </code></pre></div>
 <p><code>ExportTarget</code> controls where outputs are written, <code>ExportConfig</code> controls how the export runs, and <code>ExportModelRequest</code> carries the per-model overrides when one job mixes different settings such as sensor, modality, or variant — it is the only per-model channel. Use <code>ExportModelRequest.configure(...)</code> when you want to pass model settings as keyword arguments.</p>
 <hr />
@@ -3182,15 +3212,15 @@ This is mainly useful when you want to choose between the model's normal resize 
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">FetchSpec</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span>
+    <span class="s2">"remoteclip"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
 <span class="p">)</span>
 
 <span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="p">[</span><span class="s2">&quot;model&quot;</span><span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">&quot;sensor&quot;</span><span class="p">))</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="p">[</span><span class="s2">"model"</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="o">.</span><span class="n">get</span><span class="p">(</span><span class="s2">"sensor"</span><span class="p">))</span>
 </code></pre></div>
 <h4 id="embeddingmeta-vs-describe_model-modeldescribe"><code>Embedding.meta</code> vs <code>describe_model()</code> / <code>Model.describe()</code><a class="headerlink" href="#embeddingmeta-vs-describe_model-modeldescribe" title="Permanent link">&para;</a></h4>
 <p>These two metadata surfaces are related, but they serve different purposes:</p>
@@ -3270,12 +3300,12 @@ This is mainly useful when you want to choose between the model's normal resize 
 <p>Example:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">Model</span><span class="p">,</span> <span class="n">describe_model</span>
 
-<span class="n">desc</span> <span class="o">=</span> <span class="n">describe_model</span><span class="p">(</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">desc</span><span class="p">[</span><span class="s2">&quot;output&quot;</span><span class="p">])</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">desc</span><span class="p">[</span><span class="s2">&quot;defaults&quot;</span><span class="p">][</span><span class="s2">&quot;image_size&quot;</span><span class="p">])</span>
+<span class="n">desc</span> <span class="o">=</span> <span class="n">describe_model</span><span class="p">(</span><span class="s2">"remoteclip"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">desc</span><span class="p">[</span><span class="s2">"output"</span><span class="p">])</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">desc</span><span class="p">[</span><span class="s2">"defaults"</span><span class="p">][</span><span class="s2">"image_size"</span><span class="p">])</span>
 
-<span class="n">model</span> <span class="o">=</span> <span class="n">Model</span><span class="p">(</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">describe</span><span class="p">()[</span><span class="s2">&quot;type&quot;</span><span class="p">])</span>
+<span class="n">model</span> <span class="o">=</span> <span class="n">Model</span><span class="p">(</span><span class="s2">"remoteclip"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">model</span><span class="o">.</span><span class="n">describe</span><span class="p">()[</span><span class="s2">"type"</span><span class="p">])</span>
 </code></pre></div>
 <p>Simple rule:</p>
 <ul>

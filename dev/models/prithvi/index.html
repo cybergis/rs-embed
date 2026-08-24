@@ -1665,6 +1665,8 @@
       
         
       
+        
+      
     
     
     
@@ -1783,6 +1785,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2740,12 +2770,12 @@
 <p>The window-adaptive multi-frame fetch is used <strong>consistently</strong> across <code>get_embedding</code>, <code>get_embeddings_batch</code>, <code>export_batch</code>, and every <code>input_prep</code> mode (<code>resize</code>/<code>tile</code>/<code>auto</code>). Prithvi overrides the API-side prefetch (<code>fetch_input</code>) so the tiled/export paths receive the same <code>[T,6,H,W]</code> series as a direct call — they never silently collapse to a single composite. (Because <code>model_config</code> is not available at prefetch time, the prefetch honors an explicit <code>temporal_mode</code> argument, the <code>RS_EMBED_PRITHVI_TEMPORAL_MODE</code> env var, or the <code>auto</code> default — matching <code>olmoearth</code>/<code>galileo</code>.)</p>
 </div>
 <div class="highlight"><pre><span></span><code><span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;prithvi&quot;</span><span class="p">,</span>
+    <span class="s2">"prithvi"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-01-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2023-01-01&quot;</span><span class="p">),</span>  <span class="c1"># ~1 yr -&gt; 4 frames</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-01-01"</span><span class="p">,</span> <span class="s2">"2023-01-01"</span><span class="p">),</span>  <span class="c1"># ~1 yr -&gt; 4 frames</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">temporal_mode</span><span class="o">=</span><span class="s2">&quot;multi&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
+    <span class="n">temporal_mode</span><span class="o">=</span><span class="s2">"multi"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <p>Tuning knobs: <code>max_frames</code> (or env <code>RS_EMBED_PRITHVI_MAX_FRAMES</code>) caps the count; <code>RS_EMBED_PRITHVI_FRAME_STRIDE_DAYS</code> sets the minimum spacing (default 28); <code>RS_EMBED_PRITHVI_MAX_STRIDE_DAYS</code> sets the maximum in-distribution gap before the out-of-range flag/warning fires (default 184); <code>RS_EMBED_PRITHVI_TEMPORAL_MODE</code> sets the default mode.</p>
@@ -2753,12 +2783,12 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;prithvi&quot;</span><span class="p">,</span>
+    <span class="s2">"prithvi"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;300_tl&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">"300_tl"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <hr />
@@ -2767,11 +2797,11 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;prithvi&quot;</span><span class="p">,</span>
+    <span class="s2">"prithvi"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <h3 id="with-custom-preprocessing-mode-env-controlled">With custom preprocessing mode (env-controlled)<a class="headerlink" href="#with-custom-preprocessing-mode-env-controlled" title="Permanent link">&para;</a></h3>
@@ -2784,12 +2814,12 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embedding</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;prithvi&quot;</span><span class="p">,</span>
+    <span class="s2">"prithvi"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;prithvi_eo_v2_300_tl&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"gee"</span><span class="p">,</span>
+    <span class="n">variant</span><span class="o">=</span><span class="s2">"prithvi_eo_v2_300_tl"</span><span class="p">,</span>
 <span class="p">)</span>
 </code></pre></div>
 <hr />

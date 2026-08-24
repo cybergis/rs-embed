@@ -14,7 +14,7 @@
         <link rel="prev" href="../api_specs/">
       
       
-        <link rel="next" href="../api_export/">
+        <link rel="next" href="../user_data/">
       
       
         
@@ -1461,6 +1461,8 @@
       
         
       
+        
+      
     
     
     
@@ -1818,6 +1820,34 @@
   
 </nav>
       
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
     </li>
   
 
@@ -2552,8 +2582,8 @@
     <span class="n">fetch</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">FetchSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">modality</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">output</span><span class="p">:</span> <span class="n">OutputSpec</span> <span class="o">=</span> <span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
+    <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
     <span class="n">input_prep</span><span class="p">:</span> <span class="n">InputPrepSpec</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="o">**</span><span class="n">model_kwargs</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Embedding</span>
@@ -2657,14 +2687,14 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">FetchSpec</span><span class="p">,</span> <span class="n">PointBuffer</span><span class="p">,</span> <span class="n">TemporalSpec</span><span class="p">,</span> <span class="n">OutputSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 
 <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-    <span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span>
+    <span class="s2">"remoteclip"</span><span class="p">,</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="n">lon</span><span class="o">=</span><span class="mf">121.5</span><span class="p">,</span> <span class="n">lat</span><span class="o">=</span><span class="mf">31.2</span><span class="p">,</span> <span class="n">buffer_m</span><span class="o">=</span><span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">&quot;mean&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(</span><span class="n">pooling</span><span class="o">=</span><span class="s2">"mean"</span><span class="p">),</span>
     <span class="n">fetch</span><span class="o">=</span><span class="n">FetchSpec</span><span class="p">(</span><span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">),</span>
-    <span class="n">backend</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">device</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">input_prep</span><span class="o">=</span><span class="s2">&quot;tile&quot;</span><span class="p">,</span>  <span class="c1"># default; pass &quot;resize&quot; to downsample instead</span>
+    <span class="n">backend</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+    <span class="n">device</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span>
+    <span class="n">input_prep</span><span class="o">=</span><span class="s2">"tile"</span><span class="p">,</span>  <span class="c1"># default; pass "resize" to downsample instead</span>
 <span class="p">)</span>
 <span class="n">vec</span> <span class="o">=</span> <span class="n">emb</span><span class="o">.</span><span class="n">data</span>  <span class="c1"># (D,)</span>
 </code></pre></div>
@@ -2681,8 +2711,8 @@
     <span class="n">fetch</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">FetchSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">modality</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="nb">str</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">output</span><span class="p">:</span> <span class="n">OutputSpec</span> <span class="o">=</span> <span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>
-    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-    <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
+    <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
     <span class="n">input_prep</span><span class="p">:</span> <span class="n">InputPrepSpec</span> <span class="o">|</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="o">**</span><span class="n">model_kwargs</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">List</span><span class="p">[</span><span class="n">Embedding</span><span class="p">]</span>
@@ -2792,9 +2822,9 @@
     <span class="n">PointBuffer</span><span class="p">(</span><span class="mf">120.5</span><span class="p">,</span> <span class="mf">30.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">),</span>
 <span class="p">]</span>
 <span class="n">embs</span> <span class="o">=</span> <span class="n">get_embeddings_batch</span><span class="p">(</span>
-    <span class="s2">&quot;remoteclip&quot;</span><span class="p">,</span>
+    <span class="s2">"remoteclip"</span><span class="p">,</span>
     <span class="n">spatials</span><span class="o">=</span><span class="n">spatials</span><span class="p">,</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
 <span class="p">)</span>
 </code></pre></div>
 <p>Variant-aware batch calls follow the same pattern, for example by adding <code>variant="base"</code> to <code>get_embeddings_batch(...)</code>.</p>

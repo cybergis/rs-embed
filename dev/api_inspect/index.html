@@ -1461,6 +1461,8 @@
       
         
       
+        
+      
     
     
     
@@ -1580,6 +1582,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2212,8 +2242,8 @@
     <span class="n">spatial</span><span class="p">:</span> <span class="n">SpatialSpec</span><span class="p">,</span>
     <span class="n">temporal</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">TemporalSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">sensor</span><span class="p">:</span> <span class="n">SensorSpec</span><span class="p">,</span>
-    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;gee_patch&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"gee"</span><span class="p">,</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"gee_patch"</span><span class="p">,</span>
     <span class="n">value_range</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">return_array</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>
@@ -2227,8 +2257,8 @@ Use this when you want the same inspection flow but with a non-GEE provider back
     <span class="n">spatial</span><span class="p">:</span> <span class="n">SpatialSpec</span><span class="p">,</span>
     <span class="n">temporal</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">TemporalSpec</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">sensor</span><span class="p">:</span> <span class="n">SensorSpec</span><span class="p">,</span>
-    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;gee&quot;</span><span class="p">,</span>
-    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;gee_patch&quot;</span><span class="p">,</span>
+    <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"gee"</span><span class="p">,</span>
+    <span class="n">name</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"gee_patch"</span><span class="p">,</span>
     <span class="n">value_range</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Tuple</span><span class="p">[</span><span class="nb">float</span><span class="p">,</span> <span class="nb">float</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="n">return_array</span><span class="p">:</span> <span class="nb">bool</span> <span class="o">=</span> <span class="kc">False</span><span class="p">,</span>
 <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]</span>
@@ -2243,15 +2273,15 @@ It performs the same input quality checks (<strong>without running the model</st
 
 <span class="n">rep</span> <span class="o">=</span> <span class="n">inspect_gee_patch</span><span class="p">(</span>
     <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">),</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
     <span class="n">sensor</span><span class="o">=</span><span class="n">SensorSpec</span><span class="p">(</span>
-        <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;COPERNICUS/S2_SR_HARMONIZED&quot;</span><span class="p">,</span>
-        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;B4&quot;</span><span class="p">,</span> <span class="s2">&quot;B3&quot;</span><span class="p">,</span> <span class="s2">&quot;B2&quot;</span><span class="p">),</span>
+        <span class="n">collection</span><span class="o">=</span><span class="s2">"COPERNICUS/S2_SR_HARMONIZED"</span><span class="p">,</span>
+        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">"B4"</span><span class="p">,</span> <span class="s2">"B3"</span><span class="p">,</span> <span class="s2">"B2"</span><span class="p">),</span>
         <span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
         <span class="n">cloudy_pct</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>
-        <span class="n">composite</span><span class="o">=</span><span class="s2">&quot;median&quot;</span><span class="p">,</span>
+        <span class="n">composite</span><span class="o">=</span><span class="s2">"median"</span><span class="p">,</span>
         <span class="n">check_input</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>
-        <span class="n">check_save_dir</span><span class="o">=</span><span class="s2">&quot;artifacts&quot;</span><span class="p">,</span>
+        <span class="n">check_save_dir</span><span class="o">=</span><span class="s2">"artifacts"</span><span class="p">,</span>
     <span class="p">),</span>
     <span class="n">return_array</span><span class="o">=</span><span class="kc">False</span><span class="p">,</span>
 <span class="p">)</span>

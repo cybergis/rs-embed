@@ -11,10 +11,10 @@
       
       
       
-        <link rel="prev" href="../extending/">
+        <link rel="prev" href="../api_embedding/">
       
       
-        <link rel="next" href="../releases/">
+        <link rel="next" href="../api_export/">
       
       
         
@@ -25,7 +25,7 @@
     
     
       
-        <title>Contributing Guide - rs-embed</title>
+        <title>User Data API - rs-embed</title>
       
     
     
@@ -84,7 +84,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#contributing-guide" class="md-skip">
+        <a href="#api-user-provided-data" class="md-skip">
           Skip to content
         </a>
       
@@ -122,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Contributing Guide
+              User Data API
             
           </span>
         </div>
@@ -263,6 +263,8 @@
   
   
   
+    
+  
   
     
     
@@ -270,10 +272,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../api/" class="md-tabs__link">
           
   
@@ -295,12 +299,10 @@
   
   
   
-    
-  
   
     
     
-      <li class="md-tabs__item md-tabs__item--active">
+      <li class="md-tabs__item">
         <a href="../architecture/" class="md-tabs__link">
           
   
@@ -1377,8 +1379,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -1390,21 +1394,22 @@
     
     
       
+        
+        
+      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3" >
-        
-          
-          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3" id="__nav_3_label" tabindex="">
             
   
   
@@ -1422,7 +1427,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_3_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1437,8 +1442,10 @@
                 
   
   
+    
   
   
+  
     
     
       
@@ -1461,20 +1468,21 @@
     
       
       
-        
-      
-    
-    
-    <li class="md-nav__item md-nav__item--nested">
-      
-        
         
           
+          
         
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_1" >
+      
+    
+    
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+      
+        
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_3_1" checked>
         
           
-          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_1" id="__nav_3_1_label" tabindex="">
             
   
   
@@ -1492,7 +1500,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="2" aria-labelledby="__nav_3_1_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_3_1">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1591,10 +1599,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../user_data/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -1610,6 +1645,120 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-two-step-flow" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The two-step flow
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#userdata" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        UserData
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#functions" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get_embedding_from_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_embedding_from_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get_embeddings_batch_from_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_embeddings_batch_from_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#list_models_for_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_models_for_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#input-size-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input size handling
+      
+    </span>
+  </a>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#refusal-semantics" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Refusal semantics
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -1726,10 +1875,13 @@
       
       
         
+          
+          
+        
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
@@ -1738,7 +1890,7 @@
         <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_3_2" >
         
           
-          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_3_2" id="__nav_3_2_label" tabindex="">
             
   
   
@@ -1842,10 +1994,8 @@
       
   
   
-    
   
   
-  
     
     
       
@@ -1859,22 +2009,21 @@
     
     
       
-        
-        
-      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--nested">
       
         
-        
-        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_4" checked>
         
           
-          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="">
+        
+        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_4" >
+        
+          
+          <label class="md-nav__link" for="__nav_4" id="__nav_4_label" tabindex="0">
             
   
   
@@ -1892,7 +2041,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="true">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_4_label" aria-expanded="false">
           <label class="md-nav__title" for="__nav_4">
             <span class="md-nav__icon md-icon"></span>
             
@@ -1963,37 +2112,10 @@
                 
   
   
-    
   
   
-  
-    <li class="md-nav__item md-nav__item--active">
-      
-      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
-      
-      
-        
-      
-      
-        <label class="md-nav__link md-nav__link--active" for="__toc">
-          
-  
-  
-  <span class="md-ellipsis">
-    
-  
-    Contributing Guide
-  
-
-    
-  </span>
-  
-  
-
-          <span class="md-nav__icon md-icon"></span>
-        </label>
-      
-      <a href="./" class="md-nav__link md-nav__link--active">
+    <li class="md-nav__item">
+      <a href="../contributing/" class="md-nav__link">
         
   
   
@@ -2009,81 +2131,6 @@
   
 
       </a>
-      
-        
-
-<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
-  
-  
-  
-    
-  
-  
-    <label class="md-nav__title" for="__toc">
-      <span class="md-nav__icon md-icon"></span>
-      Table of contents
-    </label>
-    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
-      
-        <li class="md-nav__item">
-  <a href="#github-workflow" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        GitHub Workflow
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#issues" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Issues
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#pull-requests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Pull Requests
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Tests
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Documentation
-      
-    </span>
-  </a>
-  
-</li>
-      
-    </ul>
-  
-</nav>
-      
     </li>
   
 
@@ -2216,10 +2263,10 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#github-workflow" class="md-nav__link">
+  <a href="#the-two-step-flow" class="md-nav__link">
     <span class="md-ellipsis">
       
-        GitHub Workflow
+        The two-step flow
       
     </span>
   </a>
@@ -2227,10 +2274,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#issues" class="md-nav__link">
+  <a href="#userdata" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Issues
+        UserData
       
     </span>
   </a>
@@ -2238,10 +2285,60 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#pull-requests" class="md-nav__link">
+  <a href="#functions" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Pull Requests
+        Functions
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="Functions">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#get_embedding_from_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_embedding_from_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#get_embeddings_batch_from_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        get_embeddings_batch_from_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#list_models_for_data" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        list_models_for_data
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#input-size-handling" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Input size handling
       
     </span>
   </a>
@@ -2249,21 +2346,10 @@
 </li>
       
         <li class="md-nav__item">
-  <a href="#tests" class="md-nav__link">
+  <a href="#refusal-semantics" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Tests
-      
-    </span>
-  </a>
-  
-</li>
-      
-        <li class="md-nav__item">
-  <a href="#documentation" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Documentation
+        Refusal semantics
       
     </span>
   </a>
@@ -2290,40 +2376,174 @@
   
 
 
-<h1 id="contributing-guide">Contributing Guide<a class="headerlink" href="#contributing-guide" title="Permanent link">&para;</a></h1>
-<p>The <code>rs-embed</code> project welcomes bug reports, documentation fixes, model integrations, and API improvements. This page keeps the contribution workflow lightweight and points to the places where more detail already lives.</p>
-<p>If you want to add a new model adapter or change the embedder contract, start with <a href="../extending/">Extending</a>.</p>
-<h2 id="github-workflow">GitHub Workflow<a class="headerlink" href="#github-workflow" title="Permanent link">&para;</a></h2>
-<p>All development happens on GitHub. If you already know what needs to change, the fastest path is usually to open a pull request. If the scope is still unclear, or if the change affects public API shape, model semantics, or repository direction, opening an issue first helps everyone start from the same written context.</p>
-<p>For normal code contributions, fork the repository, create a focused branch, make the change, and open the pull request against <code>main</code>. Keeping unrelated changes in separate branches and PRs makes review much easier and usually gets feedback back to you faster.</p>
-<div class="highlight"><pre><span></span><code>git<span class="w"> </span>clone<span class="w"> </span>https://github.com/&lt;your-username&gt;/rs-embed.git
-<span class="nb">cd</span><span class="w"> </span>rs-embed
-git<span class="w"> </span>checkout<span class="w"> </span>-b<span class="w"> </span>&lt;descriptive-branch-name&gt;
+<h1 id="api-user-provided-data">API: User-Provided Data<a class="headerlink" href="#api-user-provided-data" title="Permanent link">&para;</a></h1>
+<p>You already have imagery — patches from your own dataset, exported GeoTIFFs, a training cube on disk. This page covers the bring-your-own-data API: computing embeddings from that imagery directly, with no provider fetch and no provider auth.</p>
+<p>Related pages: <a href="../api_embedding/">API: Embedding</a>, <a href="../api_specs/">API: Specs and Data Structures</a>, <a href="../spatial_roi/">Spatial ROI Handling</a>.</p>
+<div class="admonition abstract">
+<p class="admonition-title">The one idea</p>
+<p>You <strong>register</strong> each piece of imagery once as a <code>UserData</code> — the pixels plus everything that describes them: which collection they came from, one band name per channel, and where/when they were acquired. From then on, embedding takes only a model name. The declaration, not the array shape, is the contract: a model whose bands your declaration covers gets its channels sliced out automatically; a model it cannot satisfy is <strong>refused with the exact reason</strong>, never served silently wrong data.</p>
+</div>
+<hr />
+<h2 id="the-two-step-flow">The two-step flow<a class="headerlink" href="#the-two-step-flow" title="Permanent link">&para;</a></h2>
+<pre class="mermaid"><code>flowchart LR
+    REG["1. Register\nUserData(pixels, collection,\nbands, spatial, temporal)"] --&gt; MATCH["2. Match\ndeclaration vs the model's\ninput sensor"]
+    MATCH --&gt;|covers all bands| SLICE["slice + reorder\nchannels to model order"] --&gt; EMB["Embedding"]
+    MATCH --&gt;|"missing band /\nwrong collection"| REFUSE["ModelError\nnaming what is missing"]</code></pre>
+<p>Every on-the-fly model declares an input sensor (a collection plus an ordered band list), and your declaration is matched against it per request.</p>
+<p><strong>Superset data is accepted.</strong> If your declaration covers all bands the model needs, the needed channels are sliced out and reordered automatically. One 12-band Sentinel-2 L2A cube serves models that need 3, 6, or 10 of those bands — <code>galileo</code> takes its 10, an RGB model takes <code>B4/B3/B2</code>, all from the same declaration. Band aliases resolve the same way provider fetches resolve them (<code>"RED"</code> → <code>"B4"</code>, <code>"NIR_NARROW"</code> → <code>"B8A"</code>, …).</p>
+<p><strong>Insufficient data is refused.</strong> A collection mismatch (e.g. S2 data offered to a MODIS model) or a missing band raises <code>ModelError</code> naming exactly what is missing. Precomputed models (<code>tessera</code>, <code>gse</code>, <code>copernicus</code>) are always refused — they have no imagery input. Call <a href="#list_models_for_data"><code>list_models_for_data</code></a> to see the verdict for every catalog model up front.</p>
+<div class="admonition warning">
+<p class="admonition-title">Values must be raw provider units</p>
+<p>Pass exactly what a provider fetch would return — for Sentinel-2 L2A that is surface-reflectance DN in <code>0..10000</code>, <strong>not</strong> reflectance rescaled to <code>0..1</code>. Per-model normalization stays inside each embedder, so you never need to know a model's normalization; but data that looks already normalized (max ≤ 1.5 on an S2 declaration) triggers a <code>UserWarning</code>, because it would otherwise produce silently wrong embeddings.</p>
+</div>
+<hr />
+<h2 id="userdata">UserData<a class="headerlink" href="#userdata" title="Permanent link">&para;</a></h2>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">UserData</span>
+
+<span class="n">UserData</span><span class="p">(</span>
+    <span class="n">data</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">,</span>                      <span class="c1"># [C,H,W] or [T,C,H,W], raw provider values</span>
+    <span class="n">collection</span><span class="p">:</span> <span class="nb">str</span><span class="p">,</span>                       <span class="c1"># e.g. "COPERNICUS/S2_SR_HARMONIZED" or alias "s2"</span>
+    <span class="n">spatial</span><span class="p">:</span> <span class="n">SpatialSpec</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>    <span class="c1"># where the imagery is (PointBuffer / BBox)</span>
+    <span class="n">bands</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># one band name per channel; None = canonical order</span>
+    <span class="n">temporal</span><span class="p">:</span> <span class="n">TemporalSpec</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># when the imagery was acquired</span>
+    <span class="n">scale_m</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>            <span class="c1"># optional nominal pixel size, provenance only</span>
+<span class="p">)</span>
 </code></pre></div>
-<p>When you open the issue or PR, please include direct links to the relevant docs page, paper, model card, upstream repository, or prior discussion. If your claim depends on behavior, a plain-text code snippet is especially helpful because reviewers can search it, run it, and quote it directly.</p>
-<h2 id="issues">Issues<a class="headerlink" href="#issues" title="Permanent link">&para;</a></h2>
-<p>This repository includes GitHub issue forms for bug reports and feature requests. Please use them and include the links, code snippets, and environment details they ask for. That information usually answers the first round of clarifying questions before they need to be asked.</p>
-<h2 id="pull-requests">Pull Requests<a class="headerlink" href="#pull-requests" title="Permanent link">&para;</a></h2>
-<p>The repository also includes a pull request template. Please use it to summarize the change, link the related issue or reference material, and show how you verified the result. If the PR changes model behavior, it is especially helpful to mention the input contract, defaults, and any behavior that remains intentionally unsupported.</p>
-<p>If a pull request changes public API, model defaults, output semantics, or user-facing installation behavior, please update <code>CHANGELOG.md</code> as part of the same change so the release record stays current.</p>
-<p>Pull requests that touch user-facing or package-relevant files now get an automated changelog check in GitHub Actions. If a PR is intentionally docs-only, tests-only, CI-only, or otherwise internal, maintainers can apply the <code>skip-changelog</code> label to bypass that check.</p>
-<h2 id="tests">Tests<a class="headerlink" href="#tests" title="Permanent link">&para;</a></h2>
-<p><code>rs-embed</code> uses GitHub Actions for continuous integration, and it helps a lot if pull requests keep those checks green. If you change Python behavior, please add or update tests so the new behavior is explicit and easy to review. The repository already contains many focused tests, so the easiest starting point is usually to find a nearby test and mirror its style rather than inventing a new pattern.</p>
-<p>For a normal local setup, install the development dependencies first:</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>-e<span class="w"> </span><span class="s2">".[dev,full]"</span>
+<p><strong><code>collection</code> names the sensor product — and thereby the units.</strong> Short aliases resolve to full ids: <code>"s2"</code> / <code>"sentinel-2"</code> / <code>"s2-l2a"</code> → <code>COPERNICUS/S2_SR_HARMONIZED</code>; <code>"s1"</code> / <code>"sentinel-1"</code> → <code>COPERNICUS/S1_GRD</code>. Full collection ids pass through unchanged.</p>
+<p><strong><code>bands</code> may be omitted only for the canonical case.</strong> An S2 L2A declaration with exactly 12 channels defaults to the canonical order <code>B1, B2, B3, B4, B5, B6, B7, B8, B8A, B9, B11, B12</code>. Any other channel count, order, or collection must name its bands — band identity is never guessed from channel count.</p>
+<p><strong><code>spatial</code> and <code>temporal</code> travel with the data</strong>, because they describe <em>this imagery</em> (where it is, when it was acquired), not the API call. Both are optional, but supply them whenever you have them: models that condition on time read <code>temporal</code>, and models whose forward pass conditions on geometry (lat/lon or GSD encodings: <code>clay</code>, <code>prithvi</code>) <strong>refuse</strong> declarations without <code>spatial</code> — coordinates are never fabricated. Everything else accepts ungeoreferenced data and merely loses location provenance in the metadata.</p>
+<div class="admonition note">
+<p class="admonition-title">Multi-frame arrays</p>
+<p>A <code>[T,C,H,W]</code> array is only meaningful for time-series models (<code>galileo</code>, <code>prithvi</code>, <code>olmoearth</code>, <code>anysat</code>, <code>agrifm</code>); single-frame models reject it.</p>
+</div>
+<hr />
+<h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
+<h3 id="get_embedding_from_data">get_embedding_from_data<a class="headerlink" href="#get_embedding_from_data" title="Permanent link">&para;</a></h3>
+<p>A complete example, starting from a file on disk. Say you have a Sentinel-2 L2A patch saved as a GeoTIFF — 12 bands in the canonical order, raw surface-reflectance DN:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rasterio</span>                        <span class="c1"># example only; not an rs-embed dependency</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rasterio.warp</span><span class="w"> </span><span class="kn">import</span> <span class="n">transform_bounds</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">UserData</span><span class="p">,</span> <span class="n">get_embedding_from_data</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed.core.specs</span><span class="w"> </span><span class="kn">import</span> <span class="n">BBox</span><span class="p">,</span> <span class="n">TemporalSpec</span>
+
+<span class="c1"># 1. Load the pixels and the footprint from the file.</span>
+<span class="k">with</span> <span class="n">rasterio</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">"maize_field_2022.tif"</span><span class="p">)</span> <span class="k">as</span> <span class="n">src</span><span class="p">:</span>
+    <span class="n">pixels</span> <span class="o">=</span> <span class="n">src</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>                             <span class="c1"># numpy array, shape [12, H, W]</span>
+    <span class="n">left</span><span class="p">,</span> <span class="n">bottom</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">top</span> <span class="o">=</span> <span class="n">transform_bounds</span><span class="p">(</span>    <span class="c1"># footprint -&gt; lon/lat degrees</span>
+        <span class="n">src</span><span class="o">.</span><span class="n">crs</span><span class="p">,</span> <span class="s2">"EPSG:4326"</span><span class="p">,</span> <span class="o">*</span><span class="n">src</span><span class="o">.</span><span class="n">bounds</span>
+    <span class="p">)</span>
+
+<span class="c1"># 2. Register the imagery: the pixels plus everything that describes them.</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">UserData</span><span class="p">(</span>
+    <span class="n">data</span><span class="o">=</span><span class="n">pixels</span><span class="p">,</span>
+    <span class="n">collection</span><span class="o">=</span><span class="s2">"s2"</span><span class="p">,</span>
+    <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=</span><span class="n">left</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="n">bottom</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=</span><span class="n">right</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="n">top</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+<span class="p">)</span>
+
+<span class="c1"># 3. Embed — just name the model.</span>
+<span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding_from_data</span><span class="p">(</span><span class="s2">"galileo"</span><span class="p">,</span> <span class="n">data</span><span class="p">)</span>
+
+<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>                <span class="c1"># pooled feature vector, shape [D]</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="p">[</span><span class="s2">"user_input"</span><span class="p">])</span>        <span class="c1"># which bands/channels were actually used</span>
 </code></pre></div>
-<p>Then run the checks that cover your change:</p>
-<div class="highlight"><pre><span></span><code>ruff<span class="w"> </span>check<span class="w"> </span>src/
-ruff<span class="w"> </span>format<span class="w"> </span>src/<span class="w"> </span>tests/
-python<span class="w"> </span>-m<span class="w"> </span>pytest<span class="w"> </span>-v<span class="w"> </span>-n<span class="w"> </span>auto
+<p>If your data is already a numpy array (e.g. one sample from a training dataset), skip step 1 — anything <code>[C,H,W]</code> in raw provider units works as <code>data=</code>.</p>
+<p>Returns one <code>Embedding</code>. <code>meta["user_input"]</code> records the declaration and the channel selection actually fed to the model (<code>declared_bands</code>, <code>bands_used</code>, <code>channel_indices</code>), and <code>meta["input_prep"]</code> records how the array was sized (see <a href="#input-size-handling">Input size handling</a>).</p>
+<h3 id="get_embeddings_batch_from_data">get_embeddings_batch_from_data<a class="headerlink" href="#get_embeddings_batch_from_data" title="Permanent link">&para;</a></h3>
+<p>Continuing the example above — a whole directory of patches into one feature matrix:</p>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">pathlib</span><span class="w"> </span><span class="kn">import</span> <span class="n">Path</span>
+
+<span class="kn">import</span><span class="w"> </span><span class="nn">numpy</span><span class="w"> </span><span class="k">as</span><span class="w"> </span><span class="nn">np</span>
+
+<span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embeddings_batch_from_data</span>
+
+<span class="n">datas</span> <span class="o">=</span> <span class="p">[]</span>
+<span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">"patches/"</span><span class="p">)</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">"*.tif"</span><span class="p">)):</span>
+    <span class="k">with</span> <span class="n">rasterio</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">as</span> <span class="n">src</span><span class="p">:</span>
+        <span class="n">left</span><span class="p">,</span> <span class="n">bottom</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">top</span> <span class="o">=</span> <span class="n">transform_bounds</span><span class="p">(</span><span class="n">src</span><span class="o">.</span><span class="n">crs</span><span class="p">,</span> <span class="s2">"EPSG:4326"</span><span class="p">,</span> <span class="o">*</span><span class="n">src</span><span class="o">.</span><span class="n">bounds</span><span class="p">)</span>
+        <span class="n">datas</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
+            <span class="n">UserData</span><span class="p">(</span>
+                <span class="n">data</span><span class="o">=</span><span class="n">src</span><span class="o">.</span><span class="n">read</span><span class="p">(),</span>
+                <span class="n">collection</span><span class="o">=</span><span class="s2">"s2"</span><span class="p">,</span>
+                <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=</span><span class="n">left</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="n">bottom</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=</span><span class="n">right</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="n">top</span><span class="p">),</span>
+                <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+            <span class="p">)</span>
+        <span class="p">)</span>
+
+<span class="n">embs</span> <span class="o">=</span> <span class="n">get_embeddings_batch_from_data</span><span class="p">(</span><span class="s2">"galileo"</span><span class="p">,</span> <span class="n">datas</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">16</span><span class="p">)</span>
+
+<span class="n">X</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">stack</span><span class="p">([</span><span class="n">e</span><span class="o">.</span><span class="n">data</span> <span class="k">for</span> <span class="n">e</span> <span class="ow">in</span> <span class="n">embs</span><span class="p">])</span>   <span class="c1"># [N, D] — ready for sklearn, clustering, ...</span>
 </code></pre></div>
-<p>If your change is local to one module or behavior, using a narrower pytest target is completely fine. Including that command in the pull request gives reviewers a concrete reproduction path instead of just a general statement that testing passed.</p>
-<h2 id="documentation">Documentation<a class="headerlink" href="#documentation" title="Permanent link">&para;</a></h2>
-<p>Documentation changes are real contributions, not just cleanup after the fact. If you change the public API, model semantics, installation story, or extension workflow, it helps a lot to update the docs while the implementation context is still fresh.</p>
-<p>For doc changes, build the site locally before opening the pull request:</p>
-<div class="highlight"><pre><span></span><code>pip<span class="w"> </span>install<span class="w"> </span>mkdocs-material<span class="w"> </span>pymdown-extensions
-mkdocs<span class="w"> </span>build<span class="w"> </span>--strict
+<p>Each item is matched independently and carries its own <code>spatial</code> / <code>temporal</code>, so one batch can mix locations, dates, and even band orders. Items sharing a temporal are dispatched together (models with true batching benefit); results always come back in input order.</p>
+<div class="admonition tip">
+<p class="admonition-title">Fitting your GPU with <code>batch_size</code></p>
+<p><code>batch_size</code> caps how many items reach one model forward batch — set a small value for a small GPU. Models keep their own per-device internal default (e.g. <code>clay</code> 32 on CUDA / 4 on CPU) as a further cap, so <code>batch_size</code> lowers but does not raise a model's forward batch; to raise it, use the model's <code>RS_EMBED_&lt;MODEL&gt;_BATCH_SIZE</code> environment variable.</p>
+</div>
+<h3 id="list_models_for_data">list_models_for_data<a class="headerlink" href="#list_models_for_data" title="Permanent link">&para;</a></h3>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">list_models_for_data</span>
+
+<span class="n">report</span> <span class="o">=</span> <span class="n">list_models_for_data</span><span class="p">(</span><span class="n">data</span><span class="p">)</span>
+<span class="p">[</span><span class="n">r</span><span class="p">[</span><span class="s2">"model"</span><span class="p">]</span> <span class="k">for</span> <span class="n">r</span> <span class="ow">in</span> <span class="n">report</span> <span class="k">if</span> <span class="n">r</span><span class="p">[</span><span class="s2">"compatible"</span><span class="p">]]</span>
 </code></pre></div>
+<p>Runs the same matching against every catalog model without loading weights. Each entry has <code>model</code>, <code>compatible</code>, <code>bands_used</code>, and <code>reason</code> (why the model is incompatible).</p>
+<hr />
+<h2 id="input-size-handling">Input size handling<a class="headerlink" href="#input-size-handling" title="Permanent link">&para;</a></h2>
+<p>User data follows the package-wide <code>input_prep</code> policy, defaulting to <strong><code>"tile"</code></strong> — the same fairness semantics as the provider-fetch path (see <a href="../spatial_roi/">Spatial ROI Handling</a> and the <em>Input size</em> column in <a href="../models/">Models Overview</a>).</p>
+<p><strong>Larger than the model's input size — tiled, not squashed.</strong> The array is cut into model-native tiles at its own resolution, each tile embedded, and the outputs stitched. Every model sees the full detail regardless of its input size: a 256×256 patch reaches <code>clay</code> as one 256-px pass and <code>galileo</code> as a 4×4 grid of 64-px tiles, instead of <code>galileo</code> silently losing 15/16 of the pixels to a resize. Pass <code>input_prep="resize"</code> for one-step downsampling instead (faster, lossy); <code>meta["input_prep"]</code> records which path ran.</p>
+<p><strong>At or below the model's input size — straight through.</strong> There is nothing to tile: the array goes to the embedder, which resizes up if needed (<code>prithvi</code> can pad instead via <code>RS_EMBED_PRITHVI_PREP=pad</code>). Very small arrays run fine but carry only the information your pixels have — expect weak embeddings below roughly half the model's input size.</p>
+<p><strong>Non-square — tiling handles it cleanly.</strong> Edge tiles are padded and the outputs cropped back. Under <code>"resize"</code>, a plain resize distorts the aspect ratio — another reason to keep the tile default for non-square patches.</p>
+<div class="admonition note">
+<p class="admonition-title">Flexible-size models run your data natively</p>
+<p><code>olmoearth</code> (FlexiViT) accepts any patch-divisible input size, so your data is consumed <strong>natively by default</strong> — a 512×512 patch runs as one seamless pass instead of a 2×2 tile mosaic, with no configuration needed (the side length is snapped up to a patch multiple). Passing an explicit <code>image_size</code> in model kwargs restores fixed-size behavior (larger inputs tile at it).</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Very large native passes</p>
+<p>A flexible-size native pass beyond <strong>512 px</strong> emits a warning: attention cost grows quadratically with token count, so very large patches can be slow or exhaust GPU memory. Tile them via <code>input_prep=InputPrepSpec(mode="tile", tile_size=...)</code> or downsample via <code>"resize"</code>.</p>
+</div>
+<hr />
+<h2 id="refusal-semantics">Refusal semantics<a class="headerlink" href="#refusal-semantics" title="Permanent link">&para;</a></h2>
+<table>
+<thead>
+<tr>
+<th>Situation</th>
+<th>Result</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Declaration covers all model bands</td>
+<td>Accepted; channels sliced/reordered</td>
+</tr>
+<tr>
+<td>Missing band(s)</td>
+<td><code>ModelError</code> listing the missing band names</td>
+</tr>
+<tr>
+<td>Collection mismatch</td>
+<td><code>ModelError</code> (raw units differ across collections)</td>
+</tr>
+<tr>
+<td>Precomputed model</td>
+<td><code>ModelError</code> (no imagery input)</td>
+</tr>
+<tr>
+<td>Channel count ≠ declared bands</td>
+<td><code>SpecError</code> from <code>UserData.validate()</code></td>
+</tr>
+<tr>
+<td><code>bands=None</code> outside the canonical case</td>
+<td><code>SpecError</code> (declare bands explicitly)</td>
+</tr>
+<tr>
+<td>Missing <code>spatial</code> on a georef-conditioned model (<code>clay</code>, <code>prithvi</code>)</td>
+<td><code>ModelError</code> (coordinates are never fabricated)</td>
+</tr>
+<tr>
+<td>S2 values look normalized (max ≤ 1.5)</td>
+<td><code>UserWarning</code>, request still runs</td>
+</tr>
+</tbody>
+</table>
 
 
 

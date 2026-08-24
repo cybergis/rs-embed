@@ -1454,6 +1454,8 @@
       
         
       
+        
+      
     
     
     
@@ -1572,6 +1574,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2804,10 +2834,10 @@
 <h2 id="registration">Registration<a class="headerlink" href="#registration" title="Permanent link">&para;</a></h2>
 <p>Models are discovered through <code>catalog.py</code> → <code>registry.py</code> via lazy import:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># catalog.py</span>
-<span class="n">MODEL_SPECS</span><span class="p">[</span><span class="s2">&quot;your_model&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;your_module&quot;</span><span class="p">,</span> <span class="s2">&quot;YourEmbedder&quot;</span><span class="p">)</span>
+<span class="n">MODEL_SPECS</span><span class="p">[</span><span class="s2">"your_model"</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"your_module"</span><span class="p">,</span> <span class="s2">"YourEmbedder"</span><span class="p">)</span>
 
 <span class="c1"># your_module.py</span>
-<span class="nd">@register</span><span class="p">(</span><span class="s2">&quot;your_model&quot;</span><span class="p">)</span>
+<span class="nd">@register</span><span class="p">(</span><span class="s2">"your_model"</span><span class="p">)</span>
 <span class="k">class</span><span class="w"> </span><span class="nc">YourEmbedder</span><span class="p">(</span><span class="n">EmbedderBase</span><span class="p">):</span> <span class="o">...</span>
 </code></pre></div>
 <p>The module is only imported when <code>get_embedding("your_model", ...)</code> is first called. If it's not in <code>MODEL_SPECS</code>, string-based lookup will not find it.</p>
@@ -2825,12 +2855,12 @@
 <h3 id="describe"><code>describe()</code><a class="headerlink" href="#describe" title="Permanent link">&para;</a></h3>
 <p>Returns a JSON-serializable capability dictionary. Must be fast — no checkpoint downloads or model loading.</p>
 <div class="highlight"><pre><span></span><code><span class="p">{</span>
-  <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;on_the_fly&quot;</span><span class="p">,</span>
-  <span class="s2">&quot;backend&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;provider&quot;</span><span class="p">],</span>
-  <span class="s2">&quot;output&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;pooled&quot;</span><span class="p">,</span> <span class="s2">&quot;grid&quot;</span><span class="p">],</span>
-  <span class="s2">&quot;defaults&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;scale_m&quot;</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">&quot;image_size&quot;</span><span class="p">:</span> <span class="mi">224</span><span class="p">},</span>
-  <span class="s2">&quot;model_config&quot;</span><span class="p">:</span> <span class="p">{</span>
-    <span class="s2">&quot;variant&quot;</span><span class="p">:</span> <span class="p">{</span><span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;string&quot;</span><span class="p">,</span> <span class="s2">&quot;default&quot;</span><span class="p">:</span> <span class="s2">&quot;base&quot;</span><span class="p">,</span> <span class="s2">&quot;choices&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;base&quot;</span><span class="p">,</span> <span class="s2">&quot;large&quot;</span><span class="p">]}</span>
+  <span class="s2">"type"</span><span class="p">:</span> <span class="s2">"on_the_fly"</span><span class="p">,</span>
+  <span class="s2">"backend"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"provider"</span><span class="p">],</span>
+  <span class="s2">"output"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"pooled"</span><span class="p">,</span> <span class="s2">"grid"</span><span class="p">],</span>
+  <span class="s2">"defaults"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"scale_m"</span><span class="p">:</span> <span class="mi">10</span><span class="p">,</span> <span class="s2">"image_size"</span><span class="p">:</span> <span class="mi">224</span><span class="p">},</span>
+  <span class="s2">"model_config"</span><span class="p">:</span> <span class="p">{</span>
+    <span class="s2">"variant"</span><span class="p">:</span> <span class="p">{</span><span class="s2">"type"</span><span class="p">:</span> <span class="s2">"string"</span><span class="p">,</span> <span class="s2">"default"</span><span class="p">:</span> <span class="s2">"base"</span><span class="p">,</span> <span class="s2">"choices"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"base"</span><span class="p">,</span> <span class="s2">"large"</span><span class="p">]}</span>
   <span class="p">}</span>
 <span class="p">}</span>
 </code></pre></div>
@@ -2844,10 +2874,10 @@
 <p class="admonition-title">How <code>model_config</code> flows from the public API</p>
 <p>The public-facing functions (<code>get_embedding</code>, <code>get_embeddings_batch</code>) accept model settings as <strong>direct keyword arguments</strong>, not as a <code>model_config</code> dict:</p>
 <div class="highlight"><pre><span></span><code><span class="c1"># Correct — pass model settings directly as kwargs</span>
-<span class="n">get_embedding</span><span class="p">(</span><span class="s2">&quot;dofa&quot;</span><span class="p">,</span> <span class="n">spatial</span><span class="o">=...</span><span class="p">,</span> <span class="n">variant</span><span class="o">=</span><span class="s2">&quot;large&quot;</span><span class="p">)</span>
+<span class="n">get_embedding</span><span class="p">(</span><span class="s2">"dofa"</span><span class="p">,</span> <span class="n">spatial</span><span class="o">=...</span><span class="p">,</span> <span class="n">variant</span><span class="o">=</span><span class="s2">"large"</span><span class="p">)</span>
 
 <span class="c1"># Wrong — model_config is not a public parameter</span>
-<span class="n">get_embedding</span><span class="p">(</span><span class="s2">&quot;dofa&quot;</span><span class="p">,</span> <span class="n">spatial</span><span class="o">=...</span><span class="p">,</span> <span class="n">model_config</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;variant&quot;</span><span class="p">:</span> <span class="s2">&quot;large&quot;</span><span class="p">})</span>
+<span class="n">get_embedding</span><span class="p">(</span><span class="s2">"dofa"</span><span class="p">,</span> <span class="n">spatial</span><span class="o">=...</span><span class="p">,</span> <span class="n">model_config</span><span class="o">=</span><span class="p">{</span><span class="s2">"variant"</span><span class="p">:</span> <span class="s2">"large"</span><span class="p">})</span>
 </code></pre></div>
 <p>Internally the API collects <code>**model_kwargs</code> into a dict and passes it to the embedder as <code>model_config</code>.  Your embedder receives it the standard way (<code>model_config: dict | None</code>), so the internal interface is unchanged.  The <code>describe()</code> key <code>"model_config"</code> documents the accepted keys — users pass those keys directly as kwargs.</p>
 </div>
@@ -2870,13 +2900,13 @@
 <span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed.embedders.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbedderBase</span>
 
 
-<span class="nd">@register</span><span class="p">(</span><span class="s2">&quot;toy_model_v1&quot;</span><span class="p">)</span>
+<span class="nd">@register</span><span class="p">(</span><span class="s2">"toy_model_v1"</span><span class="p">)</span>
 <span class="k">class</span><span class="w"> </span><span class="nc">ToyModelV1</span><span class="p">(</span><span class="n">EmbedderBase</span><span class="p">):</span>
     <span class="k">def</span><span class="w"> </span><span class="nf">describe</span><span class="p">(</span><span class="bp">self</span><span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]:</span>
         <span class="k">return</span> <span class="p">{</span>
-            <span class="s2">&quot;type&quot;</span><span class="p">:</span> <span class="s2">&quot;precomputed&quot;</span><span class="p">,</span>
-            <span class="s2">&quot;backend&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;auto&quot;</span><span class="p">],</span>
-            <span class="s2">&quot;output&quot;</span><span class="p">:</span> <span class="p">[</span><span class="s2">&quot;pooled&quot;</span><span class="p">],</span>
+            <span class="s2">"type"</span><span class="p">:</span> <span class="s2">"precomputed"</span><span class="p">,</span>
+            <span class="s2">"backend"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"auto"</span><span class="p">],</span>
+            <span class="s2">"output"</span><span class="p">:</span> <span class="p">[</span><span class="s2">"pooled"</span><span class="p">],</span>
         <span class="p">}</span>
 
     <span class="k">def</span><span class="w"> </span><span class="nf">get_embedding</span><span class="p">(</span>
@@ -2886,32 +2916,32 @@
         <span class="n">temporal</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">TemporalSpec</span><span class="p">],</span>
         <span class="n">sensor</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">SensorSpec</span><span class="p">],</span>
         <span class="n">output</span><span class="p">:</span> <span class="n">OutputSpec</span><span class="p">,</span>
-        <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
-        <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">&quot;auto&quot;</span><span class="p">,</span>
+        <span class="n">backend</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
+        <span class="n">device</span><span class="p">:</span> <span class="nb">str</span> <span class="o">=</span> <span class="s2">"auto"</span><span class="p">,</span>
         <span class="n">input_chw</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">np</span><span class="o">.</span><span class="n">ndarray</span><span class="p">]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
         <span class="n">model_config</span><span class="p">:</span> <span class="n">Optional</span><span class="p">[</span><span class="n">Dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">Any</span><span class="p">]]</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>
     <span class="p">)</span> <span class="o">-&gt;</span> <span class="n">Embedding</span><span class="p">:</span>
-        <span class="k">if</span> <span class="n">output</span><span class="o">.</span><span class="n">mode</span> <span class="o">!=</span> <span class="s2">&quot;pooled&quot;</span><span class="p">:</span>
-            <span class="k">raise</span> <span class="n">ModelError</span><span class="p">(</span><span class="s2">&quot;toy_model_v1 only supports pooled output&quot;</span><span class="p">)</span>
+        <span class="k">if</span> <span class="n">output</span><span class="o">.</span><span class="n">mode</span> <span class="o">!=</span> <span class="s2">"pooled"</span><span class="p">:</span>
+            <span class="k">raise</span> <span class="n">ModelError</span><span class="p">(</span><span class="s2">"toy_model_v1 only supports pooled output"</span><span class="p">)</span>
 
         <span class="n">seed_bytes</span> <span class="o">=</span> <span class="n">hashlib</span><span class="o">.</span><span class="n">blake2s</span><span class="p">(</span>
-            <span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">spatial</span><span class="si">!r}</span><span class="s2">|</span><span class="si">{</span><span class="n">temporal</span><span class="si">!r}</span><span class="s2">|</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">model_name</span><span class="si">}</span><span class="s2">&quot;</span><span class="o">.</span><span class="n">encode</span><span class="p">(),</span>
+            <span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">spatial</span><span class="si">!r}</span><span class="s2">|</span><span class="si">{</span><span class="n">temporal</span><span class="si">!r}</span><span class="s2">|</span><span class="si">{</span><span class="bp">self</span><span class="o">.</span><span class="n">model_name</span><span class="si">}</span><span class="s2">"</span><span class="o">.</span><span class="n">encode</span><span class="p">(),</span>
             <span class="n">digest_size</span><span class="o">=</span><span class="mi">4</span><span class="p">,</span>
         <span class="p">)</span><span class="o">.</span><span class="n">digest</span><span class="p">()</span>
-        <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="nb">int</span><span class="o">.</span><span class="n">from_bytes</span><span class="p">(</span><span class="n">seed_bytes</span><span class="p">,</span> <span class="s2">&quot;little&quot;</span><span class="p">))</span>
+        <span class="n">rng</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">random</span><span class="o">.</span><span class="n">default_rng</span><span class="p">(</span><span class="nb">int</span><span class="o">.</span><span class="n">from_bytes</span><span class="p">(</span><span class="n">seed_bytes</span><span class="p">,</span> <span class="s2">"little"</span><span class="p">))</span>
 
         <span class="k">return</span> <span class="n">Embedding</span><span class="p">(</span>
-            <span class="n">data</span><span class="o">=</span><span class="n">rng</span><span class="o">.</span><span class="n">standard_normal</span><span class="p">(</span><span class="mi">512</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">&quot;float32&quot;</span><span class="p">),</span>
+            <span class="n">data</span><span class="o">=</span><span class="n">rng</span><span class="o">.</span><span class="n">standard_normal</span><span class="p">(</span><span class="mi">512</span><span class="p">)</span><span class="o">.</span><span class="n">astype</span><span class="p">(</span><span class="s2">"float32"</span><span class="p">),</span>
             <span class="n">meta</span><span class="o">=</span><span class="p">{</span>
-                <span class="s2">&quot;model&quot;</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_name</span><span class="p">,</span>
-                <span class="s2">&quot;backend&quot;</span><span class="p">:</span> <span class="n">backend</span><span class="p">,</span>
-                <span class="s2">&quot;spatial&quot;</span><span class="p">:</span> <span class="n">asdict</span><span class="p">(</span><span class="n">spatial</span><span class="p">),</span>
-                <span class="s2">&quot;temporal&quot;</span><span class="p">:</span> <span class="n">asdict</span><span class="p">(</span><span class="n">temporal</span><span class="p">)</span> <span class="k">if</span> <span class="n">temporal</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
+                <span class="s2">"model"</span><span class="p">:</span> <span class="bp">self</span><span class="o">.</span><span class="n">model_name</span><span class="p">,</span>
+                <span class="s2">"backend"</span><span class="p">:</span> <span class="n">backend</span><span class="p">,</span>
+                <span class="s2">"spatial"</span><span class="p">:</span> <span class="n">asdict</span><span class="p">(</span><span class="n">spatial</span><span class="p">),</span>
+                <span class="s2">"temporal"</span><span class="p">:</span> <span class="n">asdict</span><span class="p">(</span><span class="n">temporal</span><span class="p">)</span> <span class="k">if</span> <span class="n">temporal</span> <span class="k">else</span> <span class="kc">None</span><span class="p">,</span>
             <span class="p">},</span>
         <span class="p">)</span>
 </code></pre></div>
 <p>Then register in <code>src/rs_embed/embedders/catalog.py</code>:</p>
-<div class="highlight"><pre><span></span><code><span class="n">MODEL_SPECS</span><span class="p">[</span><span class="s2">&quot;toy_model_v1&quot;</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">&quot;toy_model&quot;</span><span class="p">,</span> <span class="s2">&quot;ToyModelV1&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">MODEL_SPECS</span><span class="p">[</span><span class="s2">"toy_model_v1"</span><span class="p">]</span> <span class="o">=</span> <span class="p">(</span><span class="s2">"toy_model"</span><span class="p">,</span> <span class="s2">"ToyModelV1"</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="on-the-fly-models">On-the-fly Models<a class="headerlink" href="#on-the-fly-models" title="Permanent link">&para;</a></h2>
@@ -2955,11 +2985,11 @@ embedder never leaks provider internals.</p>
 The base <code>fetch_input()</code> does the provider call for you — no code to write.</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed.core.specs</span><span class="w"> </span><span class="kn">import</span> <span class="n">ModelInputSpec</span>
 
-<span class="nd">@register</span><span class="p">(</span><span class="s2">&quot;my_model_v1&quot;</span><span class="p">)</span>
+<span class="nd">@register</span><span class="p">(</span><span class="s2">"my_model_v1"</span><span class="p">)</span>
 <span class="k">class</span><span class="w"> </span><span class="nc">MyModelV1</span><span class="p">(</span><span class="n">EmbedderBase</span><span class="p">):</span>
     <span class="n">input_spec</span> <span class="o">=</span> <span class="n">ModelInputSpec</span><span class="p">(</span>
-        <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;COPERNICUS/S2_SR_HARMONIZED&quot;</span><span class="p">,</span>
-        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;B2&quot;</span><span class="p">,</span> <span class="s2">&quot;B3&quot;</span><span class="p">,</span> <span class="s2">&quot;B4&quot;</span><span class="p">,</span> <span class="s2">&quot;B8&quot;</span><span class="p">),</span>   <span class="c1"># BGRNIR</span>
+        <span class="n">collection</span><span class="o">=</span><span class="s2">"COPERNICUS/S2_SR_HARMONIZED"</span><span class="p">,</span>
+        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">"B2"</span><span class="p">,</span> <span class="s2">"B3"</span><span class="p">,</span> <span class="s2">"B4"</span><span class="p">,</span> <span class="s2">"B8"</span><span class="p">),</span>   <span class="c1"># BGRNIR</span>
         <span class="n">scale_m</span><span class="o">=</span><span class="mi">10</span><span class="p">,</span>
         <span class="n">cloudy_pct</span><span class="o">=</span><span class="mi">30</span><span class="p">,</span>
         <span class="n">image_size</span><span class="o">=</span><span class="mi">224</span><span class="p">,</span>
@@ -3005,8 +3035,8 @@ generic provider fetch).  The <code>data</code> field is what the pipeline passe
         <span class="n">provider</span><span class="p">,</span>
         <span class="n">spatial</span><span class="o">=</span><span class="n">spatial</span><span class="p">,</span>
         <span class="n">temporal</span><span class="o">=</span><span class="n">temporal</span><span class="p">,</span>
-        <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;COPERNICUS/S2_SR_HARMONIZED&quot;</span><span class="p">,</span>
-        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;B2&quot;</span><span class="p">,</span> <span class="s2">&quot;B3&quot;</span><span class="p">,</span> <span class="s2">&quot;B4&quot;</span><span class="p">,</span> <span class="s2">&quot;B8&quot;</span><span class="p">),</span>
+        <span class="n">collection</span><span class="o">=</span><span class="s2">"COPERNICUS/S2_SR_HARMONIZED"</span><span class="p">,</span>
+        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">"B2"</span><span class="p">,</span> <span class="s2">"B3"</span><span class="p">,</span> <span class="s2">"B4"</span><span class="p">,</span> <span class="s2">"B8"</span><span class="p">),</span>
         <span class="n">scale_m</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">scale_m</span><span class="p">),</span>
         <span class="n">cloudy_pct</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">cloudy_pct</span><span class="p">),</span>
         <span class="n">composite</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">composite</span><span class="p">),</span>
@@ -3026,16 +3056,16 @@ Pass <code>TemporalSpec.range(start, end)</code> from the caller; the provider s
         <span class="n">provider</span><span class="p">,</span>
         <span class="n">spatial</span><span class="o">=</span><span class="n">spatial</span><span class="p">,</span>
         <span class="n">temporal</span><span class="o">=</span><span class="n">temporal</span><span class="p">,</span>          <span class="c1"># must be TemporalSpec.range(...)</span>
-        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;B2&quot;</span><span class="p">,</span> <span class="s2">&quot;B3&quot;</span><span class="p">,</span> <span class="s2">&quot;B4&quot;</span><span class="p">,</span> <span class="s2">&quot;B8A&quot;</span><span class="p">,</span> <span class="s2">&quot;B11&quot;</span><span class="p">,</span> <span class="s2">&quot;B12&quot;</span><span class="p">),</span>
+        <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">"B2"</span><span class="p">,</span> <span class="s2">"B3"</span><span class="p">,</span> <span class="s2">"B4"</span><span class="p">,</span> <span class="s2">"B8A"</span><span class="p">,</span> <span class="s2">"B11"</span><span class="p">,</span> <span class="s2">"B12"</span><span class="p">),</span>
         <span class="n">n_frames</span><span class="o">=</span><span class="mi">8</span><span class="p">,</span>                 <span class="c1"># how many frames to sample</span>
-        <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;COPERNICUS/S2_SR_HARMONIZED&quot;</span><span class="p">,</span>
+        <span class="n">collection</span><span class="o">=</span><span class="s2">"COPERNICUS/S2_SR_HARMONIZED"</span><span class="p">,</span>
         <span class="n">scale_m</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">scale_m</span><span class="p">),</span>
         <span class="n">cloudy_pct</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">cloudy_pct</span><span class="p">),</span>
-        <span class="n">composite</span><span class="o">=</span><span class="s2">&quot;median&quot;</span><span class="p">,</span>
+        <span class="n">composite</span><span class="o">=</span><span class="s2">"median"</span><span class="p">,</span>
         <span class="n">fill_value</span><span class="o">=</span><span class="mf">0.0</span><span class="p">,</span>
     <span class="p">)</span>
     <span class="c1"># raw_tchw: float32 [T, C, H, W] in raw DN [0, 10000]</span>
-    <span class="k">return</span> <span class="n">FetchResult</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">raw_tchw</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s2">&quot;n_frames&quot;</span><span class="p">:</span> <span class="n">raw_tchw</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]})</span>
+    <span class="k">return</span> <span class="n">FetchResult</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">raw_tchw</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{</span><span class="s2">"n_frames"</span><span class="p">:</span> <span class="n">raw_tchw</span><span class="o">.</span><span class="n">shape</span><span class="p">[</span><span class="mi">0</span><span class="p">]})</span>
 </code></pre></div>
 <h4 id="example-c-sentinel-1-vvvh-chw">Example C — Sentinel-1 VV/VH (CHW)<a class="headerlink" href="#example-c-sentinel-1-vvvh-chw" title="Permanent link">&para;</a></h4>
 <p>S1 fetch returns raw float32 VV/VH in linear or dB scale.  Use
@@ -3050,44 +3080,44 @@ Pass <code>TemporalSpec.range(start, end)</code> from the caller; the provider s
         <span class="n">provider</span><span class="p">,</span>
         <span class="n">spatial</span><span class="o">=</span><span class="n">spatial</span><span class="p">,</span>
         <span class="n">temporal</span><span class="o">=</span><span class="n">temporal</span><span class="p">,</span>
-        <span class="n">scale_m</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">&quot;scale_m&quot;</span><span class="p">,</span> <span class="mi">10</span><span class="p">)),</span>
-        <span class="n">orbit</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">&quot;orbit&quot;</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>        <span class="c1"># &quot;ASCENDING&quot; / &quot;DESCENDING&quot; / None</span>
+        <span class="n">scale_m</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">"scale_m"</span><span class="p">,</span> <span class="mi">10</span><span class="p">)),</span>
+        <span class="n">orbit</span><span class="o">=</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">"orbit"</span><span class="p">,</span> <span class="kc">None</span><span class="p">),</span>        <span class="c1"># "ASCENDING" / "DESCENDING" / None</span>
         <span class="n">use_float_linear</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>                        <span class="c1"># linear scale (not dB)</span>
-        <span class="n">composite</span><span class="o">=</span><span class="s2">&quot;median&quot;</span><span class="p">,</span>
+        <span class="n">composite</span><span class="o">=</span><span class="s2">"median"</span><span class="p">,</span>
         <span class="n">require_iw</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>           <span class="c1"># prefer IW acquisition mode</span>
         <span class="n">relax_iw_on_empty</span><span class="o">=</span><span class="kc">True</span><span class="p">,</span>    <span class="c1"># fall back if no IW images found</span>
     <span class="p">)</span>
     <span class="c1"># raw: float32 [2, H, W] — channel 0 = VV, channel 1 = VH</span>
-    <span class="c1"># meta: {&quot;iw_used&quot;: bool, &quot;orbit&quot;: str | None, ...}</span>
+    <span class="c1"># meta: {"iw_used": bool, "orbit": str | None, ...}</span>
     <span class="k">return</span> <span class="n">FetchResult</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">raw</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="n">meta</span><span class="p">)</span>
 </code></pre></div>
 <h4 id="example-d-multi-sensor-routing-s2-or-s1">Example D — Multi-sensor routing (S2 or S1)<a class="headerlink" href="#example-d-multi-sensor-routing-s2-or-s1" title="Permanent link">&para;</a></h4>
 <p>When a single model supports multiple input modalities, read <code>sensor.modality</code> to
 branch the fetch logic.  This is the pattern used by TerraFM and THOR.</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">fetch_input</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="n">provider</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">spatial</span><span class="p">,</span> <span class="n">temporal</span><span class="p">,</span> <span class="n">sensor</span><span class="p">):</span>
-    <span class="n">modality</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">&quot;modality&quot;</span><span class="p">,</span> <span class="s2">&quot;s2&quot;</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">&quot;s2&quot;</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
+    <span class="n">modality</span> <span class="o">=</span> <span class="nb">str</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">"modality"</span><span class="p">,</span> <span class="s2">"s2"</span><span class="p">)</span> <span class="ow">or</span> <span class="s2">"s2"</span><span class="p">)</span><span class="o">.</span><span class="n">lower</span><span class="p">()</span>
 
-    <span class="k">if</span> <span class="n">modality</span> <span class="o">==</span> <span class="s2">&quot;s2&quot;</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">modality</span> <span class="o">==</span> <span class="s2">"s2"</span><span class="p">:</span>
         <span class="n">raw</span> <span class="o">=</span> <span class="n">fetch_collection_patch_chw</span><span class="p">(</span>
             <span class="n">provider</span><span class="p">,</span> <span class="n">spatial</span><span class="o">=</span><span class="n">spatial</span><span class="p">,</span> <span class="n">temporal</span><span class="o">=</span><span class="n">temporal</span><span class="p">,</span>
-            <span class="n">collection</span><span class="o">=</span><span class="s2">&quot;COPERNICUS/S2_SR_HARMONIZED&quot;</span><span class="p">,</span>
-            <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">&quot;B2&quot;</span><span class="p">,</span> <span class="s2">&quot;B3&quot;</span><span class="p">,</span> <span class="s2">&quot;B4&quot;</span><span class="p">,</span> <span class="s2">&quot;B8&quot;</span><span class="p">),</span>
+            <span class="n">collection</span><span class="o">=</span><span class="s2">"COPERNICUS/S2_SR_HARMONIZED"</span><span class="p">,</span>
+            <span class="n">bands</span><span class="o">=</span><span class="p">(</span><span class="s2">"B2"</span><span class="p">,</span> <span class="s2">"B3"</span><span class="p">,</span> <span class="s2">"B4"</span><span class="p">,</span> <span class="s2">"B8"</span><span class="p">),</span>
             <span class="n">scale_m</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">scale_m</span><span class="p">),</span> <span class="n">cloudy_pct</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">cloudy_pct</span><span class="p">),</span>
             <span class="n">composite</span><span class="o">=</span><span class="nb">str</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">composite</span><span class="p">),</span> <span class="n">fill_value</span><span class="o">=</span><span class="nb">float</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">fill_value</span><span class="p">),</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="n">FetchResult</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">raw</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="p">{})</span>
 
-    <span class="k">if</span> <span class="n">modality</span> <span class="o">==</span> <span class="s2">&quot;s1&quot;</span><span class="p">:</span>
+    <span class="k">if</span> <span class="n">modality</span> <span class="o">==</span> <span class="s2">"s1"</span><span class="p">:</span>
         <span class="n">raw</span><span class="p">,</span> <span class="n">meta</span> <span class="o">=</span> <span class="n">fetch_s1_vvvh_raw_chw_with_meta</span><span class="p">(</span>
             <span class="n">provider</span><span class="p">,</span> <span class="n">spatial</span><span class="o">=</span><span class="n">spatial</span><span class="p">,</span> <span class="n">temporal</span><span class="o">=</span><span class="n">temporal</span><span class="p">,</span>
             <span class="n">scale_m</span><span class="o">=</span><span class="nb">int</span><span class="p">(</span><span class="n">sensor</span><span class="o">.</span><span class="n">scale_m</span><span class="p">),</span>
-            <span class="n">use_float_linear</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">&quot;use_float_linear&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)),</span>
-            <span class="n">require_iw</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">&quot;s1_require_iw&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)),</span>
-            <span class="n">relax_iw_on_empty</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">&quot;s1_relax_iw_on_empty&quot;</span><span class="p">,</span> <span class="kc">True</span><span class="p">)),</span>
+            <span class="n">use_float_linear</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">"use_float_linear"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)),</span>
+            <span class="n">require_iw</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">"s1_require_iw"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)),</span>
+            <span class="n">relax_iw_on_empty</span><span class="o">=</span><span class="nb">bool</span><span class="p">(</span><span class="nb">getattr</span><span class="p">(</span><span class="n">sensor</span><span class="p">,</span> <span class="s2">"s1_relax_iw_on_empty"</span><span class="p">,</span> <span class="kc">True</span><span class="p">)),</span>
         <span class="p">)</span>
         <span class="k">return</span> <span class="n">FetchResult</span><span class="p">(</span><span class="n">data</span><span class="o">=</span><span class="n">raw</span><span class="p">,</span> <span class="n">meta</span><span class="o">=</span><span class="n">meta</span><span class="p">)</span>
 
-    <span class="k">raise</span> <span class="n">ModelError</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;Unsupported modality: </span><span class="si">{</span><span class="n">modality</span><span class="si">!r}</span><span class="s2">. Expected &#39;s2&#39; or &#39;s1&#39;.&quot;</span><span class="p">)</span>
+    <span class="k">raise</span> <span class="n">ModelError</span><span class="p">(</span><span class="sa">f</span><span class="s2">"Unsupported modality: </span><span class="si">{</span><span class="n">modality</span><span class="si">!r}</span><span class="s2">. Expected 's2' or 's1'."</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h3 id="using-the-fetched-array-inside-get_embedding">Using the fetched array inside <code>get_embedding()</code><a class="headerlink" href="#using-the-fetched-array-inside-get_embedding" title="Permanent link">&para;</a></h3>
@@ -3095,7 +3125,7 @@ branch the fetch logic.  This is the pattern used by TerraFM and THOR.</p>
 <code>export_batch</code> sets <code>input_chw</code> when it has already downloaded the patch, so
 calling <code>fetch_input()</code> again would waste a network round-trip.</p>
 <div class="highlight"><pre><span></span><code><span class="k">def</span><span class="w"> </span><span class="nf">get_embedding</span><span class="p">(</span><span class="bp">self</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">spatial</span><span class="p">,</span> <span class="n">temporal</span><span class="p">,</span> <span class="n">sensor</span><span class="p">,</span> <span class="n">output</span><span class="p">,</span> <span class="n">backend</span><span class="p">,</span>
-                  <span class="n">device</span><span class="o">=</span><span class="s2">&quot;auto&quot;</span><span class="p">,</span> <span class="n">input_chw</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">model_config</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
+                  <span class="n">device</span><span class="o">=</span><span class="s2">"auto"</span><span class="p">,</span> <span class="n">input_chw</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">model_config</span><span class="o">=</span><span class="kc">None</span><span class="p">):</span>
     <span class="k">if</span> <span class="n">input_chw</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
         <span class="n">result</span> <span class="o">=</span> <span class="bp">self</span><span class="o">.</span><span class="n">fetch_input</span><span class="p">(</span>
             <span class="bp">self</span><span class="o">.</span><span class="n">_get_provider</span><span class="p">(</span><span class="n">backend</span><span class="p">),</span>
@@ -3149,7 +3179,7 @@ S1 linear float, etc.).  Normalization to model input range is done inside
     <span class="k">else</span><span class="p">:</span>
         <span class="n">raw</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">asarray</span><span class="p">(</span><span class="n">input_chw</span><span class="p">,</span> <span class="n">dtype</span><span class="o">=</span><span class="n">np</span><span class="o">.</span><span class="n">float32</span><span class="p">)</span>
 
-    <span class="c1"># Normalization is this embedder&#39;s responsibility:</span>
+    <span class="c1"># Normalization is this embedder's responsibility:</span>
     <span class="n">x_chw</span> <span class="o">=</span> <span class="n">np</span><span class="o">.</span><span class="n">clip</span><span class="p">(</span><span class="n">raw</span> <span class="o">/</span> <span class="mf">10000.0</span><span class="p">,</span> <span class="mf">0.0</span><span class="p">,</span> <span class="mf">1.0</span><span class="p">)</span>   <span class="c1"># S2 SR example</span>
     <span class="c1"># ... run model forward on x_chw</span>
 </code></pre></div>
@@ -3180,7 +3210,7 @@ S1 linear float, etc.).  Normalization to model input range is done inside
 
 <span class="k">def</span><span class="w"> </span><span class="nf">_require_torch</span><span class="p">():</span>
     <span class="k">if</span> <span class="n">torch</span> <span class="ow">is</span> <span class="kc">None</span><span class="p">:</span>
-        <span class="k">raise</span> <span class="n">ModelError</span><span class="p">(</span><span class="s2">&quot;Torch is required. Install with: pip install rs-embed&quot;</span><span class="p">)</span>
+        <span class="k">raise</span> <span class="n">ModelError</span><span class="p">(</span><span class="s2">"Torch is required. Install with: pip install rs-embed"</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="testing">Testing<a class="headerlink" href="#testing" title="Permanent link">&para;</a></h2>
@@ -3189,7 +3219,7 @@ S1 linear float, etc.).  Normalization to model input range is done inside
 <span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed.embedders.base</span><span class="w"> </span><span class="kn">import</span> <span class="n">EmbedderBase</span>
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_toy_model_registered</span><span class="p">():</span>
-    <span class="bp">cls</span> <span class="o">=</span> <span class="n">get_embedder_cls</span><span class="p">(</span><span class="s2">&quot;toy_model_v1&quot;</span><span class="p">)</span>  <span class="c1"># raises ModelError if not found</span>
+    <span class="bp">cls</span> <span class="o">=</span> <span class="n">get_embedder_cls</span><span class="p">(</span><span class="s2">"toy_model_v1"</span><span class="p">)</span>  <span class="c1"># raises ModelError if not found</span>
     <span class="k">assert</span> <span class="nb">issubclass</span><span class="p">(</span><span class="bp">cls</span><span class="p">,</span> <span class="n">EmbedderBase</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="api-level">API-level<a class="headerlink" href="#api-level" title="Permanent link">&para;</a></h3>
@@ -3197,7 +3227,7 @@ S1 linear float, etc.).  Normalization to model input range is done inside
 
 <span class="k">def</span><span class="w"> </span><span class="nf">test_toy_model_get_embedding</span><span class="p">():</span>
     <span class="n">emb</span> <span class="o">=</span> <span class="n">get_embedding</span><span class="p">(</span>
-        <span class="s2">&quot;toy_model_v1&quot;</span><span class="p">,</span>
+        <span class="s2">"toy_model_v1"</span><span class="p">,</span>
         <span class="n">spatial</span><span class="o">=</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mi">0</span><span class="p">,</span> <span class="mi">0</span><span class="p">,</span> <span class="mi">1000</span><span class="p">),</span>
         <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">year</span><span class="p">(</span><span class="mi">2022</span><span class="p">),</span>
         <span class="n">output</span><span class="o">=</span><span class="n">OutputSpec</span><span class="o">.</span><span class="n">pooled</span><span class="p">(),</span>

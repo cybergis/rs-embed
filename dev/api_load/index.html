@@ -1461,6 +1461,8 @@
       
         
       
+        
+      
     
     
     
@@ -1580,6 +1582,34 @@
     
   
     Embedding API
+  
+
+    
+  </span>
+  
+  
+
+      </a>
+    </li>
+  
+
+              
+            
+              
+                
+  
+  
+  
+  
+    <li class="md-nav__item">
+      <a href="../user_data/" class="md-nav__link">
+        
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    User Data API
   
 
     
@@ -2580,10 +2610,10 @@
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_export</span>
 
 <span class="c1"># Combined export (single file)</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">&quot;exports/run.npz&quot;</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">"exports/run.npz"</span><span class="p">)</span>
 
 <span class="c1"># Per-item export (directory of p00000.npz, p00001.npz, ...)</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">&quot;exports/per_item_run/&quot;</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">"exports/per_item_run/"</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="parameters">Parameters<a class="headerlink" href="#parameters" title="Permanent link">&para;</a></h2>
@@ -2629,18 +2659,18 @@
 <p><code>load_export(...)</code> always returns an <code>ExportResult</code>.</p>
 <div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
 <span class="k">class</span><span class="w"> </span><span class="nc">ExportResult</span><span class="p">:</span>
-    <span class="n">layout</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># &quot;combined&quot; or &quot;per_item&quot;</span>
+    <span class="n">layout</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># "combined" or "per_item"</span>
     <span class="n">spatials</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span>               <span class="c1"># one dict per spatial point</span>
     <span class="n">temporal</span><span class="p">:</span> <span class="nb">dict</span> <span class="o">|</span> <span class="kc">None</span>              <span class="c1"># temporal spec used at export time</span>
     <span class="n">n_items</span><span class="p">:</span> <span class="nb">int</span>                       <span class="c1"># number of spatial points</span>
-    <span class="n">status</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># &quot;ok&quot; | &quot;partial&quot; | &quot;failed&quot;</span>
+    <span class="n">status</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># "ok" | "partial" | "failed"</span>
     <span class="n">models</span><span class="p">:</span> <span class="nb">dict</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="n">ModelResult</span><span class="p">]</span>     <span class="c1"># keyed by model name</span>
     <span class="n">manifest</span><span class="p">:</span> <span class="nb">dict</span>                     <span class="c1"># raw manifest for advanced use</span>
 </code></pre></div>
 <h3 id="convenience-methods">Convenience Methods<a class="headerlink" href="#convenience-methods" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">)</span>   <span class="c1"># → np.ndarray, shape (n_items, dim)</span>
-<span class="n">result</span><span class="o">.</span><span class="n">ok_models</span>                 <span class="c1"># → list[str]  — models with status &quot;ok&quot;</span>
-<span class="n">result</span><span class="o">.</span><span class="n">failed_models</span>             <span class="c1"># → list[str]  — models with status &quot;failed&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="s2">"remoteclip"</span><span class="p">)</span>   <span class="c1"># → np.ndarray, shape (n_items, dim)</span>
+<span class="n">result</span><span class="o">.</span><span class="n">ok_models</span>                 <span class="c1"># → list[str]  — models with status "ok"</span>
+<span class="n">result</span><span class="o">.</span><span class="n">failed_models</span>             <span class="c1"># → list[str]  — models with status "failed"</span>
 </code></pre></div>
 <p><code>embedding(model)</code> raises <code>KeyError</code> if the model was not part of the export and <code>ValueError</code> if the model failed for every point.</p>
 <hr />
@@ -2649,7 +2679,7 @@
 <div class="highlight"><pre><span></span><code><span class="nd">@dataclass</span>
 <span class="k">class</span><span class="w"> </span><span class="nc">ModelResult</span><span class="p">:</span>
     <span class="n">name</span><span class="p">:</span> <span class="nb">str</span>                          <span class="c1"># canonical model identifier</span>
-    <span class="n">status</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># &quot;ok&quot; | &quot;partial&quot; | &quot;failed&quot;</span>
+    <span class="n">status</span><span class="p">:</span> <span class="nb">str</span>                        <span class="c1"># "ok" | "partial" | "failed"</span>
     <span class="n">embeddings</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span>      <span class="c1"># (n_items, dim) or (n_items, C, H, W)</span>
     <span class="n">inputs</span><span class="p">:</span> <span class="n">np</span><span class="o">.</span><span class="n">ndarray</span> <span class="o">|</span> <span class="kc">None</span>          <span class="c1"># (n_items, C, H, W) — None if not saved</span>
     <span class="n">meta</span><span class="p">:</span> <span class="nb">list</span><span class="p">[</span><span class="nb">dict</span><span class="p">]</span>                   <span class="c1"># per-point embedding metadata</span>
@@ -2683,40 +2713,40 @@
 <h3 id="load-and-inspect-a-combined-export">Load and inspect a combined export<a class="headerlink" href="#load-and-inspect-a-combined-export" title="Permanent link">&para;</a></h3>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">load_export</span>
 
-<span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">&quot;exports/combined_run.npz&quot;</span><span class="p">)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">"exports/combined_run.npz"</span><span class="p">)</span>
 
 <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">n_items</span><span class="p">)</span>           <span class="c1"># number of spatial points</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">ok_models</span><span class="p">)</span>         <span class="c1"># models that succeeded</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">temporal</span><span class="p">)</span>          <span class="c1"># {&#39;start&#39;: &#39;2022-06-01&#39;, &#39;end&#39;: &#39;2022-09-01&#39;}</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">temporal</span><span class="p">)</span>          <span class="c1"># {'start': '2022-06-01', 'end': '2022-09-01'}</span>
 
-<span class="n">emb</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">)</span>   <span class="c1"># shape (n_items, dim)</span>
+<span class="n">emb</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="s2">"remoteclip"</span><span class="p">)</span>   <span class="c1"># shape (n_items, dim)</span>
 </code></pre></div>
 <h3 id="access-inputs-when-save_inputstrue">Access inputs when save_inputs=True<a class="headerlink" href="#access-inputs-when-save_inputstrue" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">&quot;exports/combined_run.npz&quot;</span><span class="p">)</span>
-<span class="n">mr</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">models</span><span class="p">[</span><span class="s2">&quot;prithvi&quot;</span><span class="p">]</span>
+<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">"exports/combined_run.npz"</span><span class="p">)</span>
+<span class="n">mr</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">models</span><span class="p">[</span><span class="s2">"prithvi"</span><span class="p">]</span>
 <span class="k">if</span> <span class="n">mr</span><span class="o">.</span><span class="n">inputs</span> <span class="ow">is</span> <span class="ow">not</span> <span class="kc">None</span><span class="p">:</span>
     <span class="nb">print</span><span class="p">(</span><span class="n">mr</span><span class="o">.</span><span class="n">inputs</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>   <span class="c1"># (n_items, C, H, W)</span>
 </code></pre></div>
 <h3 id="load-a-per-item-export-directory">Load a per-item export directory<a class="headerlink" href="#load-a-per-item-export-directory" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">&quot;exports/per_item_run/&quot;</span><span class="p">)</span>
-<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">layout</span><span class="p">)</span>        <span class="c1"># &quot;per_item&quot;</span>
+<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">"exports/per_item_run/"</span><span class="p">)</span>
+<span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">layout</span><span class="p">)</span>        <span class="c1"># "per_item"</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">result</span><span class="o">.</span><span class="n">n_items</span><span class="p">)</span>       <span class="c1"># number of files found</span>
 
-<span class="n">emb</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">)</span>   <span class="c1"># (n_items, dim) — stacked from per-file arrays</span>
+<span class="n">emb</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="s2">"remoteclip"</span><span class="p">)</span>   <span class="c1"># (n_items, dim) — stacked from per-file arrays</span>
 </code></pre></div>
 <h3 id="handle-partial-failures">Handle partial failures<a class="headerlink" href="#handle-partial-failures" title="Permanent link">&para;</a></h3>
-<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">&quot;exports/combined_run.npz&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">"exports/combined_run.npz"</span><span class="p">)</span>
 
 <span class="k">if</span> <span class="n">result</span><span class="o">.</span><span class="n">failed_models</span><span class="p">:</span>
-    <span class="nb">print</span><span class="p">(</span><span class="s2">&quot;Failed:&quot;</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">failed_models</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="s2">"Failed:"</span><span class="p">,</span> <span class="n">result</span><span class="o">.</span><span class="n">failed_models</span><span class="p">)</span>
 
 <span class="k">for</span> <span class="n">name</span> <span class="ow">in</span> <span class="n">result</span><span class="o">.</span><span class="n">ok_models</span><span class="p">:</span>
     <span class="n">emb</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="n">name</span><span class="p">)</span>
-    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">&quot;</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">emb</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">&quot;</span><span class="p">)</span>
+    <span class="nb">print</span><span class="p">(</span><span class="sa">f</span><span class="s2">"</span><span class="si">{</span><span class="n">name</span><span class="si">}</span><span class="s2">: </span><span class="si">{</span><span class="n">emb</span><span class="o">.</span><span class="n">shape</span><span class="si">}</span><span class="s2">"</span><span class="p">)</span>
 </code></pre></div>
 <h3 id="load-via-the-manifest-json">Load via the manifest JSON<a class="headerlink" href="#load-via-the-manifest-json" title="Permanent link">&para;</a></h3>
 <p>Pass the <code>.json</code> manifest path if that is what you have — <code>load_export</code> finds the paired array file automatically:</p>
-<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">&quot;exports/combined_run.json&quot;</span><span class="p">)</span>
+<div class="highlight"><pre><span></span><code><span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">"exports/combined_run.json"</span><span class="p">)</span>
 </code></pre></div>
 <hr />
 <h2 id="relationship-to-export_batch">Relationship to export_batch<a class="headerlink" href="#relationship-to-export_batch" title="Permanent link">&para;</a></h2>
@@ -2726,15 +2756,15 @@
 <span class="c1"># Write</span>
 <span class="n">export_batch</span><span class="p">(</span>
     <span class="n">spatials</span><span class="o">=</span><span class="p">[</span><span class="n">PointBuffer</span><span class="p">(</span><span class="mf">121.5</span><span class="p">,</span> <span class="mf">31.2</span><span class="p">,</span> <span class="mi">2048</span><span class="p">)],</span>
-    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">&quot;2022-06-01&quot;</span><span class="p">,</span> <span class="s2">&quot;2022-09-01&quot;</span><span class="p">),</span>
-    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">],</span>
-    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">&quot;exports/run&quot;</span><span class="p">),</span>
+    <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="n">models</span><span class="o">=</span><span class="p">[</span><span class="s2">"remoteclip"</span><span class="p">],</span>
+    <span class="n">target</span><span class="o">=</span><span class="n">ExportTarget</span><span class="o">.</span><span class="n">combined</span><span class="p">(</span><span class="s2">"exports/run"</span><span class="p">),</span>
     <span class="n">config</span><span class="o">=</span><span class="n">ExportConfig</span><span class="p">(</span><span class="n">save_inputs</span><span class="o">=</span><span class="kc">True</span><span class="p">),</span>
 <span class="p">)</span>
 
 <span class="c1"># Read back</span>
-<span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">&quot;exports/run.npz&quot;</span><span class="p">)</span>
-<span class="n">emb</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="s2">&quot;remoteclip&quot;</span><span class="p">)</span>   <span class="c1"># shape (1, dim)</span>
+<span class="n">result</span> <span class="o">=</span> <span class="n">load_export</span><span class="p">(</span><span class="s2">"exports/run.npz"</span><span class="p">)</span>
+<span class="n">emb</span> <span class="o">=</span> <span class="n">result</span><span class="o">.</span><span class="n">embedding</span><span class="p">(</span><span class="s2">"remoteclip"</span><span class="p">)</span>   <span class="c1"># shape (1, dim)</span>
 </code></pre></div>
 <div class="admonition tip">
 <p class="admonition-title">Simple rule</p>
