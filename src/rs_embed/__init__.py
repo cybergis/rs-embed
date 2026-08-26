@@ -43,6 +43,7 @@ from .core.types import (
 from .load import ExportResult, ModelResult, load_export
 from .model import Model
 from .pipelines.exporter import BatchExporter
+from .zones import ZoneEmbedding, ZoneEmbeddings, embed_zones
 
 # Render rs-embed's own warnings as a structured, colourised block instead of
 # Python's terse default. Opt out with ``RS_EMBED_PLAIN_WARNINGS=1``.
@@ -66,6 +67,10 @@ __all__ = [
     # Embedding API (class-based)
     "Model",
     "BatchExporter",
+    # Per-zone embeddings (polygons -> one vector each)
+    "embed_zones",
+    "ZoneEmbedding",
+    "ZoneEmbeddings",
     # Embedding API (function-based, backward compat)
     "get_embedding",
     "get_embeddings_batch",
