@@ -11,6 +11,10 @@
       
       
       
+        <link rel="prev" href="../models_reference/">
+      
+      
+        <link rel="next" href="../models/tessera/">
       
       
         
@@ -21,7 +25,7 @@
     
     
       
-        <title>Known Limitations - rs-embed</title>
+        <title>Latency & Throughput - rs-embed</title>
       
     
     
@@ -80,7 +84,7 @@
     <div data-md-component="skip">
       
         
-        <a href="#known-limitations" class="md-skip">
+        <a href="#latency-throughput" class="md-skip">
           Skip to content
         </a>
       
@@ -118,7 +122,7 @@
         <div class="md-header__topic" data-md-component="header-topic">
           <span class="md-ellipsis">
             
-              Known Limitations
+              Latency & Throughput
             
           </span>
         </div>
@@ -237,10 +241,12 @@
   
   
   
+    
+  
   
     
     
-      <li class="md-tabs__item">
+      <li class="md-tabs__item md-tabs__item--active">
         <a href="../models/" class="md-tabs__link">
           
   
@@ -516,8 +522,10 @@
       
   
   
+    
   
   
+  
     
     
       
@@ -535,21 +543,22 @@
     
     
       
+        
+        
+      
       
         
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--active md-nav__item--section md-nav__item--nested">
       
         
+        
+        <input class="md-nav__toggle md-toggle " type="checkbox" id="__nav_2" checked>
         
           
-        
-        <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2" >
-        
-          
-          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2" id="__nav_2_label" tabindex="">
             
   
   
@@ -567,7 +576,7 @@
             <span class="md-nav__icon md-icon"></span>
           </label>
         
-        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="false">
+        <nav class="md-nav" data-md-level="1" aria-labelledby="__nav_2_label" aria-expanded="true">
           <label class="md-nav__title" for="__nav_2">
             <span class="md-nav__icon md-icon"></span>
             
@@ -638,10 +647,37 @@
                 
   
   
+    
   
   
-    <li class="md-nav__item">
-      <a href="../benchmarks/" class="md-nav__link">
+  
+    <li class="md-nav__item md-nav__item--active">
+      
+      <input class="md-nav__toggle md-toggle" type="checkbox" id="__toc">
+      
+      
+        
+      
+      
+        <label class="md-nav__link md-nav__link--active" for="__toc">
+          
+  
+  
+  <span class="md-ellipsis">
+    
+  
+    Latency & Throughput
+  
+
+    
+  </span>
+  
+  
+
+          <span class="md-nav__icon md-icon"></span>
+        </label>
+      
+      <a href="./" class="md-nav__link md-nav__link--active">
         
   
   
@@ -657,6 +693,87 @@
   
 
       </a>
+      
+        
+
+<nav class="md-nav md-nav--secondary" aria-label="Table of contents">
+  
+  
+  
+    
+  
+  
+    <label class="md-nav__title" for="__toc">
+      <span class="md-nav__icon md-icon"></span>
+      Table of contents
+    </label>
+    <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
+      
+        <li class="md-nav__item">
+  <a href="#the-numbers" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        The numbers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The numbers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-frame-one-composite-per-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-frame: one composite per request
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#multi-frame-a-time-series-per-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Multi-frame: a time series per request
+      
+    </span>
+  </a>
+  
+</li>
+        
+          <li class="md-nav__item">
+  <a href="#precomputed-retrieval-only-no-gpu" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Precomputed: retrieval only, no GPU
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
+</li>
+      
+        <li class="md-nav__item">
+  <a href="#how-to-read-it" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        How to read it
+      
+    </span>
+  </a>
+  
+</li>
+      
+    </ul>
+  
+</nav>
+      
     </li>
   
 
@@ -683,10 +800,13 @@
       
       
         
+          
+          
+        
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
@@ -695,7 +815,7 @@
         <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2_4" >
         
           
-          <label class="md-nav__link" for="__nav_2_4" id="__nav_2_4_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2_4" id="__nav_2_4_label" tabindex="">
             
   
   
@@ -865,10 +985,13 @@
       
       
         
+          
+          
+        
       
     
     
-    <li class="md-nav__item md-nav__item--nested">
+    <li class="md-nav__item md-nav__item--section md-nav__item--nested">
       
         
         
@@ -877,7 +1000,7 @@
         <input class="md-nav__toggle md-toggle md-toggle--indeterminate" type="checkbox" id="__nav_2_5" >
         
           
-          <label class="md-nav__link" for="__nav_2_5" id="__nav_2_5_label" tabindex="0">
+          <label class="md-nav__link" for="__nav_2_5" id="__nav_2_5_label" tabindex="">
             
   
   
@@ -2135,54 +2258,60 @@
     <ul class="md-nav__list" data-md-component="toc" data-md-scrollfix>
       
         <li class="md-nav__item">
-  <a href="#api-boundary" class="md-nav__link">
+  <a href="#the-numbers" class="md-nav__link">
     <span class="md-ellipsis">
       
-        API Boundary
+        The numbers
+      
+    </span>
+  </a>
+  
+    <nav class="md-nav" aria-label="The numbers">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#single-frame-one-composite-per-request" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Single-frame: one composite per request
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#temporal-semantics" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#multi-frame-a-time-series-per-request" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Temporal Semantics
+        Multi-frame: a time series per request
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#output-semantics" class="md-nav__link">
+        
+          <li class="md-nav__item">
+  <a href="#precomputed-retrieval-only-no-gpu" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Output Semantics
+        Precomputed: retrieval only, no GPU
       
     </span>
   </a>
   
 </li>
-      
-        <li class="md-nav__item">
-  <a href="#dependencies" class="md-nav__link">
-    <span class="md-ellipsis">
-      
-        Dependencies
-      
-    </span>
-  </a>
+        
+      </ul>
+    </nav>
   
 </li>
       
         <li class="md-nav__item">
-  <a href="#known-edge-case" class="md-nav__link">
+  <a href="#how-to-read-it" class="md-nav__link">
     <span class="md-ellipsis">
       
-        Known Edge Case
+        How to read it
       
     </span>
   </a>
@@ -2209,18 +2338,346 @@
   
 
 
-<h1 id="known-limitations">Known Limitations<a class="headerlink" href="#known-limitations" title="Permanent link">&para;</a></h1>
-<p>This page lists the main user-facing constraints in the current <code>0.1.x</code> implementation.</p>
-<h2 id="api-boundary">API Boundary<a class="headerlink" href="#api-boundary" title="Permanent link">&para;</a></h2>
-<p><code>BBox</code> and <code>PointBuffer</code> currently require <code>crs="EPSG:4326"</code>. Other CRS inputs are not accepted at the public API boundary.</p>
-<h2 id="temporal-semantics">Temporal Semantics<a class="headerlink" href="#temporal-semantics" title="Permanent link">&para;</a></h2>
-<p>Most on-the-fly adapters interpret <code>TemporalSpec.range(start, end)</code> as a filter window plus one composite image, not as automatic single-scene selection by acquisition date. Temporal support is also model-specific: for example, <code>gse</code> requires <code>TemporalSpec.year(...)</code>, and <code>copernicus</code> is currently limited to year <code>2021</code>.</p>
-<h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
-<p>For many ViT-like models, <code>OutputSpec.grid()</code> is a token or patch grid rather than guaranteed georeferenced raster space. Treat <code>grid</code> as model-internal spatial structure unless the model page says otherwise.</p>
-<h2 id="dependencies">Dependencies<a class="headerlink" href="#dependencies" title="Permanent link">&para;</a></h2>
-<p>Different providers and models require different optional packages such as <code>terratorch</code>. Missing optional dependencies usually fail only when you actually use the corresponding model path.</p>
-<h2 id="known-edge-case">Known Edge Case<a class="headerlink" href="#known-edge-case" title="Permanent link">&para;</a></h2>
-<p>Near some Tessera UTM-zone boundaries, fetched tiles may have different CRS or resolution, and strict mosaic can fail. If that happens, try shifting the ROI slightly or using a smaller ROI or window.</p>
+<h1 id="latency-throughput">Latency &amp; Throughput<a class="headerlink" href="#latency-throughput" title="Permanent link">&para;</a></h1>
+<p>How long does an embedding actually take? This page reports end-to-end
+timing for every registered backend, measured through the same public calls
+you use (<code>get_embedding</code> / <code>export_batch</code>) — including the data-acquisition
+step, which most model papers leave out and which turns out to be the whole
+story.</p>
+<div class="admonition abstract">
+<p class="admonition-title">The one idea</p>
+<p><strong>Data acquisition dominates; the model almost never does.</strong> On an H100,
+model compute stays within 1–2 s per point across architectures from
+22M to 2.6B parameters — while fetching the input takes 75–90% of the
+end-to-end time for single-frame models and pushes time-series models an
+order of magnitude higher. Pick a backend by its <strong>input footprint and
+serving path</strong>, not by its parameter count.</p>
+</div>
+<hr />
+<h2 id="the-numbers">The numbers<a class="headerlink" href="#the-numbers" title="Permanent link">&para;</a></h2>
+<p>One H100 node (SXM 80 GB, 16 CPU cores), imagery served by Google Earth
+Engine, 20 random points over the agricultural US Midwest, each a 2 048 m
+point buffer embedded with the model's default configuration. Measured
+2026-08.</p>
+<h3 id="single-frame-one-composite-per-request">Single-frame: one composite per request<a class="headerlink" href="#single-frame-one-composite-per-request" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: right;">Params</th>
+<th style="text-align: right;">Dim</th>
+<th style="text-align: right;">Fetch p50 (s)</th>
+<th style="text-align: right;">Compute p50 (s)</th>
+<th style="text-align: right;">Total p50 (s)</th>
+<th style="text-align: right;">Total p95 (s)</th>
+<th style="text-align: right;">Seq. (pt/s)</th>
+<th style="text-align: right;">Batch (pt/s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>SatMAE</td>
+<td style="text-align: right;">330M</td>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">3.6</td>
+<td style="text-align: right;">1.11</td>
+<td style="text-align: right;">4.8</td>
+<td style="text-align: right;">7.2</td>
+<td style="text-align: right;">0.21</td>
+<td style="text-align: right;">1.60</td>
+</tr>
+<tr>
+<td>Scale-MAE</td>
+<td style="text-align: right;">303M</td>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">4.2</td>
+<td style="text-align: right;">1.13</td>
+<td style="text-align: right;">5.4</td>
+<td style="text-align: right;">7.6</td>
+<td style="text-align: right;">0.19</td>
+<td style="text-align: right;">1.45</td>
+</tr>
+<tr>
+<td>SatVision-TOA</td>
+<td style="text-align: right;">2.6B</td>
+<td style="text-align: right;">4096</td>
+<td style="text-align: right;">4.7</td>
+<td style="text-align: right;">1.01</td>
+<td style="text-align: right;">5.6</td>
+<td style="text-align: right;">6.8</td>
+<td style="text-align: right;">0.18</td>
+<td style="text-align: right;">1.24</td>
+</tr>
+<tr>
+<td>RemoteCLIP</td>
+<td style="text-align: right;">151M</td>
+<td style="text-align: right;">512</td>
+<td style="text-align: right;">5.5</td>
+<td style="text-align: right;">1.10</td>
+<td style="text-align: right;">6.8</td>
+<td style="text-align: right;">8.6</td>
+<td style="text-align: right;">0.15</td>
+<td style="text-align: right;">1.18</td>
+</tr>
+<tr>
+<td>THOR</td>
+<td style="text-align: right;">94M</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">6.4</td>
+<td style="text-align: right;">0.98</td>
+<td style="text-align: right;">7.4</td>
+<td style="text-align: right;">9.8</td>
+<td style="text-align: right;">0.13</td>
+<td style="text-align: right;">0.91</td>
+</tr>
+<tr>
+<td>Clay v1.5</td>
+<td style="text-align: right;">311M</td>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">6.5</td>
+<td style="text-align: right;">1.03</td>
+<td style="text-align: right;">7.5</td>
+<td style="text-align: right;">10.6</td>
+<td style="text-align: right;">0.13</td>
+<td style="text-align: right;">0.94</td>
+</tr>
+<tr>
+<td>SatMAE++</td>
+<td style="text-align: right;">330M</td>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">6.1</td>
+<td style="text-align: right;">1.28</td>
+<td style="text-align: right;">7.6</td>
+<td style="text-align: right;">9.5</td>
+<td style="text-align: right;">0.13</td>
+<td style="text-align: right;">0.73</td>
+</tr>
+<tr>
+<td>TerraMind (small)</td>
+<td style="text-align: right;">22M</td>
+<td style="text-align: right;">384</td>
+<td style="text-align: right;">5.9</td>
+<td style="text-align: right;">1.81</td>
+<td style="text-align: right;">7.8</td>
+<td style="text-align: right;">14.4</td>
+<td style="text-align: right;">0.13</td>
+<td style="text-align: right;">0.42</td>
+</tr>
+<tr>
+<td>WildSAT</td>
+<td style="text-align: right;">87M</td>
+<td style="text-align: right;">256</td>
+<td style="text-align: right;">6.3</td>
+<td style="text-align: right;">2.13</td>
+<td style="text-align: right;">8.3</td>
+<td style="text-align: right;">13.1</td>
+<td style="text-align: right;">0.12</td>
+<td style="text-align: right;">0.62</td>
+</tr>
+<tr>
+<td>TerraFM</td>
+<td style="text-align: right;">113M</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">7.2</td>
+<td style="text-align: right;">1.82</td>
+<td style="text-align: right;">9.0</td>
+<td style="text-align: right;">14.8</td>
+<td style="text-align: right;">0.11</td>
+<td style="text-align: right;">0.56</td>
+</tr>
+<tr>
+<td>DOFA</td>
+<td style="text-align: right;">111M</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">7.1</td>
+<td style="text-align: right;">2.08</td>
+<td style="text-align: right;">9.4</td>
+<td style="text-align: right;">12.8</td>
+<td style="text-align: right;">0.11</td>
+<td style="text-align: right;">0.60</td>
+</tr>
+<tr>
+<td>FoMo</td>
+<td style="text-align: right;">67M</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">8.6</td>
+<td style="text-align: right;">0.96</td>
+<td style="text-align: right;">9.7</td>
+<td style="text-align: right;">16.4</td>
+<td style="text-align: right;">0.10</td>
+<td style="text-align: right;">0.80</td>
+</tr>
+<tr>
+<td>Prithvi-EO-2.0</td>
+<td style="text-align: right;">113M</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">9.9</td>
+<td style="text-align: right;">1.11</td>
+<td style="text-align: right;">11.0</td>
+<td style="text-align: right;">24.0</td>
+<td style="text-align: right;">0.09</td>
+<td style="text-align: right;">0.74</td>
+</tr>
+</tbody>
+</table>
+<h3 id="multi-frame-a-time-series-per-request">Multi-frame: a time series per request<a class="headerlink" href="#multi-frame-a-time-series-per-request" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: right;">Params</th>
+<th style="text-align: right;">Dim</th>
+<th style="text-align: right;">Fetch p50 (s)</th>
+<th style="text-align: right;">Compute p50 (s)</th>
+<th style="text-align: right;">Total p50 (s)</th>
+<th style="text-align: right;">Total p95 (s)</th>
+<th style="text-align: right;">Seq. (pt/s)</th>
+<th style="text-align: right;">Batch (pt/s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>OlmoEarth</td>
+<td style="text-align: right;">258M</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">31.8</td>
+<td style="text-align: right;">3.23</td>
+<td style="text-align: right;">35.1</td>
+<td style="text-align: right;">60.3</td>
+<td style="text-align: right;">0.03</td>
+<td style="text-align: right;">0.15</td>
+</tr>
+<tr>
+<td>AgriFM</td>
+<td style="text-align: right;">88M</td>
+<td style="text-align: right;">1024</td>
+<td style="text-align: right;">42.6</td>
+<td style="text-align: right;">1.49</td>
+<td style="text-align: right;">44.5</td>
+<td style="text-align: right;">68.2</td>
+<td style="text-align: right;">0.02</td>
+<td style="text-align: right;">0.14</td>
+</tr>
+<tr>
+<td>AnySat</td>
+<td style="text-align: right;">126M</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">41.6</td>
+<td style="text-align: right;">4.85</td>
+<td style="text-align: right;">46.8</td>
+<td style="text-align: right;">60.8</td>
+<td style="text-align: right;">0.02</td>
+<td style="text-align: right;">0.08</td>
+</tr>
+<tr>
+<td>Galileo (nano)</td>
+<td style="text-align: right;">1.0M</td>
+<td style="text-align: right;">128</td>
+<td style="text-align: right;">54.3</td>
+<td style="text-align: right;">2.41</td>
+<td style="text-align: right;">56.5</td>
+<td style="text-align: right;">71.3</td>
+<td style="text-align: right;">0.02</td>
+<td style="text-align: right;">0.10</td>
+</tr>
+</tbody>
+</table>
+<h3 id="precomputed-retrieval-only-no-gpu">Precomputed: retrieval only, no GPU<a class="headerlink" href="#precomputed-retrieval-only-no-gpu" title="Permanent link">&para;</a></h3>
+<table>
+<thead>
+<tr>
+<th>Model</th>
+<th style="text-align: right;">Dim</th>
+<th style="text-align: right;">Retrieval p50 (s)</th>
+<th style="text-align: right;">p95 (s)</th>
+<th style="text-align: right;">Seq. (pt/s)</th>
+<th style="text-align: right;">Batch (pt/s)</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Copernicus-Embed</td>
+<td style="text-align: right;">768</td>
+<td style="text-align: right;">&lt;0.1</td>
+<td style="text-align: right;">&lt;0.1</td>
+<td style="text-align: right;">10,000*</td>
+<td style="text-align: right;">11.02</td>
+</tr>
+<tr>
+<td>Tessera</td>
+<td style="text-align: right;">128</td>
+<td style="text-align: right;">1.3</td>
+<td style="text-align: right;">2.6</td>
+<td style="text-align: right;">0.75</td>
+<td style="text-align: right;">1.42</td>
+</tr>
+<tr>
+<td>Google Satellite Embedding</td>
+<td style="text-align: right;">64</td>
+<td style="text-align: right;">15.3</td>
+<td style="text-align: right;">25.7</td>
+<td style="text-align: right;">0.07</td>
+<td style="text-align: right;">0.14</td>
+</tr>
+</tbody>
+</table>
+<p><em>* in-memory lookup after a one-time ~3 s load — see the note below; the
+Batch column is the realistic end-to-end rate.</em></p>
+<details class="info">
+<summary>Exactly what was measured</summary>
+<p><strong>Latency</strong> is the wall time of a single <code>get_embedding()</code> call with
+weights already loaded, split at the provider boundary: <em>Fetch</em> is GEE
+network I/O plus server-side compositing (or product retrieval for
+precomputed backends), <em>Compute</em> is everything else — preprocessing,
+inference, output assembly. Medians and p95 over the 20 points,
+single-threaded.</p>
+<p><strong>Throughput</strong> compares two ways of processing the same 20 points:
+<em>Seq.</em> is a plain loop (the reciprocal of median latency), <em>Batch</em> is
+<code>export_batch()</code>, which overlaps fetching and inference with 8 prefetch
+workers at inference batch size 8.</p>
+<p>The 2 048 m buffer is a radius: each request covers ≈4.1 km × 4.1 km,
+i.e. ~410×410 pixels per band at the default 10 m scale.
+Copernicus-Embed uses a 20 km buffer instead, matching its coarse grid.
+Parameter counts are read off the loaded checkpoints. The three
+precomputed backends run entirely on CPU; only on-the-fly models touch
+the GPU, and none of them needs more than 10.5 GB of it.</p>
+</details>
+<hr />
+<h2 id="how-to-read-it">How to read it<a class="headerlink" href="#how-to-read-it" title="Permanent link">&para;</a></h2>
+<p>The split into three tables <em>is</em> the finding. Single-frame models — whatever
+their size — cluster between 5 and 11 seconds per point, and most of that
+is waiting for pixels. Multi-frame models pay for their input, not their
+weights: a full year of Sentinel-1/2 imagery puts them at 35–57 s per
+point, 89–96% of it acquisition. The starkest illustration sits at the two
+ends of the catalog: the <strong>largest</strong> model here (SatVision-TOA, 2.6B) is
+among the <em>fastest</em> end to end because it consumes a single monthly
+composite, while the <strong>smallest</strong> (Galileo-nano, 1.0M) is the <em>slowest</em>
+because it consumes a year-long time series.</p>
+<div class="admonition tip">
+<p class="admonition-title">Anything beyond a handful of points belongs in <code>export_batch</code></p>
+<p>The batch path overlaps fetching with inference and delivers <strong>2–8×</strong>
+the throughput of a plain loop on identical hardware and provider —
+compare the <em>Seq.</em> and <em>Batch</em> columns. A hand-rolled
+download-to-disk pipeline fares even worse: in our side-by-side test it
+ran 12–16× slower than the export path with the same weights.</p>
+</div>
+<div class="admonition note">
+<p class="admonition-title">The three precomputed backends are three different animals</p>
+<p><strong>Copernicus-Embed</strong> loads its coarse grid once (~3 s) and then answers
+from memory in under a millisecond — its <em>Batch</em> rate measures pipeline
+overhead, not lookup cost. <strong>Tessera</strong> reads locally cached tiles; the
+numbers above are warm-cache, and the <em>first</em> visit to a new tile
+downloads it, which can take tens of seconds. <strong>Google Satellite
+Embedding</strong> is precomputed but served through GEE, so it behaves like a
+heavy fetch — if you only need pooled vectors at points, Google's
+server-side <code>reduceRegions</code> is the faster tool for that job.</p>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Fetch times move with provider load</p>
+<p>Between two sweeps two weeks apart, per-model fetch medians shifted by
+up to ±30% — in both directions. Read the table for <strong>ratios and
+regimes</strong>, not as guaranteed absolute numbers.</p>
+</div>
 
 
 
