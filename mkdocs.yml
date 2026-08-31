@@ -75,6 +75,7 @@ nav:
   - Models:
       - Overview: models.md
       - Advanced Reference: models_reference.md
+      - Latency & Throughput: benchmarks.md
       - Precomputed:
           - Tessera: models/tessera.md
           - GSE: models/gse.md
