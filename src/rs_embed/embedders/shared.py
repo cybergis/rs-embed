@@ -159,10 +159,13 @@ def resolve_pretrained_source_cache_first(model_id: str, *, weight_names: tuple 
 
     ``Mixin.from_pretrained(repo_id)`` re-resolves config and weights against the
     Hub on every fresh process even when cached. If a cached snapshot exists and
-    holds ``config.json`` plus one of ``weight_names`` (default: the standard
-    safetensors/bin names), return its path — ``from_pretrained`` accepts a local
-    dir and skips the network entirely. On any miss return ``model_id`` unchanged
-    so the caller keeps the exact previous online behavior.
+    holds ``config.json`` plus one of ``weight_names`` (default:
+    ``model.safetensors`` only — huggingface_hub >= 1.0 loads a local directory
+    exclusively from safetensors with no ``pytorch_model.bin`` fallback, so
+    handing it a bin-only snapshot raises FileNotFoundError), return its path —
+    ``from_pretrained`` accepts a local dir and skips the network entirely. On
+    any miss return ``model_id`` unchanged so the caller keeps the exact
+    previous online behavior, where the Hub code path does fall back to bin.
     """
     if os.path.exists(model_id):
         return model_id
@@ -171,7 +174,7 @@ def resolve_pretrained_source_cache_first(model_id: str, *, weight_names: tuple 
         snap = str(hub.snapshot_download(repo_id=model_id, local_files_only=True))
     except Exception:
         return model_id
-    names = weight_names or ("model.safetensors", "pytorch_model.bin")
+    names = weight_names or ("model.safetensors",)
     if os.path.isfile(os.path.join(snap, "config.json")) and any(
         os.path.isfile(os.path.join(snap, n)) for n in names
     ):
