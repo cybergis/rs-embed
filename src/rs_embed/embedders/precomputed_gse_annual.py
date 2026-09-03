@@ -211,9 +211,22 @@ class GSEAnnualEmbedder(EmbedderBase):
         tile_size = int(math.isqrt(_gse_pixel_threshold()))
         ys, xs = _tile_yx_starts(h=h_px, w=w_px, tile_size=tile_size, stride=tile_size)
         band_names: Any = None
-        rows: list[np.ndarray] = []
+
+        # PLACE each tile at its own pixel window; do NOT concatenate.
+        #
+        # _tile_yx_starts pulls the LAST start back to (dim - tile_size) so the final tile is a
+        # full tile rather than a short remainder. That start therefore OVERLAPS the previous
+        # tile whenever dim is not a whole multiple of tile_size — for a 1340x1342 grid at
+        # tile_size 512 the starts are [0, 512, 828] and [0, 512, 830], overlapping by 196 and
+        # 194 px. Concatenating the tiles whole emitted 3*512 = 1536 columns into a 1340-column
+        # canvas, so a ~196 px band of ground appeared TWICE in the mosaic — visible in the
+        # delivered PCA raster as two near-identical vertical bands (23% of pixels byte-identical
+        # at the repeat offset, against 0% for any other offset).
+        #
+        # Assigning into the output by window makes the overlap idempotent: the second write
+        # covers the same ground with the same values instead of appending a copy.
+        out: np.ndarray | None = None
         for y0 in ys:
-            row: list[np.ndarray] = []
             for x0 in xs:
                 y1 = min(h_px, y0 + tile_size)
                 x1 = min(w_px, x0 + tile_size)
@@ -231,9 +244,17 @@ class GSEAnnualEmbedder(EmbedderBase):
                 )
                 if band_names is None:
                     band_names = bn
-                row.append(np.asarray(tile_chw, dtype=np.float32))
-            rows.append(np.concatenate(row, axis=-1))
-        return np.concatenate(rows, axis=-2), band_names
+                tile = np.asarray(tile_chw, dtype=np.float32)
+                if out is None:
+                    out = np.full(tile.shape[:-2] + (h_px, w_px), -9999.0, dtype=np.float32)
+                # The provider may return a tile a pixel or two off the requested window; take
+                # what fits rather than letting a broadcast error kill the whole grid.
+                th = min(int(y1 - y0), int(tile.shape[-2]))
+                tw = min(int(x1 - x0), int(tile.shape[-1]))
+                out[..., y0:y0 + th, x0:x0 + tw] = tile[..., :th, :tw]
+        if out is None:
+            raise ModelError("gse_annual tiled fetch produced no tiles.")
+        return out, band_names
 
     def get_embeddings_batch(
         self,
