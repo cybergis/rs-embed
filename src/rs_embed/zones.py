@@ -308,10 +308,13 @@ def embed_zones(
 
     from shapely.geometry import box  # noqa: PLC0415
 
+    # Enumerate the tiles that actually need fetching BEFORE fetching any. Most of a bounding
+    # box is empty, so nx*ny badly overstates the work -- and the cap used to be compared
+    # against that grid, which reported truncation on sweeps that had lost nothing. Enumerating
+    # first costs only spatial-index lookups and makes the dropped count exact.
+    cells: list[tuple[int, int, float, float, float, float]] = []
     for ty in range(ny):
         for tx in range(nx):
-            if max_tiles is not None and fetched >= int(max_tiles):
-                break
             x0, y0 = ox + tx * step, oy + ty * step
             x1, y1 = x0 + step, y0 + step
             if x0 > maxx or y0 > maxy:
@@ -319,34 +322,43 @@ def embed_zones(
             # Most of a bounding box is usually empty; skip tiles no zone touches.
             if not sindex.query(box(x0, y0, x1, y1), predicate="intersects").size:
                 continue
-            try:
-                arr, _meta = _tile(x0, y0, x1, y1)
-            except Exception as exc:  # noqa: BLE001 - one bad tile must not lose the sweep
-                tile_errors.append({"tile": [tx, ty], "error": f"{type(exc).__name__}: {exc}"})
-                continue
-            _d, h, w = arr.shape
-            px, py = (x1 - x0) / w, (y1 - y0) / h
-            if abs(px - scale) / scale > 0.02 or abs(py - scale) / scale > 0.02:
-                pixel_size_warnings.append(
-                    f"tile {tx},{ty}: implied pixel {px:.2f}x{py:.2f} m vs scale_m {scale:.0f}")
-            # North-up: rows run from the tile's top edge downwards.
-            zmap = rasterize(shapes, out_shape=(h, w),
-                             transform=Affine(px, 0.0, x0, 0.0, -py, y1),
-                             fill=0, all_touched=False, dtype="int32")
-            present = np.unique(zmap)
-            present = present[present > 0]
-            if present.size:
-                flat = arr.reshape(_d, h * w)
-                zflat = zmap.reshape(h * w)
-                for z in present:
-                    sel = flat[:, zflat == z]
-                    good = np.isfinite(sel).all(axis=0)
-                    if good.any():
-                        sums[z] += sel[:, good].sum(axis=1)
-                        counts[z] += int(good.sum())
-            fetched += 1
-        if max_tiles is not None and fetched >= int(max_tiles):
-            break
+            cells.append((tx, ty, x0, y0, x1, y1))
+
+    # The cap bounds REQUESTS, which is what costs. Capping successes instead -- what the
+    # old `fetched >= max_tiles` guard did -- lets a run of failures issue unboundedly many.
+    needed = len(cells)
+    dropped = 0
+    if max_tiles is not None and needed > int(max_tiles):
+        dropped = needed - int(max_tiles)
+        cells = cells[: int(max_tiles)]
+
+    for tx, ty, x0, y0, x1, y1 in cells:
+        try:
+            arr, _meta = _tile(x0, y0, x1, y1)
+        except Exception as exc:  # noqa: BLE001 - one bad tile must not lose the sweep
+            tile_errors.append({"tile": [tx, ty], "error": f"{type(exc).__name__}: {exc}"})
+            continue
+        _d, h, w = arr.shape
+        px, py = (x1 - x0) / w, (y1 - y0) / h
+        if abs(px - scale) / scale > 0.02 or abs(py - scale) / scale > 0.02:
+            pixel_size_warnings.append(
+                f"tile {tx},{ty}: implied pixel {px:.2f}x{py:.2f} m vs scale_m {scale:.0f}")
+        # North-up: rows run from the tile's top edge downwards.
+        zmap = rasterize(shapes, out_shape=(h, w),
+                         transform=Affine(px, 0.0, x0, 0.0, -py, y1),
+                         fill=0, all_touched=False, dtype="int32")
+        present = np.unique(zmap)
+        present = present[present > 0]
+        if present.size:
+            flat = arr.reshape(_d, h * w)
+            zflat = zmap.reshape(h * w)
+            for z in present:
+                sel = flat[:, zflat == z]
+                good = np.isfinite(sel).all(axis=0)
+                if good.any():
+                    sums[z] += sel[:, good].sum(axis=1)
+                    counts[z] += int(good.sum())
+        fetched += 1
 
     out = []
     for i, zid in enumerate(zone_ids):
@@ -365,7 +377,13 @@ def embed_zones(
             # scale_m is Web Mercator metres; this is what a pixel covers on the ground.
             "pixel_ground_m": round(scale * math.cos(math.radians(mid_lat)), 3),
             "tile_px": tile_px, "tiles_planned": planned, "tiles_fetched": fetched,
-            "tiles_capped": bool(max_tiles is not None and planned > int(max_tiles)),
+            # tiles_planned counts every cell of the bounding grid; tiles_needed counts only
+            # the cells a zone actually touches, which is what a cap should be read against.
+            "tiles_needed": needed, "tiles_skipped_by_cap": dropped,
+            # True only when the cap actually COST coverage. This was `planned > max_tiles`,
+            # which fired whenever the grid was larger than the cap -- so a sweep that fetched
+            # every tile any zone touched still reported itself truncated.
+            "tiles_capped": bool(dropped),
             "zone_id_field": zone_id_field, "equal_area_crs": equal_area_crs,
             "zones_total": len(out), "zones_with_pixels": sum(1 for z in out if z.pixels),
             "tile_errors": tile_errors, "pixel_size_warnings": pixel_size_warnings,
