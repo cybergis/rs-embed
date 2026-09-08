@@ -33,8 +33,9 @@ the base install::
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import TYPE_CHECKING, Any, Iterable
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
@@ -113,7 +114,7 @@ class ZoneEmbeddings:
             rows.append(row)
         return pd.DataFrame(rows)
 
-    def rollup(self, groups: dict[str, str]) -> "ZoneEmbeddings":
+    def rollup(self, groups: dict[str, str]) -> ZoneEmbeddings:
         """Combine zones into coarser units, exactly.
 
         Parameters
@@ -149,7 +150,7 @@ def _to_lonlat(x: float, y: float) -> tuple[float, float]:
             math.degrees(2 * math.atan(math.exp(y / _R_MERCATOR)) - math.pi / 2))
 
 
-def _read_zones(zones: Any, zone_id_field: str | None) -> tuple["gpd.GeoDataFrame", str | None]:
+def _read_zones(zones: Any, zone_id_field: str | None) -> tuple[gpd.GeoDataFrame, str | None]:
     """Accept a path, a GeoDataFrame, or an iterable of ``(id, geometry)``.
 
     Returns the frame and the id column to use — an iterable of pairs brings its own,
@@ -252,8 +253,8 @@ def embed_zones(
     ...     temporal=TemporalSpec.year(2022))
     >>> zed.to_frame().head()                                 # doctest: +SKIP
     """
-    from rasterio.features import rasterize  # noqa: PLC0415 - optional dependency
     from affine import Affine  # noqa: PLC0415
+    from rasterio.features import rasterize  # noqa: PLC0415 - optional dependency
 
     from .api import get_embedding  # noqa: PLC0415 - avoids an import cycle
 
