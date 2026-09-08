@@ -251,7 +251,7 @@ class GSEAnnualEmbedder(EmbedderBase):
                 # what fits rather than letting a broadcast error kill the whole grid.
                 th = min(int(y1 - y0), int(tile.shape[-2]))
                 tw = min(int(x1 - x0), int(tile.shape[-1]))
-                out[..., y0:y0 + th, x0:x0 + tw] = tile[..., :th, :tw]
+                out[..., y0 : y0 + th, x0 : x0 + tw] = tile[..., :th, :tw]
         if out is None:
             raise ModelError("gse_annual tiled fetch produced no tiles.")
         return out, band_names

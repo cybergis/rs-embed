@@ -108,8 +108,7 @@ class ZoneEmbeddings:
 
         rows = []
         for z in self.covered:
-            row: dict[str, Any] = {"zone_id": z.zone_id, "pixels": z.pixels,
-                                   "area_km2": z.area_km2}
+            row: dict[str, Any] = {"zone_id": z.zone_id, "pixels": z.pixels, "area_km2": z.area_km2}
             row.update({f"e{i:03d}": float(v) for i, v in enumerate(z.mean)})
             rows.append(row)
         return pd.DataFrame(rows)
@@ -133,21 +132,31 @@ class ZoneEmbeddings:
             parent = groups.get(z.zone_id)
             if parent is None:
                 continue
-            cur = acc.setdefault(parent, {"total": np.zeros_like(z.total), "pixels": 0,
-                                          "area_km2": 0.0})
+            cur = acc.setdefault(
+                parent, {"total": np.zeros_like(z.total), "pixels": 0, "area_km2": 0.0}
+            )
             cur["total"] = cur["total"] + z.total
             cur["pixels"] += z.pixels
             cur["area_km2"] += z.area_km2
-        out = [ZoneEmbedding(zone_id=k, pixels=v["pixels"], area_km2=round(v["area_km2"], 6),
-                             total=v["total"], mean=v["total"] / v["pixels"])
-               for k, v in acc.items()]
+        out = [
+            ZoneEmbedding(
+                zone_id=k,
+                pixels=v["pixels"],
+                area_km2=round(v["area_km2"], 6),
+                total=v["total"],
+                mean=v["total"] / v["pixels"],
+            )
+            for k, v in acc.items()
+        ]
         return ZoneEmbeddings(zones=out, meta={**self.meta, "rolled_up_from": len(self.covered)})
 
 
 def _to_lonlat(x: float, y: float) -> tuple[float, float]:
     """EPSG:3857 metres -> lon/lat degrees."""
-    return (math.degrees(x / _R_MERCATOR),
-            math.degrees(2 * math.atan(math.exp(y / _R_MERCATOR)) - math.pi / 2))
+    return (
+        math.degrees(x / _R_MERCATOR),
+        math.degrees(2 * math.atan(math.exp(y / _R_MERCATOR)) - math.pi / 2),
+    )
 
 
 def _read_zones(zones: Any, zone_id_field: str | None) -> tuple[gpd.GeoDataFrame, str | None]:
@@ -162,7 +171,8 @@ def _read_zones(zones: Any, zone_id_field: str | None) -> tuple[gpd.GeoDataFrame
     except ImportError as exc:  # pragma: no cover - depends on the install
         raise SpecError(
             "embed_zones needs geopandas and rasterio to read and rasterize polygons. "
-            'Install them with: pip install "rs-embed[zones]"') from exc
+            'Install them with: pip install "rs-embed[zones]"'
+        ) from exc
 
     if isinstance(zones, gpd.GeoDataFrame):
         gdf = zones.copy()
@@ -172,12 +182,17 @@ def _read_zones(zones: Any, zone_id_field: str | None) -> tuple[gpd.GeoDataFrame
         pairs = list(zones)
         if not pairs:
             raise SpecError("zones is empty")
-        gdf = gpd.GeoDataFrame({"zone_id": [str(i) for i, _g in pairs]},
-                               geometry=[g for _i, g in pairs], crs="EPSG:4326")
+        gdf = gpd.GeoDataFrame(
+            {"zone_id": [str(i) for i, _g in pairs]},
+            geometry=[g for _i, g in pairs],
+            crs="EPSG:4326",
+        )
         zone_id_field = "zone_id"
     else:
-        raise SpecError(f"zones must be a path, a GeoDataFrame or an iterable of "
-                        f"(id, geometry); got {type(zones).__name__}")
+        raise SpecError(
+            f"zones must be a path, a GeoDataFrame or an iterable of "
+            f"(id, geometry); got {type(zones).__name__}"
+        )
     if gdf.empty:
         raise SpecError("zones contains no features")
     if gdf.crs is None:
@@ -188,7 +203,8 @@ def _read_zones(zones: Any, zone_id_field: str | None) -> tuple[gpd.GeoDataFrame
         # the two never meet.
         raise SpecError(
             f"zone_id_field {zone_id_field!r} is not a column in the polygons; "
-            f"available: {[c for c in gdf.columns if c != 'geometry'][:20]}")
+            f"available: {[c for c in gdf.columns if c != 'geometry'][:20]}"
+        )
     return gdf, zone_id_field
 
 
@@ -263,32 +279,35 @@ def embed_zones(
     tile_px = int(tile_px)
 
     gdf, zone_id_field = _read_zones(zones, zone_id_field)
-    zone_ids = ([str(v) for v in gdf[zone_id_field]] if zone_id_field
-                else [str(i) for i in range(len(gdf))])
+    zone_ids = (
+        [str(v) for v in gdf[zone_id_field]] if zone_id_field else [str(i) for i in range(len(gdf))]
+    )
     areas = (gdf.to_crs(equal_area_crs).area / 1e6).tolist()
 
     merc = gdf.to_crs("EPSG:3857")
     # Burn value 0 means "no zone", so zones are numbered from 1.
-    shapes = [(g, i + 1) for i, g in enumerate(merc.geometry)
-              if g is not None and not g.is_empty]
+    shapes = [(g, i + 1) for i, g in enumerate(merc.geometry) if g is not None and not g.is_empty]
     if not shapes:
         raise SpecError("zones contains no usable geometry")
 
     def _tile(x0: float, y0: float, x1: float, y1: float) -> tuple[np.ndarray, dict[str, Any]]:
         lon0, lat0 = _to_lonlat(x0, y0)
         lon1, lat1 = _to_lonlat(x1, y1)
-        emb = get_embedding(model, spatial=BBox(minlon=lon0, minlat=lat0,
-                                                maxlon=lon1, maxlat=lat1),
-                            temporal=temporal, output=OutputSpec.grid(),
-                            backend=backend, **kwargs)
+        emb = get_embedding(
+            model,
+            spatial=BBox(minlon=lon0, minlat=lat0, maxlon=lon1, maxlat=lat1),
+            temporal=temporal,
+            output=OutputSpec.grid(),
+            backend=backend,
+            **kwargs,
+        )
         data = getattr(emb.data, "values", emb.data)
         return np.asarray(data, dtype=np.float32), (emb.meta or {})
 
     minx, miny, maxx, maxy = merc.total_bounds
     # One probe first: scale_m and the band count come from the provider, and the sweep
     # geometry depends on scale_m.
-    probe_arr, probe_meta = _tile(minx, miny,
-                                 min(minx + 1000.0, maxx), min(miny + 1000.0, maxy))
+    probe_arr, probe_meta = _tile(minx, miny, min(minx + 1000.0, maxx), min(miny + 1000.0, maxy))
     scale = float(probe_meta.get("scale_m") or 10)
     dims = int(probe_arr.shape[0])
     step = tile_px * scale
@@ -343,11 +362,17 @@ def embed_zones(
         px, py = (x1 - x0) / w, (y1 - y0) / h
         if abs(px - scale) / scale > 0.02 or abs(py - scale) / scale > 0.02:
             pixel_size_warnings.append(
-                f"tile {tx},{ty}: implied pixel {px:.2f}x{py:.2f} m vs scale_m {scale:.0f}")
+                f"tile {tx},{ty}: implied pixel {px:.2f}x{py:.2f} m vs scale_m {scale:.0f}"
+            )
         # North-up: rows run from the tile's top edge downwards.
-        zmap = rasterize(shapes, out_shape=(h, w),
-                         transform=Affine(px, 0.0, x0, 0.0, -py, y1),
-                         fill=0, all_touched=False, dtype="int32")
+        zmap = rasterize(
+            shapes,
+            out_shape=(h, w),
+            transform=Affine(px, 0.0, x0, 0.0, -py, y1),
+            fill=0,
+            all_touched=False,
+            dtype="int32",
+        )
         present = np.unique(zmap)
         present = present[present > 0]
         if present.size:
@@ -365,28 +390,43 @@ def embed_zones(
     for i, zid in enumerate(zone_ids):
         n = int(counts[i + 1])
         total = sums[i + 1].copy() if n else None
-        out.append(ZoneEmbedding(zone_id=zid, pixels=n, area_km2=round(float(areas[i]), 6),
-                                 total=total, mean=(total / n) if n else None))
+        out.append(
+            ZoneEmbedding(
+                zone_id=zid,
+                pixels=n,
+                area_km2=round(float(areas[i]), 6),
+                total=total,
+                mean=(total / n) if n else None,
+            )
+        )
 
     mid_lat = _to_lonlat(0.0, (miny + maxy) / 2)[1]
     planned = nx * ny
     return ZoneEmbeddings(
         zones=out,
         meta={
-            "model": model, "dims": dims, "bands": list(probe_meta.get("bands") or ())[:8],
+            "model": model,
+            "dims": dims,
+            "bands": list(probe_meta.get("bands") or ())[:8],
             "scale_m": scale,
             # scale_m is Web Mercator metres; this is what a pixel covers on the ground.
             "pixel_ground_m": round(scale * math.cos(math.radians(mid_lat)), 3),
-            "tile_px": tile_px, "tiles_planned": planned, "tiles_fetched": fetched,
+            "tile_px": tile_px,
+            "tiles_planned": planned,
+            "tiles_fetched": fetched,
             # tiles_planned counts every cell of the bounding grid; tiles_needed counts only
             # the cells a zone actually touches, which is what a cap should be read against.
-            "tiles_needed": needed, "tiles_skipped_by_cap": dropped,
+            "tiles_needed": needed,
+            "tiles_skipped_by_cap": dropped,
             # True only when the cap actually COST coverage. This was `planned > max_tiles`,
             # which fired whenever the grid was larger than the cap -- so a sweep that fetched
             # every tile any zone touched still reported itself truncated.
             "tiles_capped": bool(dropped),
-            "zone_id_field": zone_id_field, "equal_area_crs": equal_area_crs,
-            "zones_total": len(out), "zones_with_pixels": sum(1 for z in out if z.pixels),
-            "tile_errors": tile_errors, "pixel_size_warnings": pixel_size_warnings,
+            "zone_id_field": zone_id_field,
+            "equal_area_crs": equal_area_crs,
+            "zones_total": len(out),
+            "zones_with_pixels": sum(1 for z in out if z.pixels),
+            "tile_errors": tile_errors,
+            "pixel_size_warnings": pixel_size_warnings,
         },
     )
