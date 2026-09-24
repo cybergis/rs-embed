@@ -32,7 +32,7 @@ dependencies = [
   "numpy>=2.2",
   "pyproj>=3.6",
   "affine>=2.4",
-  "geotessera",
+  "geotessera>=0.10",
   "tifffile>=2024.0.0",
   "imagecodecs>=2024.0.0",
   "earthengine-api>=1.7.10",
