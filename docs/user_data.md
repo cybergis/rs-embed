@@ -41,14 +41,20 @@ UserData(
     bands: tuple[str, ...] | None = None,  # one band name per channel; None = canonical order
     temporal: TemporalSpec | None = None,  # when the imagery was acquired
     scale_m: int | None = None,            # optional nominal pixel size, provenance only
+    crs: str | None = None,                # CRS of the pixel grid, e.g. "EPSG:32616" (with transform)
+    transform: Affine | None = None,       # pixel -> CRS affine (rasterio convention)
 )
+
+UserData.from_raster(path, *, collection, bands=None, temporal=None)  # reads pixels + crs + transform
 ```
 
 **`collection` names the sensor product — and thereby the units.** Short aliases resolve to full ids: `"s2"` / `"sentinel-2"` / `"s2-l2a"` → `COPERNICUS/S2_SR_HARMONIZED`; `"s1"` / `"sentinel-1"` → `COPERNICUS/S1_GRD`. Full collection ids pass through unchanged.
 
 **`bands` may be omitted only for the canonical case.** An S2 L2A declaration with exactly 12 channels defaults to the canonical order `B1, B2, B3, B4, B5, B6, B7, B8, B8A, B9, B11, B12`. Any other channel count, order, or collection must name its bands — band identity is never guessed from channel count.
 
-**`spatial` and `temporal` travel with the data**, because they describe *this imagery* (where it is, when it was acquired), not the API call. Both are optional, but supply them whenever you have them: models that condition on time read `temporal`, and models whose forward pass conditions on geometry (lat/lon or GSD encodings: `clay`, `prithvi`) **refuse** declarations without `spatial` — coordinates are never fabricated. Everything else accepts ungeoreferenced data and merely loses location provenance in the metadata.
+**`spatial` and `temporal` travel with the data**, because they describe *this imagery* (where it is, when it was acquired), not the API call. Both are optional, but supply them whenever you have them: models that condition on time read `temporal`, and models whose forward pass conditions on geometry (lat/lon or GSD encodings: `clay`, `prithvi`) **refuse** declarations without a location — coordinates are never fabricated. Everything else accepts ungeoreferenced data and merely loses location provenance in the metadata.
+
+**`crs` + `transform` make the declaration georeferenced.** Provider fetches hand every model pixels on one common grid — EPSG:3857 at the model's `scale_m` (see [Spatial ROI Handling](spatial_roi.md)). A raster declared with its CRS and affine is put on that same grid before embedding (nearest-neighbour, so values stay exact), and its footprint stands in for `spatial` when none is given. `UserData.from_raster(...)` reads all three from a GeoTIFF with `rasterio` (an optional dependency), so the projection is detected rather than declared by hand. Without `crs`, the array is fed as-is and assumed to already be on the common grid. A UTM raster whose footprint spills into a neighbouring zone triggers a `UserWarning` (distortion grows past the zone edge). `meta["user_input"]["projection"]` records what happened (`crs`, `output_crs`, `grid_hw`, `transform`, ...).
 
 !!! note "Multi-frame arrays"
     A `[T,C,H,W]` array is only meaningful for time-series models (`galileo`, `prithvi`, `olmoearth`, `anysat`, `agrifm`); single-frame models reject it.
@@ -62,24 +68,14 @@ UserData(
 A complete example, starting from a file on disk. Say you have a Sentinel-2 L2A patch saved as a GeoTIFF — 12 bands in the canonical order, raw surface-reflectance DN:
 
 ```python
-import rasterio                        # example only; not an rs-embed dependency
-from rasterio.warp import transform_bounds
-
 from rs_embed import UserData, get_embedding_from_data
-from rs_embed.core.specs import BBox, TemporalSpec
+from rs_embed.core.specs import TemporalSpec
 
-# 1. Load the pixels and the footprint from the file.
-with rasterio.open("maize_field_2022.tif") as src:
-    pixels = src.read()                             # numpy array, shape [12, H, W]
-    left, bottom, right, top = transform_bounds(    # footprint -> lon/lat degrees
-        src.crs, "EPSG:4326", *src.bounds
-    )
-
-# 2. Register the imagery: the pixels plus everything that describes them.
-data = UserData(
-    data=pixels,
+# 1+2. Register the file: pixels, CRS and affine are read from it (needs rasterio),
+#      so the footprint is detected and the raster is aligned to the common grid.
+data = UserData.from_raster(
+    "maize_field_2022.tif",
     collection="s2",
-    spatial=BBox(minlon=left, minlat=bottom, maxlon=right, maxlat=top),
     temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
 )
 
@@ -90,7 +86,7 @@ print(emb.data.shape)                # pooled feature vector, shape [D]
 print(emb.meta["user_input"])        # which bands/channels were actually used
 ```
 
-If your data is already a numpy array (e.g. one sample from a training dataset), skip step 1 — anything `[C,H,W]` in raw provider units works as `data=`.
+If your data is already a numpy array (e.g. one sample from a training dataset), build `UserData(data=pixels, collection="s2", spatial=..., temporal=...)` directly — anything `[C,H,W]` in raw provider units works as `data=`; add `crs=` and `transform=` when you know them so the array is aligned to the common grid like a fetch would be.
 
 Returns one `Embedding`. `meta["user_input"]` records the declaration and the channel selection actually fed to the model (`declared_bands`, `bands_used`, `channel_indices`), and `meta["input_prep"]` records how the array was sized (see [Input size handling](#input-size-handling)).
 
@@ -105,18 +101,14 @@ import numpy as np
 
 from rs_embed import get_embeddings_batch_from_data
 
-datas = []
-for path in sorted(Path("patches/").glob("*.tif")):
-    with rasterio.open(path) as src:
-        left, bottom, right, top = transform_bounds(src.crs, "EPSG:4326", *src.bounds)
-        datas.append(
-            UserData(
-                data=src.read(),
-                collection="s2",
-                spatial=BBox(minlon=left, minlat=bottom, maxlon=right, maxlat=top),
-                temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
-            )
-        )
+datas = [
+    UserData.from_raster(
+        str(path),
+        collection="s2",
+        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+    )
+    for path in sorted(Path("patches/").glob("*.tif"))
+]
 
 embs = get_embeddings_batch_from_data("galileo", datas, batch_size=16)
 
@@ -169,5 +161,6 @@ User data follows the package-wide `input_prep` policy, defaulting to **`"tile"`
 | Precomputed model | `ModelError` (no imagery input) |
 | Channel count ≠ declared bands | `SpecError` from `UserData.validate()` |
 | `bands=None` outside the canonical case | `SpecError` (declare bands explicitly) |
-| Missing `spatial` on a georef-conditioned model (`clay`, `prithvi`) | `ModelError` (coordinates are never fabricated) |
+| Missing `spatial` (and no `crs`/`transform`) on a georef-conditioned model (`clay`, `prithvi`) | `ModelError` (coordinates are never fabricated) |
+| `crs` without `transform` (or vice versa), or a non-affine `transform` | `SpecError` |
 | S2 values look normalized (max ≤ 1.5) | `UserWarning`, request still runs |
