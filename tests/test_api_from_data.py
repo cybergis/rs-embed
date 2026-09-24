@@ -32,6 +32,7 @@ class _MockFromDataEmbedder(EmbedderBase):
     last_input = None
     last_sensor = None
     last_model_config = None
+    last_spatial = None
     seen_temporals: list = []
 
     def describe(self):
@@ -57,6 +58,7 @@ class _MockFromDataEmbedder(EmbedderBase):
         type(self).last_input = input_chw
         type(self).last_sensor = sensor
         type(self).last_model_config = model_config
+        type(self).last_spatial = spatial
         type(self).seen_temporals.append(temporal)
         return Embedding(
             data=np.arange(4, dtype=np.float32),
@@ -145,6 +147,7 @@ def register_mocks():
     _MockFromDataEmbedder.last_input = None
     _MockFromDataEmbedder.last_sensor = None
     _MockFromDataEmbedder.last_model_config = None
+    _MockFromDataEmbedder.last_spatial = None
     _MockFromDataEmbedder.seen_temporals = []
     yield
 
@@ -421,3 +424,73 @@ def test_list_models_for_data_rgb_only_declaration():
     assert by_model["scalemae"]["compatible"]
     assert not by_model["galileo"]["compatible"]
     assert "lacks" in by_model["galileo"]["reason"]
+
+
+# ── georeferenced declarations (crs + transform) ───────────────────
+
+
+def _utm_userdata(*, hw=(20, 20), lon=-88.2, lat=40.1, crs="EPSG:32616", spatial=None):
+    """A 12-band 10 m raster in UTM centered on (lon, lat); channel i is constant i*1000."""
+    from affine import Affine
+    from pyproj import Transformer
+
+    bands = ("B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B9", "B11", "B12")
+    arr = np.stack([np.full(hw, i * 1000.0, dtype=np.float32) for i in range(len(bands))])
+    x, y = Transformer.from_crs("EPSG:4326", crs, always_xy=True).transform(lon, lat)
+    transform = Affine(10, 0, x - hw[1] * 5, 0, -10, y + hw[0] * 5)
+    return UserData(
+        data=arr, collection="s2", bands=bands, spatial=spatial, crs=crs, transform=transform
+    )
+
+
+def test_georeferenced_data_is_resampled_onto_common_grid():
+    data = _utm_userdata()
+    emb = get_embedding_from_data("mock_from_data", data)
+
+    x = _MockFromDataEmbedder.last_input
+    assert x.shape[0] == 3
+    # 200 m of UTM at lat 40 spans ~260 m of EPSG:3857 -> more than 20 px at 10 m.
+    assert x.shape[1] > 20 and x.shape[2] > 20
+    # Nearest-neighbour keeps values exact; model band order still B4, B3, B2.
+    assert [float(x[i, 5, 5]) for i in range(3)] == [3000.0, 2000.0, 1000.0]
+
+    proj = emb.meta["user_input"]["projection"]
+    assert proj["aligned"] is True
+    assert proj["crs"] == "EPSG:32616"
+    assert proj["output_crs"] == "EPSG:3857"
+    assert proj["input_hw"] == (20, 20)
+    assert proj["grid_hw"] == (x.shape[1], x.shape[2])
+    assert proj["scale_m"] == _MockFromDataEmbedder.last_sensor.scale_m
+
+
+def test_georeferenced_data_derives_spatial_from_footprint():
+    data = _utm_userdata()
+    get_embedding_from_data("mock_from_data", data)
+    sp = _MockFromDataEmbedder.last_spatial
+    assert sp is not None
+    assert sp.minlon < -88.2 < sp.maxlon
+    assert sp.minlat < 40.1 < sp.maxlat
+
+
+def test_georeferenced_data_satisfies_georef_conditioned_models():
+    emb = get_embedding_from_data("mock_from_data_georef", _utm_userdata())
+    assert emb.data.shape == (4,)
+
+
+def test_explicit_spatial_wins_over_raster_footprint():
+    data = _utm_userdata(spatial=_POINT)
+    get_embedding_from_data("mock_from_data", data)
+    assert _MockFromDataEmbedder.last_spatial is _POINT
+
+
+def test_ungeoreferenced_data_passes_through_unchanged():
+    emb = get_embedding_from_data("mock_from_data", _twelve_band_userdata())
+    assert _MockFromDataEmbedder.last_input.shape == (3, 8, 8)
+    assert emb.meta["user_input"]["projection"] == {"crs": None, "aligned": False}
+
+
+def test_georeferenced_data_near_utm_zone_edge_warns():
+    # Zone 16 ends at lon -84; a zone-16 raster centered 30 m east of it spills over.
+    data = _utm_userdata(lon=-83.9997, lat=40.1)
+    with pytest.warns(UserWarning, match="UTM zone boundary"):
+        get_embedding_from_data("mock_from_data", data)
