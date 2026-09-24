@@ -10,10 +10,9 @@ from ..core.errors import ModelError, ProviderError, SpecError
 from ..core.specs import BBox, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers.base import ProviderBase
 from ..tools.normalization import normalize_input_chw
+from ..tools.projection import COMMON_CRS, lonlat_to_web_mercator, web_mercator_to_lonlat
 from ..tools.temporal import split_date_range as _split_date_range_core
 
-_WEB_MERCATOR_R = 6378137.0
-_WEB_MERCATOR_MAX_LAT = 85.05112878
 _GEE_SAMPLE_RECT_TOO_MANY_PIXELS = "Too many pixels in sample"
 _GEE_SAMPLE_RECT_OP = "sampleRectangle"
 _GEE_SAMPLE_RECT_MUST_BE = "must be <="
@@ -77,25 +76,6 @@ def _coerce_bbox_like(spatial: SpatialSpec) -> BBox:
     )
 
 
-def _clamp_lat_for_web_mercator(lat_deg: float) -> float:
-    return max(-_WEB_MERCATOR_MAX_LAT, min(_WEB_MERCATOR_MAX_LAT, float(lat_deg)))
-
-
-def _lonlat_to_web_mercator_xy(lon_deg: float, lat_deg: float) -> tuple[float, float]:
-    lon = math.radians(float(lon_deg))
-    lat = math.radians(_clamp_lat_for_web_mercator(lat_deg))
-    x = _WEB_MERCATOR_R * lon
-    y = _WEB_MERCATOR_R * math.log(math.tan((math.pi / 4.0) + (lat / 2.0)))
-    return (float(x), float(y))
-
-
-def _web_mercator_xy_to_lonlat(x_m: float, y_m: float) -> tuple[float, float]:
-    lon = math.degrees(float(x_m) / _WEB_MERCATOR_R)
-    lat = math.degrees((2.0 * math.atan(math.exp(float(y_m) / _WEB_MERCATOR_R))) - (math.pi / 2.0))
-    lat = _clamp_lat_for_web_mercator(lat)
-    return (float(lon), float(lat))
-
-
 def _validated_mid(candidate: float, lo: float, hi: float, coord_name: str) -> float:
     mid = min(max(candidate, lo), hi)
     if not (lo < mid < hi):
@@ -108,8 +88,8 @@ def _validated_mid(candidate: float, lo: float, hi: float, coord_name: str) -> f
 
 
 def _bbox_span_pixels_estimate(bbox: BBox, *, scale_m: int) -> tuple[int, int]:
-    x0, y0 = _lonlat_to_web_mercator_xy(bbox.minlon, bbox.minlat)
-    x1, y1 = _lonlat_to_web_mercator_xy(bbox.maxlon, bbox.maxlat)
+    x0, y0 = lonlat_to_web_mercator(bbox.minlon, bbox.minlat)
+    x1, y1 = lonlat_to_web_mercator(bbox.maxlon, bbox.maxlat)
     s = max(1.0, float(scale_m))
     w = max(1, int(math.ceil(abs(x1 - x0) / s)))
     h = max(1, int(math.ceil(abs(y1 - y0) / s)))
@@ -117,8 +97,8 @@ def _bbox_span_pixels_estimate(bbox: BBox, *, scale_m: int) -> tuple[int, int]:
 
 
 def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BBox, BBox, str]:
-    x0, y0 = _lonlat_to_web_mercator_xy(bbox.minlon, bbox.minlat)
-    x1, y1 = _lonlat_to_web_mercator_xy(bbox.maxlon, bbox.maxlat)
+    x0, y0 = lonlat_to_web_mercator(bbox.minlon, bbox.minlat)
+    x1, y1 = lonlat_to_web_mercator(bbox.maxlon, bbox.maxlat)
     dx, dy = abs(x1 - x0), abs(y1 - y0)
 
     axis = str(prefer_axis).lower()
@@ -135,7 +115,7 @@ def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BB
 
     xm, ym = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
     if axis == "x":
-        lon_raw, _ = _web_mercator_xy_to_lonlat(xm, ym)
+        lon_raw, _ = web_mercator_to_lonlat(xm, ym)
         lon_mid = _validated_mid(lon_raw, float(bbox.minlon), float(bbox.maxlon), "longitude")
         west = BBox(
             minlon=float(bbox.minlon),
@@ -153,7 +133,7 @@ def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BB
         )
         return (west, east, "x")
 
-    _, lat_raw = _web_mercator_xy_to_lonlat(xm, ym)
+    _, lat_raw = web_mercator_to_lonlat(xm, ym)
     lat_mid = _validated_mid(lat_raw, float(bbox.minlat), float(bbox.maxlat), "latitude")
     north = BBox(
         minlon=float(bbox.minlon),
@@ -434,7 +414,7 @@ def _sample_image_bands_raw_chw(
     - ``reproject(ee.Projection(...).atScale(...))`` → south-up
       (``fetch_array_chw``, which applies ``_flip_sample_tile_y``).
     """
-    img = img.select(list(bands)).reproject(crs="EPSG:3857", scale=int(scale_m))
+    img = img.select(list(bands)).reproject(crs=COMMON_CRS, scale=int(scale_m))
     rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
     props = rect.get("properties", {}) if isinstance(rect, dict) else {}
     if not props:
