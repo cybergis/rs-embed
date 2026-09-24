@@ -33,7 +33,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 
 | Model ID     | Type        | Primary Input / Source              | Default Resolution | Dim  | Temporal mode            | Notes                                                                      | Detail                         |
 | ------------ | ----------- | ----------------------------------- | ------------------ | ---- | ------------------------ | -------------------------------------------------------------------------- | ------------------------------ |
-| `tessera`    | Precomputed | GeoTessera embedding tiles          | 10m                | 128  | yearly coverage product  | Fast baseline, source-fixed precomputed workflow; product-native fixed CRS | [detail](models/tessera.md)    |
+| `tessera`    | Precomputed | GeoTessera embedding tiles          | 10m                | 128  | yearly coverage product  | Fast baseline, source-fixed precomputed workflow; tiles resampled onto the common EPSG:3857 grid | [detail](models/tessera.md)    |
 | `gse`        | Precomputed | Google Satellite Embedding (annual) | 10m                | 64   | `TemporalSpec.year(...)` | Annual product via provider path                                           | [detail](models/gse.md)        |
 | `copernicus` | Precomputed | Copernicus embeddings               | 0.25°              | 768  | limited (2021)           | Coarse resolution product on fixed EPSG:4326 grid                          | [detail](models/copernicus.md) |
 
@@ -67,7 +67,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 
 `TemporalSpec.range(start, end)` is usually a compositing window rather than a single-scene selector, and `OutputSpec.grid()` may be a token or patch grid rather than a georeferenced raster, especially for ViT-like backbones. Cross-model comparisons are usually easiest with `OutputSpec.pooled()` plus fixed ROI, temporal, and compositing settings.
 
-Precomputed products can also keep their own product-native projection instead of the common provider-backed EPSG:3857 sampling grid. Today that matters especially for `tessera` and `copernicus`, so check each detail page before comparing grid outputs directly against on-the-fly models.
+Provider-backed models and `tessera` share one output grid (EPSG:3857 at the model's `scale_m`); a ROI that straddles a UTM zone boundary is served with a warning about the resampling seam. `copernicus` keeps its coarse product-native EPSG:4326 grid, so check its detail page before comparing grid outputs directly against other models.
 
 On this page, "Default Resolution" means the default source-side fetch resolution, not the final resized tensor shape sent into the backbone. Multi-frame models such as `prithvi`, `olmoearth`, `galileo`, `anysat`, and `agrifm` also need extra attention to frame count and temporal side inputs — how each one turns a `TemporalSpec.range` into frames is summarized in [Temporal Sampling](temporal_sampling.md).
 
