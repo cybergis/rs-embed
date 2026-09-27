@@ -115,7 +115,7 @@ For new users, start with these primary APIs:
 
 ## Supported Models
 
-This is a convenience index with basic model info only (for quick scanning / links). For detailed I/O behavior and preprocessing notes, see [Supported Models](https://cybergis.github.io/rs-embed/models/).
+This is a convenience index with basic model info only (for quick scanning / links). For detailed I/O behavior and preprocessing notes, see [Supported Models](https://cybergis.github.io/rs-embed/latest/models/).
 
 ### Precomputed Embeddings
 
@@ -161,7 +161,7 @@ Resolution here means the default provider/source fetch resolution used by the a
 
 📢 [Disscusion](https://github.com/cybergis/rs-embed/discussions)
 
-🧾 [Release policy and versioning](https://cybergis.github.io/rs-embed/releases/)
+🧾 [Release policy and versioning](https://cybergis.github.io/rs-embed/latest/releases/)
 
 📌 [Project changelog](https://github.com/cybergis/rs-embed/blob/main/CHANGELOG.md)
 
@@ -169,7 +169,7 @@ Resolution here means the default provider/source fetch resolution used by the a
 
 We welcome issues for new model integrations, extension ideas, bugs, and documentation gaps. If you have your own work, or a model or paper that you think would be valuable to include in `rs-embed`, please open an [Issue](https://github.com/cybergis/rs-embed/issues) and share the relevant links, context, and examples.
 
-We also warmly welcome community contributions, including new model support, bug fixes, documentation improvements, and example notebooks. If you would like to contribute directly, please start with the [`extending`](https://cybergis.github.io/rs-embed/extending/) guide and the [contributing guide](https://cybergis.github.io/rs-embed/contributing/).
+We also warmly welcome community contributions, including new model support, bug fixes, documentation improvements, and example notebooks. If you would like to contribute directly, please start with the [`extending`](https://cybergis.github.io/rs-embed/latest/extending/) guide and the [contributing guide](https://cybergis.github.io/rs-embed/latest/contributing/).
 
 ## 🎖 Acknowledgements
 

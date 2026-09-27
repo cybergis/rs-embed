@@ -25,4 +25,8 @@ benchmarks/
 !examples/demo.ipynb
 !examples/play_with_embedding.ipynb
 !examples/utils_demo.py
+!examples/bring_your_own_data.ipynb
 iguide_dataset/
+!examples/data/
+!examples/data/s2_patches/
+!examples/data/s2_patches/**
