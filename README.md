@@ -84,6 +84,25 @@ See the visualization helper and end-to-end notebook in the repository:
 
 <img src="https://raw.githubusercontent.com/cybergis/rs-embed/main/docs/assets/vis.png" width=750 />
 
+## Bring Your Own Data
+
+> 🆕 **New:** you can now compute embeddings from imagery you already have (your own patches, GeoTIFFs, training cubes), with no Google Earth Engine fetch and no provider auth.
+
+Register the pixels once as `UserData` (raw provider values plus collection, band names, and optionally where/when they were acquired), then embed with just a model name:
+
+```python
+from rs_embed import UserData, get_embedding_from_data, list_models_for_data
+
+data = UserData(patch, collection="s2")  # patch: [12, H, W] Sentinel-2 L2A, raw DN
+# or read pixels + CRS + transform straight from a GeoTIFF:
+# data = UserData.from_raster("scene.tif", collection="s2")
+
+list_models_for_data(data)                    # which models can use this data, and why not
+emb = get_embedding_from_data("galileo", data)
+```
+
+Bands are matched to each model automatically (a 12-band cube serves RGB, 6-band, and 10-band models alike), and a model your data cannot satisfy is refused with the exact missing band instead of producing silently wrong embeddings. See the [User-Provided Data guide](https://cybergis.github.io/rs-embed/latest/user_data/) and [`examples/bring_your_own_data.ipynb`](https://github.com/cybergis/rs-embed/blob/main/examples/bring_your_own_data.ipynb).
+
 ## Main API
 
 For new users, start with these primary APIs:
@@ -92,6 +111,7 @@ For new users, start with these primary APIs:
 - `get_embeddings_batch(...)`: many ROIs, same model
 - `export_batch(...)`: export datasets / experiments (single or multiple ROIs)
 - `inspect_provider_patch(...)`: inspect raw provider patches before inference
+- `get_embedding_from_data(...)` / `get_embeddings_batch_from_data(...)`: embed your own imagery (see [Bring Your Own Data](#bring-your-own-data))
 
 ## Supported Models
 
@@ -136,6 +156,8 @@ Resolution here means the default provider/source fetch resolution used by the a
 🪄 [Get Started: Try `rs-embed` Now](https://github.com/cybergis/rs-embed/blob/main/examples/playground.ipynb)
 
 🪀 [Use case: Maize yield mapping Illinois](https://github.com/cybergis/rs-embed/blob/main/examples/demo.ipynb)
+
+🗂️ [Bring your own data: embed your own imagery](https://github.com/cybergis/rs-embed/blob/main/examples/bring_your_own_data.ipynb)
 
 📢 [Disscusion](https://github.com/cybergis/rs-embed/discussions)
 
