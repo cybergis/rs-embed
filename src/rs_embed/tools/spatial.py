@@ -17,8 +17,9 @@ convention as :mod:`rs_embed.tools.shape`), so callers fetch the square, encode,
 and crop the output back to the ROI with ``shape.crop_grid_to_roi`` /
 ``shape.roi_token_box``.
 
-The square is built in **EPSG:3857** — the projection GEE samples in — so the
-enlarged box maps to square *pixels*, matching the provider exactly. A
+The square is built in **EPSG:3857** — the common grid every provider request
+is sampled on (see :mod:`rs_embed.tools.projection`) — so the enlarged box
+maps to square *pixels*, matching the provider exactly. A
 :class:`PointBuffer` is already a centered square, so it is returned unchanged
 with a full window. If the enlargement would fall outside valid lon/lat bounds
 (near the poles / antimeridian), we fall back to the original spec and a full
@@ -27,36 +28,12 @@ window, leaving any squaring to the downstream pad path.
 
 from __future__ import annotations
 
-import math
-
 from ..core.specs import BBox, PointBuffer, SpatialSpec
+from .projection import lonlat_to_web_mercator, web_mercator_to_lonlat
 
 __all__ = ["FULL_WINDOW", "square_spatial"]
 
 FULL_WINDOW: tuple[float, float, float, float] = (0.0, 1.0, 0.0, 1.0)
-
-# Web Mercator (EPSG:3857) constants — must match providers.gee_utils so the
-# enlarged square lines up with how GEE samples pixels.
-_WEB_MERCATOR_R = 6378137.0
-_WEB_MERCATOR_MAX_LAT = 85.05112878
-
-
-def _clamp_lat(lat_deg: float) -> float:
-    return max(-_WEB_MERCATOR_MAX_LAT, min(_WEB_MERCATOR_MAX_LAT, float(lat_deg)))
-
-
-def _to_mercator(lon_deg: float, lat_deg: float) -> tuple[float, float]:
-    lon = math.radians(float(lon_deg))
-    lat = math.radians(_clamp_lat(lat_deg))
-    x = _WEB_MERCATOR_R * lon
-    y = _WEB_MERCATOR_R * math.log(math.tan((math.pi / 4.0) + (lat / 2.0)))
-    return x, y
-
-
-def _to_lonlat(x_m: float, y_m: float) -> tuple[float, float]:
-    lon = math.degrees(float(x_m) / _WEB_MERCATOR_R)
-    lat = math.degrees((2.0 * math.atan(math.exp(float(y_m) / _WEB_MERCATOR_R))) - (math.pi / 2.0))
-    return lon, _clamp_lat(lat)
 
 
 def _is_bbox(spatial: SpatialSpec) -> bool:
@@ -85,8 +62,8 @@ def square_spatial(
 
     minlon, minlat = float(spatial.minlon), float(spatial.minlat)
     maxlon, maxlat = float(spatial.maxlon), float(spatial.maxlat)
-    x0, y0 = _to_mercator(minlon, minlat)
-    x1, y1 = _to_mercator(maxlon, maxlat)
+    x0, y0 = lonlat_to_web_mercator(minlon, minlat)
+    x1, y1 = lonlat_to_web_mercator(maxlon, maxlat)
     w, h = abs(x1 - x0), abs(y1 - y0)
     if w <= 0.0 or h <= 0.0:
         return spatial, FULL_WINDOW
@@ -97,8 +74,8 @@ def square_spatial(
 
     cx, cy = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
     half = side / 2.0
-    nminlon, nminlat = _to_lonlat(cx - half, cy - half)
-    nmaxlon, nmaxlat = _to_lonlat(cx + half, cy + half)
+    nminlon, nminlat = web_mercator_to_lonlat(cx - half, cy - half)
+    nmaxlon, nmaxlat = web_mercator_to_lonlat(cx + half, cy + half)
 
     square = BBox(
         minlon=nminlon,

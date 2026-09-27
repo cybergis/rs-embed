@@ -114,6 +114,9 @@ from .tools.runtime import (
 )
 from .tools.tiling import _resolve_input_prep_spec as _resolve_input_prep_spec
 from .tools.user_data import (
+    align_to_common_grid as _align_to_common_grid,
+)
+from .tools.user_data import (
     match_user_data_to_sensor as _match_user_data_to_sensor,
 )
 from .tools.user_data import (
@@ -121,6 +124,9 @@ from .tools.user_data import (
 )
 from .tools.user_data import (
     resolve_declared_bands as _resolve_declared_bands,
+)
+from .tools.user_data import (
+    resolve_user_data_spatial as _resolve_user_data_spatial,
 )
 from .tools.user_data import (
     warn_on_suspicious_value_range as _warn_on_suspicious_value_range,
@@ -446,14 +452,15 @@ def _resolve_user_data_sensor(model_n: str, *, modality: str | None) -> SensorSp
     return sensor_eff
 
 
-def _require_georef_for_model(model_n: str, data: UserData) -> None:
-    """Refuse georef-conditioned models when a declaration has no spatial."""
-    if data.spatial is None and getattr(_get_embedder_cls(model_n), "_requires_georef", False):
+def _require_georef_for_model(model_n: str, spatial: SpatialSpec | None) -> None:
+    """Refuse georef-conditioned models when a declaration has no location."""
+    if spatial is None and getattr(_get_embedder_cls(model_n), "_requires_georef", False):
         raise ModelError(
             f"Model '{model_n}' conditions on request geometry (lat/lon or "
             "GSD encodings); it cannot embed data without UserData.spatial, "
-            "and coordinates are never fabricated. Provide spatial or choose "
-            "a model without this requirement (see list_models_for_data)."
+            "and coordinates are never fabricated. Provide spatial (or crs + "
+            "transform) or choose a model without this requirement (see "
+            "list_models_for_data)."
         )
 
 
@@ -462,22 +469,31 @@ def _prepare_user_data_inputs(
     datas: list[UserData],
     sensor_eff: SensorSpec,
     output: OutputSpec,
-) -> tuple[list[np.ndarray], list[dict[str, Any]]]:
-    """Validate, match, and slice each user-data item to model band order."""
+) -> tuple[list[np.ndarray], list[SpatialSpec | None], list[dict[str, Any]]]:
+    """Validate, match, slice to model band order, and put each item on the common grid."""
     arrays: list[np.ndarray] = []
+    spatials: list[SpatialSpec | None] = []
     metas: list[dict[str, Any]] = []
     for data in datas:
         data.validate()
-        _require_georef_for_model(model_n, data)
-        if data.spatial is not None:
-            _validate_specs(spatial=data.spatial, temporal=data.temporal, output=output)
+        spatial = _resolve_user_data_spatial(data)
+        _require_georef_for_model(model_n, spatial)
+        if spatial is not None:
+            _validate_specs(spatial=spatial, temporal=data.temporal, output=output)
         elif data.temporal is not None:
             data.temporal.validate()
         idx = _match_user_data_to_sensor(data, sensor_eff, model_name=model_n)
         _warn_on_suspicious_value_range(data)
         # select_prefetched_channels casts to float32 and returns the input
         # object unchanged for an identity selection, so no redundant copy.
-        arrays.append(_select_prefetched_channels(data.data, idx))
+        array, projection_meta = _align_to_common_grid(
+            _select_prefetched_channels(data.data, idx),
+            data,
+            scale_m=sensor_eff.scale_m,
+            fill_value=sensor_eff.fill_value,
+        )
+        arrays.append(array)
+        spatials.append(spatial)
         metas.append(
             {
                 "source": "user_data",
@@ -486,9 +502,10 @@ def _prepare_user_data_inputs(
                 "bands_used": list(sensor_eff.bands),
                 "channel_indices": list(idx),
                 "declared_scale_m": data.scale_m,
+                "projection": projection_meta,
             }
         )
-    return arrays, metas
+    return arrays, spatials, metas
 
 
 def get_embedding_from_data(
@@ -646,7 +663,7 @@ def get_embeddings_batch_from_data(
     if not isinstance(datas, list) or len(datas) == 0:
         raise ModelError("datas must be a non-empty list[UserData].")
     sensor_eff = _resolve_user_data_sensor(model_n, modality=modality)
-    arrays, metas = _prepare_user_data_inputs(model_n, datas, sensor_eff, output)
+    arrays, spatials, metas = _prepare_user_data_inputs(model_n, datas, sensor_eff, output)
 
     # The embedder batch path takes one temporal per call, so dispatch one
     # sub-request per distinct temporal and scatter results back to input
@@ -659,7 +676,7 @@ def get_embeddings_batch_from_data(
     for temporal, indices in groups.items():
         embs = _run_user_input_request(
             model_n=model_n,
-            spatials=[datas[i].spatial for i in indices],
+            spatials=[spatials[i] for i in indices],
             input_arrays=[arrays[i] for i in indices],
             temporal=temporal,
             sensor=sensor_eff,
@@ -714,7 +731,7 @@ def list_models_for_data(data: UserData) -> list[dict[str, Any]]:
         }
         try:
             sensor = _resolve_user_data_sensor(model_id, modality=None)
-            _require_georef_for_model(model_id, data)
+            _require_georef_for_model(model_id, _resolve_user_data_spatial(data))
             _match_user_data_to_sensor(data, sensor, model_name=model_id)
         except ModelError as exc:
             entry["reason"] = str(exc)

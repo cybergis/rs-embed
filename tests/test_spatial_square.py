@@ -8,7 +8,7 @@ from rs_embed.tools.spatial import FULL_WINDOW, square_spatial
 
 
 def _merc_wh(bbox: BBox) -> tuple[float, float]:
-    from rs_embed.tools.spatial import _to_mercator
+    from rs_embed.tools.projection import lonlat_to_web_mercator as _to_mercator
 
     x0, y0 = _to_mercator(bbox.minlon, bbox.minlat)
     x1, y1 = _to_mercator(bbox.maxlon, bbox.maxlat)

@@ -238,3 +238,65 @@ class warnings_disabled_check:
         self._catcher.__exit__(exc_type, exc, tb)
         assert not [w for w in self._records if issubclass(w.category, UserWarning)]
         return False
+
+
+# ── georeferencing (crs + transform) ───────────────────────────────
+
+
+def test_crs_and_transform_must_come_together():
+    from affine import Affine
+
+    arr = np.zeros((1, 4, 4), np.float32)
+    with pytest.raises(SpecError, match="given together"):
+        UserData(data=arr, collection=S2, bands=("B4",), crs="EPSG:32616").validate()
+    with pytest.raises(SpecError, match="given together"):
+        UserData(data=arr, collection=S2, bands=("B4",), transform=Affine.identity()).validate()
+    with pytest.raises(SpecError, match="affine.Affine"):
+        UserData(
+            data=arr, collection=S2, bands=("B4",), crs="EPSG:32616", transform=(1, 0, 0)
+        ).validate()
+    UserData(
+        data=arr, collection=S2, bands=("B4",), crs="EPSG:32616", transform=Affine.identity()
+    ).validate()
+
+
+def test_from_raster_detects_crs_transform_and_scale(tmp_path):
+    rasterio = pytest.importorskip("rasterio")
+    from affine import Affine
+
+    from rs_embed.tools.user_data import align_to_common_grid, resolve_user_data_spatial
+
+    path = tmp_path / "patch.tif"
+    transform = Affine(10, 0, 400000, 0, -10, 4440000)  # UTM 16N, near (-89, 40.1)
+    pixels = np.stack([np.full((6, 8), v, np.float32) for v in (1.0, 2.0, 3.0)])
+    with rasterio.open(
+        path,
+        "w",
+        driver="GTiff",
+        height=6,
+        width=8,
+        count=3,
+        dtype="float32",
+        crs="EPSG:32616",
+        transform=transform,
+    ) as dst:
+        dst.write(pixels)
+
+    data = UserData.from_raster(str(path), collection="s2", bands=("B4", "B3", "B2"))
+    data.validate()
+    assert data.crs == "EPSG:32616"
+    assert data.transform == transform
+    assert data.scale_m == 10
+    assert data.spatial is None
+    np.testing.assert_array_equal(data.data, pixels)
+
+    footprint = resolve_user_data_spatial(data)
+    assert -90.0 < footprint.minlon < footprint.maxlon < -88.0
+    assert 40.0 < footprint.minlat < footprint.maxlat < 40.2
+
+    out, meta = align_to_common_grid(data.data, data, scale_m=10, fill_value=0.0)
+    assert meta["aligned"] and meta["output_crs"] == "EPSG:3857"
+    assert out.shape[0] == 3 and out.shape[1:] == meta["grid_hw"]
+    covered = out[0] != 0.0
+    assert covered.mean() > 0.5
+    np.testing.assert_array_equal(out[2][covered], 3.0)

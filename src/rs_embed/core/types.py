@@ -185,6 +185,16 @@ class UserData:
         When the imagery was acquired, for models that condition on time.
     scale_m : int or None
         Optional nominal pixel size in meters, recorded as provenance.
+    crs : str or None
+        CRS of the array's pixel grid (e.g. ``"EPSG:32616"``), given together
+        with *transform* for a georeferenced raster. When set, the footprint
+        is derived from it (so *spatial* may be omitted) and the array is
+        resampled onto the common EPSG:3857 grid at the model's scale before
+        embedding — the same grid a provider fetch samples on. Without it the
+        array is fed as-is and assumed to already be on that grid.
+    transform : affine.Affine or None
+        Pixel → CRS affine of the array (rasterio convention; ``src.transform``).
+        Required with *crs*.
     """
 
     data: np.ndarray
@@ -193,6 +203,47 @@ class UserData:
     bands: tuple[str, ...] | None = None
     temporal: TemporalSpec | None = None
     scale_m: int | None = None
+    crs: str | None = None
+    transform: Any | None = None
+
+    @classmethod
+    def from_raster(
+        cls,
+        path: str,
+        *,
+        collection: str,
+        bands: tuple[str, ...] | None = None,
+        temporal: TemporalSpec | None = None,
+    ) -> UserData:
+        """Register a georeferenced raster file (GeoTIFF, ...) as user data.
+
+        Reads the pixels, CRS and affine transform with ``rasterio`` (an
+        optional dependency), so the projection and footprint are detected
+        from the file rather than declared by hand. Pixel values are taken
+        as stored: the raw-provider-units contract still applies.
+        """
+        try:
+            import rasterio
+        except ImportError as e:
+            raise ImportError("UserData.from_raster needs rasterio: pip install rasterio") from e
+        with rasterio.open(path) as src:
+            pixels = src.read()
+            georef = src.crs is not None
+            crs = src.crs.to_string() if georef else None
+            transform = src.transform if georef else None
+            res_x, res_y = src.res
+            scale_m = None
+            if georef and src.crs.is_projected and abs(res_x - res_y) < 1e-6 and res_x >= 1.0:
+                scale_m = int(round(res_x))
+        return cls(
+            data=pixels,
+            collection=collection,
+            bands=bands,
+            temporal=temporal,
+            scale_m=scale_m,
+            crs=crs,
+            transform=transform,
+        )
 
     def validate(self) -> None:
         """Validate the declaration's internal consistency.
@@ -231,6 +282,16 @@ class UserData:
                 )
         if self.scale_m is not None and int(self.scale_m) <= 0:
             raise SpecError("UserData.scale_m must be positive when provided.")
+        if (self.crs is None) != (self.transform is None):
+            raise SpecError(
+                "UserData.crs and UserData.transform must be given together; a "
+                "georeferenced raster needs both its CRS and its pixel->CRS affine."
+            )
+        if self.transform is not None and not all(hasattr(self.transform, k) for k in "abcdef"):
+            raise SpecError(
+                "UserData.transform must be an affine.Affine (rasterio-style pixel -> CRS "
+                f"transform), got {type(self.transform).__name__}."
+            )
 
 
 # ── Typed results ──────────────────────────────────────────────────

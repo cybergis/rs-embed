@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import os
 import warnings
-from collections.abc import Callable, Iterable
+from collections.abc import Iterable
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
@@ -12,20 +12,29 @@ from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
 from ..core.specs import (
-    BBox,
     OutputSpec,
-    PointBuffer,
     SensorSpec,
     SpatialSpec,
     TemporalSpec,
 )
 from ..core.types import EmbedderCapabilities
+from ..tools.projection import (
+    COMMON_CRS,
+    CommonGrid,
+    common_grid,
+    crs_label,
+    project_pixel_centers,
+    source_pixel_indices,
+    warn_if_utm_boundary,
+)
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta
 
 _EMBED_DIMS = (64, 128, 256, 512, 768, 1024)
-_TESSERA_PROJECTION_WARNED = False
+# GeoTessera is a 10 m product; its tiles are resampled onto the common
+# EPSG:3857 grid at this pixel size.
+_TESSERA_SCALE_M = 10
 
 
 def _resolve_tessera_cache_dir(
@@ -54,33 +63,6 @@ def _resolve_tessera_cache_dir(
     return cache_dir
 
 
-def _buffer_m_to_deg(lat: float, buffer_m: float) -> tuple[float, float]:
-    import math
-
-    m_per_deg_lat = 111_320.0
-    dlat = buffer_m / m_per_deg_lat
-    cos_lat = max(1e-6, math.cos(math.radians(lat)))
-    dlon = buffer_m / (m_per_deg_lat * cos_lat)
-    return dlon, dlat
-
-
-def _to_bbox_4326(spatial: SpatialSpec) -> BBox:
-    if isinstance(spatial, BBox):
-        spatial.validate()
-        return spatial
-    if isinstance(spatial, PointBuffer):
-        spatial.validate()
-        dlon, dlat = _buffer_m_to_deg(spatial.lat, spatial.buffer_m)
-        return BBox(
-            minlon=spatial.lon - dlon,
-            minlat=spatial.lat - dlat,
-            maxlon=spatial.lon + dlon,
-            maxlat=spatial.lat + dlat,
-            crs="EPSG:4326",
-        )
-    raise ModelError(f"Unsupported SpatialSpec: {type(spatial)}")
-
-
 def _year_from_temporal(temporal: TemporalSpec | None, default_year: int = 2021) -> int:
     if temporal is None:
         warnings.warn(
@@ -106,16 +88,15 @@ def _pool(chw: np.ndarray, pooling: str) -> np.ndarray:
     raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
 
 
-def _to_hwc(arr: np.ndarray) -> np.ndarray:
+def _gather_hwc(arr: np.ndarray, rows: np.ndarray, cols: np.ndarray) -> np.ndarray:
+    """Pick ``[N, D]`` pixel vectors from an HWC or CHW tile without copying the tile."""
     a = np.asarray(arr)
     if a.ndim != 3:
         raise ModelError(f"Unexpected embedding ndim={a.ndim}, shape={a.shape}")
-    # geotessera：HWC (H, W, D)
     if a.shape[-1] in _EMBED_DIMS:
-        return a.astype(np.float32)
-    # also support CHW
+        return a[rows, cols, :].astype(np.float32)
     if a.shape[0] in _EMBED_DIMS:
-        return np.moveaxis(a, 0, -1).astype(np.float32)
+        return a[:, rows, cols].T.astype(np.float32)
     raise ModelError(f"Unexpected embedding shape: {a.shape}")
 
 
@@ -131,185 +112,52 @@ def _infer_hwc_shape(arr: np.ndarray) -> tuple[int, int, int]:
     raise ModelError(f"Unexpected embedding shape: {a.shape}")
 
 
-def _assert_north_up(transform):
-    # 期望：无旋转 b=d=0，且 a>0, e<0
-    b = float(getattr(transform, "b", 0.0))
-    d = float(getattr(transform, "d", 0.0))
-    if abs(b) > 1e-12 or abs(d) > 1e-12:
-        raise ModelError(
-            "Tile transform has rotation/shear; mosaic+crop requires north-up (b=d=0)."
-        )
-
-
-def _tile_bounds(transform, w: int, h: int) -> tuple[float, float, float, float]:
-    # (left, bottom, right, top) in tile CRS
-    x0, y0 = transform * (0, 0)  # top-left
-    x1, y1 = transform * (w, h)  # bottom-right (for north-up, y decreases)
-    left, right = (min(x0, x1), max(x0, x1))
-    bottom, top = (min(y0, y1), max(y0, y1))
-    return left, bottom, right, top
-
-
-def _reproject_bbox_4326_to(tile_crs_str: str, bbox: BBox) -> tuple[float, float, float, float]:
-    # returns (xmin, ymin, xmax, ymax) in tile CRS
-    if str(tile_crs_str).upper() in ("EPSG:4326", "WGS84", "CRS:84"):
-        return bbox.minlon, bbox.minlat, bbox.maxlon, bbox.maxlat
-
-    try:
-        from pyproj import Transformer
-    except Exception as e:
-        raise ModelError(f"Need pyproj for CRS={tile_crs_str}. Install: pip install pyproj") from e
-
-    tfm = Transformer.from_crs("EPSG:4326", str(tile_crs_str), always_xy=True)
-    x0, y0 = tfm.transform(bbox.minlon, bbox.minlat)
-    x1, y1 = tfm.transform(bbox.maxlon, bbox.maxlat)
-    return min(x0, x1), min(y0, y1), max(x0, x1), max(y0, y1)
-
-
-def _mosaic_and_crop_strict_roi(
-    tiles_rows_factory: Callable[[], Iterable[tuple[int, float, float, np.ndarray, Any, Any]]],
-    bbox_4326: BBox,
+def _resample_tiles_to_common_grid(
+    tile_rows: Iterable[tuple[int, float, float, np.ndarray, Any, Any]],
+    grid: CommonGrid,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """
-    tiles_rows_factory: returns iterable of
-      (year, tile_lon, tile_lat, embedding_array, crs, transform)
-    Return cropped CHW + meta.
-    """
-    # Materialize the factory output once. The two-pass mosaic (bounds scan +
-    # paste) must see identical rows; re-invoking the factory can re-download
-    # or re-read every tile from geotessera, doubling I/O on the hottest path.
-    tile_rows = list(tiles_rows_factory())
+    """Sample every tile's pixels onto *grid* (nearest neighbour) and return CHW + meta.
 
-    # Pass 1: scan tile layout and compute global bounds from metadata only.
-    crs0 = None
-    crs0_str = None
-    a0 = e0 = None
-    d0 = None
-    left = bottom = float("inf")
-    right = top = float("-inf")
-
+    ``tile_rows`` are geotessera's ``(year, tile_lon, tile_lat, embedding,
+    crs, transform)`` tuples. Tiles are consumed one at a time and only the
+    output canvas is allocated, so a large ROI never materializes a full
+    mosaic. Each tile is placed through its own CRS, which is what lets a ROI
+    straddling a UTM zone boundary be served instead of rejected.
+    """
+    canvas: np.ndarray | None = None
+    filled = np.zeros(grid.shape, dtype=bool)
+    centers_by_crs: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for _year, _tlon, _tlat, emb, crs, transform in tile_rows:
-        _assert_north_up(transform)
         h, w, d = _infer_hwc_shape(emb)
-        t_left, t_bottom, t_right, t_top = _tile_bounds(transform, w, h)
+        if canvas is None:
+            canvas = np.zeros(grid.shape + (d,), dtype=np.float32)
+        elif d != canvas.shape[-1]:
+            raise ModelError("Tiles have different embedding dimensions; cannot combine.")
+        label = crs_label(crs)
+        if label not in centers_by_crs:
+            centers_by_crs[label] = project_pixel_centers(grid, crs)
+        rows, cols, inside = source_pixel_indices(transform, *centers_by_crs[label], (h, w))
+        inside &= ~filled  # first tile wins where tiles overlap
+        if not inside.any():
+            continue
+        canvas[inside] = _gather_hwc(emb, rows[inside], cols[inside])
+        filled |= inside
 
-        if crs0 is None:
-            crs0 = crs
-            crs0_str = str(crs0)
-            a0 = float(transform.a)
-            e0 = float(transform.e)
-            d0 = int(d)
-        else:
-            if crs != crs0:
-                raise ModelError("Tiles have different CRS; cannot mosaic.")
-            if abs(float(transform.a) - a0) > 1e-12 or abs(float(transform.e) - e0) > 1e-12:
-                raise ModelError(
-                    "Tiles have different resolution; cannot mosaic without resampling."
-                )
-            if int(d) != int(d0):
-                raise ModelError("Tiles have different embedding dimensions; cannot mosaic.")
-
-        left = min(left, t_left)
-        bottom = min(bottom, t_bottom)
-        right = max(right, t_right)
-        top = max(top, t_top)
-
-    if crs0 is None:
-        raise ModelError("No tiles fetched; cannot mosaic.")
-
-    px_w = float(a0)  # >0
-    px_h = abs(float(e0))  # >0 (since e<0)
-
-    mosaic_w = int(np.ceil((right - left) / px_w))
-    mosaic_h = int(np.ceil((top - bottom) / px_h))
-
-    # global transform (north-up)
-    # x = left + col*px_w, y = top - row*px_h
-    # Affine(a, b, c, d, e, f) = (px_w, 0, left, 0, -px_h, top)
-    from affine import Affine
-
-    global_transform = Affine(px_w, 0.0, left, 0.0, -px_h, top)
-
-    # crop window for ROI in tile CRS
-    xmin, ymin, xmax, ymax = _reproject_bbox_4326_to(str(crs0_str), bbox_4326)
-    inv = ~global_transform
-    c0, r0 = inv * (xmin, ymax)  # top-left
-    c1, r1 = inv * (xmax, ymin)  # bottom-right
-
-    x0 = int(np.floor(min(c0, c1)))
-    x1 = int(np.ceil(max(c0, c1)))
-    y0 = int(np.floor(min(r0, r1)))
-    y1 = int(np.ceil(max(r0, r1)))
-
-    # clip
-    x0 = max(0, min(mosaic_w, x0))
-    x1 = max(0, min(mosaic_w, x1))
-    y0 = max(0, min(mosaic_h, y0))
-    y1 = max(0, min(mosaic_h, y1))
-    if x1 <= x0 or y1 <= y0:
+    if canvas is None:
+        raise ModelError("No tiles fetched; cannot build the embedding grid.")
+    if not filled.any():
         raise ModelError("ROI does not overlap fetched tessera tiles.")
 
-    crop_h = y1 - y0
-    crop_w = x1 - x0
-    cropped_hwc = np.zeros((crop_h, crop_w, int(d0)), dtype=np.float32)
-
-    # Pass 2: paste tiles directly into crop canvas (avoid full mosaic allocation).
-    for _year, _tlon, _tlat, emb, _crs, transform in tile_rows:
-        _assert_north_up(transform)
-        hwc = _to_hwc(emb)
-        h, w, _ = hwc.shape
-        t_left, t_bottom, t_right, t_top = _tile_bounds(transform, w, h)
-
-        x_off = int(round((t_left - left) / px_w))
-        y_off = int(round((top - t_top) / px_h))
-        tx0 = max(x0, x_off)
-        tx1 = min(x1, x_off + w)
-        ty0 = max(y0, y_off)
-        ty1 = min(y1, y_off + h)
-        if tx1 <= tx0 or ty1 <= ty0:
-            continue
-
-        sx0 = tx0 - x_off
-        sx1 = tx1 - x_off
-        sy0 = ty0 - y_off
-        sy1 = ty1 - y_off
-
-        dx0 = tx0 - x0
-        dx1 = tx1 - x0
-        dy0 = ty0 - y0
-        dy1 = ty1 - y0
-        cropped_hwc[dy0:dy1, dx0:dx1, :] = hwc[sy0:sy1, sx0:sx1, :]
-
-    chw = np.moveaxis(cropped_hwc, -1, 0).astype(np.float32)
-
+    chw = np.moveaxis(canvas, -1, 0)
     meta = {
-        "tile_crs": str(crs0_str),
-        "mosaic_hw": (mosaic_h, mosaic_w),
-        "crop_px_window": (x0, y0, x1, y1),
-        "crop_hw": (y1 - y0, x1 - x0),
-        "global_transform": global_transform,
+        "input_crs": "EPSG:4326",
+        "projection_mode": "common_grid",
+        "resampling": "nearest",
+        "tile_crs": sorted(centers_by_crs),
+        "coverage": float(filled.mean()),
+        **grid.meta(),
     }
     return chw, meta
-
-
-def _projection_note(tile_crs: str) -> str:
-    return (
-        f"Tessera returns embeddings on the product-native tile CRS ({tile_crs}), "
-        "which may differ from the common provider-backed default grid in EPSG:3857. "
-        "Input spatial specs still use EPSG:4326."
-    )
-
-
-def _warn_projection_once(tile_crs: str) -> None:
-    global _TESSERA_PROJECTION_WARNED
-    if _TESSERA_PROJECTION_WARNED:
-        return
-    warnings.warn(
-        _projection_note(tile_crs),
-        category=UserWarning,
-        stacklevel=2,
-    )
-    _TESSERA_PROJECTION_WARNED = True
 
 
 @register("tessera")
@@ -336,6 +184,8 @@ class TesseraEmbedder(EmbedderBase):
             "source": "geotessera.GeoTessera",
             "defaults": {
                 "cache_dir_env": "RS_EMBED_TESSERA_CACHE",
+                "scale_m": _TESSERA_SCALE_M,
+                "output_crs": COMMON_CRS,
             },
             "model_config": {
                 "cache_dir": {
@@ -351,7 +201,9 @@ class TesseraEmbedder(EmbedderBase):
             "notes": [
                 "Precomputed GeoTessera tiles use a fixed source path; use backend='auto'.",
                 "TemporalSpec.range uses the start year for tile lookup in v0.1.",
-                "Embeddings stay on the product-native tile CRS rather than the common provider-backed EPSG:3857 grid.",
+                f"Tiles (UTM) are resampled (nearest) onto the common {COMMON_CRS} grid at "
+                f"{_TESSERA_SCALE_M} m, the same grid provider-backed models sample on.",
+                "A ROI straddling a UTM zone boundary is served with a warning (seam).",
             ],
         }
 
@@ -397,7 +249,8 @@ class TesseraEmbedder(EmbedderBase):
         if backend_n != "auto":
             raise ModelError("tessera is precomputed; use backend='auto'.")
 
-        bbox = _to_bbox_4326(spatial)
+        grid = common_grid(spatial, scale_m=_TESSERA_SCALE_M)
+        footprint = grid.bounds_4326()
         year = _year_from_temporal(temporal, default_year=2021)
 
         cache_dir = _resolve_tessera_cache_dir(model_config, sensor)
@@ -406,17 +259,13 @@ class TesseraEmbedder(EmbedderBase):
         cache_key = cache_dir or ""
         gt = self._get_gt(cache_key)
 
-        bounds = (bbox.minlon, bbox.minlat, bbox.maxlon, bbox.maxlat)
+        bounds = (footprint.minlon, footprint.minlat, footprint.maxlon, footprint.maxlat)
         tiles = gt.registry.load_blocks_for_region(bounds=bounds, year=int(year))
         if not tiles:
             raise ModelError(f"No tessera tiles for bounds={bounds}, year={year}")
 
-        def _tiles_rows():
-            return gt.fetch_embeddings(tiles)
-
-        chw, crop_meta = _mosaic_and_crop_strict_roi(_tiles_rows, bbox_4326=bbox)
-        tile_crs = str(crop_meta.get("tile_crs", "unknown"))
-        _warn_projection_once(tile_crs)
+        chw, grid_meta = _resample_tiles_to_common_grid(gt.fetch_embeddings(tiles), grid)
+        warn_if_utm_boundary(crss=grid_meta["tile_crs"], footprint=footprint, context="tessera")
 
         meta = build_meta(
             model=self.model_name,
@@ -433,11 +282,7 @@ class TesseraEmbedder(EmbedderBase):
                 "bbox_4326": bounds,
                 "preferred_year": year,
                 "chw_shape": tuple(chw.shape),
-                "input_crs": "EPSG:4326",
-                "output_crs": tile_crs,
-                "projection_mode": "product_native_fixed",
-                "projection_note": _projection_note(tile_crs),
-                **crop_meta,
+                **grid_meta,
             },
         )
 

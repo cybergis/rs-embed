@@ -128,7 +128,7 @@ _SYNC_DEBT_PATTERNS = [
 # these comments by extracting shared code, lower the baseline in the same
 # commit. Raising it requires deliberately accepting new hand-maintained
 # duplication — don't.
-_SYNC_DEBT_BASELINE = 7
+_SYNC_DEBT_BASELINE = 6
 
 
 def test_sync_comment_ratchet():

@@ -12,18 +12,31 @@ Policy: the model's required bands must be a subset of the declared bands
 or a missing band refuses the request with a :class:`ModelError` naming what
 is missing. Band vocabulary is shared with provider fetches via
 :func:`~rs_embed.providers.gee_utils.resolve_band_aliases`.
+
+Georeferenced declarations (``crs`` + ``transform``) are also put on the
+package's common grid here (:func:`align_to_common_grid`), so a user raster
+reaches the model on the same EPSG:3857 lattice a provider fetch would have
+produced.
 """
 
 from __future__ import annotations
 
 import warnings
+from typing import Any
 
 import numpy as np
 
 from ..core.errors import ModelError, SpecError
-from ..core.specs import SensorSpec
+from ..core.specs import SensorSpec, SpatialSpec
 from ..core.types import UserData
 from ..providers.gee_utils import resolve_band_aliases
+from .projection import (
+    common_grid,
+    crs_label,
+    raster_bounds_4326,
+    resample_to_common_grid,
+    warn_if_utm_boundary,
+)
 
 # Short user-facing aliases for provider collection ids. Full ids always pass
 # through unchanged, so this stays a convenience layer, not a registry.
@@ -200,3 +213,54 @@ def warn_on_suspicious_value_range(data: UserData) -> None:
             UserWarning,
             stacklevel=3,
         )
+
+
+def resolve_user_data_spatial(data: UserData) -> SpatialSpec | None:
+    """Where the declaration is: ``spatial`` if given, else the raster footprint.
+
+    A georeferenced declaration (``crs`` + ``transform``) carries its own
+    location, so ``spatial`` need not be repeated; an explicit ``spatial``
+    still wins when both are present.
+    """
+    if data.spatial is not None or data.crs is None:
+        return data.spatial
+    return raster_bounds_4326(data.crs, data.transform, np.asarray(data.data).shape[-2:])
+
+
+def align_to_common_grid(
+    array: np.ndarray,
+    data: UserData,
+    *,
+    scale_m: float,
+    fill_value: float,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Resample a georeferenced user array onto the common grid at *scale_m*.
+
+    Provider fetches return pixels on the common EPSG:3857 lattice at the
+    model's scale; a raster declared with ``crs``/``transform`` is put on that
+    same grid (nearest neighbour, *fill_value* outside the raster) so the model
+    sees what a fetch would have produced. Declarations without georeferencing
+    pass through untouched. Returns the array and provenance for
+    ``meta['user_input']['projection']``.
+    """
+    if data.crs is None:
+        return array, {"crs": None, "aligned": False}
+    src_label = crs_label(data.crs)
+    footprint = raster_bounds_4326(data.crs, data.transform, np.asarray(array).shape[-2:])
+    warn_if_utm_boundary(crss=[src_label], footprint=footprint, context=f"user data in {src_label}")
+    grid = common_grid(footprint, scale_m=scale_m)
+    out = resample_to_common_grid(
+        array,
+        src_crs=data.crs,
+        src_transform=data.transform,
+        grid=grid,
+        fill_value=fill_value,
+    )
+    return out, {
+        "crs": src_label,
+        "input_transform": data.transform,
+        "input_hw": tuple(int(v) for v in np.asarray(array).shape[-2:]),
+        "aligned": True,
+        "resampling": "nearest",
+        **grid.meta(),
+    }

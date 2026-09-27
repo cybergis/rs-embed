@@ -5,10 +5,10 @@ from collections.abc import Sequence
 from typing import Any
 
 import numpy as np
-from pyproj import Transformer
 
-from ..core.errors import ModelError, ProviderError
-from ..core.specs import BBox, PointBuffer, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.errors import ModelError, ProviderError, SpecError
+from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
+from ..tools.projection import COMMON_CRS, web_mercator_bounds
 from .base import ProviderBase
 from .gee_utils import (
     _bbox_recursive_fallback,
@@ -59,22 +59,11 @@ class GEEProvider(ProviderBase):
     def _to_ee_region_3857(self, spatial: SpatialSpec):
         import ee
 
-        to_3857 = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True)
-
-        if isinstance(spatial, PointBuffer):
-            spatial.validate()
-            x, y = to_3857.transform(spatial.lon, spatial.lat)
-            half = spatial.buffer_m
-            minx, miny, maxx, maxy = x - half, y - half, x + half, y + half
-            return ee.Geometry.Rectangle([minx, miny, maxx, maxy], proj="EPSG:3857", geodesic=False)
-
-        if isinstance(spatial, BBox):
-            spatial.validate()
-            minx, miny = to_3857.transform(spatial.minlon, spatial.minlat)
-            maxx, maxy = to_3857.transform(spatial.maxlon, spatial.maxlat)
-            return ee.Geometry.Rectangle([minx, miny, maxx, maxy], proj="EPSG:3857", geodesic=False)
-
-        raise ProviderError(f"Unsupported spatial type: {type(spatial)}")
+        try:
+            minx, miny, maxx, maxy = web_mercator_bounds(spatial)
+        except SpecError as e:
+            raise ProviderError(str(e)) from e
+        return ee.Geometry.Rectangle([minx, miny, maxx, maxy], proj=COMMON_CRS, geodesic=False)
 
     def get_region_3857(self, spatial: SpatialSpec):
         self.ensure_ready()
@@ -155,7 +144,7 @@ class GEEProvider(ProviderBase):
         img = image.select(list(resolved))
 
         # 3) Force pixel grid at desired scale; clip masks non-rectangular regions
-        proj = ee.Projection("EPSG:3857").atScale(int(scale_m))
+        proj = ee.Projection(COMMON_CRS).atScale(int(scale_m))
         img = img.reproject(proj).clip(region)
 
         # 4) Sample and build CHW (raw GEE output is south-up with atScale+clip)
@@ -369,7 +358,7 @@ class GEEProvider(ProviderBase):
         else:
             raise ProviderError(f"Unknown composite='{composite}'. Use 'median' or 'mosaic'.")
 
-        img = img.select(["VV", "VH"]).reproject(crs="EPSG:3857", scale=int(scale_m))
+        img = img.select(["VV", "VH"]).reproject(crs=COMMON_CRS, scale=int(scale_m))
         rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
         props = rect.get("properties", {}) if isinstance(rect, dict) else {}
         if not props:
@@ -627,7 +616,7 @@ class GEEProvider(ProviderBase):
         # reproject(crs=..., scale=...) + clip: north-up — row order follows the
         # reprojection form, not clipping (see _sample_image_bands_raw_chw for
         # the verified contract). No flip here.
-        img = img.reproject(crs="EPSG:3857", scale=int(scale_m)).clip(region)
+        img = img.reproject(crs=COMMON_CRS, scale=int(scale_m)).clip(region)
         band_names_raw = img.bandNames().getInfo()
         band_names = tuple(str(b) for b in (band_names_raw or []))
         if not band_names:

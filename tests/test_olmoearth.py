@@ -481,7 +481,7 @@ def test_grid_and_pooled_crop_back_to_roi(monkeypatch):
 
 def test_fetch_input_enlarges_bbox_to_square(monkeypatch):
     """A rectangular BBox is enlarged to a square fetch window in EPSG:3857."""
-    from rs_embed.tools.spatial import _to_mercator
+    from rs_embed.tools.projection import lonlat_to_web_mercator as _to_mercator
 
     emb = oe.OlmoEarthEmbedder()
     captured: dict = {}
