@@ -2453,7 +2453,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <td>10m</td>
 <td>128</td>
 <td>yearly coverage product</td>
-<td>Fast baseline, source-fixed precomputed workflow; product-native fixed CRS</td>
+<td>Fast baseline, source-fixed precomputed workflow; tiles resampled onto the common EPSG:3857 grid</td>
 <td><a href="tessera/">detail</a></td>
 </tr>
 <tr>
@@ -2669,7 +2669,7 @@ Some detail-page filenames still use older names for compatibility, but the cano
 <hr />
 <h2 id="temporal-and-comparison-notes-what-people-usually-miss">Temporal and Comparison Notes (What People Usually Miss)<a class="headerlink" href="#temporal-and-comparison-notes-what-people-usually-miss" title="Permanent link">&para;</a></h2>
 <p><code>TemporalSpec.range(start, end)</code> is usually a compositing window rather than a single-scene selector, and <code>OutputSpec.grid()</code> may be a token or patch grid rather than a georeferenced raster, especially for ViT-like backbones. Cross-model comparisons are usually easiest with <code>OutputSpec.pooled()</code> plus fixed ROI, temporal, and compositing settings.</p>
-<p>Precomputed products can also keep their own product-native projection instead of the common provider-backed EPSG:3857 sampling grid. Today that matters especially for <code>tessera</code> and <code>copernicus</code>, so check each detail page before comparing grid outputs directly against on-the-fly models.</p>
+<p>Provider-backed models and <code>tessera</code> share one output grid (EPSG:3857 at the model's <code>scale_m</code>); a ROI that straddles a UTM zone boundary is served with a warning about the resampling seam. <code>copernicus</code> keeps its coarse product-native EPSG:4326 grid, so check its detail page before comparing grid outputs directly against other models.</p>
 <p>On this page, "Default Resolution" means the default source-side fetch resolution, not the final resized tensor shape sent into the backbone. Multi-frame models such as <code>prithvi</code>, <code>olmoearth</code>, <code>galileo</code>, <code>anysat</code>, and <code>agrifm</code> also need extra attention to frame count and temporal side inputs — how each one turns a <code>TemporalSpec.range</code> into frames is summarized in <a href="../temporal_sampling/">Temporal Sampling</a>.</p>
 <p>Read the details in <a href="../models_reference/">Supported Models (Advanced Reference)</a>.</p>
 <hr />

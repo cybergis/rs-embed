@@ -2500,12 +2500,12 @@
 </table>
 <div class="admonition success">
 <p class="admonition-title">Tessera In 30 Seconds</p>
-<p>Tessera is a precomputed 10 m global embedding product distributed as local GeoTessera tiles — <code>rs-embed</code> does no model inference here; it mosaics the tiles covering your ROI, reprojects the ROI into each tile's native CRS if needed, and returns the cropped <code>(D,H,W)</code> embedding grid in that tile-native CRS.</p>
+<p>Tessera is a precomputed 10 m global embedding product distributed as local GeoTessera tiles — <code>rs-embed</code> does no model inference here; it resamples the tiles covering your ROI (nearest neighbour, each tile through its own UTM CRS) onto the common EPSG:3857 grid at 10 m and returns the <code>(D,H,W)</code> embedding grid on that grid — the same grid provider-backed models sample on.</p>
 <p>In <code>rs-embed</code>, its most important characteristics are:</p>
 <ul>
-<li>strict north-up mosaic requiring consistent tile CRS/resolution — rotated/sheared or heterogeneous tiles raise: see <a href="#preprocessing-retrieval-pipeline">Preprocessing / Retrieval Pipeline</a></li>
+<li>output lives on the common EPSG:3857 grid at 10 m, pixel-aligned with provider-backed models for the same ROI: see <a href="#output-semantics">Output Semantics</a></li>
+<li>a ROI straddling a UTM zone boundary is served (tiles from both zones are resampled independently) with a <code>UserWarning</code> about the seam: see <a href="#preprocessing-retrieval-pipeline">Preprocessing / Retrieval Pipeline</a></li>
 <li>year-selector temporal semantics: <code>TemporalSpec.range(...)</code> silently uses the <code>start</code> year rather than doing real temporal filtering: see <a href="#retrieval-contract">Retrieval Contract</a></li>
-<li>output CRS follows the tile-native CRS, not the EPSG:3857 default used by provider-backed paths elsewhere: see <a href="#output-semantics">Output Semantics</a></li>
 </ul>
 </div>
 <hr />
@@ -2524,7 +2524,7 @@
 </tr>
 <tr>
 <td><code>SpatialSpec</code></td>
-<td><code>BBox</code> direct, or <code>PointBuffer</code> converted to EPSG:4326 BBox (approximate meter-to-degree)</td>
+<td><code>BBox</code> / <code>PointBuffer</code>, mapped to the common EPSG:3857 grid exactly as provider requests are</td>
 </tr>
 <tr>
 <td><code>TemporalSpec</code></td>
@@ -2536,7 +2536,7 @@
 </tr>
 <tr>
 <td>Product CRS</td>
-<td>tile-native (varies by tile), <strong>not</strong> EPSG:3857</td>
+<td>tile-native UTM (varies by tile); output resampled onto EPSG:3857</td>
 </tr>
 <tr>
 <td>Product resolution</td>
@@ -2553,16 +2553,17 @@
 </tbody>
 </table>
 <div class="admonition warning">
-<p class="admonition-title">Output CRS and temporal semantics</p>
-<p>Tessera reads and returns embeddings in the <strong>product-native tile CRS</strong> after mosaic + crop. This differs from the EPSG:3857 default used by provider-backed models. <code>TemporalSpec.range(...)</code> is a year selector here, <strong>not</strong> scene-level temporal filtering.</p>
+<p class="admonition-title">Temporal semantics</p>
+<p><code>TemporalSpec.range(...)</code> is a year selector here, <strong>not</strong> scene-level temporal filtering.</p>
 </div>
 <hr />
 <h2 id="preprocessing-retrieval-pipeline">Preprocessing / Retrieval Pipeline<a class="headerlink" href="#preprocessing-retrieval-pipeline" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
-    INPUT["SpatialSpec\n+ TemporalSpec"] --&gt; QUERY["ROI → EPSG:4326\n→ query tile blocks"]
-    QUERY --&gt; MOSAIC["Fetch tiles\n→ mosaic + crop"]
-    MOSAIC --&gt; POOL["pooled: vector"]
-    MOSAIC --&gt; GRID["grid: (D,H,W)\nin tile-native CRS"]</code></pre>
+    INPUT["SpatialSpec\n+ TemporalSpec"] --&gt; GRIDDEF["ROI → common grid\n(EPSG:3857 @ 10 m)"]
+    GRIDDEF --&gt; QUERY["grid footprint\n→ query tile blocks"]
+    QUERY --&gt; RESAMPLE["Fetch tiles → nearest-neighbour\nresample onto the grid\n(UTM seam → warning)"]
+    RESAMPLE --&gt; POOL["pooled: vector"]
+    RESAMPLE --&gt; GRID["grid: (D,H,W)\non the common grid"]</code></pre>
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
@@ -2571,14 +2572,14 @@
         STORE["GeoTessera tile blocks\n(local cache)"]
     end
     subgraph Retrieval
-        RES --&gt; BBOX["ROI → EPSG:4326 bbox"]
+        RES --&gt; BBOX["ROI → common grid\nfootprint"]
         STORE --&gt; TILES["Query + fetch\ntile blocks"]
         BBOX --&gt; TILES
-        TILES --&gt; MOS["Strict north-up\nmosaic + crop"]
+        TILES --&gt; MOS["Per-tile nearest\nresample onto grid"]
     end
     subgraph Output
         MOS --&gt; POOL["pooled: spatial\npooling over grid"]
-        MOS --&gt; GRID["grid: (D,H,W)\nin tile-native CRS"]
+        MOS --&gt; GRID["grid: (D,H,W)\non EPSG:3857"]
     end</code></pre>
 <hr />
 <h2 id="environment-variables-tuning-knobs">Environment Variables / Tuning Knobs<a class="headerlink" href="#environment-variables-tuning-knobs" title="Permanent link">&para;</a></h2>
@@ -2610,7 +2611,7 @@
 <hr />
 <h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
 <p><strong><code>pooled</code></strong>: spatial pooling over the cropped embedding grid.</p>
-<p><strong><code>grid</code></strong>: cropped <code>(D,H,W)</code> in product pixel space after mosaic + crop; metadata records <code>input_crs=EPSG:4326</code> and <code>output_crs</code> follows the tile-native CRS.</p>
+<p><strong><code>grid</code></strong>: <code>(D,H,W)</code> on the common grid. Metadata records <code>input_crs=EPSG:4326</code>, <code>output_crs=EPSG:3857</code>, <code>scale_m=10</code>, the north-up <code>transform</code> (affine, pixel → EPSG:3857), <code>grid_hw</code>, <code>tile_crs</code> (the UTM CRSs the tiles came from), <code>resampling=nearest</code>, and <code>coverage</code> (fraction of grid pixels a tile covered; the rest are zero vectors).</p>
 <hr />
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <h3 id="minimal-example">Minimal example<a class="headerlink" href="#minimal-example" title="Permanent link">&para;</a></h3>
@@ -2636,8 +2637,8 @@
 <hr />
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
-<li>Tile mosaic requires all tiles to be north-up with consistent CRS and resolution — tiles with rotation/shear are rejected.</li>
-<li>Output CRS is tile-native (not EPSG:3857) — do not compare grids with provider-backed models without reprojecting.</li>
+<li>Tiles are placed through their own CRS/affine, so mixed UTM zones and rotated tiles are all handled; tiles must share the embedding dimension.</li>
+<li>A ROI across a UTM zone boundary warns once per request: the two sides are resampled independently, so expect a seam along the boundary.</li>
 <li>"No tiles found" usually means the ROI/year combination has no coverage in the GeoTessera cache, not that the cache is broken.</li>
 </ul>
 

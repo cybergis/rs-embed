@@ -2437,11 +2437,16 @@
     <span class="n">bands</span><span class="p">:</span> <span class="nb">tuple</span><span class="p">[</span><span class="nb">str</span><span class="p">,</span> <span class="o">...</span><span class="p">]</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># one band name per channel; None = canonical order</span>
     <span class="n">temporal</span><span class="p">:</span> <span class="n">TemporalSpec</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>  <span class="c1"># when the imagery was acquired</span>
     <span class="n">scale_m</span><span class="p">:</span> <span class="nb">int</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>            <span class="c1"># optional nominal pixel size, provenance only</span>
+    <span class="n">crs</span><span class="p">:</span> <span class="nb">str</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>                <span class="c1"># CRS of the pixel grid, e.g. "EPSG:32616" (with transform)</span>
+    <span class="n">transform</span><span class="p">:</span> <span class="n">Affine</span> <span class="o">|</span> <span class="kc">None</span> <span class="o">=</span> <span class="kc">None</span><span class="p">,</span>       <span class="c1"># pixel -&gt; CRS affine (rasterio convention)</span>
 <span class="p">)</span>
+
+<span class="n">UserData</span><span class="o">.</span><span class="n">from_raster</span><span class="p">(</span><span class="n">path</span><span class="p">,</span> <span class="o">*</span><span class="p">,</span> <span class="n">collection</span><span class="p">,</span> <span class="n">bands</span><span class="o">=</span><span class="kc">None</span><span class="p">,</span> <span class="n">temporal</span><span class="o">=</span><span class="kc">None</span><span class="p">)</span>  <span class="c1"># reads pixels + crs + transform</span>
 </code></pre></div>
 <p><strong><code>collection</code> names the sensor product — and thereby the units.</strong> Short aliases resolve to full ids: <code>"s2"</code> / <code>"sentinel-2"</code> / <code>"s2-l2a"</code> → <code>COPERNICUS/S2_SR_HARMONIZED</code>; <code>"s1"</code> / <code>"sentinel-1"</code> → <code>COPERNICUS/S1_GRD</code>. Full collection ids pass through unchanged.</p>
 <p><strong><code>bands</code> may be omitted only for the canonical case.</strong> An S2 L2A declaration with exactly 12 channels defaults to the canonical order <code>B1, B2, B3, B4, B5, B6, B7, B8, B8A, B9, B11, B12</code>. Any other channel count, order, or collection must name its bands — band identity is never guessed from channel count.</p>
-<p><strong><code>spatial</code> and <code>temporal</code> travel with the data</strong>, because they describe <em>this imagery</em> (where it is, when it was acquired), not the API call. Both are optional, but supply them whenever you have them: models that condition on time read <code>temporal</code>, and models whose forward pass conditions on geometry (lat/lon or GSD encodings: <code>clay</code>, <code>prithvi</code>) <strong>refuse</strong> declarations without <code>spatial</code> — coordinates are never fabricated. Everything else accepts ungeoreferenced data and merely loses location provenance in the metadata.</p>
+<p><strong><code>spatial</code> and <code>temporal</code> travel with the data</strong>, because they describe <em>this imagery</em> (where it is, when it was acquired), not the API call. Both are optional, but supply them whenever you have them: models that condition on time read <code>temporal</code>, and models whose forward pass conditions on geometry (lat/lon or GSD encodings: <code>clay</code>, <code>prithvi</code>) <strong>refuse</strong> declarations without a location — coordinates are never fabricated. Everything else accepts ungeoreferenced data and merely loses location provenance in the metadata.</p>
+<p><strong><code>crs</code> + <code>transform</code> make the declaration georeferenced.</strong> Provider fetches hand every model pixels on one common grid — EPSG:3857 at the model's <code>scale_m</code> (see <a href="../spatial_roi/">Spatial ROI Handling</a>). A raster declared with its CRS and affine is put on that same grid before embedding (nearest-neighbour, so values stay exact), and its footprint stands in for <code>spatial</code> when none is given. <code>UserData.from_raster(...)</code> reads all three from a GeoTIFF with <code>rasterio</code> (an optional dependency), so the projection is detected rather than declared by hand. Without <code>crs</code>, the array is fed as-is and assumed to already be on the common grid. A UTM raster whose footprint spills into a neighbouring zone triggers a <code>UserWarning</code> (distortion grows past the zone edge). <code>meta["user_input"]["projection"]</code> records what happened (<code>crs</code>, <code>output_crs</code>, <code>grid_hw</code>, <code>transform</code>, ...).</p>
 <div class="admonition note">
 <p class="admonition-title">Multi-frame arrays</p>
 <p>A <code>[T,C,H,W]</code> array is only meaningful for time-series models (<code>galileo</code>, <code>prithvi</code>, <code>olmoearth</code>, <code>anysat</code>, <code>agrifm</code>); single-frame models reject it.</p>
@@ -2450,24 +2455,14 @@
 <h2 id="functions">Functions<a class="headerlink" href="#functions" title="Permanent link">&para;</a></h2>
 <h3 id="get_embedding_from_data">get_embedding_from_data<a class="headerlink" href="#get_embedding_from_data" title="Permanent link">&para;</a></h3>
 <p>A complete example, starting from a file on disk. Say you have a Sentinel-2 L2A patch saved as a GeoTIFF — 12 bands in the canonical order, raw surface-reflectance DN:</p>
-<div class="highlight"><pre><span></span><code><span class="kn">import</span><span class="w"> </span><span class="nn">rasterio</span>                        <span class="c1"># example only; not an rs-embed dependency</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">rasterio.warp</span><span class="w"> </span><span class="kn">import</span> <span class="n">transform_bounds</span>
+<div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">UserData</span><span class="p">,</span> <span class="n">get_embedding_from_data</span>
+<span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed.core.specs</span><span class="w"> </span><span class="kn">import</span> <span class="n">TemporalSpec</span>
 
-<span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">UserData</span><span class="p">,</span> <span class="n">get_embedding_from_data</span>
-<span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed.core.specs</span><span class="w"> </span><span class="kn">import</span> <span class="n">BBox</span><span class="p">,</span> <span class="n">TemporalSpec</span>
-
-<span class="c1"># 1. Load the pixels and the footprint from the file.</span>
-<span class="k">with</span> <span class="n">rasterio</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="s2">"maize_field_2022.tif"</span><span class="p">)</span> <span class="k">as</span> <span class="n">src</span><span class="p">:</span>
-    <span class="n">pixels</span> <span class="o">=</span> <span class="n">src</span><span class="o">.</span><span class="n">read</span><span class="p">()</span>                             <span class="c1"># numpy array, shape [12, H, W]</span>
-    <span class="n">left</span><span class="p">,</span> <span class="n">bottom</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">top</span> <span class="o">=</span> <span class="n">transform_bounds</span><span class="p">(</span>    <span class="c1"># footprint -&gt; lon/lat degrees</span>
-        <span class="n">src</span><span class="o">.</span><span class="n">crs</span><span class="p">,</span> <span class="s2">"EPSG:4326"</span><span class="p">,</span> <span class="o">*</span><span class="n">src</span><span class="o">.</span><span class="n">bounds</span>
-    <span class="p">)</span>
-
-<span class="c1"># 2. Register the imagery: the pixels plus everything that describes them.</span>
-<span class="n">data</span> <span class="o">=</span> <span class="n">UserData</span><span class="p">(</span>
-    <span class="n">data</span><span class="o">=</span><span class="n">pixels</span><span class="p">,</span>
+<span class="c1"># 1+2. Register the file: pixels, CRS and affine are read from it (needs rasterio),</span>
+<span class="c1">#      so the footprint is detected and the raster is aligned to the common grid.</span>
+<span class="n">data</span> <span class="o">=</span> <span class="n">UserData</span><span class="o">.</span><span class="n">from_raster</span><span class="p">(</span>
+    <span class="s2">"maize_field_2022.tif"</span><span class="p">,</span>
     <span class="n">collection</span><span class="o">=</span><span class="s2">"s2"</span><span class="p">,</span>
-    <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=</span><span class="n">left</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="n">bottom</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=</span><span class="n">right</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="n">top</span><span class="p">),</span>
     <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
 <span class="p">)</span>
 
@@ -2477,7 +2472,7 @@
 <span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">data</span><span class="o">.</span><span class="n">shape</span><span class="p">)</span>                <span class="c1"># pooled feature vector, shape [D]</span>
 <span class="nb">print</span><span class="p">(</span><span class="n">emb</span><span class="o">.</span><span class="n">meta</span><span class="p">[</span><span class="s2">"user_input"</span><span class="p">])</span>        <span class="c1"># which bands/channels were actually used</span>
 </code></pre></div>
-<p>If your data is already a numpy array (e.g. one sample from a training dataset), skip step 1 — anything <code>[C,H,W]</code> in raw provider units works as <code>data=</code>.</p>
+<p>If your data is already a numpy array (e.g. one sample from a training dataset), build <code>UserData(data=pixels, collection="s2", spatial=..., temporal=...)</code> directly — anything <code>[C,H,W]</code> in raw provider units works as <code>data=</code>; add <code>crs=</code> and <code>transform=</code> when you know them so the array is aligned to the common grid like a fetch would be.</p>
 <p>Returns one <code>Embedding</code>. <code>meta["user_input"]</code> records the declaration and the channel selection actually fed to the model (<code>declared_bands</code>, <code>bands_used</code>, <code>channel_indices</code>), and <code>meta["input_prep"]</code> records how the array was sized (see <a href="#input-size-handling">Input size handling</a>).</p>
 <h3 id="get_embeddings_batch_from_data">get_embeddings_batch_from_data<a class="headerlink" href="#get_embeddings_batch_from_data" title="Permanent link">&para;</a></h3>
 <p>Continuing the example above — a whole directory of patches into one feature matrix:</p>
@@ -2487,18 +2482,14 @@
 
 <span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">get_embeddings_batch_from_data</span>
 
-<span class="n">datas</span> <span class="o">=</span> <span class="p">[]</span>
-<span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">"patches/"</span><span class="p">)</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">"*.tif"</span><span class="p">)):</span>
-    <span class="k">with</span> <span class="n">rasterio</span><span class="o">.</span><span class="n">open</span><span class="p">(</span><span class="n">path</span><span class="p">)</span> <span class="k">as</span> <span class="n">src</span><span class="p">:</span>
-        <span class="n">left</span><span class="p">,</span> <span class="n">bottom</span><span class="p">,</span> <span class="n">right</span><span class="p">,</span> <span class="n">top</span> <span class="o">=</span> <span class="n">transform_bounds</span><span class="p">(</span><span class="n">src</span><span class="o">.</span><span class="n">crs</span><span class="p">,</span> <span class="s2">"EPSG:4326"</span><span class="p">,</span> <span class="o">*</span><span class="n">src</span><span class="o">.</span><span class="n">bounds</span><span class="p">)</span>
-        <span class="n">datas</span><span class="o">.</span><span class="n">append</span><span class="p">(</span>
-            <span class="n">UserData</span><span class="p">(</span>
-                <span class="n">data</span><span class="o">=</span><span class="n">src</span><span class="o">.</span><span class="n">read</span><span class="p">(),</span>
-                <span class="n">collection</span><span class="o">=</span><span class="s2">"s2"</span><span class="p">,</span>
-                <span class="n">spatial</span><span class="o">=</span><span class="n">BBox</span><span class="p">(</span><span class="n">minlon</span><span class="o">=</span><span class="n">left</span><span class="p">,</span> <span class="n">minlat</span><span class="o">=</span><span class="n">bottom</span><span class="p">,</span> <span class="n">maxlon</span><span class="o">=</span><span class="n">right</span><span class="p">,</span> <span class="n">maxlat</span><span class="o">=</span><span class="n">top</span><span class="p">),</span>
-                <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
-            <span class="p">)</span>
-        <span class="p">)</span>
+<span class="n">datas</span> <span class="o">=</span> <span class="p">[</span>
+    <span class="n">UserData</span><span class="o">.</span><span class="n">from_raster</span><span class="p">(</span>
+        <span class="nb">str</span><span class="p">(</span><span class="n">path</span><span class="p">),</span>
+        <span class="n">collection</span><span class="o">=</span><span class="s2">"s2"</span><span class="p">,</span>
+        <span class="n">temporal</span><span class="o">=</span><span class="n">TemporalSpec</span><span class="o">.</span><span class="n">range</span><span class="p">(</span><span class="s2">"2022-06-01"</span><span class="p">,</span> <span class="s2">"2022-09-01"</span><span class="p">),</span>
+    <span class="p">)</span>
+    <span class="k">for</span> <span class="n">path</span> <span class="ow">in</span> <span class="nb">sorted</span><span class="p">(</span><span class="n">Path</span><span class="p">(</span><span class="s2">"patches/"</span><span class="p">)</span><span class="o">.</span><span class="n">glob</span><span class="p">(</span><span class="s2">"*.tif"</span><span class="p">))</span>
+<span class="p">]</span>
 
 <span class="n">embs</span> <span class="o">=</span> <span class="n">get_embeddings_batch_from_data</span><span class="p">(</span><span class="s2">"galileo"</span><span class="p">,</span> <span class="n">datas</span><span class="p">,</span> <span class="n">batch_size</span><span class="o">=</span><span class="mi">16</span><span class="p">)</span>
 
@@ -2565,8 +2556,12 @@
 <td><code>SpecError</code> (declare bands explicitly)</td>
 </tr>
 <tr>
-<td>Missing <code>spatial</code> on a georef-conditioned model (<code>clay</code>, <code>prithvi</code>)</td>
+<td>Missing <code>spatial</code> (and no <code>crs</code>/<code>transform</code>) on a georef-conditioned model (<code>clay</code>, <code>prithvi</code>)</td>
 <td><code>ModelError</code> (coordinates are never fabricated)</td>
+</tr>
+<tr>
+<td><code>crs</code> without <code>transform</code> (or vice versa), or a non-affine <code>transform</code></td>
+<td><code>SpecError</code></td>
 </tr>
 <tr>
 <td>S2 values look normalized (max ≤ 1.5)</td>
