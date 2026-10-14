@@ -47,8 +47,8 @@ flowchart LR
     FETCH --> GRID["grid: (D,H,W)\nwith band-name coords"]
 ```
 
-!!! note "Large requests tile automatically"
-    When a `BBox`'s estimated pixel footprint exceeds the GEE `sampleRectangle` limit, the region is split into a sub-`BBox` grid, fetched tile-by-tile, and concatenated — so there is no hard cap on request size, and the result matches a single large fetch. `gse` manages this tiling itself; passing `input_prep="tile"` only emits a `UserWarning` clarifying that.
+!!! note "Large requests are split automatically"
+    When a `BBox` covers more pixels than GEE's `sampleRectangle` limit (262,144), the GEE provider splits it into smaller requests along pixel boundaries of the EPSG:3857 grid and concatenates the results. There is no hard cap on request size, and the result is pixel-for-pixel identical to a single large fetch. `input_prep` does not apply to `gse`; passing `input_prep="tile"` only emits a `UserWarning` saying so. The old `RS_EMBED_GSE_MAX_PIXELS` variable no longer has any effect.
 
 ---
 

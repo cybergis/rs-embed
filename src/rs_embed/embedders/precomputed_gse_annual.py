@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 import os
 import warnings
 from concurrent.futures import ThreadPoolExecutor, as_completed
@@ -12,7 +11,7 @@ import xarray as xr
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.registry import register
-from ..core.specs import BBox, OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
+from ..core.specs import OutputSpec, SensorSpec, SpatialSpec, TemporalSpec
 from ..core.types import EmbedderCapabilities
 from ..providers.fetch import (
     fetch_collection_patch_all_bands_chw as _fetch_collection_patch_all_bands_chw,
@@ -20,39 +19,23 @@ from ..providers.fetch import (
 from ..providers.resolution import (
     is_provider_backend,
 )
-from ..tools.tiling import _tile_subspatial, _tile_yx_starts
 from .base import EmbedderBase
 from .meta import build_meta
 
-_GSE_DEFAULT_MAX_PIXELS = 512 * 512
+_LEGACY_MAX_PIXELS_ENV = "RS_EMBED_GSE_MAX_PIXELS"
 
 
-def _gse_pixel_threshold() -> int:
-    raw_value = os.environ.get("RS_EMBED_GSE_MAX_PIXELS", str(_GSE_DEFAULT_MAX_PIXELS))
-    try:
-        threshold = int(raw_value)
-    except (TypeError, ValueError) as exc:
-        raise ModelError("Invalid RS_EMBED_GSE_MAX_PIXELS value: must be an integer.") from exc
-    if threshold < 1:
-        raise ModelError(f"RS_EMBED_GSE_MAX_PIXELS must be >= 1, got {threshold}.")
-    return threshold
-
-
-def _estimate_pixel_dims(spatial: SpatialSpec, scale_m: int) -> tuple[int, int]:
-    if not isinstance(spatial, BBox):
-        return (1, 1)
-    lat_c = (spatial.minlat + spatial.maxlat) / 2.0
-    w_px = max(
-        1,
-        int(
-            abs(spatial.maxlon - spatial.minlon)
-            * math.cos(math.radians(lat_c))
-            * 111320.0
-            / scale_m
-        ),
+def _warn_if_legacy_max_pixels_env() -> None:
+    if os.environ.get(_LEGACY_MAX_PIXELS_ENV) is None:
+        return
+    warnings.warn(
+        f"{_LEGACY_MAX_PIXELS_ENV} is no longer used and will be removed: requests above "
+        "GEE's sampleRectangle limit are split by the provider along pixel boundaries, "
+        "so the result matches a single request "
+        "(https://github.com/cybergis/rs-embed/issues/134).",
+        FutureWarning,
+        stacklevel=3,
     )
-    h_px = max(1, int(abs(spatial.maxlat - spatial.minlat) * 111320.0 / scale_m))
-    return h_px, w_px
 
 
 @register("gse")
@@ -65,8 +48,9 @@ class GSEAnnualEmbedder(EmbedderBase):
     DEFAULT_BATCH_WORKERS = 4
     _allow_auto_backend = True
     _is_precomputed = True
-    # GSE tiles/aggregates precomputed embeddings itself based on request
-    # size; API-side input_prep is ignored (a non-resize request warns).
+    # GSE returns the precomputed grid as-is (the provider splits requests
+    # above GEE's pixel limit); API-side input_prep is ignored (a non-resize
+    # request warns).
     _manages_own_input_prep = True
 
     # Explicit pipeline-routing capabilities; the contract test asserts these
@@ -129,27 +113,19 @@ class GSEAnnualEmbedder(EmbedderBase):
 
         scale_m = int(getattr(sensor, "scale_m", 10) if sensor is not None else 10)
 
+        _warn_if_legacy_max_pixels_env()
         provider = self._get_provider(backend)
-        h_px, w_px = _estimate_pixel_dims(spatial, scale_m)
-        if h_px * w_px > _gse_pixel_threshold():
-            emb_chw, band_names = self._fetch_tiled(
-                provider,
-                spatial=spatial,
-                temporal=temporal,
-                scale_m=scale_m,
-                h_px=h_px,
-                w_px=w_px,
-            )
-        else:
-            emb_chw, band_names = _fetch_collection_patch_all_bands_chw(
-                provider,
-                spatial=spatial,
-                temporal=temporal,
-                collection="GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL",
-                scale_m=scale_m,
-                fill_value=-9999.0,
-                composite="mosaic",
-            )
+        # Requests above GEE's sampleRectangle pixel limit are split and
+        # re-joined inside the provider, on the common grid's pixel lattice.
+        emb_chw, band_names = _fetch_collection_patch_all_bands_chw(
+            provider,
+            spatial=spatial,
+            temporal=temporal,
+            collection="GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL",
+            scale_m=scale_m,
+            fill_value=-9999.0,
+            composite="mosaic",
+        )
         emb_chw = np.asarray(emb_chw, dtype=np.float32)
         emb_chw[emb_chw == -9999] = np.nan
         nodata_fraction = float(np.isnan(emb_chw[0]).mean()) if emb_chw.size else 0.0
@@ -197,43 +173,6 @@ class GSEAnnualEmbedder(EmbedderBase):
             return Embedding(data=da, meta=meta)
 
         raise ModelError(f"Unknown output mode: {output.mode}")
-
-    def _fetch_tiled(
-        self,
-        provider: Any,
-        *,
-        spatial: SpatialSpec,
-        temporal: TemporalSpec | None,
-        scale_m: int,
-        h_px: int,
-        w_px: int,
-    ) -> tuple[np.ndarray, Any]:
-        tile_size = int(math.isqrt(_gse_pixel_threshold()))
-        ys, xs = _tile_yx_starts(h=h_px, w=w_px, tile_size=tile_size, stride=tile_size)
-        band_names: Any = None
-        rows: list[np.ndarray] = []
-        for y0 in ys:
-            row: list[np.ndarray] = []
-            for x0 in xs:
-                y1 = min(h_px, y0 + tile_size)
-                x1 = min(w_px, x0 + tile_size)
-                sub = _tile_subspatial(
-                    spatial, full_h=h_px, full_w=w_px, y0=y0, y1=y1, x0=x0, x1=x1
-                )
-                tile_chw, bn = _fetch_collection_patch_all_bands_chw(
-                    provider,
-                    spatial=sub,
-                    temporal=temporal,
-                    collection="GOOGLE/SATELLITE_EMBEDDING/V1/ANNUAL",
-                    scale_m=scale_m,
-                    fill_value=-9999.0,
-                    composite="mosaic",
-                )
-                if band_names is None:
-                    band_names = bn
-                row.append(np.asarray(tile_chw, dtype=np.float32))
-            rows.append(np.concatenate(row, axis=-1))
-        return np.concatenate(rows, axis=-2), band_names
 
     def get_embeddings_batch(
         self,

@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -10,14 +9,23 @@ from ..core.errors import ModelError, ProviderError, SpecError
 from ..core.specs import BBox, SensorSpec, SpatialSpec, TemporalSpec
 from ..providers.base import ProviderBase
 from ..tools.normalization import normalize_input_chw
-from ..tools.projection import COMMON_CRS, lonlat_to_web_mercator, web_mercator_to_lonlat
+from ..tools.projection import (
+    COMMON_CRS,
+    common_grid,
+    web_mercator_bounds,
+    web_mercator_to_lonlat,
+)
 from ..tools.temporal import split_date_range as _split_date_range_core
 
 _GEE_SAMPLE_RECT_TOO_MANY_PIXELS = "Too many pixels in sample"
 _GEE_SAMPLE_RECT_OP = "sampleRectangle"
 _GEE_SAMPLE_RECT_MUST_BE = "must be <="
 _MAX_GEE_BBOX_SPLIT_DEPTH = 12
-_GEE_BBOX_STITCH_LEN_TOLERANCE_PX = 4
+# GEE's ceiling for one sampleRectangle call; larger BBoxes are split up front.
+_GEE_SAMPLE_RECT_MAX_PIXELS = 262144
+# How far (in pixels) a split child's cut edge sits inside its own side of the
+# lattice line: far above lon/lat round-trip error, far below half a pixel.
+_SPLIT_EDGE_NUDGE_PX = 1e-6
 
 
 def _iter_exception_messages(exc: BaseException) -> tuple[str, ...]:
@@ -87,19 +95,33 @@ def _validated_mid(candidate: float, lo: float, hi: float, coord_name: str) -> f
     return mid
 
 
-def _bbox_span_pixels_estimate(bbox: BBox, *, scale_m: int) -> tuple[int, int]:
-    x0, y0 = lonlat_to_web_mercator(bbox.minlon, bbox.minlat)
-    x1, y1 = lonlat_to_web_mercator(bbox.maxlon, bbox.maxlat)
-    s = max(1.0, float(scale_m))
-    w = max(1, int(math.ceil(abs(x1 - x0) / s)))
-    h = max(1, int(math.ceil(abs(y1 - y0) / s)))
-    return (h, w)
+def _lattice_split_edge(lo: float, hi: float, *, scale_m: float, nudge: float) -> float:
+    """The EPSG:3857 pixel-lattice line nearest the middle of ``(lo, hi)``.
+
+    Falls back to the plain middle when no lattice line lies inside the span
+    (a sub-pixel span, which never trips the pixel limit in practice).
+    """
+    mid = 0.5 * (lo + hi)
+    edge = round(mid / scale_m) * scale_m
+    return edge if (lo + nudge) < edge < (hi - nudge) else mid
 
 
-def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BBox, BBox, str]:
-    x0, y0 = lonlat_to_web_mercator(bbox.minlon, bbox.minlat)
-    x1, y1 = lonlat_to_web_mercator(bbox.maxlon, bbox.maxlat)
-    dx, dy = abs(x1 - x0), abs(y1 - y0)
+def _split_bbox_for_recursive_fetch(
+    bbox: BBox, *, scale_m: int, prefer_axis: str
+) -> tuple[BBox, BBox, str]:
+    """Split *bbox* in two along a pixel edge of the common EPSG:3857 grid.
+
+    The cut sits on the ``k * scale_m`` lattice every GEE request samples on,
+    and each child's cut edge is pulled ``_SPLIT_EDGE_NUDGE_PX`` of a pixel
+    inside its own side. Every pixel therefore lies wholly within exactly one
+    child, whether GEE assigns boundary pixels by center, by overlap, or by
+    rounding the region outward, so the children concatenate to the
+    single-request grid with no overlap or gap. Outer edges are untouched.
+    """
+    minx, miny, maxx, maxy = web_mercator_bounds(bbox)
+    dx, dy = maxx - minx, maxy - miny
+    s = float(scale_m)
+    nudge = s * _SPLIT_EDGE_NUDGE_PX
 
     axis = str(prefer_axis).lower()
     if axis not in {"x", "y"}:
@@ -113,40 +135,43 @@ def _split_bbox_for_recursive_fetch(bbox: BBox, *, prefer_axis: str) -> tuple[BB
             "Cannot split degenerate BBox while handling GEE sampleRectangle pixel-limit error."
         )
 
-    xm, ym = 0.5 * (x0 + x1), 0.5 * (y0 + y1)
+    lo_lon, lo_lat = float(bbox.minlon), float(bbox.minlat)
+    hi_lon, hi_lat = float(bbox.maxlon), float(bbox.maxlat)
     if axis == "x":
-        lon_raw, _ = web_mercator_to_lonlat(xm, ym)
-        lon_mid = _validated_mid(lon_raw, float(bbox.minlon), float(bbox.maxlon), "longitude")
+        edge = _lattice_split_edge(minx, maxx, scale_m=s, nudge=nudge)
+        west_max, _ = web_mercator_to_lonlat(edge - nudge, miny)
+        east_min, _ = web_mercator_to_lonlat(edge + nudge, miny)
         west = BBox(
-            minlon=float(bbox.minlon),
-            minlat=float(bbox.minlat),
-            maxlon=lon_mid,
-            maxlat=float(bbox.maxlat),
+            minlon=lo_lon,
+            minlat=lo_lat,
+            maxlon=_validated_mid(west_max, lo_lon, hi_lon, "longitude"),
+            maxlat=hi_lat,
             crs=bbox.crs,
         )
         east = BBox(
-            minlon=lon_mid,
-            minlat=float(bbox.minlat),
-            maxlon=float(bbox.maxlon),
-            maxlat=float(bbox.maxlat),
+            minlon=_validated_mid(east_min, lo_lon, hi_lon, "longitude"),
+            minlat=lo_lat,
+            maxlon=hi_lon,
+            maxlat=hi_lat,
             crs=bbox.crs,
         )
         return (west, east, "x")
 
-    _, lat_raw = web_mercator_to_lonlat(xm, ym)
-    lat_mid = _validated_mid(lat_raw, float(bbox.minlat), float(bbox.maxlat), "latitude")
+    edge = _lattice_split_edge(miny, maxy, scale_m=s, nudge=nudge)
+    _, north_min = web_mercator_to_lonlat(minx, edge + nudge)
+    _, south_max = web_mercator_to_lonlat(minx, edge - nudge)
     north = BBox(
-        minlon=float(bbox.minlon),
-        minlat=lat_mid,
-        maxlon=float(bbox.maxlon),
-        maxlat=float(bbox.maxlat),
+        minlon=lo_lon,
+        minlat=_validated_mid(north_min, lo_lat, hi_lat, "latitude"),
+        maxlon=hi_lon,
+        maxlat=hi_lat,
         crs=bbox.crs,
     )
     south = BBox(
-        minlon=float(bbox.minlon),
-        minlat=float(bbox.minlat),
-        maxlon=float(bbox.maxlon),
-        maxlat=lat_mid,
+        minlon=lo_lon,
+        minlat=lo_lat,
+        maxlon=hi_lon,
+        maxlat=_validated_mid(south_max, lo_lat, hi_lat, "latitude"),
         crs=bbox.crs,
     )
     return (north, south, "y")
@@ -450,79 +475,76 @@ def _flip_sample_tile_y(arr: np.ndarray) -> np.ndarray:
     return np.flip(a, axis=a.ndim - 2).astype(np.float32, copy=False)
 
 
+def _exceeds_sample_pixel_limit(bbox: BBox, *, scale_m: int) -> bool:
+    try:
+        h, w = common_grid(bbox, scale_m=float(scale_m)).shape
+    except SpecError:
+        # Invalid bounds: let fetch_fn report them through the provider's own error path.
+        return False
+    return h * w > _GEE_SAMPLE_RECT_MAX_PIXELS
+
+
 def _bbox_recursive_fallback(
     *,
     spatial: SpatialSpec,
     scale_m: int,
-    fill_value: float,
     fetch_fn: Any,
     stitch_fn: Any,
     _depth: int = 0,
 ) -> Any:
-    """Generic recursive BBox-splitting fallback for GEE pixel-limit errors.
+    """Generic recursive BBox splitting for GEE's sampleRectangle pixel limit.
 
-    Calls fetch_fn(spatial); on a pixel-limit error splits the bbox, recurses,
-    then calls stitch_fn(result_a, result_b, bbox, axis, scale_m, fill_value).
+    A BBox whose common-grid footprint already exceeds the limit is split up
+    front; anything else is fetched with fetch_fn(spatial) and split only if
+    GEE still reports a pixel-limit error. Splits follow pixel-lattice lines
+    (see :func:`_split_bbox_for_recursive_fetch`), so
+    stitch_fn(result_a, result_b, axis) only has to concatenate.
     """
-    try:
-        return fetch_fn(spatial)
-    except Exception as e:
-        if not (_looks_like_gee_sample_too_many_pixels(e) and _looks_like_bbox_spatial(spatial)):
-            raise
-        if _depth >= _MAX_GEE_BBOX_SPLIT_DEPTH:
-            raise ModelError(
-                "GEE sampleRectangle pixel-limit fallback exceeded max recursive BBox splits "
-                f"({_MAX_GEE_BBOX_SPLIT_DEPTH})."
-            ) from e
-        spatial_bbox = _coerce_bbox_like(spatial)
-        h_est, w_est = _bbox_span_pixels_estimate(spatial_bbox, scale_m=scale_m)
-        prefer_axis = "x" if w_est >= h_est else "y"
-        a_sp, b_sp, axis = _split_bbox_for_recursive_fetch(spatial_bbox, prefer_axis=prefer_axis)
-        kw: dict[str, Any] = dict(
-            scale_m=scale_m,
-            fill_value=fill_value,
-            fetch_fn=fetch_fn,
-            stitch_fn=stitch_fn,
-            _depth=_depth + 1,
-        )
-        return stitch_fn(
-            _bbox_recursive_fallback(spatial=a_sp, **kw),
-            _bbox_recursive_fallback(spatial=b_sp, **kw),
-            spatial_bbox,
-            axis,
-            scale_m,
-            fill_value,
-        )
+    cause: BaseException | None = None
+    is_bbox = _looks_like_bbox_spatial(spatial)
+    if not (is_bbox and _exceeds_sample_pixel_limit(_coerce_bbox_like(spatial), scale_m=scale_m)):
+        try:
+            return fetch_fn(spatial)
+        except Exception as e:
+            if not (is_bbox and _looks_like_gee_sample_too_many_pixels(e)):
+                raise
+            cause = e
+    if _depth >= _MAX_GEE_BBOX_SPLIT_DEPTH:
+        raise ModelError(
+            "GEE sampleRectangle pixel-limit fallback exceeded max recursive BBox splits "
+            f"({_MAX_GEE_BBOX_SPLIT_DEPTH})."
+        ) from cause
+    spatial_bbox = _coerce_bbox_like(spatial)
+    grid_h, grid_w = common_grid(spatial_bbox, scale_m=float(scale_m)).shape
+    a_sp, b_sp, axis = _split_bbox_for_recursive_fetch(
+        spatial_bbox, scale_m=scale_m, prefer_axis="x" if grid_w >= grid_h else "y"
+    )
+    kw: dict[str, Any] = dict(
+        scale_m=scale_m,
+        fetch_fn=fetch_fn,
+        stitch_fn=stitch_fn,
+        _depth=_depth + 1,
+    )
+    return stitch_fn(
+        _bbox_recursive_fallback(spatial=a_sp, **kw),
+        _bbox_recursive_fallback(spatial=b_sp, **kw),
+        axis,
+    )
 
 
 def _fetch_with_bbox_fallback(
     *,
     spatial: SpatialSpec,
     scale_m: int,
-    fill_value: float,
     fetch_fn: Any,
     split_depth: int = 0,
 ) -> np.ndarray:
     """BBox-splitting fallback for fetch functions returning np.ndarray."""
-
-    def _stitch(
-        a: Any, b: Any, bbox: Any, axis: str, scale_m: int, fill_value: float
-    ) -> np.ndarray:
-        return _stitch_bbox_split_arrays(
-            arr_a=np.asarray(a, dtype=np.float32),
-            arr_b=np.asarray(b, dtype=np.float32),
-            parent_spatial=bbox,
-            axis=axis,
-            scale_m=scale_m,
-            fill_value=fill_value,
-        )
-
     return _bbox_recursive_fallback(
         spatial=spatial,
         scale_m=scale_m,
-        fill_value=fill_value,
         fetch_fn=lambda sp: np.asarray(fetch_fn(sp), dtype=np.float32),
-        stitch_fn=_stitch,
+        stitch_fn=_stitch_bbox_split_arrays,
         _depth=split_depth,
     )
 
@@ -555,25 +577,19 @@ def _fetch_provider_array_chw_with_bbox_fallback(
     return _fetch_with_bbox_fallback(
         spatial=spatial,
         scale_m=int(scale_m),
-        fill_value=float(fill_value),
         fetch_fn=_do,
     )
 
 
-def _stitch_bbox_split_arrays(
-    *,
-    arr_a: np.ndarray,
-    arr_b: np.ndarray,
-    parent_spatial: Any,
-    axis: str,
-    scale_m: int,
-    fill_value: float,
-) -> np.ndarray:
-    """Stitch two bbox-split arrays along a spatial axis.
+def _stitch_bbox_split_arrays(arr_a: Any, arr_b: Any, axis: str) -> np.ndarray:
+    """Join two bbox-split arrays along a spatial axis.
 
     The recursive splitter returns children in spatial order:
     - ``axis="x"``: west, east
     - ``axis="y"``: north, south
+
+    Children are cut on pixel-lattice lines, so they share no pixels and leave
+    no gap: a plain concatenation reproduces the single-request grid.
     """
     arr_a = np.asarray(arr_a, dtype=np.float32)
     arr_b = np.asarray(arr_b, dtype=np.float32)
@@ -586,8 +602,9 @@ def _stitch_bbox_split_arrays(
             f"Leading shape mismatch while stitching bbox tiles: {arr_a.shape} vs {arr_b.shape}"
         )
 
-    spatial_bbox = _coerce_bbox_like(parent_spatial)
     axis = str(axis).lower()
+    if axis not in {"x", "y"}:
+        raise ModelError(f"Invalid bbox fallback stitch axis={axis!r}")
     split_axis = arr_a.ndim - 1 if axis == "x" else arr_a.ndim - 2
     nonsplit_axis = arr_a.ndim - 2 if axis == "x" else arr_a.ndim - 1
 
@@ -595,49 +612,6 @@ def _stitch_bbox_split_arrays(
         raise ModelError(
             f"Non-split spatial dim mismatch while stitching bbox tiles: {arr_a.shape} vs {arr_b.shape}"
         )
-
-    if axis not in {"x", "y"}:
-        raise ModelError(f"Invalid bbox fallback stitch axis={axis!r}")
-
-    target_h, target_w = _bbox_span_pixels_estimate(spatial_bbox, scale_m=int(scale_m))
-    target_len = int(target_w if axis == "x" else target_h)
-    len_a = int(arr_a.shape[split_axis])
-    len_b = int(arr_b.shape[split_axis])
-    combined_len = int(len_a + len_b)
-    delta = int(combined_len - target_len)
-
-    if delta > 0:
-        if delta > _GEE_BBOX_STITCH_LEN_TOLERANCE_PX:
-            raise ModelError(
-                "Excessive overlap while stitching bbox tiles: "
-                f"combined={combined_len}, target~={target_len}, delta={delta}"
-            )
-        trim_a = int(delta // 2)
-        trim_b = int(delta - trim_a)
-        if trim_a > 0:
-            slicer = [slice(None)] * arr_a.ndim
-            slicer[split_axis] = slice(0, max(0, len_a - trim_a))
-            arr_a = arr_a[tuple(slicer)]
-            len_a = int(arr_a.shape[split_axis])
-        if trim_b > 0:
-            slicer = [slice(None)] * arr_b.ndim
-            slicer[split_axis] = slice(min(trim_b, len_b), None)
-            arr_b = arr_b[tuple(slicer)]
-            len_b = int(arr_b.shape[split_axis])
-    elif delta < 0:
-        gap = int(-delta)
-        if gap > _GEE_BBOX_STITCH_LEN_TOLERANCE_PX:
-            raise ModelError(
-                "Excessive gap while stitching bbox tiles: "
-                f"combined={combined_len}, target~={target_len}, gap={gap}"
-            )
-        pad_shape = list(arr_a.shape)
-        pad_shape[split_axis] = gap
-        gap_arr = np.full(tuple(pad_shape), float(fill_value), dtype=np.float32)
-        return np.concatenate([arr_a, gap_arr, arr_b], axis=split_axis).astype(
-            np.float32, copy=False
-        )
-
     return np.concatenate([arr_a, arr_b], axis=split_axis).astype(np.float32, copy=False)
 
 
