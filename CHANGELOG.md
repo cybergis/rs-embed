@@ -8,13 +8,20 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.3.1] — 2026-10-14
+
+Bug-fix release for large Google Earth Engine requests ([#134](https://github.com/cybergis/rs-embed/issues/134)). `gse` could return duplicated mosaics for ROIs above about 262,144 pixels, and every GEE-backed model could gain a fill-value row or column, or lose a real one, where an oversized request was split. If you exported `gse` embeddings, or grid outputs from on-the-fly models, for `BBox` ROIs above that size, re-export them.
+
 ### Fixed
 
-- **`gse` no longer returns a duplicated 2×2 mosaic for large ROIs** ([#134](https://github.com/cybergis/rs-embed/issues/134)). `gse` used to tile large requests itself: it sized them with an equirectangular estimate that undercounts EPSG:3857 pixels by about 1/cos(lat), cut overlapping tiles, and concatenated them as-is. Any ROI over the threshold could come back duplicated, not just high-latitude ones: at high latitude each quadrant held a near-complete copy of the ROI at roughly twice the true size, mid-latitude ROIs were also duplicated (e.g. about 2.2× at 35–38°N, 500 m), and some requests raised a `ValueError` when tile widths differed. Pooled vectors were biased the same way. `gse` now issues a single provider request and leaves oversized requests to the provider (next entry). `RS_EMBED_GSE_MAX_PIXELS` no longer has any effect and emits a `FutureWarning` when set. Re-export `gse` embeddings for any `BBox` above about 262,144 pixels at the requested `scale_m`.
-- **GEE requests above the `sampleRectangle` pixel limit now stitch exactly** ([#134](https://github.com/cybergis/rs-embed/issues/134)). The provider's pixel-limit fallback used to cut requests at the Mercator midpoint and then trim or pad each seam toward an estimated length, which could insert a fill-value row/column or drop a real one at a cut. Cuts now fall on pixel edges of the common EPSG:3857 grid, so the pieces concatenate to exactly the single-request grid. Oversized `BBox` requests are also split up front instead of after a failed request (Alaska at 1000 m used to make 127 failing calls first). `tests/test_gee_bbox_split_live.py` (opt-in, `RS_EMBED_LIVE_GEE=1`) checks the GEE behavior this relies on.
-  - **Who was affected:** every GEE-backed model, i.e. `gse` and all on-the-fly models (every fetch path — single-image, Sentinel-1, multi-frame — shares this fallback), for a `BBox` ROI above 262,144 pixels at `scale_m`. At 10 m that is roughly 5 km × 5 km or larger. Whether a given request was hit depended on where the cut landed: in a simulation of Sentinel-2 at 10 m, a 6 × 6 km ROI gained a fill-value column and an 8 × 8 km ROI gained a fill-value row and column, while a 10 × 10 km ROI came out intact. For on-the-fly models the inserted fill-value row/column appears as a black line in the model input, and the image beyond a seam is shifted by one pixel. That perturbs grid embeddings near the seam, misplaces them by one pixel on the far side, and biases pooled vectors slightly.
-  - **Not affected:** `PointBuffer` ROIs (an oversized one raises an error instead of being split), `BBox` ROIs under the limit, and models that do not fetch through GEE (`tessera`, `copernicus_embed`, and user-provided data via `get_embedding_from_data`). The model-side `input_prep="tile"` tiling is unaffected: it tiles the already-fetched array and gives each pixel in an overlap to exactly one tile.
-  - **What to do:** re-export grid outputs for on-the-fly models whose `BBox` ROIs exceeded the limit.
+- **`gse` no longer returns duplicated mosaics for large ROIs.** `gse` used to tile oversized requests itself: it sized them with an estimate that undercounts EPSG:3857 pixels by about 1/cos(lat), cut overlapping tiles, and joined them with a plain concatenation. Results came back duplicated at any latitude: a near-complete copy of the ROI in each quadrant at high latitude, about 2.2× at 35–38°N and 500 m. Pooled vectors were biased the same way, and some requests raised a `ValueError`. `gse` now makes a single provider request and leaves the splitting to the provider.
+- **GEE requests above the `sampleRectangle` pixel limit now stitch exactly.** The provider's pixel-limit fallback cut requests at the Mercator midpoint and then trimmed or padded each seam toward an estimated length, which could insert a fill-value row/column or drop a real one. Cuts now fall on pixel edges of the common EPSG:3857 grid, so a split request reproduces the single-request grid exactly. Oversized `BBox` requests are also split up front instead of after a failed request.
+  - **Who was affected:** `gse` and all on-the-fly models (single-image, Sentinel-1 and multi-frame fetches share this path), for a `BBox` ROI above 262,144 pixels at `scale_m`, roughly 5 km × 5 km at 10 m. Not every such request was hit; it depended on where the cut landed. For on-the-fly models a seam showed up as a black line in the model input, with the image beyond it shifted by one pixel. That perturbed grid embeddings near the seam and slightly biased pooled vectors.
+  - **Not affected:** `PointBuffer` ROIs (an oversized one raises an error instead), `BBox` ROIs under the limit, `tessera`, `copernicus_embed`, user-provided data (`get_embedding_from_data`), and model-side `input_prep="tile"` tiling.
+
+### Deprecated
+
+- **`RS_EMBED_GSE_MAX_PIXELS`** no longer has any effect and emits a `FutureWarning` when set; it will be removed in a future release. It only served as a workaround for the `gse` duplication above.
 
 ## [0.3.0] — 2026-09-27
 
@@ -164,7 +171,8 @@ This release rolls up upstream-alignment work and correctness fixes that may cha
 - Support for on-the-fly model adapters including `satmae`, `satmaepp`, `satmaepp_s2_10b`, `prithvi`, `scalemae`, `remoteclip`, `dofa`, `satvision`, `anysat`, `galileo`, `wildsat`, `fomo`, `terramind`, `terrafm`, `thor`, and `agrifm`.
 - Documentation site covering quickstart, model behavior, API contracts, and extension guidance.
 
-[Unreleased]: https://github.com/cybergis/rs-embed/compare/v0.3.0...HEAD
+[Unreleased]: https://github.com/cybergis/rs-embed/compare/v0.3.1...HEAD
+[0.3.1]: https://github.com/cybergis/rs-embed/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/cybergis/rs-embed/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cybergis/rs-embed/compare/v0.2.0...v0.2.1
 [0.2.0]: https://github.com/cybergis/rs-embed/compare/v0.1.3...v0.2.0
