@@ -2563,8 +2563,8 @@
     FETCH --&gt; POOL["pooled: spatial pooling"]
     FETCH --&gt; GRID["grid: (D,H,W)\nwith band-name coords"]</code></pre>
 <div class="admonition note">
-<p class="admonition-title">Large requests tile automatically</p>
-<p>When a <code>BBox</code>'s estimated pixel footprint exceeds the GEE <code>sampleRectangle</code> limit, the region is split into a sub-<code>BBox</code> grid, fetched tile-by-tile, and concatenated — so there is no hard cap on request size, and the result matches a single large fetch. <code>gse</code> manages this tiling itself; passing <code>input_prep="tile"</code> only emits a <code>UserWarning</code> clarifying that.</p>
+<p class="admonition-title">Large requests are split automatically</p>
+<p>When a <code>BBox</code> covers more pixels than GEE's <code>sampleRectangle</code> limit (262,144), the GEE provider splits it into smaller requests along pixel boundaries of the EPSG:3857 grid and concatenates the results. There is no hard cap on request size, and the result is pixel-for-pixel identical to a single large fetch. <code>input_prep</code> does not apply to <code>gse</code>; passing <code>input_prep="tile"</code> only emits a <code>UserWarning</code> saying so. The old <code>RS_EMBED_GSE_MAX_PIXELS</code> variable no longer has any effect.</p>
 </div>
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
