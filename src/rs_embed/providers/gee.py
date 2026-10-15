@@ -247,9 +247,7 @@ class GEEProvider(ProviderBase):
                 relax_iw_on_empty=relax_iw_on_empty,
             )
 
-        def _stitch(
-            res_a: Any, res_b: Any, bbox: Any, axis: str, scale_m: int, fill_value: float
-        ) -> tuple[np.ndarray, dict[str, Any]]:
+        def _stitch(res_a: Any, res_b: Any, axis: str) -> tuple[np.ndarray, dict[str, Any]]:
             arr_a, meta_a = res_a
             arr_b, meta_b = res_b
             # Merge tile metas: if either half relaxed the IW filter, the
@@ -261,19 +259,11 @@ class GEEProvider(ProviderBase):
             meta["s1_iw_relaxed_on_empty"] = bool(
                 meta_a.get("s1_iw_relaxed_on_empty", False)
             ) or bool(meta_b.get("s1_iw_relaxed_on_empty", False))
-            return _stitch_bbox_split_arrays(
-                arr_a=arr_a,
-                arr_b=arr_b,
-                parent_spatial=bbox,
-                axis=axis,
-                scale_m=scale_m,
-                fill_value=fill_value,
-            ), meta
+            return _stitch_bbox_split_arrays(arr_a, arr_b, axis), meta
 
         return _bbox_recursive_fallback(
             spatial=spatial,
             scale_m=scale_m,
-            fill_value=fill_value,
             fetch_fn=_fetch,
             stitch_fn=_stitch,
         )
@@ -414,7 +404,6 @@ class GEEProvider(ProviderBase):
         return _fetch_with_bbox_fallback(
             spatial=spatial,
             scale_m=int(scale_m),
-            fill_value=float(fill_value),
             fetch_fn=_do,
         )
 
@@ -550,26 +539,16 @@ class GEEProvider(ProviderBase):
                 composite=composite,
             )
 
-        def _stitch(
-            res_a: Any, res_b: Any, bbox: Any, axis: str, scale_m: int, fill_value: float
-        ) -> tuple[np.ndarray, tuple[str, ...]]:
+        def _stitch(res_a: Any, res_b: Any, axis: str) -> tuple[np.ndarray, tuple[str, ...]]:
             arr_a, names_a = res_a
             arr_b, names_b = res_b
             if tuple(names_a) != tuple(names_b):
                 raise ModelError("Band names mismatch while stitching all-band bbox tiles.")
-            return _stitch_bbox_split_arrays(
-                arr_a=arr_a,
-                arr_b=arr_b,
-                parent_spatial=bbox,
-                axis=axis,
-                scale_m=scale_m,
-                fill_value=fill_value,
-            ), tuple(names_a)
+            return _stitch_bbox_split_arrays(arr_a, arr_b, axis), tuple(names_a)
 
         return _bbox_recursive_fallback(
             spatial=spatial,
             scale_m=scale_m,
-            fill_value=fill_value,
             fetch_fn=_fetch,
             stitch_fn=_stitch,
         )
