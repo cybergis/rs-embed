@@ -190,6 +190,14 @@ def _thor_hf_id_from_model_key(model_key: str) -> str | None:
     return None
 
 
+def _thor_image_size_from_env(default_image_size: int) -> int:
+    raw = os.environ.get("RS_EMBED_THOR_IMG", str(default_image_size))
+    try:
+        return int(raw)
+    except ValueError as e:
+        raise ModelError(f"RS_EMBED_THOR_IMG must be an integer, got {raw!r}.") from e
+
+
 def _resolve_thor_runtime_config(
     *,
     model_config: dict[str, Any] | None,
@@ -205,7 +213,7 @@ def _resolve_thor_runtime_config(
             or default_model_key
         )
 
-    image_size = int(os.environ.get("RS_EMBED_THOR_IMG", str(default_image_size)))
+    image_size = _thor_image_size_from_env(default_image_size)
 
     ckpt_path = os.environ.get("RS_EMBED_THOR_CKPT")
     ckpt_path = ckpt_path or None
@@ -405,8 +413,17 @@ def _thor_snap_side_to_valid(
 _THOR_FIXED_RESIZE_HINTS = {
     "fixed_mode": "set RS_EMBED_THOR_RESIZE_MODE=native_snap to keep native geometry",
     "rectangular_above_tolerance": "use a square ROI, or raise RS_EMBED_THOR_SHAPE_TOL_PX",
-    "native_side_limit": "use input_prep='tile', or raise RS_EMBED_THOR_MAX_NATIVE_SIDE",
-    "tile_preserve_stitch_geometry": "set input_prep tile_size equal to RS_EMBED_THOR_IMG",
+    "native_side_limit": (
+        "use input_prep='tile', or raise RS_EMBED_THOR_MAX_NATIVE_SIDE together with "
+        "RS_EMBED_THOR_MAX_NATIVE_TOKENS"
+    ),
+    "native_token_limit": (
+        "raise RS_EMBED_THOR_MAX_NATIVE_TOKENS, use a larger RS_EMBED_THOR_PATCH_SIZE, "
+        "or use input_prep='tile'"
+    ),
+    "tile_preserve_stitch_geometry": (
+        "set input_prep tile_size equal to RS_EMBED_THOR_IMG and keep pad_edges=True"
+    ),
 }
 
 
@@ -424,9 +441,10 @@ def _thor_fixed_resize_meta(
     THOR takes each band's GSD from its fixed channel config and is told the
     ground cover ``scale_m * image_size``, so stretching an HxW input to
     ``image_size`` leaves the model assuming ``scale_m`` pixels while the real
-    spacing is ``scale_m * H / image_size`` (and likewise for W). THOR cannot
-    represent the real spacing (GSDs are integer config values), so the
-    mismatch is reported instead of corrected.
+    spacing is ``scale_m * H / image_size`` (and likewise for W). The GSDs are
+    integer config values, so a resampled input can never be described
+    exactly; only the unresampled native path keeps the geometry, and every
+    fallback here is reported instead.
     """
     h, w = int(raw_hw[0]), int(raw_hw[1])
     gsd_hw = (scale_m * h / image_size, scale_m * w / image_size)
@@ -556,20 +574,36 @@ def _prepare_thor_raw_chw(
     meta["snapped_side"] = int(snapped_side)
     meta["estimated_patch_tokens"] = est_tokens
 
-    if int(snapped_side) > int(max_native_side):
-        meta.update(_thor_fixed_resize_meta(**fixed_kwargs, reason="native_side_limit"))
-        return x, meta
-
-    if est_tokens is None or int(est_tokens) > int(max_native_tokens):
-        # No resize can lower the token count honestly: tokens are fixed by
-        # ground cover / (patch_size * GSD), so resampling to image_size only
-        # misstates the cover (and adds tokens whenever snapped_side < image_size).
+    if est_tokens is None:
         raise ModelError(
-            f"THOR native input {snapped_side}x{snapped_side} at {scale_m} m with "
-            f"patch_size={patch_size} needs {est_tokens} patch tokens, above "
-            f"RS_EMBED_THOR_MAX_NATIVE_TOKENS={max_native_tokens}. Raise "
-            "RS_EMBED_THOR_MAX_NATIVE_TOKENS, use a larger RS_EMBED_THOR_PATCH_SIZE, "
-            "or use a smaller ROI."
+            f"THOR snapped side {snapped_side} does not fit the patch grid "
+            f"(side unit {side_unit}); this is a bug in the THOR side snapping."
+        )
+
+    limit_reason = None
+    if int(snapped_side) > int(max_native_side):
+        limit_reason = "native_side_limit"
+    elif int(est_tokens) > int(max_native_tokens):
+        limit_reason = "native_token_limit"
+    if limit_reason is not None:
+        # Tokens are fixed by ground cover / (patch_size * GSD) and grow with the
+        # side, so resizing to image_size only cuts them when image_size is the
+        # smaller side; that resize changes the pixel spacing, which the helper
+        # reports. Otherwise the fallback would only add tokens and misstate the
+        # geometry, so the input stays native.
+        if int(image_size) < int(snapped_side):
+            meta["shape_adjust_applied"] = "none"
+            meta.pop("square_side", None)
+            meta.update(_thor_fixed_resize_meta(**fixed_kwargs, reason=limit_reason))
+            return x, meta
+        meta["native_limit_exceeded"] = limit_reason
+        warnings.warn(
+            f"THOR native input {snapped_side}x{snapped_side} needs {est_tokens} patch tokens "
+            f"and exceeds {limit_reason} (max_native_side={max_native_side}, "
+            f"max_native_tokens={max_native_tokens}), but resizing to "
+            f"RS_EMBED_THOR_IMG={image_size} would not reduce it; running natively.",
+            UserWarning,
+            stacklevel=2,
         )
 
     x_native = _thor_center_crop_or_pad_to_side_chw(
@@ -1021,6 +1055,11 @@ class THORBaseEmbedder(EmbedderBase):
         return cfg
 
     def describe(self) -> dict[str, Any]:
+        try:
+            image_size = _thor_image_size_from_env(self.DEFAULT_IMAGE_SIZE)
+        except ModelError:
+            # describe() must not fail; get_embedding raises the config error.
+            image_size = self.DEFAULT_IMAGE_SIZE
         return {
             "type": "on_the_fly",
             "backend": ["provider"],
@@ -1054,7 +1093,9 @@ class THORBaseEmbedder(EmbedderBase):
                 "modality": "s2",
                 "model_key": self.DEFAULT_MODEL_KEY,
                 "variant": _thor_variant_from_model_key(self.DEFAULT_MODEL_KEY),
-                "image_size": self.DEFAULT_IMAGE_SIZE,
+                # Follows RS_EMBED_THOR_IMG: the tiler's default tile size comes from
+                # here, and tiles of any other size would be resampled by THOR.
+                "image_size": image_size,
                 "patch_size": 8,
                 "resize_mode": "native_snap",
                 "shape_adjust": "crop",

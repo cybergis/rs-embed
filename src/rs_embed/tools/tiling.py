@@ -48,7 +48,7 @@ from .shape import geo_roi_from_meta, roi_is_full, roi_token_box
 # Bump whenever tiling/stitching/aggregation behavior changes in a way that
 # alters produced embeddings. Stamped into every embedding's meta["input_prep"]
 # so downstream consumers can detect a contract change and pin reproducibility.
-INPUT_PREP_VERSION = 1
+INPUT_PREP_VERSION = 2
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +274,18 @@ def _resolve_tile_params(
     )
 
 
+def _snapped_hw(
+    h: int, w: int, *, tile_size: int, stride: int, snap_frac: float
+) -> tuple[int, int]:
+    """Target ``(h, w)`` of :func:`_maybe_snap_input`, without resizing anything."""
+    if not (stride == tile_size and snap_frac > 0.0):
+        return int(h), int(w)
+    return (
+        _snap_axis_to_tile(h, tile_size=tile_size, snap_frac=snap_frac),
+        _snap_axis_to_tile(w, tile_size=tile_size, snap_frac=snap_frac),
+    )
+
+
 def _maybe_snap_input(
     x: np.ndarray,
     *,
@@ -290,10 +302,7 @@ def _maybe_snap_input(
     see :func:`_snap_axis_to_tile`.
     """
     h, w = _input_hw(x)
-    if not (stride == tile_size and snap_frac > 0.0):
-        return x, None
-    snap_h = _snap_axis_to_tile(h, tile_size=tile_size, snap_frac=snap_frac)
-    snap_w = _snap_axis_to_tile(w, tile_size=tile_size, snap_frac=snap_frac)
+    snap_h, snap_w = _snapped_hw(h, w, tile_size=tile_size, stride=stride, snap_frac=snap_frac)
     if (snap_h, snap_w) == (h, w):
         return x, None
     x_snapped = _resize_spatial_hw(x, out_h=snap_h, out_w=snap_w)
@@ -301,6 +310,30 @@ def _maybe_snap_input(
     if _input_hw(x_snapped) == (h, w):
         return x, None
     return x_snapped, (int(h), int(w))
+
+
+def _plan_tiling(
+    x: np.ndarray,
+    *,
+    tile_size: int,
+    stride: int,
+    snap_frac: float,
+) -> tuple[np.ndarray, tuple[int, int] | None] | None:
+    """Snap ``x`` for tiling, or return ``None`` when it should be dispatched whole.
+
+    Returns ``(x_to_tile, snapped_from_hw)`` (see :func:`_maybe_snap_input`) when
+    the input still needs more than one tile after snapping. An input that fits
+    one tile gains nothing from tiling: padding it to ``tile_size`` feeds the
+    model fabricated cells that no stitch crops away, and the snap only exists
+    to avoid a near-duplicate shifted edge tile. Single-point and batch tilers
+    both dispatch such an input whole and unsnapped, as a plain call with the
+    caller's ``model_config`` (``resolved_mode="resize"``).
+    """
+    h, w = _input_hw(x)
+    h, w = _snapped_hw(h, w, tile_size=tile_size, stride=stride, snap_frac=snap_frac)
+    if _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride) <= 1:
+        return None
+    return _maybe_snap_input(x, tile_size=tile_size, stride=stride, snap_frac=snap_frac)
 
 
 def _augment_model_config_for_tiled_dispatch(
@@ -820,15 +853,10 @@ def _call_embedder_get_embedding_tiled(
     fetch_meta: dict[str, Any] | None = None,
 ) -> Embedding:
     x = np.asarray(input_chw, dtype=np.float32)
-    params = _resolve_tile_params(embedder, input_prep, model_config)
-    tile_size = params.tile_size
-    model_fixed_size = params.model_fixed_size
-    effective_pad_edges = params.effective_pad_edges
-    if tile_size <= 0:
-        # No tile size could be determined (no explicit tile_size and the model
-        # exposes no describe().defaults.image_size). Tiling is the package
-        # default, so degrade gracefully to a plain (resize) call rather than
-        # hard-failing; the dispatch backfills resolved_mode="resize" in meta.
+
+    def _plain_call() -> Embedding:
+        # The original input with the caller's model_config, exactly as in
+        # resize mode; the dispatch backfills resolved_mode="resize" in meta.
         return _call_embedder_get_embedding(
             embedder=embedder,
             spatial=spatial,
@@ -841,17 +869,26 @@ def _call_embedder_get_embedding_tiled(
             input_chw=x,
             fetch_meta=fetch_meta,
         )
+
+    params = _resolve_tile_params(embedder, input_prep, model_config)
+    tile_size = params.tile_size
+    model_fixed_size = params.model_fixed_size
+    effective_pad_edges = params.effective_pad_edges
+    if tile_size <= 0:
+        # No tile size could be determined (no explicit tile_size and the model
+        # exposes no describe().defaults.image_size). Tiling is the package
+        # default, so degrade gracefully to a plain call rather than hard-failing.
+        return _plain_call()
     stride = params.stride
     if stride <= 0:
         raise ModelError(f"Invalid tile_stride={stride}")
-    # Snap-to-tile: when an axis only slightly exceeds a tile multiple, downscale
-    # that overhang away so the axis tiles cleanly instead of spawning a
-    # near-fully-overlapping shifted edge tile (which duplicates cells in the
-    # stitched grid). Only applies under the stride==tile_size overlap-shift model.
-    x, snapped_input_hw = _maybe_snap_input(
-        x, tile_size=tile_size, stride=stride, snap_frac=input_prep.tile_snap_frac
-    )
-    h, w = _input_hw(x)
+    plan = _plan_tiling(x, tile_size=tile_size, stride=stride, snap_frac=input_prep.tile_snap_frac)
+    if plan is None:
+        # Fits one tile: the whole ROI is one plain input; the embedder squares
+        # + crops it back to the ROI via fetch_meta['roi_window_geo'].
+        return _plain_call()
+    x_tiles, snapped_input_hw = plan
+    h, w = _input_hw(x_tiles)
     tiled_model_config = _augment_model_config_for_tiled_dispatch(
         embedder,
         model_config,
@@ -866,24 +903,8 @@ def _call_embedder_get_embedding_tiled(
         # wide/flat or tall/thin ROI keeps detail on its long side instead of
         # being squashed by a whole-ROI resize.
         small_dim_forces_resize = (h <= tile_size or w <= tile_size) and not model_fixed_size
-        if (
-            output.mode != "grid"
-            or num_tiles <= 1
-            or num_tiles > input_prep.max_tiles
-            or small_dim_forces_resize
-        ):
-            return _call_embedder_get_embedding(
-                embedder=embedder,
-                spatial=spatial,
-                temporal=temporal,
-                sensor=sensor,
-                model_config=model_config,
-                output=output,
-                backend=backend,
-                device=device,
-                input_chw=x,
-                fetch_meta=fetch_meta,
-            )
+        if output.mode != "grid" or num_tiles > input_prep.max_tiles or small_dim_forces_resize:
+            return _plain_call()
     elif input_prep.mode == "tile":
         if num_tiles > input_prep.max_tiles_hard:
             raise ModelError(
@@ -906,29 +927,13 @@ def _call_embedder_get_embedding_tiled(
 
     fill_value = float(sensor.fill_value) if sensor is not None else 0.0
     tiles, tile_meta, tile_spatials = _tile_one_image(
-        x,
+        x_tiles,
         spatial=spatial,
         tile_size=tile_size,
         stride=stride,
         pad_edges=effective_pad_edges,
         fill_value=fill_value,
     )
-
-    if len(tiles) <= 1:
-        # Single tile = the whole ROI is one input; the embedder squares + crops it
-        # back to the ROI via fetch_meta['roi_window_geo'] (set by the prefetch).
-        return _call_embedder_get_embedding(
-            embedder=embedder,
-            spatial=spatial,
-            temporal=temporal,
-            sensor=sensor,
-            model_config=tiled_model_config if input_prep.mode == "tile" else model_config,
-            output=output,
-            backend=backend,
-            device=device,
-            input_chw=x,
-            fetch_meta=fetch_meta,
-        )
 
     can_batch_tiles = _supports_prefetched_batch_api(embedder) and (
         tiled_model_config is None

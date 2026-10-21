@@ -444,6 +444,124 @@ def test_run_batch_tiled_single_tile_keeps_roi_meta():
     assert emb.seen_fetch_metas == [{"roi_window_geo": _ROI}]
 
 
+class _ConfigRecordingTiledRoiEmbedder(_FakeTiledRoiEmbedder):
+    """Records (input shape, model_config) per call; adapts its config for tiles."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls: list = []
+
+    def tiled_dispatch_model_config(self, model_config, *, tile_size):
+        return {**(model_config or {}), "_tiled": int(tile_size)}
+
+    def get_embedding(self, *, input_chw, output, model_config=None, fetch_meta=None, **kwargs):
+        return self.get_embeddings_batch_from_inputs(
+            spatials=[None],
+            input_chws=[input_chw],
+            output=output,
+            model_config=model_config,
+            fetch_metas=[fetch_meta],
+        )[0]
+
+    def get_embeddings_batch_from_inputs(self, *, input_chws, model_config=None, **kwargs):
+        self.calls.extend((tuple(np.asarray(x).shape), model_config) for x in input_chws)
+        return super().get_embeddings_batch_from_inputs(input_chws=input_chws, **kwargs)
+
+
+def _run_batch_tiled_grid(emb, images, *, fetch_metas, model_config=None):
+    from rs_embed.pipelines.inference import InferenceEngine
+
+    cfg = ExportConfig(input_prep=InputPrepSpec.tile(tile_size=4))
+    engine = InferenceEngine(device="cpu", output=OutputSpec.grid(), config=cfg)
+    return engine._run_batch_tiled(
+        idxs=list(range(len(images))),
+        spatials=[BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0)] * len(images),
+        temporal=None,
+        sensor=None,
+        embedder=emb,
+        lock=threading.RLock(),
+        backend="gee",
+        get_input_fn=lambda i: images[i],
+        batch_size=16,
+        continue_on_error=False,
+        on_done=lambda i: None,
+        use_lock=False,
+        model_name="fake_tiled_roi",
+        model_config=model_config,
+        get_fetch_meta_fn=lambda i: dict(fetch_metas[i]),
+    )
+
+
+def test_run_batch_tiled_dispatches_sub_tile_inputs_whole():
+    """A sub-tile input runs unpadded with the plain config; no pad cells in the output."""
+    emb = _ConfigRecordingTiledRoiEmbedder()
+    small = np.arange(9, dtype=np.float32).reshape(1, 3, 3)
+    large = np.arange(64, dtype=np.float32).reshape(1, 8, 8)
+
+    out, succeeded = _run_batch_tiled_grid(
+        emb,
+        [small, large],
+        fetch_metas=[{"roi_window_geo": _ROI}, {}],
+        model_config={"k": 1},
+    )
+
+    assert succeeded
+    # The sub-tile input used to be edge-padded to 4x4, run with the tile config,
+    # and returned with the pad row/column still in the grid.
+    assert ((1, 3, 3), {"k": 1}) in emb.calls
+    assert emb.calls.count(((1, 4, 4), {"k": 1, "_tiled": 4})) == 4
+    np.testing.assert_array_equal(out[0].embedding, small)
+    assert out[0].meta["input_prep"]["resolved_mode"] == "resize"
+    np.testing.assert_array_equal(out[1].embedding, large)
+    assert out[1].meta["input_prep"]["resolved_mode"] == "tile"
+    # The whole-input item keeps its ROI window for the embedder-side crop.
+    assert {"roi_window_geo": _ROI} in emb.seen_fetch_metas
+
+
+def test_run_batch_tiled_whole_input_failure_still_batches_tiled_points():
+    class _FailsOnSubTile(_ConfigRecordingTiledRoiEmbedder):
+        def get_embeddings_batch_from_inputs(self, *, input_chws, model_config=None, **kwargs):
+            if any(np.asarray(x).shape[-1] == 3 for x in input_chws):
+                raise RuntimeError("boom")
+            return super().get_embeddings_batch_from_inputs(
+                input_chws=input_chws, model_config=model_config, **kwargs
+            )
+
+    small = np.arange(9, dtype=np.float32).reshape(1, 3, 3)
+    large = np.arange(64, dtype=np.float32).reshape(1, 8, 8)
+    with pytest.warns(UserWarning, match=r"tiled \(whole-input\) batch inference"):
+        out, succeeded = _run_batch_tiled_grid(
+            _FailsOnSubTile(), [small, large], fetch_metas=[{}, {}]
+        )
+
+    # The failed whole-input point is left to the per-point fallback ...
+    assert succeeded is False
+    assert 0 not in out
+    # ... while the multi-tile point still ran batched and stitched.
+    np.testing.assert_array_equal(out[1].embedding, large)
+
+
+def test_sub_tile_input_matches_between_single_point_and_batch_tiled():
+    from rs_embed.tools.tiling import _call_embedder_get_embedding_with_input_prep
+
+    small = np.arange(9, dtype=np.float32).reshape(1, 3, 3)
+    out, _ = _run_batch_tiled_grid(_ConfigRecordingTiledRoiEmbedder(), [small], fetch_metas=[{}])
+    single = _call_embedder_get_embedding_with_input_prep(
+        embedder=_ConfigRecordingTiledRoiEmbedder(),
+        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=small,
+        input_prep=InputPrepSpec.tile(tile_size=4),
+    )
+
+    np.testing.assert_array_equal(out[0].embedding, np.asarray(single.data))
+    assert out[0].meta["input_prep"] == single.meta["input_prep"]
+
+
 def test_per_item_pipelined_chunks_keep_square_fetch(tmp_path, monkeypatch):
     """Chunks beyond the first must square-fetch exactly like chunk 1.
 

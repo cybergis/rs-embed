@@ -268,3 +268,21 @@ def test_init_state_drops_arrays_of_removed_models(tmp_path):
     assert "embeddings__gone" not in arrays
     assert "embeddings__m1" in arrays
     assert pending == ["m2"]
+
+
+def test_request_fingerprint_changes_with_input_prep_version(monkeypatch):
+    """Resume must not keep outputs produced under an older input_prep version."""
+    from types import SimpleNamespace
+
+    from rs_embed.tools import manifest
+
+    config = SimpleNamespace(format="npz", save_inputs=False, save_embeddings=True, input_prep=None)
+
+    def _fp():
+        return manifest.export_request_fingerprint(
+            models=[], temporal=None, output=OutputSpec.pooled(), config=config
+        )
+
+    before = _fp()
+    monkeypatch.setattr(manifest, "INPUT_PREP_VERSION", manifest.INPUT_PREP_VERSION + 1)
+    assert _fp() != before

@@ -760,7 +760,12 @@ def test_snap_disabled_keeps_native_overlap_tiling():
 
 
 def test_snap_collapses_small_overhang_to_single_tile():
-    """A 1px overhang on both axes snaps away, collapsing 4 overlap tiles into one."""
+    """A 1px overhang that snaps to one tile is dispatched whole, unsnapped.
+
+    The snap only exists to avoid near-duplicate shifted edge tiles; once the
+    input fits one tile there is nothing to tile, so resampling it would only
+    change its pixel spacing.
+    """
     pytest.importorskip("torch")
     emb = _FakeTileEmbedder()
     out = _call_embedder_get_embedding_with_input_prep(
@@ -777,11 +782,88 @@ def test_snap_collapses_small_overhang_to_single_tile():
         input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.25),
     )
     arr = np.asarray(out.data, dtype=np.float32)
-    # Single 4x4 tile fed after snapping 5x5 -> 4x4; no overlap-stitch inflation.
-    assert arr.shape[-2:] == (4, 4)
-    # Single-tile path reports a plain resize, and only one model call ran.
-    assert emb.single_calls + emb.batch_calls >= 1
+    # One plain call with the original 5x5 input; no snap, no overlap tiles.
+    assert arr.shape[-2:] == (5, 5)
+    assert emb.single_calls == 1
+    assert emb.batch_calls == 0
     assert out.meta["input_prep"]["resolved_mode"] == "resize"
+
+
+class _ConfigRecordingTileEmbedder(_FakeTileEmbedder):
+    """Records the model_config and input shape of every call; adapts its config for tiles."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def tiled_dispatch_model_config(self, model_config, *, tile_size):
+        return {**(model_config or {}), "_tiled": int(tile_size)}
+
+    def get_embedding(self, *, input_chw=None, model_config=None, **kwargs):
+        self.calls.append((tuple(np.asarray(input_chw).shape), model_config))
+        return super().get_embedding(input_chw=input_chw, **kwargs)
+
+    def get_embeddings_batch_from_inputs(
+        self, *, spatials, input_chws, model_config=None, **kwargs
+    ):
+        self.batch_calls += 1
+        return [
+            self.get_embedding(input_chw=x, model_config=model_config, spatial=sp, **kwargs)
+            for sp, x in zip(spatials, input_chws, strict=True)
+        ]
+
+
+def test_sub_tile_input_is_dispatched_whole_with_plain_model_config():
+    """An input that fits one tile is a plain call: no tile config, no padding."""
+    emb = _ConfigRecordingTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 3, 3), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4),
+        model_config={"k": 1},
+    )
+
+    # The tile config used to leak into this call (forcing e.g. THOR into a
+    # fixed resize of the whole sub-tile ROI to the tile size).
+    assert emb.calls == [((1, 3, 3), {"k": 1})]
+    assert np.asarray(out.data).shape[-2:] == (3, 3)
+    assert out.meta["input_prep"]["resolved_mode"] == "resize"
+
+
+def test_multi_tile_input_still_gets_tiled_model_config():
+    emb = _ConfigRecordingTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 8, 8), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4),
+        model_config={"k": 1},
+    )
+
+    assert emb.calls == [((1, 4, 4), {"k": 1, "_tiled": 4})] * 4
+    assert out.meta["input_prep"]["resolved_mode"] == "tile"
+
+
+def test_plan_tiling_skips_the_snap_resize_for_whole_inputs(monkeypatch):
+    from rs_embed.tools import tiling
+
+    def _no_resize(*args, **kwargs):
+        raise AssertionError("snap resize should not run for a whole-input dispatch")
+
+    monkeypatch.setattr(tiling, "_resize_spatial_hw", _no_resize)
+    x = np.ones((1, 5, 5), dtype=np.float32)
+    assert tiling._plan_tiling(x, tile_size=4, stride=4, snap_frac=0.25) is None
 
 
 def test_snap_reduces_tiles_and_records_meta_on_multitile_path():
