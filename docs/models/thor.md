@@ -104,7 +104,7 @@ flowchart LR
 | `RS_EMBED_THOR_SHAPE_ADJUST`      | `crop`         | How `native_snap` resolves small non-square inputs: `crop` or `pad`                             |
 | `RS_EMBED_THOR_SHAPE_TOL_PX`      | `8`            | Maximum `abs(H-W)` tolerated before `native_snap` falls back to fixed resize                    |
 | `RS_EMBED_THOR_MAX_NATIVE_SIDE`   | `384`          | Largest snapped native side allowed before falling back to fixed resize                         |
-| `RS_EMBED_THOR_MAX_NATIVE_TOKENS` | `3000`         | Largest estimated THOR patch-token count allowed for `native_snap`                              |
+| `RS_EMBED_THOR_MAX_NATIVE_TOKENS` | `3000`         | Largest estimated THOR patch-token count allowed for `native_snap`; above it THOR raises        |
 | `RS_EMBED_THOR_FETCH_WORKERS`     | `8`            | Provider prefetch workers for batch APIs                                                        |
 
 === "Patch Size"
@@ -124,6 +124,11 @@ flowchart LR
     `native_snap` is intentionally bounded. It only stays on the native path when the input is close to square, the snapped side does not exceed `RS_EMBED_THOR_MAX_NATIVE_SIDE`, and the estimated THOR patch-token count does not exceed `RS_EMBED_THOR_MAX_NATIVE_TOKENS`.
 
     For the current default S2 10m/20m path with `patch_size=8`, `side=384` corresponds to about `2880` patch tokens, which is why `384` is the default ceiling.
+
+    The two limits behave differently. Past `RS_EMBED_THOR_MAX_NATIVE_SIDE`, THOR falls back to a fixed resize. Past `RS_EMBED_THOR_MAX_NATIVE_TOKENS`, it raises a `ModelError`: the token count is set by ground cover / (`patch_size` × GSD), so resizing could only lower it by misstating the ground cover. With `patch_size=4`, for example, any input above about `196` px (≈2 km at 10 m) exceeds `3000` tokens. Raise the token limit, use a larger `patch_size`, or use a smaller ROI.
+
+!!! warning "Fixed resize changes the pixel spacing THOR assumes"
+    THOR reads each band's GSD (10 m / 20 m) from its channel config and is told a ground cover of `scale_m × RS_EMBED_THOR_IMG`. Any fixed resize of an input whose side is not `RS_EMBED_THOR_IMG` therefore runs the model at the wrong scale. For example, a 256 px (2560 m) input stretched to 288 px is treated as 2880 m at 10 m, but the real spacing is 8.89 m, and patch-size embeddings and output grid cells are off by the same factor. THOR emits a `UserWarning` when this happens and records the real spacing in `meta["effective_gsd_m"]` (per axis, `(y, x)`) and `meta["gsd_mismatch"]`. `native_snap` only crops or pads, so its spacing stays exact.
 
 ## Model-specific Settings
 
@@ -242,7 +247,7 @@ emb = get_embedding(
     export RS_EMBED_THOR_MAX_NATIVE_TOKENS=3000
     ```
 
-    This lets THOR keep a snapped native side for near-square inputs such as `289x288` or `300x300`, but still falls back to fixed resize for larger or more expensive inputs.
+    This lets THOR keep a snapped native side for near-square inputs such as `289x288` or `300x300`. Larger inputs still fall back to fixed resize, and inputs over the token limit raise an error.
 
 === "Patch Size"
 
@@ -251,7 +256,7 @@ emb = get_embedding(
     export RS_EMBED_THOR_PATCH_SIZE=4
     ```
 
-    Use a smaller `patch_size` when spatial detail matters more than runtime or memory.
+    Use a smaller `patch_size` when spatial detail matters more than runtime or memory. At `patch_size=4`, a 256 px input needs 5120 tokens, so also raise `RS_EMBED_THOR_MAX_NATIVE_TOKENS` (for example to `6000`), or THOR will raise an error.
 
     ```bash
     export RS_EMBED_THOR_IMG=288
@@ -315,6 +320,7 @@ emb = get_embedding(
 ## Reference
 
 - Changing `patch_size` without updating `image_size` to divide cleanly is the most common misconfiguration.
-- `native_snap` only applies in `input_prep="resize"` mode — tiled inference always uses fixed per-tile resize.
+- `native_snap` only applies in `input_prep="resize"` mode — tiled inference always uses fixed per-tile resize. Keep the tile size equal to `RS_EMBED_THOR_IMG`, or each tile is resampled and THOR runs at the wrong pixel spacing.
+- A fixed resize that changes the pixel spacing emits a `UserWarning`; check `meta["gsd_mismatch"]` and `meta["effective_gsd_m"]` on exported embeddings.
 - `group_merge=concat` and `group_merge=mean` produce different channel dimensions; do not compare them directly.
 - Grid construction can fail if the token layout is not square and group parsing cannot resolve it — fall back to `pooled` to isolate the issue.

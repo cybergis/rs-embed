@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import math
 import os
+import warnings
 from functools import lru_cache
 from typing import Any
 
@@ -401,6 +402,62 @@ def _thor_snap_side_to_valid(
     return int(upper)
 
 
+_THOR_FIXED_RESIZE_HINTS = {
+    "fixed_mode": "set RS_EMBED_THOR_RESIZE_MODE=native_snap to keep native geometry",
+    "rectangular_above_tolerance": "use a square ROI, or raise RS_EMBED_THOR_SHAPE_TOL_PX",
+    "native_side_limit": "use input_prep='tile', or raise RS_EMBED_THOR_MAX_NATIVE_SIDE",
+    "tile_preserve_stitch_geometry": "set input_prep tile_size equal to RS_EMBED_THOR_IMG",
+}
+
+
+def _thor_fixed_resize_meta(
+    *,
+    raw_hw: tuple[int, int],
+    scale_m: int,
+    patch_size: int,
+    band_gsds: tuple[int, ...],
+    image_size: int,
+    reason: str,
+) -> dict[str, Any]:
+    """Meta for the fixed-resize path; warns when resampling changes pixel spacing.
+
+    THOR takes each band's GSD from its fixed channel config and is told the
+    ground cover ``scale_m * image_size``, so stretching an HxW input to
+    ``image_size`` leaves the model assuming ``scale_m`` pixels while the real
+    spacing is ``scale_m * H / image_size`` (and likewise for W). THOR cannot
+    represent the real spacing (GSDs are integer config values), so the
+    mismatch is reported instead of corrected.
+    """
+    h, w = int(raw_hw[0]), int(raw_hw[1])
+    gsd_hw = (scale_m * h / image_size, scale_m * w / image_size)
+    gsd_mismatch = (h, w) != (int(image_size), int(image_size))
+    if gsd_mismatch:
+        warnings.warn(
+            f"THOR resampled a {h}x{w} input to {image_size}x{image_size} ({reason}): the model "
+            f"assumes {scale_m} m pixels covering {scale_m * image_size} m, but the real pixel "
+            f"spacing is {gsd_hw[0]:.2f}x{gsd_hw[1]:.2f} m over {scale_m * h}x{scale_m * w} m. "
+            "Patch-size embeddings and output grid cells are off by the same factor; "
+            f"{_THOR_FIXED_RESIZE_HINTS.get(reason, 'use a native-size input')}.",
+            UserWarning,
+            stacklevel=3,
+        )
+    return {
+        "preprocess_strategy": "fixed_resize",
+        "preprocess_reason": str(reason),
+        "final_hw": (int(image_size), int(image_size)),
+        "effective_image_size": int(image_size),
+        "ground_cover_m": int(scale_m) * int(image_size),
+        "estimated_patch_tokens": _thor_estimated_patch_tokens(
+            side=int(image_size),
+            scale_m=int(scale_m),
+            patch_size=int(patch_size),
+            band_gsds=tuple(band_gsds),
+        ),
+        "effective_gsd_m": (round(gsd_hw[0], 4), round(gsd_hw[1], 4)),
+        "gsd_mismatch": bool(gsd_mismatch),
+    }
+
+
 def _prepare_thor_raw_chw(
     raw_chw: np.ndarray,
     *,
@@ -454,18 +511,16 @@ def _prepare_thor_raw_chw(
             force_fixed = True
             fallback_reason = "rectangular_above_tolerance"
 
+    fixed_kwargs = {
+        "raw_hw": (h, w),
+        "scale_m": int(scale_m),
+        "patch_size": int(patch_size),
+        "band_gsds": tuple(band_gsds),
+        "image_size": int(image_size),
+    }
+
     if force_fixed:
-        meta["preprocess_strategy"] = "fixed_resize"
-        meta["preprocess_reason"] = str(fallback_reason)
-        meta["final_hw"] = (int(image_size), int(image_size))
-        meta["effective_image_size"] = int(image_size)
-        meta["ground_cover_m"] = int(scale_m) * int(image_size)
-        meta["estimated_patch_tokens"] = _thor_estimated_patch_tokens(
-            side=int(image_size),
-            scale_m=int(scale_m),
-            patch_size=int(patch_size),
-            band_gsds=tuple(band_gsds),
-        )
+        meta.update(_thor_fixed_resize_meta(**fixed_kwargs, reason=str(fallback_reason)))
         return x, meta
 
     if shape_adjust == "crop":
@@ -502,32 +557,20 @@ def _prepare_thor_raw_chw(
     meta["estimated_patch_tokens"] = est_tokens
 
     if int(snapped_side) > int(max_native_side):
-        meta["preprocess_strategy"] = "fixed_resize"
-        meta["preprocess_reason"] = "native_side_limit"
-        meta["final_hw"] = (int(image_size), int(image_size))
-        meta["effective_image_size"] = int(image_size)
-        meta["ground_cover_m"] = int(scale_m) * int(image_size)
-        meta["estimated_patch_tokens"] = _thor_estimated_patch_tokens(
-            side=int(image_size),
-            scale_m=int(scale_m),
-            patch_size=int(patch_size),
-            band_gsds=tuple(band_gsds),
-        )
+        meta.update(_thor_fixed_resize_meta(**fixed_kwargs, reason="native_side_limit"))
         return x, meta
 
     if est_tokens is None or int(est_tokens) > int(max_native_tokens):
-        meta["preprocess_strategy"] = "fixed_resize"
-        meta["preprocess_reason"] = "native_token_limit"
-        meta["final_hw"] = (int(image_size), int(image_size))
-        meta["effective_image_size"] = int(image_size)
-        meta["ground_cover_m"] = int(scale_m) * int(image_size)
-        meta["estimated_patch_tokens"] = _thor_estimated_patch_tokens(
-            side=int(image_size),
-            scale_m=int(scale_m),
-            patch_size=int(patch_size),
-            band_gsds=tuple(band_gsds),
+        # No resize can lower the token count honestly: tokens are fixed by
+        # ground cover / (patch_size * GSD), so resampling to image_size only
+        # misstates the cover (and adds tokens whenever snapped_side < image_size).
+        raise ModelError(
+            f"THOR native input {snapped_side}x{snapped_side} at {scale_m} m with "
+            f"patch_size={patch_size} needs {est_tokens} patch tokens, above "
+            f"RS_EMBED_THOR_MAX_NATIVE_TOKENS={max_native_tokens}. Raise "
+            "RS_EMBED_THOR_MAX_NATIVE_TOKENS, use a larger RS_EMBED_THOR_PATCH_SIZE, "
+            "or use a smaller ROI."
         )
-        return x, meta
 
     x_native = _thor_center_crop_or_pad_to_side_chw(
         x_sq,
@@ -546,6 +589,9 @@ def _prepare_thor_raw_chw(
     meta["final_hw"] = (int(snapped_side), int(snapped_side))
     meta["effective_image_size"] = int(snapped_side)
     meta["ground_cover_m"] = int(scale_m) * int(snapped_side)
+    # Crop/pad keeps the pixel spacing, so the model's geometry is exact.
+    meta["effective_gsd_m"] = (float(scale_m), float(scale_m))
+    meta["gsd_mismatch"] = False
     return x_native, meta
 
 

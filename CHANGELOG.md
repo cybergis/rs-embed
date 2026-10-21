@@ -8,6 +8,13 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Fixed
+
+- **`thor` no longer silently runs at the wrong pixel spacing.** THOR's fixed-resize path stretched the input to `RS_EMBED_THOR_IMG` (288) but told the model a ground cover of `scale_m × 288`. For any input of another size, THOR ran at the wrong scale: a 256 px (2560 m) input was treated as 2880 m at 10 m when its real spacing was 8.89 m, so patch-size embeddings and output grid cells were off by about 11%. Nothing was logged; the only trace was `preprocess_strategy="fixed_resize"` in the metadata.
+  - **The token limit now raises instead of resizing.** When a `native_snap` input exceeded `RS_EMBED_THOR_MAX_NATIVE_TOKENS`, THOR fell back to the 288 px resize, which often had more tokens than the native input (5120 → 6480 at `patch_size=4`, 20480 → 25920 at `patch_size=2`) and misstated the geometry. It now raises a `ModelError` that names the token count and the knobs to change.
+  - **Remaining fixed resizes warn and record the real spacing.** `resize_mode="fixed"`, rectangular inputs beyond `RS_EMBED_THOR_SHAPE_TOL_PX`, inputs beyond `RS_EMBED_THOR_MAX_NATIVE_SIDE`, and tiles whose size differs from `RS_EMBED_THOR_IMG` now emit a `UserWarning`. They also record `effective_gsd_m` (per axis, `(y, x)`) and `gsd_mismatch` in the metadata; `native_snap` outputs carry the same keys.
+  - **Who was affected:** `thor` with `RS_EMBED_THOR_PATCH_SIZE` below 8 on inputs above the token limit (at `patch_size=4`, anything over about 196 px, ≈2 km at 10 m), or with any of the fixed-resize cases above on inputs whose side is not `RS_EMBED_THOR_IMG`. The defaults (`patch_size=8`, near-square inputs up to 384 px, 288 px tiles) were not affected. Re-export affected THOR embeddings; for small patch sizes, raise `RS_EMBED_THOR_MAX_NATIVE_TOKENS` to keep the native geometry.
+
 ## [0.3.1] — 2026-10-14
 
 Bug-fix release for large Google Earth Engine requests ([#134](https://github.com/cybergis/rs-embed/issues/134)). `gse` could return duplicated mosaics for ROIs above about 262,144 pixels, and every GEE-backed model could gain a fill-value row or column, or lose a real one, where an oversized request was split. If you exported `gse` embeddings, or grid outputs from on-the-fly models, for `BBox` ROIs above that size, re-export them.

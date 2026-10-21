@@ -1,6 +1,7 @@
 import types
 
 import numpy as np
+import pytest
 import torch
 
 from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
@@ -145,20 +146,21 @@ def test_prepare_thor_raw_chw_tile_mode_forces_fixed_resize():
     import rs_embed.embedders.onthefly_thor as thor
 
     raw = np.zeros((10, 300, 300), dtype=np.float32)
-    out, meta = thor._prepare_thor_raw_chw(
-        raw,
-        scale_m=10,
-        patch_size=8,
-        band_gsds=(10, 20),
-        image_size=288,
-        resize_mode="native_snap",
-        shape_adjust="crop",
-        shape_tol_px=8,
-        max_native_side=384,
-        max_native_tokens=3000,
-        input_prep_mode="tile",
-        fill_value=0.0,
-    )
+    with pytest.warns(UserWarning, match="tile_preserve_stitch_geometry"):
+        out, meta = thor._prepare_thor_raw_chw(
+            raw,
+            scale_m=10,
+            patch_size=8,
+            band_gsds=(10, 20),
+            image_size=288,
+            resize_mode="native_snap",
+            shape_adjust="crop",
+            shape_tol_px=8,
+            max_native_side=384,
+            max_native_tokens=3000,
+            input_prep_mode="tile",
+            fill_value=0.0,
+        )
 
     assert out.shape == (10, 300, 300)
     assert meta["preprocess_strategy"] == "fixed_resize"
@@ -170,25 +172,107 @@ def test_prepare_thor_raw_chw_large_square_falls_back_to_fixed_resize():
     import rs_embed.embedders.onthefly_thor as thor
 
     raw = np.zeros((10, 512, 512), dtype=np.float32)
-    out, meta = thor._prepare_thor_raw_chw(
-        raw,
-        scale_m=10,
-        patch_size=8,
-        band_gsds=(10, 20),
-        image_size=288,
-        resize_mode="native_snap",
-        shape_adjust="crop",
-        shape_tol_px=8,
-        max_native_side=384,
-        max_native_tokens=3000,
-        input_prep_mode="resize",
-        fill_value=0.0,
-    )
+    with pytest.warns(UserWarning, match="native_side_limit"):
+        out, meta = thor._prepare_thor_raw_chw(
+            raw,
+            scale_m=10,
+            patch_size=8,
+            band_gsds=(10, 20),
+            image_size=288,
+            resize_mode="native_snap",
+            shape_adjust="crop",
+            shape_tol_px=8,
+            max_native_side=384,
+            max_native_tokens=3000,
+            input_prep_mode="resize",
+            fill_value=0.0,
+        )
 
     assert out.shape == (10, 512, 512)
     assert meta["preprocess_strategy"] == "fixed_resize"
     assert meta["preprocess_reason"] == "native_side_limit"
     assert meta["effective_image_size"] == 288
+    # 5120 m of real data stretched onto a model told 2880 m at 10 m.
+    assert meta["ground_cover_m"] == 2880
+    assert meta["effective_gsd_m"] == pytest.approx((17.7778, 17.7778))
+    assert meta["gsd_mismatch"] is True
+
+
+def _prepare_default(raw, **overrides):
+    import rs_embed.embedders.onthefly_thor as thor
+
+    kwargs = {
+        "scale_m": 10,
+        "patch_size": 8,
+        "band_gsds": (10, 20),
+        "image_size": 288,
+        "resize_mode": "native_snap",
+        "shape_adjust": "crop",
+        "shape_tol_px": 8,
+        "max_native_side": 384,
+        "max_native_tokens": 3000,
+        "input_prep_mode": "resize",
+        "fill_value": 0.0,
+        **overrides,
+    }
+    return thor._prepare_thor_raw_chw(raw, **kwargs)
+
+
+def test_prepare_thor_raw_chw_token_limit_raises_instead_of_resizing():
+    from rs_embed.core.errors import ModelError
+
+    # patch_size=4 at 2560 m needs 64^2 + 32^2 = 5120 tokens; resizing to 288
+    # would have produced 6480 tokens and a misstated 2880 m ground cover.
+    raw = np.zeros((10, 256, 256), dtype=np.float32)
+    with pytest.raises(ModelError, match="5120 patch tokens"):
+        _prepare_default(raw, patch_size=4)
+
+
+def test_prepare_thor_raw_chw_token_limit_can_be_raised_to_stay_native():
+    raw = np.zeros((10, 256, 256), dtype=np.float32)
+    out, meta = _prepare_default(raw, patch_size=4, max_native_tokens=6000)
+
+    assert out.shape == (10, 256, 256)
+    assert meta["preprocess_strategy"] == "native_snap"
+    assert meta["ground_cover_m"] == 2560
+    assert meta["estimated_patch_tokens"] == 5120
+    assert meta["effective_gsd_m"] == (10.0, 10.0)
+    assert meta["gsd_mismatch"] is False
+
+
+def test_prepare_thor_raw_chw_fixed_mode_reports_real_gsd():
+    raw = np.zeros((10, 256, 256), dtype=np.float32)
+    with pytest.warns(UserWarning, match=r"real pixel spacing is 8\.89x8\.89 m"):
+        _, meta = _prepare_default(raw, resize_mode="fixed")
+
+    assert meta["preprocess_reason"] == "fixed_mode"
+    assert meta["ground_cover_m"] == 2880
+    assert meta["effective_gsd_m"] == pytest.approx((8.8889, 8.8889))
+    assert meta["gsd_mismatch"] is True
+
+
+def test_prepare_thor_raw_chw_rectangular_fallback_reports_per_axis_gsd():
+    raw = np.zeros((10, 256, 300), dtype=np.float32)
+    with pytest.warns(UserWarning, match="rectangular_above_tolerance"):
+        _, meta = _prepare_default(raw)
+
+    assert meta["effective_gsd_m"] == pytest.approx((8.8889, 10.4167))
+    assert meta["gsd_mismatch"] is True
+
+
+def test_prepare_thor_raw_chw_fixed_resize_at_model_size_is_silent():
+    import warnings
+
+    # Tiles already at image_size are not resampled, so the geometry is exact.
+    raw = np.zeros((10, 288, 288), dtype=np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _, meta = _prepare_default(raw, input_prep_mode="tile")
+
+    assert meta["preprocess_strategy"] == "fixed_resize"
+    assert meta["ground_cover_m"] == 2880
+    assert meta["effective_gsd_m"] == (10.0, 10.0)
+    assert meta["gsd_mismatch"] is False
 
 
 def test_thor_describe_exposes_s1_modality():
