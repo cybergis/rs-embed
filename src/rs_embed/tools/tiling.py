@@ -11,7 +11,7 @@ import math
 import os
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -277,7 +277,10 @@ def _resolve_tile_params(
 def _snapped_hw(
     h: int, w: int, *, tile_size: int, stride: int, snap_frac: float
 ) -> tuple[int, int]:
-    """Target ``(h, w)`` of :func:`_maybe_snap_input`, without resizing anything."""
+    """Target ``(h, w)`` of the snap-to-tile downscale (see :func:`_snap_axis_to_tile`).
+
+    Only applies under the ``stride == tile_size`` overlap-shift model.
+    """
     if not (stride == tile_size and snap_frac > 0.0):
         return int(h), int(w)
     return (
@@ -286,30 +289,14 @@ def _snapped_hw(
     )
 
 
-def _maybe_snap_input(
-    x: np.ndarray,
-    *,
-    tile_size: int,
-    stride: int,
-    snap_frac: float,
-) -> tuple[np.ndarray, tuple[int, int] | None]:
-    """Apply snap-to-tile downscaling to an input before tiling.
+class _TilingPlan(NamedTuple):
+    """How :func:`_plan_tiling` slices an input that needs more than one tile."""
 
-    Returns ``(x_maybe_resized, snapped_from_hw)``: ``snapped_from_hw`` is the
-    original ``(h, w)`` when a snap happened, else ``None`` (no snap requested,
-    axes already on a tile multiple, or torch unavailable so the resize was a
-    no-op). Only applies under the ``stride == tile_size`` overlap-shift model;
-    see :func:`_snap_axis_to_tile`.
-    """
-    h, w = _input_hw(x)
-    snap_h, snap_w = _snapped_hw(h, w, tile_size=tile_size, stride=stride, snap_frac=snap_frac)
-    if (snap_h, snap_w) == (h, w):
-        return x, None
-    x_snapped = _resize_spatial_hw(x, out_h=snap_h, out_w=snap_w)
-    # Guard against a no-op when torch is unavailable (resize returns x).
-    if _input_hw(x_snapped) == (h, w):
-        return x, None
-    return x_snapped, (int(h), int(w))
+    x: np.ndarray  # the input to slice, snapped when ``snapped_from_hw`` is set
+    snapped_from_hw: tuple[int, int] | None  # original (h, w) if the snap resized x
+    h: int
+    w: int
+    num_tiles: int
 
 
 def _plan_tiling(
@@ -318,22 +305,35 @@ def _plan_tiling(
     tile_size: int,
     stride: int,
     snap_frac: float,
-) -> tuple[np.ndarray, tuple[int, int] | None] | None:
-    """Snap ``x`` for tiling, or return ``None`` when it should be dispatched whole.
+) -> _TilingPlan | None:
+    """Plan the tiling of ``x``, or return ``None`` when it should be dispatched whole.
 
-    Returns ``(x_to_tile, snapped_from_hw)`` (see :func:`_maybe_snap_input`) when
-    the input still needs more than one tile after snapping. An input that fits
-    one tile gains nothing from tiling: padding it to ``tile_size`` feeds the
-    model fabricated cells that no stitch crops away, and the snap only exists
-    to avoid a near-duplicate shifted edge tile. Single-point and batch tilers
-    both dispatch such an input whole and unsnapped, as a plain call with the
-    caller's ``model_config`` (``resolved_mode="resize"``).
+    An input that fits one tile after snapping gains nothing from tiling:
+    padding it to ``tile_size`` feeds the model fabricated cells that no stitch
+    crops away, and the snap only exists to avoid a near-duplicate shifted edge
+    tile. Single-point and batch tilers both dispatch such an input whole and
+    unsnapped, with the config from :func:`_whole_input_config`. Otherwise the
+    snap-to-tile downscale is applied (only resizing when it changes the shape).
     """
-    h, w = _input_hw(x)
-    h, w = _snapped_hw(h, w, tile_size=tile_size, stride=stride, snap_frac=snap_frac)
+    h0, w0 = _input_hw(x)
+    h, w = _snapped_hw(h0, w0, tile_size=tile_size, stride=stride, snap_frac=snap_frac)
     if _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride) <= 1:
         return None
-    return _maybe_snap_input(x, tile_size=tile_size, stride=stride, snap_frac=snap_frac)
+    snapped_from_hw = None
+    if (h, w) != (h0, w0):
+        x_snapped = _resize_spatial_hw(x, out_h=h, out_w=w)
+        # _resize_spatial_hw returns x unchanged when torch is unavailable.
+        if _input_hw(x_snapped) == (h, w):
+            x, snapped_from_hw = x_snapped, (h0, w0)
+        else:
+            h, w = h0, w0
+    return _TilingPlan(
+        x=x,
+        snapped_from_hw=snapped_from_hw,
+        h=h,
+        w=w,
+        num_tiles=_estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride),
+    )
 
 
 def _augment_model_config_for_tiled_dispatch(
@@ -351,6 +351,51 @@ def _augment_model_config_for_tiled_dispatch(
     if hook is None:
         return model_config
     return hook(model_config, tile_size=int(tile_size))
+
+
+def _native_input_size(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    input_hw: tuple[int, int],
+) -> int | None:
+    """The size a flexible-size embedder consumes this input at, else ``None``.
+
+    Asks ``resolve_input_image_size(model_config, input_hw=...)``; fixed-size
+    embedders (the base hook) and embedders without the hook give ``None``.
+    """
+    hook = getattr(embedder, "resolve_input_image_size", None)
+    if not callable(hook):
+        return None
+    try:
+        v = hook(model_config, input_hw=(int(input_hw[0]), int(input_hw[1])))
+    except ModelError:
+        raise
+    except Exception as _e:
+        return None
+    return int(v) if v is not None and int(v) > 0 else None
+
+
+def _whole_input_config(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    *,
+    native: int | None,
+) -> tuple[dict[str, Any] | None, str]:
+    """``(model_config, resolved_mode)`` for an input dispatched whole, untiled.
+
+    A flexible-size embedder consumes it at its *native* size (from
+    :func:`_native_input_size`), injected through ``tiled_dispatch_model_config``
+    (``"native"``); any other embedder gets the caller's config, exactly as in
+    resize mode (``"resize"``). Shared by the single-point and batch tilers and
+    the user-data dispatch, so an input that needs no tiling is treated the
+    same way on every path.
+    """
+    if native is None:
+        return model_config, "resize"
+    return (
+        _augment_model_config_for_tiled_dispatch(embedder, model_config, tile_size=native),
+        "native",
+    )
 
 
 def _tile_yx_starts(*, h: int, w: int, tile_size: int, stride: int) -> tuple[list[int], list[int]]:
@@ -854,7 +899,7 @@ def _call_embedder_get_embedding_tiled(
 ) -> Embedding:
     x = np.asarray(input_chw, dtype=np.float32)
 
-    def _plain_call() -> Embedding:
+    def _plain_call(config: dict[str, Any] | None = model_config) -> Embedding:
         # The original input with the caller's model_config, exactly as in
         # resize mode; the dispatch backfills resolved_mode="resize" in meta.
         return _call_embedder_get_embedding(
@@ -862,7 +907,7 @@ def _call_embedder_get_embedding_tiled(
             spatial=spatial,
             temporal=temporal,
             sensor=sensor,
-            model_config=model_config,
+            model_config=config,
             output=output,
             backend=backend,
             device=device,
@@ -884,17 +929,22 @@ def _call_embedder_get_embedding_tiled(
         raise ModelError(f"Invalid tile_stride={stride}")
     plan = _plan_tiling(x, tile_size=tile_size, stride=stride, snap_frac=input_prep.tile_snap_frac)
     if plan is None:
-        # Fits one tile: the whole ROI is one plain input; the embedder squares
-        # + crops it back to the ROI via fetch_meta['roi_window_geo'].
-        return _plain_call()
-    x_tiles, snapped_input_hw = plan
-    h, w = _input_hw(x_tiles)
+        # Fits one tile: the whole ROI is one input; the embedder squares +
+        # crops it back to the ROI via fetch_meta['roi_window_geo'].
+        whole_config, resolved_mode = _whole_input_config(
+            embedder,
+            model_config,
+            native=_native_input_size(embedder, model_config, _input_hw(x)),
+        )
+        return _stamp_input_prep_meta(
+            _plain_call(whole_config), requested_mode=input_prep.mode, resolved_mode=resolved_mode
+        )
+    x_tiles, snapped_input_hw, h, w, num_tiles = plan
     tiled_model_config = _augment_model_config_for_tiled_dispatch(
         embedder,
         model_config,
         tile_size=tile_size,
     )
-    num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
     if input_prep.mode == "auto":
         # A dimension smaller than a tile only forces a plain resize for models
         # without a fixed input size. Fixed-size models tile the long axis

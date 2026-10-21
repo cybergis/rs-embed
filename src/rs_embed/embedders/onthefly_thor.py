@@ -414,12 +414,11 @@ _THOR_FIXED_RESIZE_HINTS = {
     "fixed_mode": "set RS_EMBED_THOR_RESIZE_MODE=native_snap to keep native geometry",
     "rectangular_above_tolerance": "use a square ROI, or raise RS_EMBED_THOR_SHAPE_TOL_PX",
     "native_side_limit": (
-        "use input_prep='tile', or raise RS_EMBED_THOR_MAX_NATIVE_SIDE together with "
-        "RS_EMBED_THOR_MAX_NATIVE_TOKENS"
+        "raise RS_EMBED_THOR_MAX_NATIVE_SIDE together with RS_EMBED_THOR_MAX_NATIVE_TOKENS "
+        "to keep the input native"
     ),
     "native_token_limit": (
-        "raise RS_EMBED_THOR_MAX_NATIVE_TOKENS, use a larger RS_EMBED_THOR_PATCH_SIZE, "
-        "or use input_prep='tile'"
+        "raise RS_EMBED_THOR_MAX_NATIVE_TOKENS, or use a larger RS_EMBED_THOR_PATCH_SIZE"
     ),
     "tile_preserve_stitch_geometry": (
         "set input_prep tile_size equal to RS_EMBED_THOR_IMG and keep pad_edges=True"

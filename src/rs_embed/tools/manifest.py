@@ -8,7 +8,7 @@ from typing import Any
 from ..core.specs import OutputSpec, SpatialSpec, TemporalSpec
 from .serialization import jsonable as _jsonable
 from .serialization import utc_ts as _utc_ts
-from .tiling import INPUT_PREP_VERSION
+from .tiling import INPUT_PREP_VERSION, _resolve_input_prep_spec
 
 
 def export_request_fingerprint(
@@ -47,10 +47,14 @@ def export_request_fingerprint(
         "save_inputs": bool(config.save_inputs),
         "save_embeddings": bool(config.save_embeddings),
         "input_prep": _jsonable(config.input_prep),
-        # A prep-semantics bump changes embeddings for the same request, so
-        # resume must not keep outputs produced under the previous version.
-        "input_prep_version": INPUT_PREP_VERSION,
     }
+    # An input_prep version bump changes on-the-fly embeddings under tile/auto
+    # prep, so resume must not keep outputs produced under the previous
+    # version. Requests it cannot affect keep their fingerprint.
+    if _resolve_input_prep_spec(config.input_prep).mode != "resize" and any(
+        not getattr(mc, "is_precomputed", False) for mc in models
+    ):
+        payload["input_prep_version"] = INPUT_PREP_VERSION
     if spatials is not None:
         payload["spatials"] = [_jsonable(s) for s in spatials]
     if spatial is not None:

@@ -836,6 +836,33 @@ def test_sub_tile_input_is_dispatched_whole_with_plain_model_config():
     assert out.meta["input_prep"]["resolved_mode"] == "resize"
 
 
+class _FlexibleRecordingTileEmbedder(_ConfigRecordingTileEmbedder):
+    """Flexible-size fake: consumes any input natively, tiles at 4 otherwise."""
+
+    def resolve_input_image_size(self, model_config, *, input_hw=None):
+        return 4 if input_hw is None else max(input_hw)
+
+
+def test_sub_tile_input_runs_natively_on_a_flexible_model():
+    """Same rule as the user-data path: the native size is injected, not the tile size."""
+    emb = _FlexibleRecordingTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 3, 3), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4),
+        model_config={"k": 1},
+    )
+
+    assert emb.calls == [((1, 3, 3), {"k": 1, "_tiled": 3})]
+    assert out.meta["input_prep"]["resolved_mode"] == "native"
+
+
 def test_multi_tile_input_still_gets_tiled_model_config():
     emb = _ConfigRecordingTileEmbedder()
     out = _call_embedder_get_embedding_with_input_prep(

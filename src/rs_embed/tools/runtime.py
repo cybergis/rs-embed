@@ -907,8 +907,10 @@ def run_user_input_request(
 
     from .tiling import (
         _call_embedder_get_embedding_with_input_prep,
+        _native_input_size,
         _resolve_tile_params,
         _stamp_input_prep_meta,
+        _whole_input_config,
     )
 
     (
@@ -932,14 +934,7 @@ def run_user_input_request(
         params = _resolve_tile_params(embedder, input_prep_resolved, model_config)
         for i, x in enumerate(input_arrays):
             h, w = int(x.shape[-2]), int(x.shape[-1])
-            native: int | None = None
-            try:
-                v = embedder.resolve_input_image_size(model_config, input_hw=(h, w))
-                native = int(v) if v is not None and int(v) > 0 else None
-            except ModelError:
-                raise
-            except Exception as _e:
-                native = None
+            native = _native_input_size(embedder, model_config, (h, w))
             threshold = native if native is not None else params.tile_size
             if threshold > 0 and (h > threshold or w > threshold):
                 tiled_set.add(i)
@@ -963,15 +958,13 @@ def run_user_input_request(
     results: list[Embedding | None] = [None] * len(input_arrays)
 
     # Direct items grouped by native size: one embedder batch call per group,
-    # with the size injected via tiled_dispatch_model_config so a flexible
-    # model consumes the group's inputs at exactly that size.
+    # configured by the same whole-input rule as the tilers (a flexible model
+    # consumes the group's inputs at exactly that size).
     direct_groups: dict[int | None, list[int]] = {}
     for i in sorted(native_sizes):
         direct_groups.setdefault(native_sizes[i], []).append(i)
     for native, indices in direct_groups.items():
-        group_config = model_config
-        if native is not None:
-            group_config = embedder.tiled_dispatch_model_config(model_config, tile_size=native)
+        group_config, resolved_mode = _whole_input_config(embedder, model_config, native=native)
         if group_config is not None and group_config is not model_config:
             require_model_config_support(
                 embedder=embedder,
@@ -997,9 +990,7 @@ def run_user_input_request(
             for i, emb in zip(chunk, out, strict=True):
                 emb = normalize_embedding_output(emb=emb, output=output)
                 results[i] = _stamp_input_prep_meta(
-                    emb,
-                    requested_mode=requested_mode,
-                    resolved_mode="native" if native is not None else "resize",
+                    emb, requested_mode=requested_mode, resolved_mode=resolved_mode
                 )
 
     for i in sorted(tiled_set):

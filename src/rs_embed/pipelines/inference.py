@@ -35,13 +35,14 @@ from ..tools.tiling import (
     _augment_model_config_for_tiled_dispatch,
     _build_tile_prep_meta,
     _call_embedder_get_embedding_with_input_prep,
-    _estimate_tile_count,
     _input_hw,
+    _native_input_size,
     _plan_tiling,
     _resolve_input_prep_spec,
     _resolve_tile_params,
     _stamp_input_prep_meta,
     _tile_one_image,
+    _whole_input_config,
 )
 from .runner import run_with_retry
 
@@ -504,9 +505,7 @@ class InferenceEngine:
                 if plan is None:
                     whole_inputs[i] = inp
                     continue
-                inp, snapped_from = plan
-                h, w = _input_hw(inp)
-                num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
+                inp, snapped_from, h, w, num_tiles = plan
                 if num_tiles > spec.max_tiles_hard:
                     err = ModelError(
                         f"input_prep tile would create {num_tiles} tiles "
@@ -549,11 +548,20 @@ class InferenceEngine:
                 all_tile_fetch_metas.extend([img_fmeta] * len(tiles))
                 tile_map[i] = (flat_start, len(tiles), tile_metas, h, w, snapped_from)
 
-            if whole_inputs:
-                # Plain (resize) dispatch with the caller's model_config, exactly
-                # what the single-point tiler does for an input that fits a tile.
-                whole_out, whole_ok = self._run_batch_prefetched(
-                    idxs=list(whole_inputs),
+            # Whole inputs use the single-point tiler's rule (_whole_input_config),
+            # one dispatch per native size. Same-size inputs run back to back,
+            # so e.g. THOR builds one model per ground cover, not one per switch.
+            whole_groups: dict[int | None, list[int]] = {}
+            for i in sorted(whole_inputs, key=lambda i: _input_hw(whole_inputs[i])):
+                native = _native_input_size(embedder, model_config, _input_hw(whole_inputs[i]))
+                whole_groups.setdefault(native, []).append(i)
+            whole_ok = True
+            for native, group_idxs in whole_groups.items():
+                group_config, resolved_mode = _whole_input_config(
+                    embedder, model_config, native=native
+                )
+                group_out, group_ok = self._run_batch_prefetched(
+                    idxs=group_idxs,
                     spatials=spatials,
                     temporal=temporal,
                     sensor=sensor,
@@ -566,16 +574,15 @@ class InferenceEngine:
                     on_done=on_done,
                     use_lock=use_lock,
                     model_name=model_name,
-                    model_config=model_config,
+                    model_config=group_config,
                     get_fetch_meta_fn=get_fetch_meta_fn,
-                    finalize_emb=lambda e: _stamp_input_prep_meta(
-                        e, requested_mode=spec.mode, resolved_mode="resize"
+                    finalize_emb=lambda e, m=resolved_mode: _stamp_input_prep_meta(
+                        e, requested_mode=spec.mode, resolved_mode=m
                     ),
                     tier="tiled (whole-input)",
                 )
-                out.update(whole_out)
-            else:
-                whole_ok = True
+                out.update(group_out)
+                whole_ok = whole_ok and group_ok
 
             # A failed whole-input batch leaves its points to the per-point
             # fallback; the multi-tile points still run batched below.

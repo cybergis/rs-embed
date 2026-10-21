@@ -518,6 +518,21 @@ def test_run_batch_tiled_dispatches_sub_tile_inputs_whole():
     assert {"roi_window_geo": _ROI} in emb.seen_fetch_metas
 
 
+def test_run_batch_tiled_groups_whole_inputs_by_native_size():
+    class _Flexible(_ConfigRecordingTiledRoiEmbedder):
+        def resolve_input_image_size(self, model_config, *, input_hw=None):
+            return 4 if input_hw is None else max(input_hw)
+
+    emb = _Flexible()
+    images = [np.ones((1, 3, 3), np.float32), np.ones((1, 2, 2), np.float32)]
+    out, succeeded = _run_batch_tiled_grid(emb, images, fetch_metas=[{}, {}])
+
+    assert succeeded
+    # One dispatch per native size, smallest first, each with its own size.
+    assert emb.calls == [((1, 2, 2), {"_tiled": 2}), ((1, 3, 3), {"_tiled": 3})]
+    assert all(out[i].meta["input_prep"]["resolved_mode"] == "native" for i in (0, 1))
+
+
 def test_run_batch_tiled_whole_input_failure_still_batches_tiled_points():
     class _FailsOnSubTile(_ConfigRecordingTiledRoiEmbedder):
         def get_embeddings_batch_from_inputs(self, *, input_chws, model_config=None, **kwargs):
