@@ -345,6 +345,65 @@ def require_model_config_support(
     )
 
 
+def tiled_dispatch_config(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    *,
+    tile_size: int,
+) -> dict[str, Any] | None:
+    """Let the embedder adapt ``model_config`` for a dispatch at *tile_size*.
+
+    Delegates to ``EmbedderBase.tiled_dispatch_model_config``; embedders that
+    do not override the hook get the config back unchanged.
+    """
+    hook = getattr(embedder, "tiled_dispatch_model_config", None)
+    if hook is None:
+        return model_config
+    return hook(model_config, tile_size=int(tile_size))
+
+
+def native_input_size(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    input_hw: tuple[int, int] | None = None,
+) -> int | None:
+    """The input size the embedder resolves for this request, else ``None``.
+
+    Asks ``resolve_input_image_size``: with *input_hw*, a flexible-size
+    embedder answers with the size it consumes that input at; fixed-size
+    embedders (the base hook) and embedders without the hook give ``None``.
+    Errors from the hook propagate.
+    """
+    hook = getattr(embedder, "resolve_input_image_size", None)
+    if not callable(hook):
+        return None
+    if input_hw is None:
+        v = hook(model_config)
+    else:
+        v = hook(model_config, input_hw=(int(input_hw[0]), int(input_hw[1])))
+    return int(v) if v is not None and int(v) > 0 else None
+
+
+def whole_input_config(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    *,
+    native: int | None,
+) -> tuple[dict[str, Any] | None, str]:
+    """``(model_config, resolved_mode)`` for an input dispatched whole, untiled.
+
+    A flexible-size embedder consumes it at the size from
+    :func:`native_input_size`, injected through ``tiled_dispatch_model_config``
+    (``"native"``); any other embedder gets the caller's config, exactly as in
+    resize mode (``"resize"``). Shared by the single-point and batch tilers and
+    the user-data dispatch, so an input that needs no tiling is treated the
+    same way on every path.
+    """
+    if native is None:
+        return model_config, "resize"
+    return tiled_dispatch_config(embedder, model_config, tile_size=native), "native"
+
+
 def call_embedder_get_embedding(
     *,
     embedder: Any,
@@ -907,10 +966,8 @@ def run_user_input_request(
 
     from .tiling import (
         _call_embedder_get_embedding_with_input_prep,
-        _native_input_size,
         _resolve_tile_params,
         _stamp_input_prep_meta,
-        _whole_input_config,
     )
 
     (
@@ -934,7 +991,7 @@ def run_user_input_request(
         params = _resolve_tile_params(embedder, input_prep_resolved, model_config)
         for i, x in enumerate(input_arrays):
             h, w = int(x.shape[-2]), int(x.shape[-1])
-            native = _native_input_size(embedder, model_config, (h, w))
+            native = native_input_size(embedder, model_config, (h, w))
             threshold = native if native is not None else params.tile_size
             if threshold > 0 and (h > threshold or w > threshold):
                 tiled_set.add(i)
@@ -964,7 +1021,7 @@ def run_user_input_request(
     for i in sorted(native_sizes):
         direct_groups.setdefault(native_sizes[i], []).append(i)
     for native, indices in direct_groups.items():
-        group_config, resolved_mode = _whole_input_config(embedder, model_config, native=native)
+        group_config, resolved_mode = whole_input_config(embedder, model_config, native=native)
         if group_config is not None and group_config is not model_config:
             require_model_config_support(
                 embedder=embedder,

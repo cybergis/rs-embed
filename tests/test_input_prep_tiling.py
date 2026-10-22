@@ -893,6 +893,33 @@ def test_plan_tiling_skips_the_snap_resize_for_whole_inputs(monkeypatch):
     assert tiling._plan_tiling(x, tile_size=4, stride=4, snap_frac=0.25) is None
 
 
+def test_auto_plain_fallback_skips_the_snap_resize(monkeypatch):
+    """Auto falls back to a plain call on the original input, so nothing is resized."""
+    from rs_embed.tools import tiling
+
+    def _no_resize(*args, **kwargs):
+        raise AssertionError("snap resize should not run before a plain fallback")
+
+    monkeypatch.setattr(tiling, "_resize_spatial_hw", _no_resize)
+    emb = _FakeTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="gee",
+        device="cpu",
+        # 9 px snaps to 8 (two tiles per axis), but pooled output under auto
+        # falls back to one plain call.
+        input_chw=np.ones((1, 9, 9), dtype=np.float32),
+        input_prep=InputPrepSpec.auto(tile_size=4, tile_snap_frac=0.25),
+    )
+
+    assert emb.single_calls == 1
+    assert out.meta["input_prep"]["resolved_mode"] == "resize"
+
+
 def test_snap_reduces_tiles_and_records_meta_on_multitile_path():
     """When snapping still leaves >1 tile, the stitch meta records the snap."""
     pytest.importorskip("torch")

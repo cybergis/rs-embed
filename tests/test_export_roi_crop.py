@@ -556,6 +556,29 @@ def test_run_batch_tiled_whole_input_failure_still_batches_tiled_points():
     np.testing.assert_array_equal(out[1].embedding, large)
 
 
+def test_run_batch_tiled_stops_whole_input_groups_after_a_failure():
+    class _FlexibleFailing(_ConfigRecordingTiledRoiEmbedder):
+        attempted: list = []
+
+        def resolve_input_image_size(self, model_config, *, input_hw=None):
+            return 4 if input_hw is None else max(input_hw)
+
+        def get_embeddings_batch_from_inputs(self, *, input_chws, model_config=None, **kwargs):
+            self.attempted.append(tuple(np.asarray(input_chws[0]).shape))
+            raise RuntimeError("boom")
+
+    emb = _FlexibleFailing()
+    images = [np.ones((1, 3, 3), np.float32), np.ones((1, 2, 2), np.float32)]
+    with pytest.warns(UserWarning, match="whole-input"):
+        out, succeeded = _run_batch_tiled_grid(emb, images, fetch_metas=[{}, {}])
+
+    # The 2x2 group fails first; the 3x3 group is left to the per-point fallback
+    # instead of failing (and retrying) on its own.
+    assert succeeded is False
+    assert out == {}
+    assert set(emb.attempted) == {(1, 2, 2)}
+
+
 def test_sub_tile_input_matches_between_single_point_and_batch_tiled():
     from rs_embed.tools.tiling import _call_embedder_get_embedding_with_input_prep
 

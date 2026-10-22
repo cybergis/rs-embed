@@ -103,8 +103,8 @@ flowchart LR
 | `RS_EMBED_THOR_PATCH_SIZE`        | `8`            | THOR flexi patch size parameter                                                                 |
 | `RS_EMBED_THOR_SHAPE_ADJUST`      | `crop`         | How `native_snap` resolves small non-square inputs: `crop` or `pad`                             |
 | `RS_EMBED_THOR_SHAPE_TOL_PX`      | `8`            | Maximum `abs(H-W)` tolerated before `native_snap` falls back to fixed resize                    |
-| `RS_EMBED_THOR_MAX_NATIVE_SIDE`   | `384`          | Largest snapped native side allowed before falling back to fixed resize                         |
-| `RS_EMBED_THOR_MAX_NATIVE_TOKENS` | `3000`         | Largest estimated THOR patch-token count allowed for `native_snap`                              |
+| `RS_EMBED_THOR_MAX_NATIVE_SIDE`   | `384`          | Snapped native side above which THOR falls back to fixed resize, if that lowers the token count |
+| `RS_EMBED_THOR_MAX_NATIVE_TOKENS` | `3000`         | Patch-token count above which THOR falls back to fixed resize, if that lowers the count         |
 | `RS_EMBED_THOR_FETCH_WORKERS`     | `8`            | Provider prefetch workers for batch APIs                                                        |
 
 === "Patch Size"
@@ -121,11 +121,11 @@ flowchart LR
 
 === "Native-Snap Limits"
 
-    `native_snap` is intentionally bounded. It only stays on the native path when the input is close to square, the snapped side does not exceed `RS_EMBED_THOR_MAX_NATIVE_SIDE`, and the estimated THOR patch-token count does not exceed `RS_EMBED_THOR_MAX_NATIVE_TOKENS`.
+    `native_snap` is intentionally bounded. An input that is not close to square always falls back to fixed resize. Past `RS_EMBED_THOR_MAX_NATIVE_SIDE` or `RS_EMBED_THOR_MAX_NATIVE_TOKENS`, THOR falls back only when that lowers the token count (see below), so an input below `RS_EMBED_THOR_IMG` can stay native past either limit.
 
     For the current default S2 10m/20m path with `patch_size=8`, `side=384` corresponds to about `2880` patch tokens, which is why `384` is the default ceiling.
 
-    Each distinct native side has its own ground cover, and THOR builds one model per ground cover (up to 8 stay cached). An export whose ROIs snap to many different sides therefore rebuilds the model often (about 0.6 s each for `base` with cached weights). Use ROIs of one size, e.g. a fixed `PointBuffer` radius, to keep a single model.
+    Each distinct native side has its own ground cover, and THOR builds one model per ground cover (up to 8 stay cached). THOR exports run point by point in input order, so ROIs that snap to many different sides rebuild the model often (about 0.6 s each for `base` with cached weights). Use ROIs of one size, e.g. a fixed `PointBuffer` radius, to keep a single model.
 
     Past either limit, THOR falls back to a fixed resize to `RS_EMBED_THOR_IMG`, but only when that resize actually lowers the token count, i.e. when `RS_EMBED_THOR_IMG` is smaller than the snapped side. The token count is set by ground cover / (`patch_size` × GSD), so a resize to a larger side would add tokens and misstate the geometry. In that case THOR runs the input natively, emits a `UserWarning` and records `meta["native_limit_exceeded"]`. With `patch_size=4`, for example, a 256 px input needs 5120 tokens and runs natively (the 288 px fallback would need 6480), while a 380 px input falls back to 288 px. Raise `RS_EMBED_THOR_MAX_NATIVE_TOKENS` to keep larger inputs native. Under `input_prep="resize"`, switching to `"tile"` also keeps inputs larger than one tile at native spacing.
 
