@@ -2422,9 +2422,15 @@ path (<code>input_prep="tile"</code>, the package default for most models).</p>
 <p><strong>3. Crop the output back to the ROI.</strong>
 The encoder's token grid / feature map is cropped to <code>roi_window</code>
 (<code>crop_grid_to_roi</code> / <code>roi_token_box</code>); for <code>pooled</code> output only the ROI tokens are
-pooled (<code>crop_grid_and_pool</code>). The stitched grid from the tile path is cropped the
-same way, and tiled <code>pooled</code> embeddings are weighted by each tile's ROI-overlap
-area. The result describes <strong>your</strong> ROI, not the enlarged square.</p>
+pooled (<code>crop_grid_and_pool</code>). <code>roi_window</code> is relative to the fetched square, so a
+model that pads, crops or center-crops that array on the way in first maps the
+window into its own input's frame (<code>model_roi_window</code>, through
+<code>meta["shape_prep"]["input_window"]</code>). Grid output also drops whole cells of such
+padding; <code>pooled</code> output pools ROI tokens only when the ROI is a sub-window, and
+otherwise keeps the model's own pooled vector (<code>olmoearth</code> and <code>thor</code> pool only the
+input's valid region even then). The stitched grid from the tile path
+is cropped the same way, and tiled <code>pooled</code> embeddings are weighted by each tile's
+ROI-overlap area. The result describes <strong>your</strong> ROI, not the enlarged square.</p>
 <hr />
 <h2 id="by-roi-shape">By ROI shape<a class="headerlink" href="#by-roi-shape" title="Permanent link">&para;</a></h2>
 <table>
@@ -2496,7 +2502,7 @@ the poles or antimeridian, or you may pass a non-square array directly via
 </tr>
 <tr>
 <td>Any rectangle</td>
-<td>Make square (pad <strong>or</strong> crop), then resize; the ROI window is recorded so the output is cropped back</td>
+<td>Make square (pad <strong>or</strong> crop), then resize; the input's position in the square is recorded (<code>input_window</code>) so ROI windows map through it and the output is cropped back</td>
 <td><code>pad_to_square</code> / <code>crop_to_square</code></td>
 </tr>
 </tbody>
@@ -2545,7 +2551,7 @@ this fallback; see the THOR page.</p>
 </tr>
 <tr>
 <td><code>meta["shape_prep"]["applied"]</code></td>
-<td><code>none</code> / <code>pad_to_square</code> / <code>crop_to_square</code> (fallback path)</td>
+<td><code>none</code> / <code>pad_to_square</code> / <code>crop_to_square</code> (fallback path); <code>pad_bottom_right</code> for <code>prithvi</code> with <code>RS_EMBED_PRITHVI_PREP=pad</code>, which pads only the bottom and right edges up to a patch multiple and records just <code>orig_hw</code>, <code>square_hw</code> and the windows</td>
 </tr>
 <tr>
 <td><code>meta["shape_prep"]["orig_hw"]</code> / <code>["square_hw"]</code> / <code>["target_hw"]</code></td>
@@ -2554,6 +2560,14 @@ this fallback; see the THOR page.</p>
 <tr>
 <td><code>meta["shape_prep"]["aspect"]</code></td>
 <td><code>long_side / short_side</code> (≥ 2.0 triggers the heavy-padding warning)</td>
+</tr>
+<tr>
+<td><code>meta["shape_prep"]["input_window"]</code></td>
+<td>Where the input lies in the squared array, as exact fractions <code>(y0, y1, x0, x1)</code>; past <code>[0, 1]</code> on a cropped axis. Recorded by models that square their input (<code>clay</code> and <code>dofa</code> under <code>meta["preprocess"]["resize_meta"]["shape_prep"]</code>; <code>remoteclip</code> only with its built-in preprocessing)</td>
+</tr>
+<tr>
+<td><code>meta["shape_prep"]["roi_window"]</code></td>
+<td><code>input_window</code> clipped to the square</td>
 </tr>
 </tbody>
 </table>
