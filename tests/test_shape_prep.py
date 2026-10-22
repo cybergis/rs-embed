@@ -12,6 +12,7 @@ from rs_embed.tools.shape import (
     crop_grid_to_roi,
     prepare_square,
     resize_square,
+    roi_in_frame,
     roi_is_full,
     roi_token_box,
 )
@@ -227,3 +228,14 @@ def test_square_fetch_batch():
     assert len(raws) == 2 and len(geo_rois) == 2
     assert geo_rois[0] != (0.0, 1.0, 0.0, 1.0)
     assert geo_rois[1] == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_roi_in_frame_maps_a_window_through_padding_and_cropping():
+    # Input padded 4 px each side into a 208 px array: its frame is (4/208, 204/208).
+    frame = (4 / 208, 204 / 208, 4 / 208, 204 / 208)
+    assert roi_in_frame(frame, (0.0, 1.0, 0.0, 1.0)) == pytest.approx(frame)
+    assert roi_in_frame(frame, (0.5, 1.0, 0.0, 0.5)) == pytest.approx(
+        (104 / 208, 204 / 208, 4 / 208, 104 / 208)
+    )
+    # A cropped axis extends past [0, 1]; the mapped window is clipped to the array.
+    assert roi_in_frame((-0.1, 1.1, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)) == (0.0, 1.0, 0.0, 1.0)

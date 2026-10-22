@@ -218,6 +218,31 @@ def roi_is_full(roi_window: tuple[float, float, float, float], *, eps: float = 1
     return y0 <= eps and y1 >= 1.0 - eps and x0 <= eps and x1 >= 1.0 - eps
 
 
+def roi_in_frame(
+    frame: tuple[float, float, float, float],
+    roi_window: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Map *roi_window*, given in an input's frame, into the frame of the array fed to the model.
+
+    *frame* is where the input lies in that array, as fractions ``(y0, y1, x0,
+    x1)`` of the array; it extends past ``[0, 1]`` on axes where the input was
+    cropped, and lies inside on axes where it was padded. The result is clipped
+    to the array, so it is the window to crop the model's token grid to.
+    """
+    fy0, fy1, fx0, fx1 = (float(v) for v in frame)
+    y0, y1, x0, x1 = (float(v) for v in roi_window)
+
+    def _clip(v: float) -> float:
+        return min(1.0, max(0.0, v))
+
+    return (
+        _clip(fy0 + y0 * (fy1 - fy0)),
+        _clip(fy0 + y1 * (fy1 - fy0)),
+        _clip(fx0 + x0 * (fx1 - fx0)),
+        _clip(fx0 + x1 * (fx1 - fx0)),
+    )
+
+
 def roi_token_box(
     roi_window: tuple[float, float, float, float], *, grid_h: int, grid_w: int
 ) -> tuple[int, int, int, int]:
