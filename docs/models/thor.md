@@ -101,7 +101,7 @@ flowchart LR
 | `RS_EMBED_THOR_NORMALIZE`         | `thor_stats`   | S2: `thor_stats`, `unit_scale`, or `none`; S1: `thor_stats` (shared S1 log normalize) or `none` |
 | `RS_EMBED_THOR_GROUP_MERGE`       | `mean`         | THOR group-grid aggregation: `mean`, `sum`, `concat`                                            |
 | `RS_EMBED_THOR_PATCH_SIZE`        | `8`            | THOR flexi patch size parameter                                                                 |
-| `RS_EMBED_THOR_SHAPE_ADJUST`      | `crop`         | How `native_snap` squares near-square inputs: `crop`, or `pad` (replicates edge pixels)         |
+| `RS_EMBED_THOR_SHAPE_ADJUST`      | `crop`         | Side `native_snap` snaps from for near-square inputs: `crop` (short side) or `pad` (long side)  |
 | `RS_EMBED_THOR_SHAPE_TOL_PX`      | `8`            | Maximum `abs(H-W)` tolerated before `native_snap` falls back to fixed resize                    |
 | `RS_EMBED_THOR_MAX_NATIVE_SIDE`   | `384`          | Snapped native side above which THOR falls back to fixed resize, if that lowers the token count |
 | `RS_EMBED_THOR_MAX_NATIVE_TOKENS` | `3000`         | Patch-token count above which THOR falls back to fixed resize, if that lowers the count         |
@@ -125,7 +125,9 @@ flowchart LR
 
     For the current default S2 10m/20m path with `patch_size=8`, `side=384` corresponds to about `2880` patch tokens, which is why `384` is the default ceiling.
 
-    `native_snap` pads the square input up to the next valid side (a multiple of 16 px at `patch_size=8` and 10 m) by replicating its edge pixels, so no ROI pixel is dropped and no zero fill reaches the model. Only when padding up would break one of the limits above while the valid side below meets them does it crop instead, by less than one unit (e.g. 388 px runs at 384 px instead of falling back to a 288 px resize). `meta["input_window"]` records where the input lies in the array fed to THOR, and the ROI crop is mapped through it: grid output drops the ROI's context margin and any whole tokens of padding, and pooled output of an ROI sub-window pools the ROI's grid cells. A whole ROI always keeps THOR's token-level pool, which also covers the padding (at most one token per side).
+    `native_snap` snaps up to the next valid side (a multiple of 16 px at `patch_size=8` and 10 m), starting from the short side under `shape_adjust=crop` or the long side under `pad`, and center-fits the input to it, padding by replicating edge pixels. No zero fill reaches the model, and pixels are only dropped from a long axis that exceeds the snapped side. The one other crop: when padding up would break one of the limits above, so the input would otherwise be resampled to `RS_EMBED_THOR_IMG`, and the valid side below meets the limits, it crops by less than one unit instead (e.g. 388 px runs at 384 px instead of a 288 px resize).
+
+    `meta["input_window"]` records where the input lies in the array fed to THOR, and the ROI crop is mapped through it. Grid output drops the ROI's context margin and any whole tokens of padding; `meta["model_grid_hw"]` and `meta["grid_crop_box"]` record the uncropped grid and the kept token box. Pooled output of an ROI sub-window pools the ROI's grid cells; a whole ROI keeps THOR's token-level pool, over the tokens inside the input window.
 
     Each distinct native side has its own ground cover, and THOR builds one model per ground cover (up to 8 stay cached). THOR exports run point by point in input order, so ROIs that snap to many different sides rebuild the model often (about 0.6 s each for `base` with cached weights). Use ROIs of one size, e.g. a fixed `PointBuffer` radius, to keep a single model.
 

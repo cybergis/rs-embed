@@ -245,16 +245,31 @@ def test_roi_in_frame_maps_a_window_through_padding_and_cropping():
 
 def test_center_fit_crops_and_pads_each_axis_around_center_offset():
     x = np.arange(5 * 3, dtype=np.float32).reshape(1, 5, 3)
-    y = center_fit(x, out_h=4, out_w=6, pad_mode="edge")
+    y, window = center_fit(x, out_h=4, out_w=6, pad_mode="edge")
 
     assert y.shape == (1, 4, 6)
     top, left = center_offset(5, 4), center_offset(3, 6)
     assert (top, left) == (0, 1)  # 1 px cropped after on H; 1 before / 2 after on W
     np.testing.assert_array_equal(y[0, :, 1:4], x[0, 0:4, :])
     np.testing.assert_array_equal(y[0, :, 0], x[0, 0:4, 0])  # edge replicated
-    assert center_fit(x, out_h=5, out_w=3) is x
+    assert window == pytest.approx((0.0, 5 / 4, 1 / 6, 4 / 6))
+    same, full = center_fit(x, out_h=5, out_w=3)
+    assert same is x
+    assert full == (0.0, 1.0, 0.0, 1.0)
 
 
-def test_roi_token_box_ignores_float_round_off_at_token_edges():
+def test_center_fit_rejects_bad_targets_and_empty_edge_pads():
+    x = np.ones((1, 4, 4), dtype=np.float32)
+    with pytest.raises(ModelError, match="positive"):
+        center_fit(x, out_h=0, out_w=4)
+    with pytest.raises(ModelError, match="empty input"):
+        center_fit(np.ones((1, 0, 4), dtype=np.float32), out_h=4, out_w=4, pad_mode="edge")
+    padded, _ = center_fit(x, out_h=6, out_w=6, pad_mode="constant", fill_value=-1.0)
+    assert padded[0, 0, 0] == -1.0
+
+
+def test_roi_token_box_ignores_round_off_at_token_edges():
     # 4/392 of a 98-token grid is exactly token 1, but evaluates to 0.99999...
     assert roi_token_box((4 / 392, 1.0, 0.0, 1.0), grid_h=98, grid_w=98) == (1, 98, 0, 98)
+    # fetch-square windows are rounded to 6 decimals: round(8/38, 6) * 38 = 7.999988
+    assert roi_token_box((round(8 / 38, 6), 1.0, 0.0, 1.0), grid_h=38, grid_w=38)[0] == 8
