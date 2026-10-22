@@ -45,12 +45,10 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
-    model_roi_windows,
     prepare_square,
     roi_fetch_meta,
-    roi_is_full,
     square_fetch_batch,
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
@@ -1063,9 +1061,12 @@ class GalileoEmbedder(EmbedderBase):
         # Crop the token grid (D, H', W') back to the ROI, mapped through the
         # squaring: grid output always (dropping padding), pooled output only
         # for an ROI sub-window (no-op when the window is full).
-        cropped_to_roi = not roi_is_full(geo_roi)
-        grid_roi, pool_roi = model_roi_windows(pmeta.get("shape_prep"), geo_roi)
-        grid = crop_grid_to_roi(grid, grid_roi if output.mode == "grid" else pool_roi)
+        grid, cropped_to_roi = crop_grid_for_output(
+            grid,
+            geo_roi=geo_roi,
+            shape_prep=pmeta.get("shape_prep"),
+            pooled=output.mode == "pooled",
+        )
 
         meta = build_meta(
             model=self.model_name,

@@ -40,9 +40,8 @@ from ..tools.runtime import (
     move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
-    model_roi_windows,
     prepare_square,
     roi_fetch_meta,
     square_fetch_batch,
@@ -714,8 +713,9 @@ class AnySatEmbedder(EmbedderBase):
         # output always (dropping padding), pooled output only for an ROI
         # sub-window (no-op when full; tile-pooled output has no grid to crop).
         if grid is not None:
-            grid_roi, pool_roi = model_roi_windows(shape_prep, geo_roi)
-            grid = crop_grid_to_roi(grid, grid_roi if output.mode == "grid" else pool_roi)
+            grid, _ = crop_grid_for_output(
+                grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=output.mode == "pooled"
+            )
 
         meta = build_meta(
             model=self.model_name,
@@ -738,6 +738,7 @@ class AnySatEmbedder(EmbedderBase):
                 "normalization": norm_mode,
                 "grid_feature_mode": grid_feature_mode,
                 "pooled_source": pooled_source,
+                **({"shape_prep": shape_prep} if shape_prep is not None else {}),
                 "start": t.start,
                 "end": t.end,
                 "n_frames": int(raw_tchw.shape[0]),

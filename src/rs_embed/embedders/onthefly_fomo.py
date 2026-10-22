@@ -33,10 +33,8 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_and_pool,
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
-    model_roi_windows,
     prepare_square,
     roi_fetch_meta,
     roi_is_full,
@@ -378,6 +376,11 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str
     return out, meta["shape_prep"]
 
 
+def _pool_grid_cells(grid: np.ndarray, pooling: str) -> np.ndarray:
+    """Max- or mean-pool a (D, H, W) grid over its cells."""
+    return (np.max if pooling == "max" else np.mean)(grid, axis=(1, 2)).astype(np.float32)
+
+
 def _normalize_s2(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
     return normalize_s2(
         raw_chw,
@@ -673,11 +676,10 @@ class FoMoEmbedder(EmbedderBase):
         token_pooled = (np.max if output.pooling == "max" else np.mean)(tokens, axis=0).astype(
             np.float32
         )
-        grid_roi, pool_roi = model_roi_windows(shape_prep, geo_roi)
-        _, vec = crop_grid_and_pool(
-            grid, pool_roi, pooling=output.pooling, pooled_fallback=token_pooled
+        grid, roi_pooled = crop_grid_for_output(
+            grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=output.mode == "pooled"
         )
-        grid = crop_grid_to_roi(grid, grid_roi)
+        vec = _pool_grid_cells(grid, output.pooling) if roi_pooled else token_pooled
         cropped_to_roi = not roi_is_full(geo_roi)
         pooling = f"roi_grid_{output.pooling}" if cropped_to_roi else f"token_{output.pooling}"
 
@@ -705,6 +707,7 @@ class FoMoEmbedder(EmbedderBase):
                 "device": dev,
                 "pooling": pooling,
                 "pooled_shape": tuple(vec.shape),
+                **({"shape_prep": shape_prep} if shape_prep is not None else {}),
                 **lmeta,
                 **fmeta,
                 **gmeta,
@@ -823,11 +826,10 @@ class FoMoEmbedder(EmbedderBase):
             token_pooled = (np.max if output.pooling == "max" else np.mean)(tokens, axis=0).astype(
                 np.float32
             )
-            grid_roi, pool_roi = model_roi_windows(shape_preps[k], geo_roi)
-            _, vec = crop_grid_and_pool(
-                grid, pool_roi, pooling=output.pooling, pooled_fallback=token_pooled
+            grid, roi_pooled = crop_grid_for_output(
+                grid, geo_roi=geo_roi, shape_prep=shape_preps[k], pooled=output.mode == "pooled"
             )
-            grid = crop_grid_to_roi(grid, grid_roi)
+            vec = _pool_grid_cells(grid, output.pooling) if roi_pooled else token_pooled
             cropped_to_roi = not roi_is_full(geo_roi)
             pooling = f"roi_grid_{output.pooling}" if cropped_to_roi else f"token_{output.pooling}"
 
@@ -855,6 +857,7 @@ class FoMoEmbedder(EmbedderBase):
                     "device": dev,
                     "pooling": pooling,
                     "pooled_shape": tuple(vec.shape),
+                    **({"shape_prep": shape_preps[k]} if shape_preps[k] is not None else {}),
                     **lmeta,
                     **fmeta,
                     **gmeta,

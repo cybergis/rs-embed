@@ -279,8 +279,14 @@ class CheckpointManager:
         )
 
     @staticmethod
-    def drop_prefetch_arrays(arrays: dict[str, np.ndarray]) -> None:
+    def drop_prefetch_arrays(
+        arrays: dict[str, np.ndarray], manifest: dict[str, Any] | None = None
+    ) -> None:
         drop_prefetch_checkpoint_arrays(arrays)
+        # The per-item fetch metadata only serves a resume of these arrays.
+        for entry in ((manifest or {}).get("prefetch") or {}).values():
+            if isinstance(entry, dict):
+                entry.pop("fetch_meta", None)
 
     @staticmethod
     def collect_input_refs(

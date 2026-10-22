@@ -41,11 +41,11 @@ from ..tools.runtime import (
     move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
-    model_roi_windows,
     prepare_square,
     roi_fetch_meta,
+    roi_in_frame,
     roi_is_full,
     square_fetch_batch,
 )
@@ -532,7 +532,14 @@ def _prepare_prithvi_chw(
         # Padded on the bottom and right only: the input keeps the top-left corner.
         h, w = int(x_chw.shape[-2]), int(x_chw.shape[-1])
         nh, nw = int(y.shape[-2]), int(y.shape[-1])
-        shape_prep = {"input_window": (0.0, h / nh, 0.0, w / nw)}
+        input_window = (0.0, h / nh, 0.0, w / nw)
+        shape_prep = {
+            "applied": "pad_bottom_right" if (nh, nw) != (h, w) else "none",
+            "orig_hw": (h, w),
+            "square_hw": (nh, nw),
+            "input_window": input_window,
+            "roi_window": roi_in_frame(input_window, FULL_WINDOW),
+        }
     else:
         raise ModelError(f"Unknown RS_EMBED_PRITHVI_PREP='{prep}'. Use 'resize' or 'pad'.")
 
@@ -1258,16 +1265,17 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         )
 
         cropped_to_roi = not roi_is_full(geo_roi)
-        # ROI mapped through the prep (squaring or bottom/right pad): grid output
-        # is always cropped to it, pooled output only for an ROI sub-window.
-        grid_roi, pool_roi = model_roi_windows(prep_meta.get("shape_prep"), geo_roi)
+        # The ROI is cropped in the prep's frame (squaring or bottom/right pad).
+        shape_prep = prep_meta.get("shape_prep")
 
         if output.mode == "pooled":
             if cropped_to_roi:
                 # Pool only the ROI's tokens (exclude the real-neighborhood context
                 # fetched to make the input square).
                 grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                grid = crop_grid_to_roi(grid, pool_roi)
+                grid, _ = crop_grid_for_output(
+                    grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=True
+                )
                 vec = (
                     grid.max(axis=(1, 2)) if output.pooling == "max" else grid.mean(axis=(1, 2))
                 ).astype("float32")
@@ -1280,7 +1288,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         if output.mode == "grid":
             grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-            grid = crop_grid_to_roi(grid, grid_roi)
+            grid, _ = crop_grid_for_output(
+                grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=False
+            )
             h, w = int(grid.shape[1]), int(grid.shape[2])
             meta.update(
                 {
@@ -1416,15 +1426,16 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         )
 
         cropped_to_roi = not roi_is_full(geo_roi)
-        # ROI mapped through the prep (squaring or bottom/right pad): grid output
-        # is always cropped to it, pooled output only for an ROI sub-window.
-        grid_roi, pool_roi = model_roi_windows(prep_meta.get("shape_prep"), geo_roi)
+        # The ROI is cropped in the prep's frame (squaring or bottom/right pad).
+        shape_prep = prep_meta.get("shape_prep")
 
         if output.mode == "pooled":
             if cropped_to_roi:
                 # Pool only the ROI's tokens (time-collapsed grid, then ROI crop).
                 grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
-                grid = crop_grid_to_roi(grid, pool_roi)
+                grid, _ = crop_grid_for_output(
+                    grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=True
+                )
                 vec = (
                     grid.max(axis=(1, 2)) if output.pooling == "max" else grid.mean(axis=(1, 2))
                 ).astype("float32")
@@ -1443,7 +1454,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         if output.mode == "grid":
             grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
-            grid = crop_grid_to_roi(grid, grid_roi)
+            grid, _ = crop_grid_for_output(
+                grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=False
+            )
             h, w = int(grid.shape[1]), int(grid.shape[2])
             meta.update(
                 {
@@ -1681,18 +1694,20 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                             "target_image_size": target_size,
                             "batch_infer": True,
                             "input_override": True,
+                            "shape_prep": shape_preps[i],
                             **wmeta,
                         },
                     )
 
                     geo_roi_i = _roi_at(i)
                     cropped_i = not roi_is_full(geo_roi_i)
-                    grid_roi_i, pool_roi_i = model_roi_windows(shape_preps[i], geo_roi_i)
 
                     if output.mode == "pooled":
                         if cropped_i:
                             grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                            grid = crop_grid_to_roi(grid, pool_roi_i)
+                            grid, _ = crop_grid_for_output(
+                                grid, geo_roi=geo_roi_i, shape_prep=shape_preps[i], pooled=True
+                            )
                             vec = (
                                 grid.max(axis=(1, 2))
                                 if output.pooling == "max"
@@ -1708,7 +1723,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
                     if output.mode == "grid":
                         grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                        grid = crop_grid_to_roi(grid, grid_roi_i)
+                        grid, _ = crop_grid_for_output(
+                            grid, geo_roi=geo_roi_i, shape_prep=shape_preps[i], pooled=False
+                        )
                         h, w = int(grid.shape[1]), int(grid.shape[2])
                         meta.update(
                             {
@@ -1853,20 +1870,22 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                             "coords_encoding": coords_encoding,
                             "input_hw": (int(x_item.shape[-2]), int(x_item.shape[-1])),
                             "batch_infer": True,
+                            "shape_prep": shape_preps[i],
                             **spacing_meta,
                         },
                     )
 
                     geo_roi_i = _roi_at(i)
                     cropped_i = not roi_is_full(geo_roi_i)
-                    grid_roi_i, pool_roi_i = model_roi_windows(shape_preps[i], geo_roi_i)
 
                     if output.mode == "pooled":
                         if cropped_i:
                             grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(
                                 tokens, n_frames, output.pooling
                             )
-                            grid = crop_grid_to_roi(grid, pool_roi_i)
+                            grid, _ = crop_grid_for_output(
+                                grid, geo_roi=geo_roi_i, shape_prep=shape_preps[i], pooled=True
+                            )
                             vec = (
                                 grid.max(axis=(1, 2))
                                 if output.pooling == "max"
@@ -1892,7 +1911,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(
                             tokens, n_frames, output.pooling
                         )
-                        grid = crop_grid_to_roi(grid, grid_roi_i)
+                        grid, _ = crop_grid_for_output(
+                            grid, geo_roi=geo_roi_i, shape_prep=shape_preps[i], pooled=False
+                        )
                         h, w = int(grid.shape[1]), int(grid.shape[2])
                         meta.update(
                             {

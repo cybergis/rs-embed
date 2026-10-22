@@ -11,7 +11,9 @@ from rs_embed.tools.shape import (
     center_fit,
     center_offset,
     center_pad_to_square,
+    crop_grid_for_output,
     crop_grid_to_roi,
+    fetch_metas_with_roi,
     model_roi_windows,
     prepare_square,
     resize_square,
@@ -322,3 +324,36 @@ def test_square_spatial_window_is_exact():
     top = (1.0 - h / w) / 2.0
     assert geo == (top, top + h / w, 0.0, 1.0)
     assert geo[0] != round(geo[0], 6)
+
+
+def test_crop_grid_for_output_splits_grid_and_pooled_crops():
+    grid = np.arange(8, dtype=np.float32)[None, :, None].repeat(4, axis=2)  # (1, 8, 4)
+    pad = {"input_window": (0.25, 0.75, 0.0, 1.0)}
+    full = (0.0, 1.0, 0.0, 1.0)
+    # Grid output drops the padding rows even for a whole ROI.
+    g, roi_pooled = crop_grid_for_output(grid, geo_roi=full, shape_prep=pad, pooled=False)
+    assert g[0, :, 0].tolist() == [2.0, 3.0, 4.0, 5.0] and roi_pooled is False
+    # Pooled output of a whole ROI keeps the grid for the model's own pooling.
+    g, roi_pooled = crop_grid_for_output(grid, geo_roi=full, shape_prep=pad, pooled=True)
+    assert g is grid and roi_pooled is False
+    # A sub-window is pooled over its cells, mapped through the pad.
+    g, roi_pooled = crop_grid_for_output(
+        grid, geo_roi=(0.5, 1.0, 0.0, 1.0), shape_prep=pad, pooled=True
+    )
+    assert g[0, :, 0].tolist() == [4.0, 5.0] and roi_pooled is True
+
+
+def test_model_roi_windows_warns_when_the_roi_is_cropped_away():
+    crop = {"input_window": (0.0, 1.0, -0.5, 1.5)}  # the long axis lost a quarter each side
+    with pytest.warns(UserWarning, match="lies outside the part of the input"):
+        model_roi_windows(crop, (0.0, 1.0, 0.0, 0.2))
+
+
+def test_fetch_metas_with_roi_lets_the_window_list_win():
+    metas = [{"roi_window_geo": (0.0, 1.0, 0.0, 1.0), "flag": True}, None, {"x": 1}]
+    windows = [(0.0, 0.5, 0.0, 1.0), np.array([0.25, 0.75, 0.0, 1.0]), None]
+    out = fetch_metas_with_roi(metas, windows, 3)
+    assert out[0] == {"flag": True, "roi_window_geo": (0.0, 0.5, 0.0, 1.0)}
+    assert out[1] == {"roi_window_geo": (0.25, 0.75, 0.0, 1.0)}  # numpy windows work
+    assert out[2] == {"x": 1}
+    assert fetch_metas_with_roi(metas, None, 3) is metas

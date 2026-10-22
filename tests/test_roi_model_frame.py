@@ -103,6 +103,13 @@ def test_remoteclip_center_crop_window():
     # A square image is fed as-is.
     assert _remoteclip_shape_prep(np.zeros((64, 64, 3), np.uint8))["input_window"] == _FULL
 
+    # A wrapper with its own transform has unknown geometry: no mapping.
+    class _WithTransform:
+        def transform(self, img, size):
+            return img
+
+    assert _remoteclip_shape_prep(np.zeros((100, 200, 3), np.uint8), _WithTransform()) is None
+
 
 @pytest.mark.parametrize(
     ("prep_mode", "window"),
@@ -121,6 +128,8 @@ def test_prithvi_prep_records_the_input_window(monkeypatch, prep_mode, window):
     _, meta = _prepare_prithvi_chw(np.ones((6, 20, 30), np.float32), fill_value=0.0)
 
     assert meta["shape_prep"]["input_window"] == pytest.approx(window)
+    assert meta["shape_prep"]["applied"] in {"pad_bottom_right", "pad_to_square"}
+    assert meta["shape_prep"]["orig_hw"] == (20, 30)
 
 
 @pytest.mark.parametrize(

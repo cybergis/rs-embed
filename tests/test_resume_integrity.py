@@ -275,7 +275,7 @@ def test_init_state_drops_arrays_of_removed_models(tmp_path):
     [
         ("onthefly", None, True),  # default tile prep: affected
         ("onthefly", "auto", True),
-        ("onthefly", "resize", False),  # resize never tiles
+        ("onthefly", "resize", True),  # the ROI crop changed under resize too
         ("precomputed", None, False),  # precomputed models do not tile
     ],
 )
@@ -340,3 +340,12 @@ def test_prefetch_checkpoint_round_trips_fetch_meta():
 
     assert geo_roi_from_meta(restored[(0, "s2")]) == (0.25, 0.75, 0.0, 1.0)
     assert set(CheckpointManager.restore_prefetch_cache(manifest, arrays)) == set(restored)
+
+
+def test_final_manifest_drops_prefetch_fetch_meta():
+    """The fetch metadata only serves a resume, so the final manifest drops it."""
+    from rs_embed.pipelines.checkpoint import CheckpointManager
+
+    manifest = {"prefetch": {"s2": {"npz_key": "k", "fetch_meta": {"0": {"a": 1}}}}}
+    CheckpointManager.drop_prefetch_arrays({}, manifest)
+    assert manifest == {"prefetch": {"s2": {"npz_key": "k"}}}

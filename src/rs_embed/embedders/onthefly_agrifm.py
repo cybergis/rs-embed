@@ -42,9 +42,8 @@ from ..tools.runtime import (
     move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
-    model_roi_windows,
     prepare_square,
     roi_fetch_meta,
     square_fetch_batch,
@@ -767,8 +766,9 @@ class AgriFMEmbedder(EmbedderBase):
         # Crop the token grid (D, H', W') back to the ROI, mapped through the
         # squaring: grid output always (dropping padding), pooled output only
         # for an ROI sub-window (no-op when the window is full).
-        grid_roi, pool_roi = model_roi_windows(shape_prep, geo_roi)
-        grid = crop_grid_to_roi(grid, grid_roi if output.mode == "grid" else pool_roi)
+        grid, _ = crop_grid_for_output(
+            grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=output.mode == "pooled"
+        )
         meta = build_meta(
             model=self.model_name,
             kind="on_the_fly",
@@ -783,6 +783,7 @@ class AgriFMEmbedder(EmbedderBase):
                 "norm_mode": norm_mode,
                 "input_hw": (int(raw_tchw.shape[-2]), int(raw_tchw.shape[-1])),
                 "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "shape_prep": shape_prep,
                 **diversity_meta,
                 **check_meta,
                 **wmeta,

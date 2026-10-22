@@ -380,7 +380,7 @@ class BatchExporter:
         )
 
         # Drop prefetch checkpoint arrays before final write
-        self.checkpoint.drop_prefetch_arrays(arrays)
+        self.checkpoint.drop_prefetch_arrays(arrays, manifest)
 
         # Summarize
         model_entries = manifest.get("models", [])

@@ -50,7 +50,8 @@ model that pads, crops or center-crops that array on the way in first maps the
 window into its own input's frame (`model_roi_windows`, through
 `meta["shape_prep"]["input_window"]`). Grid output also drops whole cells of such
 padding; `pooled` output pools ROI tokens only when the ROI is a sub-window, and
-otherwise keeps the model's own pooled vector. The stitched grid from the tile path
+otherwise keeps the model's own pooled vector (`olmoearth` and `thor` pool only the
+input's valid region even then). The stitched grid from the tile path
 is cropped the same way, and tiled `pooled` embeddings are weighted by each tile's
 ROI-overlap area. The result describes **your** ROI, not the enlarged square.
 
@@ -128,7 +129,7 @@ this fallback; see the THOR page.
 | `meta["shape_prep"]["applied"]` | `none` / `pad_to_square` / `crop_to_square` (fallback path) |
 | `meta["shape_prep"]["orig_hw"]` / `["square_hw"]` / `["target_hw"]` | ROI shape, squared shape, final model size |
 | `meta["shape_prep"]["aspect"]` | `long_side / short_side` (≥ 2.0 triggers the heavy-padding warning) |
-| `meta["shape_prep"]["input_window"]` | Where the input lies in the squared array, as exact fractions `(y0, y1, x0, x1)`; past `[0, 1]` on a cropped axis |
+| `meta["shape_prep"]["input_window"]` | Where the input lies in the squared array, as exact fractions `(y0, y1, x0, x1)`; past `[0, 1]` on a cropped axis. Recorded by models that square their input (`clay` and `dofa` under `meta["preprocess"]["resize_meta"]["shape_prep"]`) |
 | `meta["shape_prep"]["roi_window"]` | `input_window` clipped to the square |
 
 `roi_cropped=True` means you got the ROI, not the square.

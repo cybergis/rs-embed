@@ -9,12 +9,17 @@ copies; model-specific wording is parameterized, never rewritten.
 
 from __future__ import annotations
 
+import math
 import os
 from typing import Any
 
 import numpy as np
 
+from ..core.embedding import Embedding
 from ..core.errors import ModelError
+from ..core.specs import OutputSpec
+from ..tools.shape import crop_grid_for_output, roi_is_full
+from ..tools.spatial import FULL_WINDOW
 
 
 def reduce_tokens(tokens, pooling):
@@ -35,6 +40,63 @@ def pool_from_tokens(tokens, pooling):
     if len(patch) == 0:
         return tokens[0].astype("float32"), has_cls
     return reduce_tokens(patch, pooling), has_cls
+
+
+def build_vit_patch_embedding(
+    tokens_nd: np.ndarray,
+    pooled_d: np.ndarray,
+    *,
+    geo_roi: tuple[float, float, float, float] | None,
+    shape_prep: dict[str, Any] | None,
+    output: OutputSpec,
+    base_meta: dict[str, Any],
+    patch_size: int,
+    model_label: str,
+    native_pooling: str | None = None,
+) -> Embedding:
+    """Turn square ViT patch tokens [N,D] + a pooled vector [D] into an Embedding.
+
+    The ROI is cropped in the model's frame (``crop_grid_for_output``): grid
+    output is cropped to it, dropping padding; pooled output means the ROI's
+    tokens (``roi_grid_mean``) when ``geo_roi`` is a sub-window and is
+    *pooled_d* otherwise (labelled *native_pooling* when given).
+    """
+    geo_roi = tuple(geo_roi or FULL_WINDOW)
+    pooled_out = output.mode == "pooled"
+    grid = None
+    if output.mode == "grid" or (pooled_out and not roi_is_full(geo_roi)):
+        n, d = tokens_nd.shape
+        side = int(round(math.sqrt(n)))
+        if side * side != n:
+            raise ModelError(f"{model_label} tokens N={n} not square; cannot reshape to grid.")
+        grid = tokens_nd.reshape(side, side, d).transpose(2, 0, 1).astype(np.float32)
+        grid, _ = crop_grid_for_output(
+            grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=pooled_out
+        )
+
+    if pooled_out:
+        # The grid is only built for pooled output when the ROI is a sub-window.
+        roi_pooled = grid is not None
+        vec = grid.mean(axis=(1, 2)) if roi_pooled else pooled_d
+        vec = np.asarray(vec, dtype=np.float32)
+        meta = {**base_meta, "pooled_shape": tuple(vec.shape)}
+        if roi_pooled:
+            meta["pooling"] = "roi_grid_mean"
+        elif native_pooling is not None:
+            meta["pooling"] = native_pooling
+        return Embedding(data=vec, meta=meta)
+
+    if output.mode == "grid":
+        meta = {
+            **base_meta,
+            "grid_type": "vit_patch_tokens",
+            "grid_shape": tuple(grid.shape),
+            "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
+            "patch_size": int(patch_size),
+        }
+        return Embedding(data=grid_to_dataarray(grid, meta=meta), meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
 
 
 def tokens_to_grid_dhw(tokens):
