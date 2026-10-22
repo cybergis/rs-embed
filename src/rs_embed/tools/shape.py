@@ -22,8 +22,9 @@ output can always be cropped back to the real ROI — it never silently stretche
 All helpers operate on the **last two axes** (``..., H, W``) so the same code
 serves ``CHW`` and ``TCHW`` (and any leading-dim) layouts identically.
 
-Mirrors the proven crop/pad-to-square logic in the THOR embedder; THOR keeps its
-own multi-GSD ``native_snap`` path and is intentionally left untouched.
+Every centered crop and pad here places the input with :func:`center_offset`,
+so callers that need to know where the input landed (e.g. THOR's ``native_snap``
+via :func:`center_fit`) can compute it with the same convention.
 """
 
 from __future__ import annotations
@@ -40,11 +41,14 @@ from ..core.specs import SpatialSpec
 from .spatial import FULL_WINDOW, square_spatial
 
 __all__ = [
+    "center_offset",
+    "center_fit",
     "center_crop_to_square",
     "center_pad_to_square",
     "resize_square",
     "prepare_square",
     "roi_is_full",
+    "roi_in_frame",
     "roi_token_box",
     "crop_grid_to_roi",
     "geo_roi_from_meta",
@@ -67,12 +71,53 @@ def _hw(x: np.ndarray) -> tuple[int, int]:
     return int(x.shape[-2]), int(x.shape[-1])
 
 
+def center_offset(inner: int, outer: int) -> int:
+    """Start of a centered length-*inner* span within length *outer*.
+
+    Negative when *inner* is longer (the span is cropped). The odd pixel of a
+    pad or crop always goes after the span.
+    """
+    return (outer - inner) // 2 if outer >= inner else -((inner - outer) // 2)
+
+
+def center_fit(
+    x: np.ndarray,
+    *,
+    out_h: int,
+    out_w: int,
+    pad_mode: str = "edge",
+) -> np.ndarray:
+    """Center-crop or center-pad the last two axes to ``(out_h, out_w)``.
+
+    Each axis is cropped where it is longer and padded (``np.pad`` *pad_mode*)
+    where it is shorter; the input's top-left lands at ``(center_offset(H,
+    out_h), center_offset(W, out_w))`` of the result. Returns ``x`` itself when
+    the shape already matches.
+    """
+    h, w = _hw(x)
+    out_h, out_w = int(out_h), int(out_w)
+    if (h, w) == (out_h, out_w):
+        return x
+    top, left = center_offset(h, out_h), center_offset(w, out_w)
+    y0, x0 = max(0, -top), max(0, -left)
+    kept_h, kept_w = min(h, out_h), min(w, out_w)
+    x = x[..., y0 : y0 + kept_h, x0 : x0 + kept_w]
+    pad_top, pad_left = max(0, top), max(0, left)
+    pad_width = [(0, 0)] * (x.ndim - 2) + [
+        (pad_top, out_h - kept_h - pad_top),
+        (pad_left, out_w - kept_w - pad_left),
+    ]
+    if kept_h != out_h or kept_w != out_w:
+        x = np.pad(x, pad_width, mode=pad_mode)
+    return np.ascontiguousarray(x)
+
+
 def center_crop_to_square(x: np.ndarray) -> np.ndarray:
     """Center-crop the last two axes (``..., H, W``) to ``side = min(H, W)``."""
     h, w = _hw(x)
     side = min(h, w)
-    y0 = (h - side) // 2
-    x0 = (w - side) // 2
+    y0 = -center_offset(h, side)
+    x0 = -center_offset(w, side)
     return np.ascontiguousarray(x[..., y0 : y0 + side, x0 : x0 + side])
 
 
@@ -94,7 +139,7 @@ def center_pad_to_square(
     if side == min(h, w):
         return np.ascontiguousarray(x)
     pad_h, pad_w = side - h, side - w
-    top, left = pad_h // 2, pad_w // 2
+    top, left = center_offset(h, side), center_offset(w, side)
     pad_width = [(0, 0)] * (x.ndim - 2) + [(top, pad_h - top), (left, pad_w - left)]
 
     mode = str(pad_mode).lower()
@@ -250,12 +295,15 @@ def roi_token_box(
 
     Rounds outward (floor low edge, ceil high edge) so the ROI is never
     under-covered, and always returns at least a 1×1 box clamped to the grid.
+    An edge within float round-off of a token boundary counts as on it, so a
+    window computed from pixel fractions does not pull in a whole extra token.
     """
+    eps = 1e-6
     y0f, y1f, x0f, x1f = roi_window
-    y0 = max(0, min(int(np.floor(y0f * grid_h)), grid_h - 1))
-    y1 = max(y0 + 1, min(int(np.ceil(y1f * grid_h)), grid_h))
-    x0 = max(0, min(int(np.floor(x0f * grid_w)), grid_w - 1))
-    x1 = max(x0 + 1, min(int(np.ceil(x1f * grid_w)), grid_w))
+    y0 = max(0, min(int(np.floor(y0f * grid_h + eps)), grid_h - 1))
+    y1 = max(y0 + 1, min(int(np.ceil(y1f * grid_h - eps)), grid_h))
+    x0 = max(0, min(int(np.floor(x0f * grid_w + eps)), grid_w - 1))
+    x1 = max(x0 + 1, min(int(np.ceil(x1f * grid_w - eps)), grid_w))
     return y0, y1, x0, x1
 
 

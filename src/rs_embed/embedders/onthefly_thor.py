@@ -43,15 +43,14 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    center_crop_to_square,
-    center_pad_to_square,
+    center_fit,
+    center_offset,
     crop_grid_and_pool,
     crop_grid_to_roi,
     geo_roi_from_meta,
     roi_fetch_meta,
     roi_in_frame,
     roi_is_full,
-    roi_token_box,
     square_fetch_batch,
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
@@ -346,34 +345,6 @@ def _thor_estimated_patch_tokens(
     return int(total)
 
 
-def _center_offset(inner: int, outer: int) -> int:
-    """Offset of a centered length-*inner* span in *outer* (negative when cropped).
-
-    Matches the split used by ``center_crop_to_square`` / ``center_pad_to_square``
-    and :func:`_thor_edge_pad_to_side`.
-    """
-    return (outer - inner) // 2 if outer >= inner else -((inner - outer) // 2)
-
-
-def _thor_edge_pad_to_side(x_chw: np.ndarray, *, side: int) -> np.ndarray:
-    """Center-pad a square CHW array up to *side* by replicating its edge pixels.
-
-    Edge replication keeps the border tokens on real surface values (a constant
-    fill would drag them toward an out-of-distribution "all nodata" point, the
-    same reason the tiler replicates edges).
-    """
-    cur = int(x_chw.shape[-1])
-    if int(x_chw.shape[-2]) != cur or int(side) < cur:
-        raise ModelError(
-            f"THOR edge pad expects a square input no larger than {side}, got {x_chw.shape[-2:]}."
-        )
-    before = _center_offset(cur, int(side))
-    after = int(side) - cur - before
-    return np.ascontiguousarray(
-        np.pad(x_chw, ((0, 0), (before, after), (before, after)), mode="edge")
-    )
-
-
 def _thor_snap_side_to_valid(
     side: int,
     *,
@@ -383,8 +354,9 @@ def _thor_snap_side_to_valid(
 ) -> int:
     """The smallest valid THOR side ``>= side``.
 
-    Snapping only upward (padding) never drops ROI pixels; the padded border is
-    excluded from the output through ``input_window``.
+    Snapping upward pads instead of cropping, so no ROI pixel is dropped;
+    ``_prepare_thor_raw_chw`` only steps down one unit when padding would
+    break a native limit.
     """
     unit = _thor_valid_side_unit(
         scale_m=scale_m,
@@ -478,15 +450,17 @@ def _prepare_thor_raw_chw(
     """Prepare a CHW input for THOR; ``meta['input_window']`` says where it lies.
 
     ``input_window`` is the raw input's position in the returned array, as
-    fractions ``(y0, y1, x0, x1)``; it extends past ``[0, 1]`` on an axis that
-    ``shape_adjust='crop'`` cropped. ``get_embedding`` maps the ROI window
-    through it (``roi_in_frame``) so the output covers the ROI, not the padding.
+    fractions ``(y0, y1, x0, x1)``; it extends past ``[0, 1]`` on a cropped
+    axis. ``get_embedding`` maps the ROI window through it (``roi_in_frame``)
+    so the output covers the ROI, not the padding.
     """
     x = np.asarray(raw_chw, dtype=np.float32)
     if x.ndim != 3:
         raise ModelError(f"THOR expected CHW input, got {getattr(x, 'shape', None)}")
 
     h, w = int(x.shape[-2]), int(x.shape[-1])
+    if h == 0 or w == 0:
+        raise ModelError(f"THOR received an empty input of shape {x.shape}.")
     meta: dict[str, Any] = {
         "resize_mode_requested": str(resize_mode),
         "input_prep_mode": str(input_prep_mode or "resize"),
@@ -532,50 +506,60 @@ def _prepare_thor_raw_chw(
         meta.update(_thor_fixed_resize_meta(**fixed_kwargs, reason=str(fallback_reason)))
         return x, meta
 
+    # Square side before snapping: the short side under shape_adjust='crop',
+    # the long side under 'pad'; one center_fit below crops/pads both axes.
     if shape_adjust == "crop":
-        x_sq = center_crop_to_square(x)
+        square_side = min(h, w)
         if h != w:
             meta["shape_adjust_applied"] = "crop_to_square"
     else:
-        x_sq = center_pad_to_square(x, pad_mode="edge")
+        square_side = max(h, w)
         if h != w:
             meta["shape_adjust_applied"] = "pad_to_square"
 
-    square_side = int(x_sq.shape[-1])
     side_unit = _thor_valid_side_unit(
         scale_m=int(scale_m),
         patch_size=int(patch_size),
         band_gsds=tuple(band_gsds),
     )
+
+    def _tokens_and_limit(side: int) -> tuple[int, str | None]:
+        tokens = _thor_estimated_patch_tokens(
+            side=int(side),
+            scale_m=int(scale_m),
+            patch_size=int(patch_size),
+            band_gsds=tuple(band_gsds),
+        )
+        if tokens is None:
+            raise ModelError(
+                f"THOR snapped side {side} does not fit the patch grid "
+                f"(side unit {side_unit}); this is a bug in the THOR side snapping."
+            )
+        if int(side) > int(max_native_side):
+            return tokens, "native_side_limit"
+        if int(tokens) > int(max_native_tokens):
+            return tokens, "native_token_limit"
+        return tokens, None
+
     snapped_side = _thor_snap_side_to_valid(
         square_side,
         scale_m=int(scale_m),
         patch_size=int(patch_size),
         band_gsds=tuple(band_gsds),
     )
-    est_tokens = _thor_estimated_patch_tokens(
-        side=int(snapped_side),
-        scale_m=int(scale_m),
-        patch_size=int(patch_size),
-        band_gsds=tuple(band_gsds),
-    )
+    est_tokens, limit_reason = _tokens_and_limit(snapped_side)
+    if limit_reason is not None and snapped_side > square_side > side_unit:
+        # Padding up broke a limit the valid side below would meet: cropping
+        # less than one unit beats resampling the whole input.
+        lower_tokens, lower_limit = _tokens_and_limit(snapped_side - side_unit)
+        if lower_limit is None:
+            snapped_side, est_tokens, limit_reason = snapped_side - side_unit, lower_tokens, None
 
     meta["square_side"] = int(square_side)
     meta["side_unit"] = int(side_unit)
     meta["snapped_side"] = int(snapped_side)
     meta["estimated_patch_tokens"] = est_tokens
 
-    if est_tokens is None:
-        raise ModelError(
-            f"THOR snapped side {snapped_side} does not fit the patch grid "
-            f"(side unit {side_unit}); this is a bug in the THOR side snapping."
-        )
-
-    limit_reason = None
-    if int(snapped_side) > int(max_native_side):
-        limit_reason = "native_side_limit"
-    elif int(est_tokens) > int(max_native_tokens):
-        limit_reason = "native_token_limit"
     if limit_reason is not None:
         # Tokens are fixed by ground cover / (patch_size * GSD) and grow with the
         # side, so resizing to image_size only cuts them when image_size is the
@@ -597,13 +581,17 @@ def _prepare_thor_raw_chw(
             stacklevel=2,
         )
 
-    x_native = _thor_edge_pad_to_side(x_sq, side=int(snapped_side))
-    meta["snap_adjust_applied"] = (
-        "pad_to_valid_side" if int(snapped_side) > int(square_side) else "none"
-    )
+    # Pads replicate edge pixels: a constant fill would drag the border tokens
+    # toward an out-of-distribution "all nodata" point (as in the tiler).
+    x_native = center_fit(x, out_h=snapped_side, out_w=snapped_side, pad_mode="edge")
+    if snapped_side > square_side:
+        meta["snap_adjust_applied"] = "pad_to_valid_side"
+    elif snapped_side < square_side:
+        meta["snap_adjust_applied"] = "crop_to_valid_side"
+    else:
+        meta["snap_adjust_applied"] = "none"
     side_f = float(snapped_side)
-    top = _center_offset(square_side, snapped_side) + _center_offset(h, square_side)
-    left = _center_offset(square_side, snapped_side) + _center_offset(w, square_side)
+    top, left = center_offset(h, snapped_side), center_offset(w, snapped_side)
     meta["input_window"] = (top / side_f, (top + h) / side_f, left / side_f, (left + w) / side_f)
 
     meta["preprocess_strategy"] = "native_snap"
@@ -1396,24 +1384,21 @@ class THORBaseEmbedder(EmbedderBase):
 
         # The ROI window is relative to the fetched input; native_snap padded (or
         # cropped) it on the way into the model, so map the window into the
-        # model input's frame before cropping the output grid.
+        # model input's frame before cropping the output grid. Whether pooled
+        # output pools the ROI grid depends only on the ROI itself, never on
+        # how the snap padding rounds to tokens.
         roi = roi_in_frame(prep_meta["input_window"], geo_roi)
-        if grid is not None:
-            gh, gw = int(grid.shape[-2]), int(grid.shape[-1])
-            if roi_token_box(roi, grid_h=gh, grid_w=gw) == (0, gh, 0, gw):
-                # Padding within the border tokens: nothing to crop, so keep
-                # the token-level pooling below.
-                roi = FULL_WINDOW
-        cropped_to_roi = not roi_is_full(roi)
+        roi_is_sub_window = not roi_is_full(geo_roi)
 
         if output.mode == "pooled":
-            if cropped_to_roi and grid is not None:
+            if roi_is_sub_window and grid is not None:
                 # Pool only the ROI tokens (the global pool would include the
-                # real-neighborhood context fetched only to square the input,
-                # or the border padded on to reach a valid side).
+                # real-neighborhood context fetched only to square the input).
                 _, vec = crop_grid_and_pool(grid, roi, pooling=output.pooling, pooled_fallback=None)
                 out_meta = {**meta, "pooling": f"roi_grid_{output.pooling}", "cls_removed": False}
                 return Embedding(data=vec.astype(np.float32), meta=out_meta)
+            # Whole ROI: THOR's token-level pool, which also sees any snap
+            # padding (at most one token per side, replicated edge pixels).
             vec, cls_removed = _pool_thor_tokens(
                 tokens,
                 pooling=output.pooling,
@@ -1432,8 +1417,8 @@ class THORBaseEmbedder(EmbedderBase):
                     "THOR grid output is unavailable for this configuration. "
                     "Try pooled output, or use default model/input settings."
                 )
-            if cropped_to_roi:
-                grid = crop_grid_to_roi(grid, roi)
+            # Drops the ROI-context margin and any whole tokens of snap padding.
+            grid = crop_grid_to_roi(grid, roi)
             gmeta = {
                 **meta,
                 "grid_shape": tuple(grid.shape),

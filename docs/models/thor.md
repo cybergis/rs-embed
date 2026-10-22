@@ -125,7 +125,7 @@ flowchart LR
 
     For the current default S2 10m/20m path with `patch_size=8`, `side=384` corresponds to about `2880` patch tokens, which is why `384` is the default ceiling.
 
-    Within the limits, `native_snap` pads the square input up to the next valid side (a multiple of 16 px at `patch_size=8` and 10 m) by replicating its edge pixels, so no ROI pixel is dropped and no zero fill reaches the model. `meta["input_window"]` records where the input lies in the padded array; the ROI crop of grid and pooled outputs is mapped through it, and whole tokens of padding are cropped from the output.
+    `native_snap` pads the square input up to the next valid side (a multiple of 16 px at `patch_size=8` and 10 m) by replicating its edge pixels, so no ROI pixel is dropped and no zero fill reaches the model. Only when padding up would break one of the limits above while the valid side below meets them does it crop instead, by less than one unit (e.g. 388 px runs at 384 px instead of falling back to a 288 px resize). `meta["input_window"]` records where the input lies in the array fed to THOR, and the ROI crop is mapped through it: grid output drops the ROI's context margin and any whole tokens of padding, and pooled output of an ROI sub-window pools the ROI's grid cells. A whole ROI always keeps THOR's token-level pool, which also covers the padding (at most one token per side).
 
     Each distinct native side has its own ground cover, and THOR builds one model per ground cover (up to 8 stay cached). THOR exports run point by point in input order, so ROIs that snap to many different sides rebuild the model often (about 0.6 s each for `base` with cached weights). Use ROIs of one size, e.g. a fixed `PointBuffer` radius, to keep a single model.
 

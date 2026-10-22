@@ -8,6 +8,8 @@ import pytest
 from rs_embed.core.errors import ModelError
 from rs_embed.tools.shape import (
     center_crop_to_square,
+    center_fit,
+    center_offset,
     center_pad_to_square,
     crop_grid_to_roi,
     prepare_square,
@@ -239,3 +241,20 @@ def test_roi_in_frame_maps_a_window_through_padding_and_cropping():
     )
     # A cropped axis extends past [0, 1]; the mapped window is clipped to the array.
     assert roi_in_frame((-0.1, 1.1, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)) == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_center_fit_crops_and_pads_each_axis_around_center_offset():
+    x = np.arange(5 * 3, dtype=np.float32).reshape(1, 5, 3)
+    y = center_fit(x, out_h=4, out_w=6, pad_mode="edge")
+
+    assert y.shape == (1, 4, 6)
+    top, left = center_offset(5, 4), center_offset(3, 6)
+    assert (top, left) == (0, 1)  # 1 px cropped after on H; 1 before / 2 after on W
+    np.testing.assert_array_equal(y[0, :, 1:4], x[0, 0:4, :])
+    np.testing.assert_array_equal(y[0, :, 0], x[0, 0:4, 0])  # edge replicated
+    assert center_fit(x, out_h=5, out_w=3) is x
+
+
+def test_roi_token_box_ignores_float_round_off_at_token_edges():
+    # 4/392 of a 98-token grid is exactly token 1, but evaluates to 0.99999...
+    assert roi_token_box((4 / 392, 1.0, 0.0, 1.0), grid_h=98, grid_w=98) == (1, 98, 0, 98)

@@ -478,10 +478,12 @@ def test_thor_get_embedding_s1_uses_vvvh_model_bands(monkeypatch):
 
 
 def _thor_with_fake_forward(monkeypatch, *, grid_side):
+    import os
+
     import rs_embed.embedders.onthefly_thor as thor
 
-    for var in ("RS_EMBED_THOR_IMG", "RS_EMBED_THOR_PATCH_SIZE", "RS_EMBED_THOR_RESIZE_MODE"):
-        monkeypatch.delenv(var, raising=False)
+    for var in [k for k in os.environ if k.startswith("RS_EMBED_THOR_")]:
+        monkeypatch.delenv(var)
     rows = np.arange(grid_side, dtype=np.float32)[None, :, None]
     grid = np.broadcast_to(rows, (8, grid_side, grid_side)).copy()
 
@@ -519,22 +521,61 @@ def test_thor_roi_crop_uses_the_snapped_frame(monkeypatch):
     assert data[0, 0, 0] == 8.0
 
 
-def test_thor_padding_within_border_tokens_keeps_token_pooling(monkeypatch):
-    # 200 px pads 4 px per side into 208 px: less than one 8 px token, so the
-    # pooled vector stays the token-level pool instead of a cropped grid pool.
-    emb = _thor_with_fake_forward(monkeypatch, grid_side=26)
-    out = emb.get_embedding(
-        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=1000),
+def _thor_embed(emb, side, output, fetch_meta=None):
+    return emb.get_embedding(
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=5 * side),
         temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
         sensor=None,
-        output=OutputSpec.pooled(),
+        output=output,
         backend="gee",
         device="cpu",
-        input_chw=np.ones((10, 200, 200), dtype=np.float32),
+        input_chw=np.ones((10, side, side), dtype=np.float32),
+        fetch_meta=fetch_meta,
     )
 
+
+@pytest.mark.parametrize("side", [288, 289, 290])
+def test_thor_whole_roi_always_keeps_token_pooling(monkeypatch, side):
+    # Whether the snap padding fills a whole token (289 pads 7/8 px to 304) or
+    # not (290 pads 7/7), a whole ROI pools THOR's tokens, so neighbouring ROI
+    # sizes stay comparable (and keep the same length under concat merging).
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=38)
+    out = _thor_embed(emb, side, OutputSpec.pooled())
+
     assert out.meta["pooling"] == "mean"
-    assert out.meta["input_window"] == pytest.approx((4 / 208, 204 / 208, 4 / 208, 204 / 208))
+    assert out.data.shape == (8,)
+
+
+def test_thor_grid_drops_whole_tokens_of_snap_padding(monkeypatch):
+    # 289 px pads 7 px before and 8 px after to reach 304; the last 8 px token
+    # row/column is pure padding and is cropped from grid output.
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=38)
+    out = _thor_embed(emb, 289, OutputSpec.grid())
+
+    assert np.asarray(out.data).shape == (8, 37, 37)
+
+
+def test_prepare_thor_raw_chw_steps_down_instead_of_breaking_the_side_limit():
+    # 388 px would pad up to 400 > max_native_side=384 and fall back to a 288 px
+    # resize; cropping 2 px per side to 384 keeps it native at exact spacing.
+    import warnings
+
+    raw = np.ones((10, 388, 388), dtype=np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out, meta = _prepare_default(raw)
+
+    assert out.shape == (10, 384, 384)
+    assert meta["preprocess_strategy"] == "native_snap"
+    assert meta["snap_adjust_applied"] == "crop_to_valid_side"
+    assert meta["input_window"] == pytest.approx((-2 / 384, 386 / 384, -2 / 384, 386 / 384))
+
+
+def test_prepare_thor_raw_chw_rejects_empty_input():
+    from rs_embed.core.errors import ModelError
+
+    with pytest.raises(ModelError, match="empty input"):
+        _prepare_default(np.zeros((10, 0, 0), dtype=np.float32))
 
 
 def test_enable_alibi_for_timm_patches_block_and_attention():
