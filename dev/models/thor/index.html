@@ -2699,12 +2699,12 @@
 <tr>
 <td><code>RS_EMBED_THOR_MAX_NATIVE_SIDE</code></td>
 <td><code>384</code></td>
-<td>Largest snapped native side allowed before falling back to fixed resize</td>
+<td>Snapped native side above which THOR falls back to fixed resize, if that lowers the token count</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_THOR_MAX_NATIVE_TOKENS</code></td>
 <td><code>3000</code></td>
-<td>Largest estimated THOR patch-token count allowed for <code>native_snap</code></td>
+<td>Patch-token count above which THOR falls back to fixed resize, if that lowers the count</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_THOR_FETCH_WORKERS</code></td>
@@ -2721,13 +2721,19 @@
 </div>
 <div class="tabbed-block">
 <p><code>input_prep="resize"</code> means one whole input patch goes through THOR once; in that path the adapter may use <code>native_snap</code>.</p>
-<p><code>input_prep="tile"</code> means the API slices a larger input into multiple tiles first; inside that tiled path THOR intentionally uses fixed per-tile resize behavior so the stitched output still maps cleanly back to the tile layout.</p>
+<p><code>input_prep="tile"</code> means the API slices a larger input into multiple tiles first; inside that tiled path THOR intentionally uses fixed per-tile resize behavior so the stitched output still maps cleanly back to the tile layout. An input that fits one tile is not tiled: it is passed whole, exactly as in <code>resize</code> mode.</p>
 </div>
 <div class="tabbed-block">
-<p><code>native_snap</code> is intentionally bounded. It only stays on the native path when the input is close to square, the snapped side does not exceed <code>RS_EMBED_THOR_MAX_NATIVE_SIDE</code>, and the estimated THOR patch-token count does not exceed <code>RS_EMBED_THOR_MAX_NATIVE_TOKENS</code>.</p>
+<p><code>native_snap</code> is intentionally bounded. An input that is not close to square always falls back to fixed resize. Past <code>RS_EMBED_THOR_MAX_NATIVE_SIDE</code> or <code>RS_EMBED_THOR_MAX_NATIVE_TOKENS</code>, THOR falls back only when that lowers the token count (see below), so an input below <code>RS_EMBED_THOR_IMG</code> can stay native past either limit.</p>
 <p>For the current default S2 10m/20m path with <code>patch_size=8</code>, <code>side=384</code> corresponds to about <code>2880</code> patch tokens, which is why <code>384</code> is the default ceiling.</p>
+<p>Each distinct native side has its own ground cover, and THOR builds one model per ground cover (up to 8 stay cached). THOR exports run point by point in input order, so ROIs that snap to many different sides rebuild the model often (about 0.6 s each for <code>base</code> with cached weights). Use ROIs of one size, e.g. a fixed <code>PointBuffer</code> radius, to keep a single model.</p>
+<p>Past either limit, THOR falls back to a fixed resize to <code>RS_EMBED_THOR_IMG</code>, but only when that resize actually lowers the token count, i.e. when <code>RS_EMBED_THOR_IMG</code> is smaller than the snapped side. The token count is set by ground cover / (<code>patch_size</code> × GSD), so a resize to a larger side would add tokens and misstate the geometry. In that case THOR runs the input natively, emits a <code>UserWarning</code> and records <code>meta["native_limit_exceeded"]</code>. With <code>patch_size=4</code>, for example, a 256 px input needs 5120 tokens and runs natively (the 288 px fallback would need 6480), while a 380 px input falls back to 288 px. Raise <code>RS_EMBED_THOR_MAX_NATIVE_TOKENS</code> to keep larger inputs native. Under <code>input_prep="resize"</code>, switching to <code>"tile"</code> also keeps inputs larger than one tile at native spacing.</p>
 </div>
 </div>
+</div>
+<div class="admonition warning">
+<p class="admonition-title">Fixed resize changes the pixel spacing THOR assumes</p>
+<p>THOR reads each band's GSD (10 m / 20 m) from its channel config and is told a ground cover of <code>scale_m × RS_EMBED_THOR_IMG</code>. Any fixed resize of an input whose side is not <code>RS_EMBED_THOR_IMG</code> therefore runs the model at the wrong scale. For example, a 256 px (2560 m) input stretched to 288 px is treated as 2880 m at 10 m, but the real spacing is 8.89 m, and patch-size embeddings and output grid cells are off by the same factor. THOR emits a <code>UserWarning</code> when this happens and records the real spacing in <code>meta["effective_gsd_m"]</code> (per axis, <code>(y, x)</code>) and <code>meta["gsd_mismatch"]</code>. <code>native_snap</code> only crops or pads, so its spacing stays exact.</p>
 </div>
 <h2 id="model-specific-settings">Model-specific Settings<a class="headerlink" href="#model-specific-settings" title="Permanent link">&para;</a></h2>
 <p><code>variant</code> selects the THOR backbone size. In <code>rs-embed</code>, pass it as <code>variant="tiny" | "small" | "base" | "large"</code>.</p>
@@ -2866,13 +2872,13 @@
 <span class="nb">export</span><span class="w"> </span><span class="nv">RS_EMBED_THOR_MAX_NATIVE_SIDE</span><span class="o">=</span><span class="m">384</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">RS_EMBED_THOR_MAX_NATIVE_TOKENS</span><span class="o">=</span><span class="m">3000</span>
 </code></pre></div>
-<p>This lets THOR keep a snapped native side for near-square inputs such as <code>289x288</code> or <code>300x300</code>, but still falls back to fixed resize for larger or more expensive inputs.</p>
+<p>This lets THOR keep a snapped native side for near-square inputs such as <code>289x288</code> or <code>300x300</code>, but still falls back to fixed resize for larger or more expensive inputs when that resize lowers the token count.</p>
 </div>
 <div class="tabbed-block">
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">RS_EMBED_THOR_IMG</span><span class="o">=</span><span class="m">288</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">RS_EMBED_THOR_PATCH_SIZE</span><span class="o">=</span><span class="m">4</span>
 </code></pre></div>
-<p>Use a smaller <code>patch_size</code> when spatial detail matters more than runtime or memory.</p>
+<p>Use a smaller <code>patch_size</code> when spatial detail matters more than runtime or memory. At <code>patch_size=4</code>, inputs above about 196 px exceed the default <code>3000</code>-token limit: those under 288 px run natively with a warning, larger ones fall back to a 288 px resize. Raise <code>RS_EMBED_THOR_MAX_NATIVE_TOKENS</code> (for example to <code>12000</code>) to keep them all native.</p>
 <div class="highlight"><pre><span></span><code><span class="nb">export</span><span class="w"> </span><span class="nv">RS_EMBED_THOR_IMG</span><span class="o">=</span><span class="m">288</span>
 <span class="nb">export</span><span class="w"> </span><span class="nv">RS_EMBED_THOR_PATCH_SIZE</span><span class="o">=</span><span class="m">12</span>
 </code></pre></div>
@@ -2923,7 +2929,8 @@
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
 <li>Changing <code>patch_size</code> without updating <code>image_size</code> to divide cleanly is the most common misconfiguration.</li>
-<li><code>native_snap</code> only applies in <code>input_prep="resize"</code> mode — tiled inference always uses fixed per-tile resize.</li>
+<li>Inside tiled inference, THOR uses fixed per-tile resize instead of <code>native_snap</code>. This only applies to inputs that are actually split into tiles: an input that fits one tile is passed to THOR whole, as a plain call, so <code>native_snap</code> applies to it. The default tile size follows <code>RS_EMBED_THOR_IMG</code>; if you set <code>tile_size</code> explicitly, keep it equal to <code>RS_EMBED_THOR_IMG</code> and keep <code>pad_edges=True</code>, or each tile is resampled and THOR runs at the wrong pixel spacing.</li>
+<li>A fixed resize that changes the pixel spacing emits a <code>UserWarning</code>; check <code>meta["gsd_mismatch"]</code> and <code>meta["effective_gsd_m"]</code> on exported embeddings. For tiled inputs, the shared tiler may also have shrunk an axis by up to <code>tile_snap_frac</code> (10% by default) to avoid near-duplicate edge tiles; that is recorded separately in <code>meta["input_prep"]["snapped_from_hw"]</code>.</li>
 <li><code>group_merge=concat</code> and <code>group_merge=mean</code> produce different channel dimensions; do not compare them directly.</li>
 <li>Grid construction can fail if the token layout is not square and group parsing cannot resolve it — fall back to <code>pooled</code> to isolate the issue.</li>
 </ul>
