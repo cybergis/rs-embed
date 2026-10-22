@@ -12,6 +12,7 @@ from rs_embed.tools.shape import (
     center_offset,
     center_pad_to_square,
     crop_grid_to_roi,
+    model_roi_windows,
     prepare_square,
     resize_square,
     roi_in_frame,
@@ -95,9 +96,11 @@ def test_prepare_square_roi_window_pad():
     _, meta = prepare_square(x, size=256)
     y0, y1, x0, x1 = meta["shape_prep"]["roi_window"]
     top = (59 - 33) // 2  # 13
-    assert y0 == round(top / 59, 6)
-    assert y1 == round((top + 33) / 59, 6)
+    # Exact fractions: 6-decimal rounding put token-aligned edges a token off.
+    assert y0 == top / 59
+    assert y1 == (top + 33) / 59
     assert (x0, x1) == (0.0, 1.0)  # width unchanged
+    assert meta["shape_prep"]["input_window"] == (y0, y1, x0, x1)
 
 
 def test_prepare_square_roi_window_full_when_not_padded():
@@ -146,8 +149,8 @@ def test_prepare_square_extreme_aspect_pads_and_warns():
     assert meta["shape_prep"]["applied"] == "pad_to_square"
     y0, y1, x0, x1 = meta["shape_prep"]["roi_window"]
     top = (90 - 10) // 2
-    assert y0 == round(top / 90, 6)
-    assert y1 == round((top + 10) / 90, 6)
+    assert y0 == top / 90
+    assert y1 == (top + 10) / 90
     assert (x0, x1) == (0.0, 1.0)
 
 
@@ -273,3 +276,49 @@ def test_center_fit_rejects_bad_targets_and_empty_edge_pads():
 def test_roi_token_box_ignores_float_round_off_at_token_edges():
     # 4/392 of a 98-token grid is exactly token 1, but evaluates to 0.99999...
     assert roi_token_box((4 / 392, 1.0, 0.0, 1.0), grid_h=98, grid_w=98) == (1, 98, 0, 98)
+
+
+def test_prepare_square_records_the_input_window_for_crop_and_none():
+    # crop: the input extends past the square on the cropped axis.
+    x = np.ones((1, 20, 16), dtype=np.float32)
+    _, meta = prepare_square(x, size=8, shape_adjust="crop")
+    sp = meta["shape_prep"]
+    assert sp["input_window"] == (-2 / 16, 18 / 16, 0.0, 1.0)
+    assert sp["roi_window"] == (0.0, 1.0, 0.0, 1.0)
+    # none: already square, so the input fills the square.
+    _, meta = prepare_square(np.ones((1, 16, 16), dtype=np.float32), size=8)
+    assert meta["shape_prep"]["input_window"] == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_model_roi_windows_maps_the_geo_roi_into_the_model_frame():
+    pad = {"input_window": (0.25, 0.75, 0.0, 1.0)}  # input padded top and bottom
+    # Whole ROI: crop grid output to the input (drop the pad), keep native pooling.
+    assert model_roi_windows(pad, (0.0, 1.0, 0.0, 1.0)) == (
+        (0.25, 0.75, 0.0, 1.0),
+        (0.0, 1.0, 0.0, 1.0),
+    )
+    # Sub-window ROI: both windows are the ROI mapped through the pad.
+    grid, pool = model_roi_windows(pad, (0.5, 1.0, 0.0, 1.0))
+    assert grid == pool == (0.5, 0.75, 0.0, 1.0)
+    # A cropped axis is clipped to the model input.
+    crop = {"input_window": (-0.125, 1.125, 0.0, 1.0)}
+    assert model_roi_windows(crop, (0.0, 0.5, 0.0, 1.0))[0] == (0.0, 0.5, 0.0, 1.0)
+    # No preprocessing record (as-is or stretched input): the frames agree.
+    assert model_roi_windows(None, (0.2, 0.8, 0.0, 1.0)) == ((0.2, 0.8, 0.0, 1.0),) * 2
+
+
+def test_square_spatial_window_is_exact():
+    # The window must be the exact fraction, not a 6-decimal approximation:
+    # rounding put token-aligned edges one token off on large grids.
+    from rs_embed.core.specs import BBox
+    from rs_embed.tools.projection import lonlat_to_web_mercator
+    from rs_embed.tools.spatial import square_spatial
+
+    bbox = BBox(minlon=0.0, minlat=-0.0013, maxlon=0.0098, maxlat=0.0011)
+    _, geo = square_spatial(bbox)
+    x0, y0 = lonlat_to_web_mercator(bbox.minlon, bbox.minlat)
+    x1, y1 = lonlat_to_web_mercator(bbox.maxlon, bbox.maxlat)
+    w, h = abs(x1 - x0), abs(y1 - y0)
+    top = (1.0 - h / w) / 2.0
+    assert geo == (top, top + h / w, 0.0, 1.0)
+    assert geo[0] != round(geo[0], 6)

@@ -49,6 +49,7 @@ __all__ = [
     "prepare_square",
     "roi_is_full",
     "roi_in_frame",
+    "model_roi_windows",
     "roi_token_box",
     "crop_grid_to_roi",
     "geo_roi_from_meta",
@@ -149,11 +150,20 @@ def center_pad_to_square(
     """
     h, w = _hw(x)
     side = max(h, w)
+    mode = _square_pad_mode(h, w, pad_mode)
+    return center_fit(x, out_h=side, out_w=side, pad_mode=mode, fill_value=fill_value)[0]
+
+
+def _square_pad_mode(h: int, w: int, pad_mode: str) -> str:
+    """*pad_mode* for padding ``(h, w)`` to a square, with reflect's fallback.
+
+    Reflect needs the pad to be shorter than the axis; otherwise replicate the edge.
+    """
+    side = max(h, w)
     mode = str(pad_mode).lower()
     if mode == "reflect" and (side - h >= h or side - w >= w):
-        # reflect needs pad < dim along each axis; replicate the edge instead.
-        mode = "edge"
-    return center_fit(x, out_h=side, out_w=side, pad_mode=mode, fill_value=fill_value)[0]
+        return "edge"
+    return mode
 
 
 def resize_square(x: np.ndarray, *, size: int, interp: str = "bilinear") -> np.ndarray:
@@ -201,14 +211,16 @@ def prepare_square(
     - already square → just resize to ``size``;
     - otherwise → **pad** (default, keeps the whole ROI) or **crop** to square,
       *then* resize to ``size`` — never a plain stretch, so the output grid /
-      ROI-pooled vector can always be cropped back to the real ROI via
-      ``meta['shape_prep']['roi_window']``. Aspect ratios ≥ ``aspect_tol`` warn
+      ROI-pooled vector can always be cropped back to the real ROI (see
+      :func:`model_roi_windows`). Aspect ratios ≥ ``aspect_tol`` warn
       that the padded square is dominated by synthetic border (a square *fetch*
       of real imagery, or tiling, serves such ROIs better) but still pad —
       distorting silently is worse than padding loudly.
 
     Returns ``(out, meta)`` where ``meta['shape_prep']`` records what happened so
-    callers can surface it in the embedding metadata.
+    callers can surface it in the embedding metadata. Its ``input_window`` is
+    where the input lies in the square (exact fractions, past ``[0, 1]`` on a
+    cropped axis); ``roi_window`` is that window clipped to the square.
     """
     adj = str(shape_adjust).lower()
     if adj not in ("pad", "crop"):
@@ -226,11 +238,9 @@ def prepare_square(
     }
 
     if h == w:
-        applied = "none"
-        sq = x
+        applied, side = "none", h
     elif adj == "crop":
-        applied = "crop_to_square"
-        sq = center_crop_to_square(x)
+        applied, side = "crop_to_square", short_side
     else:
         if aspect >= float(aspect_tol):
             warnings.warn(
@@ -240,22 +250,19 @@ def prepare_square(
                 "automatically on provider-backed paths) or input_prep='tile'.",
                 stacklevel=2,
             )
-        applied = "pad_to_square"
-        sq = center_pad_to_square(x, fill_value=fill_value, pad_mode=pad_mode)
+        applied, side = "pad_to_square", long_side
+    sq, input_window = center_fit(
+        x,
+        out_h=side,
+        out_w=side,
+        pad_mode=_square_pad_mode(h, w, pad_mode),
+        fill_value=fill_value,
+    )
 
     meta["applied"] = applied
     meta["square_hw"] = tuple(int(v) for v in _hw(sq))
-    # ROI window within the square, normalized to [0, 1] as (y0, y1, x0, x1).
-    # Only padding inserts non-ROI border; crop/none cover the whole
-    # square, so their window is the full frame. Downstream code uses this to crop
-    # the output token grid (and pooled tokens) back to the real ROI.
-    if applied == "pad_to_square":
-        s = max(h, w)
-        top, left = center_offset(h, s), center_offset(w, s)
-        roi = (top / s, (top + h) / s, left / s, (left + w) / s)
-    else:
-        roi = (0.0, 1.0, 0.0, 1.0)
-    meta["roi_window"] = tuple(round(float(v), 6) for v in roi)
+    meta["input_window"] = input_window
+    meta["roi_window"] = roi_in_frame(input_window, FULL_WINDOW)
     out = resize_square(sq, size=int(size), interp=interp)
     return out, {"shape_prep": meta}
 
@@ -289,6 +296,29 @@ def roi_in_frame(
         _clip(fx0 + x0 * (fx1 - fx0)),
         _clip(fx0 + x1 * (fx1 - fx0)),
     )
+
+
+def model_roi_windows(
+    shape_prep: dict[str, Any] | None,
+    geo_roi: tuple[float, float, float, float],
+) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
+    """``(grid_window, pool_window)`` for cropping a model's output to the ROI.
+
+    *geo_roi* is the ROI's window in the fetched input; *shape_prep* is the
+    preprocessing record whose ``input_window`` says where that input lies in
+    the array fed to the model (``None`` or no ``input_window``: the model fed
+    the input as-is or stretched it, so the frames agree).
+
+    - ``grid_window``: *geo_roi* in the model's frame. Crop grid output to it
+      always; when *geo_roi* is full it still drops whole cells of padding.
+    - ``pool_window``: ``grid_window`` when *geo_roi* is a sub-window, else
+      :data:`FULL_WINDOW`. Pool the ROI's cells only when it is not full;
+      otherwise keep the model's native pooled vector.
+    """
+    frame = (shape_prep or {}).get("input_window") or FULL_WINDOW
+    grid_window = roi_in_frame(tuple(frame), tuple(geo_roi))
+    pool_window = FULL_WINDOW if roi_is_full(tuple(geo_roi)) else grid_window
+    return grid_window, pool_window
 
 
 def roi_token_box(
