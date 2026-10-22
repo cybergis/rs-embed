@@ -22,22 +22,23 @@ from ..tools.runtime import (
     embedder_accepts_model_config,
     embedder_fetch_semantics,
     get_embedder_bundle_cached,
+    native_input_size,
     require_model_config_support,
     resolve_model_aware_input_prep,
     supports_batch_api,
     supports_prefetched_batch_api,
+    tiled_dispatch_config,
+    whole_input_config,
 )
 from ..tools.runtime import call_embedder_get_embedding as _runtime_call_embedder_get_embedding
 from ..tools.serialization import embedding_to_numpy, input_cache_key, jsonable
 from ..tools.shape import geo_roi_from_meta
 from ..tools.tiling import (
     _aggregate_tiled_embeddings,
-    _augment_model_config_for_tiled_dispatch,
     _build_tile_prep_meta,
     _call_embedder_get_embedding_with_input_prep,
-    _estimate_tile_count,
     _input_hw,
-    _maybe_snap_input,
+    _plan_tiling,
     _resolve_input_prep_spec,
     _resolve_tile_params,
     _stamp_input_prep_meta,
@@ -268,8 +269,15 @@ class InferenceEngine:
         model_name: str,
         model_config: dict[str, Any] | None = None,
         get_fetch_meta_fn: Callable[[int], dict[str, Any] | None] | None = None,
+        finalize_emb: Callable[[Embedding], Embedding] | None = None,
+        tier: str = "prefetched-input",
     ) -> tuple[dict[int, TaskResult], bool]:
-        """Run tier-1 batch inference using prefetched provider inputs."""
+        """Run tier-1 batch inference using prefetched provider inputs.
+
+        ``finalize_emb`` post-processes each embedding before it is stored, and
+        ``tier`` names the caller in the fallback warning (the tiled tier uses
+        both for its whole-input items).
+        """
         cfg = self.config
         out: dict[int, TaskResult] = {}
         try:
@@ -333,11 +341,13 @@ class InferenceEngine:
                         f"for {len(sub_idx)} prefetched inputs."
                     )
                 for j, emb in enumerate(batch_out):
+                    if finalize_emb is not None:
+                        emb = finalize_emb(emb)
                     out[sub_idx[j]] = self._embedding_to_result(emb)
                     on_done(sub_idx[j])
             return out, True
         except Exception as e:
-            self._warn_batch_fallback("prefetched-input", model_name, e)
+            self._warn_batch_fallback(tier, model_name, e)
             return out, False
 
     def _run_batch_no_input(
@@ -429,8 +439,11 @@ class InferenceEngine:
     ) -> tuple[dict[int, TaskResult], bool]:
         """Run tile-mode batch inference across multiple spatial points.
 
-        Each input image is tiled, all tiles from all spatial points are batched
-        together for model inference, then stitched back into per-point results.
+        Inputs that need more than one tile are tiled, all their tiles are
+        batched together for model inference, then stitched back into
+        per-point results. Inputs that fit one tile are dispatched whole by the
+        tier-1 batch path (see ``whole_input_config``); points it fails on are
+        left to the per-point fallback.
         ``input_prep_resolved`` is the model-aware resolved spec; it falls back
         to the global resolution when not supplied.
         """
@@ -445,9 +458,7 @@ class InferenceEngine:
             stride = params.stride
             if stride <= 0 or stride != tile_size:
                 return out, False
-            tiled_model_config = _augment_model_config_for_tiled_dispatch(
-                embedder, model_config, tile_size=tile_size
-            )
+            tiled_model_config = tiled_dispatch_config(embedder, model_config, tile_size=tile_size)
             if tiled_model_config is not None and not embedder_accepts_model_config(
                 type(embedder), "get_embeddings_batch_from_inputs"
             ):
@@ -482,15 +493,20 @@ class InferenceEngine:
             roi_by_idx: dict[int, tuple[float, float, float, float]] = {}
 
             fill_value = float(sensor.fill_value) if sensor is not None else 0.0
+            # Inputs that fit one tile are dispatched whole, unsnapped and unpadded.
+            whole_inputs: dict[int, np.ndarray] = {}
             for i, spatial, inp in ready:
-                # Snap-to-tile and edge-pad policy go through the same shared
-                # helpers as the single-point path so batch- and single-dispatched
-                # stitches (and their input_prep meta) are identical.
-                inp, snapped_from = _maybe_snap_input(
+                # Snap-to-tile, the whole-input decision and edge-pad policy go
+                # through the same shared helpers as the single-point path so
+                # batch- and single-dispatched results (and their input_prep
+                # meta) are identical.
+                plan = _plan_tiling(
                     inp, tile_size=tile_size, stride=stride, snap_frac=spec.tile_snap_frac
                 )
-                h, w = _input_hw(inp)
-                num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
+                if plan is None:
+                    whole_inputs[i] = inp
+                    continue
+                num_tiles = plan.num_tiles
                 if num_tiles > spec.max_tiles_hard:
                     err = ModelError(
                         f"input_prep tile would create {num_tiles} tiles "
@@ -509,6 +525,8 @@ class InferenceEngine:
                         "memory-heavy. Tiling proceeds; raise max_tiles to silence this warning.",
                         stacklevel=2,
                     )
+                inp, snapped_from = plan.snap(inp)
+                h, w = _input_hw(inp)
                 tiles, tile_metas, tile_spatials_pt = _tile_one_image(
                     inp,
                     spatial=spatial,
@@ -522,19 +540,60 @@ class InferenceEngine:
                 all_tile_spatials.extend(tile_spatials_pt)
                 img_fmeta = get_fetch_meta_fn(i) if get_fetch_meta_fn is not None else None
                 roi_by_idx[i] = geo_roi_from_meta(img_fmeta)
-                if len(tiles) > 1 and img_fmeta is not None and "roi_window_geo" in img_fmeta:
+                if img_fmeta is not None and "roi_window_geo" in img_fmeta:
                     # The image-level ROI window is relative to the whole input,
                     # not to any single tile: cropping per tile would be wrong.
                     # Strip it here and crop once on the stitched grid instead;
                     # other provenance keys (e.g. unit-scale flags) still apply
-                    # per tile. A single tile spans the whole input, so there the
-                    # embedder-side crop is the correct one — meta passes intact.
+                    # per tile. Whole-input items keep it: the embedder-side
+                    # crop is the correct one there.
                     img_fmeta = {k: v for k, v in img_fmeta.items() if k != "roi_window_geo"}
                 all_tile_fetch_metas.extend([img_fmeta] * len(tiles))
                 tile_map[i] = (flat_start, len(tiles), tile_metas, h, w, snapped_from)
 
+            # Whole inputs use the single-point tiler's rule (whole_input_config):
+            # one dispatch per native size, with same-size inputs back to back so
+            # size-dependent model state is reused within a group.
+            whole_groups: dict[int | None, list[int]] = {}
+            for i in sorted(whole_inputs, key=lambda i: _input_hw(whole_inputs[i])):
+                native = native_input_size(embedder, model_config, _input_hw(whole_inputs[i]))
+                whole_groups.setdefault(native, []).append(i)
+            whole_ok = True
+            for native, group_idxs in whole_groups.items():
+                group_config, resolved_mode = whole_input_config(
+                    embedder, model_config, native=native
+                )
+                group_out, group_ok = self._run_batch_prefetched(
+                    idxs=group_idxs,
+                    spatials=spatials,
+                    temporal=temporal,
+                    sensor=sensor,
+                    embedder=embedder,
+                    lock=lock,
+                    backend=backend,
+                    get_input_fn=whole_inputs.__getitem__,
+                    batch_size=batch_size,
+                    continue_on_error=continue_on_error,
+                    on_done=on_done,
+                    use_lock=use_lock,
+                    model_name=model_name,
+                    model_config=group_config,
+                    get_fetch_meta_fn=get_fetch_meta_fn,
+                    finalize_emb=lambda e, m=resolved_mode: _stamp_input_prep_meta(
+                        e, requested_mode=spec.mode, resolved_mode=m
+                    ),
+                    tier="tiled (whole-input)",
+                )
+                out.update(group_out)
+                if not group_ok:
+                    # Leave this and the remaining groups to the per-point
+                    # fallback rather than retrying a likely-repeatable failure
+                    # once per group; the multi-tile points still run below.
+                    whole_ok = False
+                    break
+
             if not all_tiles:
-                return out, True
+                return out, whole_ok
 
             # Step 2: run batch inference on the flat tile list.
             all_tile_embs: list[Embedding] = []
@@ -583,43 +642,33 @@ class InferenceEngine:
                 tile_embs_n = [
                     normalize_embedding_output(emb=e, output=self.output) for e in tile_embs
                 ]
-                if tile_count == 1:
-                    result = self._embedding_to_result(
-                        _stamp_input_prep_meta(
-                            tile_embs_n[0],
-                            requested_mode=spec.mode,
-                            resolved_mode="resize",
-                        )
-                    )
-                else:
-                    prep_meta = _build_tile_prep_meta(
-                        requested_mode=spec.mode,
-                        tile_size=tile_size,
-                        stride=stride,
-                        tile_count=tile_count,
-                        effective_pad_edges=params.effective_pad_edges,
-                        max_tiles=spec.max_tiles,
-                        max_tiles_hard=spec.max_tiles_hard,
-                        input_hw=(h, w),
-                        tile_snap_frac=spec.tile_snap_frac,
-                        snapped_from_hw=snapped_from,
-                    )
-                    stitched = _aggregate_tiled_embeddings(
-                        embs=tile_embs_n,
-                        tile_meta=tile_metas,
-                        output=self.output,
-                        tile_size=tile_size,
-                        stride=stride,
-                        prep_meta=prep_meta,
-                        # Fetch-square crop-back: restrict the stitched output to
-                        # the requested ROI, mirroring the single-point tiled path.
-                        roi_window=roi_by_idx.get(i),
-                    )
-                    result = self._embedding_to_result(stitched)
-                out[i] = result
+                prep_meta = _build_tile_prep_meta(
+                    requested_mode=spec.mode,
+                    tile_size=tile_size,
+                    stride=stride,
+                    tile_count=tile_count,
+                    effective_pad_edges=params.effective_pad_edges,
+                    max_tiles=spec.max_tiles,
+                    max_tiles_hard=spec.max_tiles_hard,
+                    input_hw=(h, w),
+                    tile_snap_frac=spec.tile_snap_frac,
+                    snapped_from_hw=snapped_from,
+                )
+                stitched = _aggregate_tiled_embeddings(
+                    embs=tile_embs_n,
+                    tile_meta=tile_metas,
+                    output=self.output,
+                    tile_size=tile_size,
+                    stride=stride,
+                    prep_meta=prep_meta,
+                    # Fetch-square crop-back: restrict the stitched output to
+                    # the requested ROI, mirroring the single-point tiled path.
+                    roi_window=roi_by_idx.get(i),
+                )
+                out[i] = self._embedding_to_result(stitched)
                 on_done(i)
 
-            return out, True
+            return out, whole_ok
         except Exception as e:
             self._warn_batch_fallback("tiled", model_name, e)
             return out, False

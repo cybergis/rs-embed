@@ -268,3 +268,36 @@ def test_init_state_drops_arrays_of_removed_models(tmp_path):
     assert "embeddings__gone" not in arrays
     assert "embeddings__m1" in arrays
     assert pending == ["m2"]
+
+
+@pytest.mark.parametrize(
+    ("model_type", "input_prep", "expect_change"),
+    [
+        ("onthefly", None, True),  # default tile prep: affected
+        ("onthefly", "auto", True),
+        ("onthefly", "resize", False),  # resize never tiles
+        ("precomputed", None, False),  # precomputed models do not tile
+    ],
+)
+def test_request_fingerprint_tracks_input_prep_version_only_when_it_matters(
+    monkeypatch, model_type, input_prep, expect_change
+):
+    """Resume must drop outputs from an older input_prep version, and only those."""
+    from types import SimpleNamespace
+
+    from rs_embed.core.types import ModelConfig
+    from rs_embed.tools import manifest
+
+    config = SimpleNamespace(
+        format="npz", save_inputs=False, save_embeddings=True, input_prep=input_prep
+    )
+    models = [ModelConfig(name="m", backend="gee", model_type=model_type)]
+
+    def _fp():
+        return manifest.export_request_fingerprint(
+            models=models, temporal=None, output=OutputSpec.pooled(), config=config
+        )
+
+    before = _fp()
+    monkeypatch.setattr(manifest, "INPUT_PREP_VERSION", manifest.INPUT_PREP_VERSION + 1)
+    assert (_fp() != before) is expect_change
