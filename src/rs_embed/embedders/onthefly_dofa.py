@@ -35,7 +35,9 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
+    model_roi_windows,
     prepare_square,
+    roi_fetch_meta,
     roi_is_full,
     square_fetch_batch,
 )
@@ -626,6 +628,62 @@ def _dofa_forward_tokens_and_pooled_batch(
 # -----------------------------
 # Embedder
 # -----------------------------
+def _build_dofa_embedding(
+    tokens: np.ndarray,
+    pooled: np.ndarray,
+    *,
+    geo_roi: tuple[float, float, float, float] | None,
+    shape_prep: dict[str, Any] | None,
+    output: OutputSpec,
+    base_meta: dict[str, Any],
+    patch_size: int,
+) -> Embedding:
+    """Turn DOFA patch tokens [N,D] + pooled [D] into an Embedding (single and batch paths).
+
+    ``geo_roi`` is the ROI's window in the fetched input and ``shape_prep`` the
+    squaring record from ``_resize_chw``; the ROI is mapped into the model's
+    frame with ``model_roi_windows``. Grid output is cropped to it (dropping
+    padding); pooled output means the ROI's tokens (``roi_grid_mean``) only when
+    ``geo_roi`` is a sub-window, and is DOFA's own pooled vector otherwise.
+    """
+    geo_roi = tuple(geo_roi or FULL_WINDOW)
+    grid_roi, pool_roi = model_roi_windows(shape_prep, geo_roi)
+    pool_by_roi = not roi_is_full(geo_roi)
+
+    grid = None
+    if output.mode == "grid" or pool_by_roi:
+        n, d = tokens.shape
+        side = int(round(math.sqrt(n)))
+        if side * side != n:
+            raise ModelError(f"DOFA tokens N={n} not square; cannot reshape to grid.")
+        grid = tokens.reshape(side, side, d).transpose(2, 0, 1).astype(np.float32)
+
+    if output.mode == "pooled":
+        if pool_by_roi:
+            vec = crop_grid_to_roi(grid, pool_roi).mean(axis=(1, 2))
+        else:
+            vec = pooled
+        vec = np.asarray(vec, dtype=np.float32)
+        meta = {**base_meta, "pooled_shape": tuple(vec.shape)}
+        if pool_by_roi:
+            meta["pooling"] = "roi_grid_mean"
+        return Embedding(data=vec, meta=meta)
+
+    if output.mode == "grid":
+        assert grid is not None
+        grid = crop_grid_to_roi(grid, grid_roi)
+        meta = {
+            **base_meta,
+            "grid_type": "vit_patch_tokens",
+            "grid_shape": tuple(grid.shape),
+            "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
+            "patch_size": int(patch_size),
+        }
+        return Embedding(data=grid_to_dataarray(grid, meta=meta), meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
+
+
 @register("dofa")
 class DOFAEmbedder(EmbedderBase):
     """
@@ -902,44 +960,15 @@ class DOFAEmbedder(EmbedderBase):
             },
         )
 
-        # Build the token grid when we need it (grid output, or pooled that must be
-        # restricted to the ROI after a fetch-square enlargement). The enlarged
-        # input is square, so the token count is a perfect square.
-        cropped_to_roi = not roi_is_full(geo_roi)
-        grid = None
-        if output.mode == "grid" or cropped_to_roi:
-            n, d = tokens.shape
-            side = int(round(math.sqrt(n)))
-            if side * side != n:
-                raise ModelError(f"DOFA tokens N={n} not square; cannot reshape to grid.")
-            grid = tokens.reshape(side, side, d).transpose(2, 0, 1).astype(np.float32)
-            if cropped_to_roi:
-                grid = crop_grid_to_roi(grid, geo_roi)
-
-        if output.mode == "pooled":
-            # Pool only the ROI's tokens when the input was enlarged to a square;
-            # otherwise use DOFA's own pooled vector.
-            vec = grid.mean(axis=(1, 2)).astype(np.float32) if cropped_to_roi else pooled
-            vec = vec.astype(np.float32)
-            base_meta["pooled_shape"] = tuple(vec.shape)
-            if cropped_to_roi:
-                base_meta["pooling"] = "roi_grid_mean"
-            return Embedding(data=vec, meta=base_meta)
-
-        if output.mode == "grid":
-            assert grid is not None
-            meta = {
-                **base_meta,
-                "grid_type": "vit_patch_tokens",
-                "grid_shape": tuple(grid.shape),
-                "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
-                "patch_size": int(getattr(model, "patch_size", 16)),
-            }
-
-            da = grid_to_dataarray(grid, meta=meta)
-            return Embedding(data=da, meta=meta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return _build_dofa_embedding(
+            tokens,
+            pooled,
+            geo_roi=geo_roi,
+            shape_prep=resize_meta.get("shape_prep"),
+            output=output,
+            base_meta=base_meta,
+            patch_size=int(getattr(model, "patch_size", 16)),
+        )
 
     def get_embeddings_batch(
         self,
@@ -1031,6 +1060,9 @@ class DOFAEmbedder(EmbedderBase):
 
         backend_l = backend.lower().strip()
         if backend_l == "tensor":
+            # The per-item loop must still crop each output back to its ROI.
+            if fetch_metas is None and _roi_windows_geo is not None:
+                fetch_metas = [roi_fetch_meta(tuple(r)) if r else None for r in _roi_windows_geo]
             return super().get_embeddings_batch_from_inputs(
                 spatials=spatials,
                 input_chws=input_chws,
@@ -1040,6 +1072,7 @@ class DOFAEmbedder(EmbedderBase):
                 output=output,
                 backend=backend,
                 device=device,
+                fetch_metas=fetch_metas,
             )
         self._get_provider(backend)
         t = temporal_to_range(temporal)
@@ -1126,42 +1159,15 @@ class DOFAEmbedder(EmbedderBase):
                 )
 
                 geo_roi = tuple((_roi_windows_geo[i] if _roi_windows_geo else None) or FULL_WINDOW)
-                cropped = not roi_is_full(geo_roi)
-                grid = None
-                if output.mode == "grid" or cropped:
-                    n_tok, d_tok = tokens.shape
-                    side = int(round(math.sqrt(n_tok)))
-                    if side * side != n_tok:
-                        raise ModelError(
-                            f"DOFA tokens N={n_tok} not square; cannot reshape to grid."
-                        )
-                    grid = tokens.reshape(side, side, d_tok).transpose(2, 0, 1).astype(np.float32)
-                    if cropped:
-                        grid = crop_grid_to_roi(grid, geo_roi)
-
-                if output.mode == "pooled":
-                    vec = grid.mean(axis=(1, 2)).astype(np.float32) if cropped else pooled
-                    vec = vec.astype(np.float32)
-                    base_meta["pooled_shape"] = tuple(vec.shape)
-                    if cropped:
-                        base_meta["pooling"] = "roi_grid_mean"
-                    out[i] = Embedding(data=vec, meta=base_meta)
-                    continue
-
-                if output.mode == "grid":
-                    assert grid is not None
-                    meta = {
-                        **base_meta,
-                        "grid_type": "vit_patch_tokens",
-                        "grid_shape": tuple(grid.shape),
-                        "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
-                        "patch_size": int(getattr(model, "patch_size", 16)),
-                    }
-                    da = grid_to_dataarray(grid, meta=meta)
-                    out[i] = Embedding(data=da, meta=meta)
-                    continue
-
-                raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = _build_dofa_embedding(
+                    tokens,
+                    pooled,
+                    geo_roi=geo_roi,
+                    shape_prep=resize_meta_all[i].get("shape_prep"),
+                    output=output,
+                    base_meta=base_meta,
+                    patch_size=int(getattr(model, "patch_size", 16)),
+                )
 
         if any(e is None for e in out):
             raise ModelError("dofa batch inference produced incomplete outputs.")

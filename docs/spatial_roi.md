@@ -45,9 +45,14 @@ path (`input_prep="tile"`, the package default for most models).
 **3. Crop the output back to the ROI.**
 The encoder's token grid / feature map is cropped to `roi_window`
 (`crop_grid_to_roi` / `roi_token_box`); for `pooled` output only the ROI tokens are
-pooled (`crop_grid_and_pool`). The stitched grid from the tile path is cropped the
-same way, and tiled `pooled` embeddings are weighted by each tile's ROI-overlap
-area. The result describes **your** ROI, not the enlarged square.
+pooled (`crop_grid_and_pool`). `roi_window` is relative to the fetched square, so a
+model that pads, crops or center-crops that array on the way in first maps the
+window into its own input's frame (`model_roi_windows`, through
+`meta["shape_prep"]["input_window"]`). Grid output also drops whole cells of such
+padding; `pooled` output pools ROI tokens only when the ROI is a sub-window, and
+otherwise keeps the model's own pooled vector. The stitched grid from the tile path
+is cropped the same way, and tiled `pooled` embeddings are weighted by each tile's
+ROI-overlap area. The result describes **your** ROI, not the enlarged square.
 
 ---
 
@@ -91,7 +96,7 @@ the poles or antimeridian, or you may pass a non-square array directly via
 | Case | What happens | `meta["shape_prep"]["applied"]` |
 | ---- | ------------ | ------------------------------- |
 | Already square | Resize to `image_size` | `none` |
-| Any rectangle | Make square (pad **or** crop), then resize; the ROI window is recorded so the output is cropped back | `pad_to_square` / `crop_to_square` |
+| Any rectangle | Make square (pad **or** crop), then resize; the input's position in the square is recorded (`input_window`) so ROI windows map through it and the output is cropped back | `pad_to_square` / `crop_to_square` |
 
 `pad` (default) reflect-pads the short side (keeps the whole ROI, adds synthetic
 border); `crop` center-crops the long side (no synthetic data, discards margins).
@@ -123,6 +128,8 @@ this fallback; see the THOR page.
 | `meta["shape_prep"]["applied"]` | `none` / `pad_to_square` / `crop_to_square` (fallback path) |
 | `meta["shape_prep"]["orig_hw"]` / `["square_hw"]` / `["target_hw"]` | ROI shape, squared shape, final model size |
 | `meta["shape_prep"]["aspect"]` | `long_side / short_side` (≥ 2.0 triggers the heavy-padding warning) |
+| `meta["shape_prep"]["input_window"]` | Where the input lies in the squared array, as exact fractions `(y0, y1, x0, x1)`; past `[0, 1]` on a cropped axis |
+| `meta["shape_prep"]["roi_window"]` | `input_window` clipped to the square |
 
 `roi_cropped=True` means you got the ROI, not the square.
 

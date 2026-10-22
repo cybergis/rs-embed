@@ -39,7 +39,9 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
+    model_roi_windows,
     prepare_square,
+    roi_fetch_meta,
     roi_is_full,
     square_fetch_batch,
 )
@@ -486,36 +488,43 @@ def build_clay_embedding(
     output: OutputSpec,
     base_meta: dict[str, Any],
     patch_size: int = _CLAY_PATCH_SIZE,
+    shape_prep: dict[str, Any] | None = None,
 ) -> Embedding:
     """Turn Clay patch tokens [N,D] + CLS vector [D] into an Embedding.
 
-    When ``geo_roi`` is a sub-window (fetch-square enlargement), the token grid
-    is cropped back to the ROI; pooled output then means the ROI's tokens
-    (``roi_grid_mean``) instead of the model's CLS vector.
+    ``geo_roi`` is the ROI's window in the fetched input and ``shape_prep`` the
+    squaring record from ``_resize_chw``; the ROI is mapped into the model's
+    frame with ``model_roi_windows``. Grid output is cropped to it (dropping
+    padding); pooled output means the ROI's tokens (``roi_grid_mean``) only when
+    ``geo_roi`` is a sub-window, and is the model's CLS vector otherwise.
     """
     geo_roi = tuple(geo_roi or FULL_WINDOW)
-    cropped_to_roi = not roi_is_full(geo_roi)
+    grid_roi, pool_roi = model_roi_windows(shape_prep, geo_roi)
+    pool_by_roi = not roi_is_full(geo_roi)
 
     grid = None
-    if output.mode == "grid" or cropped_to_roi:
+    if output.mode == "grid" or pool_by_roi:
         n, d = tokens_nd.shape
         side = int(round(math.sqrt(n)))
         if side * side != n:
             raise ModelError(f"Clay tokens N={n} not square; cannot reshape to grid.")
         grid = tokens_nd.reshape(side, side, d).transpose(2, 0, 1).astype(np.float32)
-        if cropped_to_roi:
-            grid = crop_grid_to_roi(grid, geo_roi)
 
     if output.mode == "pooled":
-        vec = grid.mean(axis=(1, 2)).astype(np.float32) if cropped_to_roi else pooled_d
+        vec = (
+            crop_grid_to_roi(grid, pool_roi).mean(axis=(1, 2)).astype(np.float32)
+            if pool_by_roi
+            else pooled_d
+        )
         vec = vec.astype(np.float32)
         meta = dict(base_meta)
         meta["pooled_shape"] = tuple(vec.shape)
-        meta["pooling"] = "roi_grid_mean" if cropped_to_roi else "model_cls"
+        meta["pooling"] = "roi_grid_mean" if pool_by_roi else "model_cls"
         return Embedding(data=vec, meta=meta)
 
     if output.mode == "grid":
         assert grid is not None
+        grid = crop_grid_to_roi(grid, grid_roi)
         meta = {
             **base_meta,
             "grid_type": "vit_patch_tokens",
@@ -826,6 +835,7 @@ class ClayEmbedder(EmbedderBase):
             output=output,
             base_meta=base_meta,
             patch_size=int(mmeta.get("patch_size", _CLAY_PATCH_SIZE)),
+            shape_prep=resize_meta.get("shape_prep"),
         )
 
     def get_embeddings_batch(
@@ -914,6 +924,9 @@ class ClayEmbedder(EmbedderBase):
 
         backend_l = backend.lower().strip()
         if backend_l == "tensor":
+            # The per-item loop must still crop each output back to its ROI.
+            if fetch_metas is None and _roi_windows_geo is not None:
+                fetch_metas = [roi_fetch_meta(tuple(r)) if r else None for r in _roi_windows_geo]
             return super().get_embeddings_batch_from_inputs(
                 spatials=spatials,
                 input_chws=input_chws,
@@ -923,6 +936,7 @@ class ClayEmbedder(EmbedderBase):
                 output=output,
                 backend=backend,
                 device=device,
+                fetch_metas=fetch_metas,
             )
         # Inputs are prefetched — same lazy-provider convention as the single
         # path: never acquire a provider (and its live auth) without a fetch.
@@ -1028,6 +1042,7 @@ class ClayEmbedder(EmbedderBase):
                     output=output,
                     base_meta=base_meta,
                     patch_size=int(mmeta.get("patch_size", _CLAY_PATCH_SIZE)),
+                    shape_prep=resize_meta_all[i].get("shape_prep"),
                 )
 
         if any(e is None for e in out):

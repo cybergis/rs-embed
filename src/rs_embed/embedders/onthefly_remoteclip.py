@@ -40,6 +40,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
+    model_roi_windows,
     roi_is_full,
     square_fetch_batch,
 )
@@ -332,6 +333,18 @@ def _first_nchw_grid(out: Any):
 # -----------------------------
 # RemoteCLIP inference adapter
 # -----------------------------
+def _remoteclip_shape_prep(rgb_u8: np.ndarray) -> dict[str, Any]:
+    """Where an HxW image lies in the model input after Resize(short side) + CenterCrop.
+
+    The short axis fills the crop; the long axis is ``L/S`` crops long and
+    centered, so it extends past ``[0, 1]`` (see ``shape.model_roi_windows``).
+    """
+    h, w = int(rgb_u8.shape[0]), int(rgb_u8.shape[1])
+    short = float(min(h, w))
+    y_half, x_half = h / (2.0 * short), w / (2.0 * short)
+    return {"input_window": (0.5 - y_half, 0.5 + y_half, 0.5 - x_half, 0.5 + x_half)}
+
+
 def _remoteclip_encode_tokens(
     model,
     rgb_u8: np.ndarray,
@@ -807,7 +820,8 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 )
                 if tokens_or_vec.ndim == 2:
                     grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                    g = crop_grid_to_roi(grid_dhw, geo_roi)
+                    _, pool_roi = model_roi_windows(_remoteclip_shape_prep(rgb_u8), geo_roi)
+                    g = crop_grid_to_roi(grid_dhw, pool_roi)
                     reduce = g.max if output.pooling == "max" else g.mean
                     vec = reduce(axis=(1, 2)).astype(np.float32)
                     base_meta = _build_base_meta(
@@ -838,9 +852,10 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 )
 
             grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-            if cropped_to_roi:
-                grid_dhw = crop_grid_to_roi(grid_dhw, geo_roi)
-                gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
+            # ROI mapped through the center crop (also drops a cropped-away margin).
+            grid_roi, _ = model_roi_windows(_remoteclip_shape_prep(rgb_u8), geo_roi)
+            grid_dhw = crop_grid_to_roi(grid_dhw, grid_roi)
+            gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
             meta = {
                 **base_meta,
                 **gmeta,
@@ -1017,7 +1032,10 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                         )
                         if tokens_or_vec.ndim == 2:
                             grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                            g = crop_grid_to_roi(grid_dhw, geo_roi)
+                            _, pool_roi = model_roi_windows(
+                                _remoteclip_shape_prep(rgb_u8_all[i]), geo_roi
+                            )
+                            g = crop_grid_to_roi(grid_dhw, pool_roi)
                             reduce = g.max if output.pooling == "max" else g.mean
                             vec = reduce(axis=(1, 2)).astype(np.float32)
                             meta = _base_meta_for(
@@ -1048,9 +1066,9 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                         "Your RemoteCLIP wrapper only provides pooled vectors (no forward_encoder tokens)."
                     )
                 grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                if not roi_is_full(geo_roi):
-                    grid_dhw = crop_grid_to_roi(grid_dhw, geo_roi)
-                    gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
+                grid_roi, _ = model_roi_windows(_remoteclip_shape_prep(rgb_u8_all[i]), geo_roi)
+                grid_dhw = crop_grid_to_roi(grid_dhw, grid_roi)
+                gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
                 meta = _base_meta_for(
                     {**tmeta, **gmeta, "batch_infer": False, "grid_type": "vit_tokens"}
                 )

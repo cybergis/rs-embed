@@ -43,6 +43,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
+    model_roi_windows,
     prepare_square,
     roi_fetch_meta,
     roi_is_full,
@@ -494,18 +495,18 @@ def _pad_chw_to_multiple(x_chw: np.ndarray, mult: int = 16, value: float = 0.0) 
     return out
 
 
-def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
+def _resize_chw(x_chw: np.ndarray, *, size: int = 224) -> tuple[np.ndarray, dict[str, Any]]:
     """Make CHW square ``(size,size)`` without aspect-ratio distortion.
 
     A rectangular ROI is reflect-padded to square before resizing (see
     :mod:`rs_embed.tools.shape`) rather than stretched. This is the ``resize``
     prep mode; the separate ``pad`` mode (:func:`_pad_chw_to_multiple`) is
-    unchanged.
+    unchanged. Returns ``(out, shape_prep)``.
     """
     if x_chw.ndim != 3:
         raise ModelError(f"Expected CHW array, got {x_chw.shape}")
-    out, _ = prepare_square(x_chw, size=int(size), shape_adjust="pad")
-    return out
+    out, meta = prepare_square(x_chw, size=int(size), shape_adjust="pad")
+    return out, meta["shape_prep"]
 
 
 def _prepare_prithvi_chw(
@@ -525,9 +526,13 @@ def _prepare_prithvi_chw(
     target_size = max(16, int(os.environ.get("RS_EMBED_PRITHVI_IMG", "224")))
 
     if prep == "resize":
-        y = _resize_chw(x_chw, size=target_size)
+        y, shape_prep = _resize_chw(x_chw, size=target_size)
     elif prep == "pad":
         y = _pad_chw_to_multiple(x_chw, mult=patch_mult, value=float(fill_value))
+        # Padded on the bottom and right only: the input keeps the top-left corner.
+        h, w = int(x_chw.shape[-2]), int(x_chw.shape[-1])
+        nh, nw = int(y.shape[-2]), int(y.shape[-1])
+        shape_prep = {"input_window": (0.0, h / nh, 0.0, w / nw)}
     else:
         raise ModelError(f"Unknown RS_EMBED_PRITHVI_PREP='{prep}'. Use 'resize' or 'pad'.")
 
@@ -535,6 +540,7 @@ def _prepare_prithvi_chw(
         "prep_mode": prep,
         "patch_mult": int(patch_mult),
         "target_image_size": int(target_size),
+        "shape_prep": shape_prep,
     }
 
 
@@ -1252,13 +1258,16 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         )
 
         cropped_to_roi = not roi_is_full(geo_roi)
+        # ROI mapped through the prep (squaring or bottom/right pad): grid output
+        # is always cropped to it, pooled output only for an ROI sub-window.
+        grid_roi, pool_roi = model_roi_windows(prep_meta.get("shape_prep"), geo_roi)
 
         if output.mode == "pooled":
             if cropped_to_roi:
                 # Pool only the ROI's tokens (exclude the real-neighborhood context
                 # fetched to make the input square).
                 grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                grid = crop_grid_to_roi(grid, geo_roi)
+                grid = crop_grid_to_roi(grid, pool_roi)
                 vec = (
                     grid.max(axis=(1, 2)) if output.pooling == "max" else grid.mean(axis=(1, 2))
                 ).astype("float32")
@@ -1270,10 +1279,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
-            grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
-            if cropped_to_roi:
-                grid = crop_grid_to_roi(grid, geo_roi)
-                h, w = int(grid.shape[1]), int(grid.shape[2])
+            grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
+            grid = crop_grid_to_roi(grid, grid_roi)
+            h, w = int(grid.shape[1]), int(grid.shape[2])
             meta.update(
                 {
                     "grid_hw": (h, w),
@@ -1408,12 +1416,15 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         )
 
         cropped_to_roi = not roi_is_full(geo_roi)
+        # ROI mapped through the prep (squaring or bottom/right pad): grid output
+        # is always cropped to it, pooled output only for an ROI sub-window.
+        grid_roi, pool_roi = model_roi_windows(prep_meta.get("shape_prep"), geo_roi)
 
         if output.mode == "pooled":
             if cropped_to_roi:
                 # Pool only the ROI's tokens (time-collapsed grid, then ROI crop).
                 grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
-                grid = crop_grid_to_roi(grid, geo_roi)
+                grid = crop_grid_to_roi(grid, pool_roi)
                 vec = (
                     grid.max(axis=(1, 2)) if output.pooling == "max" else grid.mean(axis=(1, 2))
                 ).astype("float32")
@@ -1431,10 +1442,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             return Embedding(data=vec, meta=meta)
 
         if output.mode == "grid":
-            grid, (h, w), cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
-            if cropped_to_roi:
-                grid = crop_grid_to_roi(grid, geo_roi)
-                h, w = int(grid.shape[1]), int(grid.shape[2])
+            grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
+            grid = crop_grid_to_roi(grid, grid_roi)
+            h, w = int(grid.shape[1]), int(grid.shape[2])
             meta.update(
                 {
                     "grid_hw": (h, w),
@@ -1600,6 +1610,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
         infer_bs = self._resolve_infer_batch(str(dev))
 
         x_prepared: list[np.ndarray] = []
+        shape_preps: list[dict[str, Any] | None] = []
         lon_lat: list[tuple[float, float]] = []
         for i, input_chw in enumerate(input_chws):
             if input_chw.ndim != 3 or input_chw.shape[0] != 6:
@@ -1609,11 +1620,12 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             x_chw = input_chw.astype(np.float32) / 10000.0
             x_chw = np.clip(x_chw, 0.0, 1.0)
             x_chw = np.nan_to_num(x_chw, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
-            x_chw, _ = _prepare_prithvi_chw(
+            x_chw, item_prep = _prepare_prithvi_chw(
                 x_chw,
                 fill_value=float(sensor.fill_value),
             )
             x_prepared.append(x_chw)
+            shape_preps.append(item_prep.get("shape_prep"))
             lon_lat.append(_spatial_center_lon_lat(spatials[i]))
 
         date_str = temporal_midpoint_str(t) or "2022-07-01"
@@ -1675,11 +1687,12 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
                     geo_roi_i = _roi_at(i)
                     cropped_i = not roi_is_full(geo_roi_i)
+                    grid_roi_i, pool_roi_i = model_roi_windows(shape_preps[i], geo_roi_i)
 
                     if output.mode == "pooled":
                         if cropped_i:
                             grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                            grid = crop_grid_to_roi(grid, geo_roi_i)
+                            grid = crop_grid_to_roi(grid, pool_roi_i)
                             vec = (
                                 grid.max(axis=(1, 2))
                                 if output.pooling == "max"
@@ -1694,10 +1707,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         continue
 
                     if output.mode == "grid":
-                        grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
-                        if cropped_i:
-                            grid = crop_grid_to_roi(grid, geo_roi_i)
-                            h, w = int(grid.shape[1]), int(grid.shape[2])
+                        grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
+                        grid = crop_grid_to_roi(grid, grid_roi_i)
+                        h, w = int(grid.shape[1]), int(grid.shape[2])
                         meta.update(
                             {
                                 "grid_hw": (h, w),
@@ -1751,6 +1763,7 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
         # Prepare each item to (T_eff, 6, H, W) + per-frame dates.
         prepared: list[np.ndarray] = []
+        shape_preps: list[dict[str, Any] | None] = []
         item_dates: list[list[str]] = []
         lon_lat: list[tuple[float, float]] = []
         for i, raw in enumerate(input_chws):
@@ -1768,8 +1781,9 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                 )
             x_tchw = _raw_tchw_to_unit(raw_tchw)
             x_tchw, dates = _drop_duplicate_frames(x_tchw, dates)
-            x_tchw, _ = _prepare_prithvi_tchw(x_tchw, fill_value=float(sensor.fill_value))
+            x_tchw, item_prep = _prepare_prithvi_tchw(x_tchw, fill_value=float(sensor.fill_value))
             prepared.append(x_tchw)
+            shape_preps.append(item_prep.get("shape_prep"))
             item_dates.append(dates)
             lon_lat.append(_spatial_center_lon_lat(spatials[i]))
 
@@ -1845,13 +1859,14 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
 
                     geo_roi_i = _roi_at(i)
                     cropped_i = not roi_is_full(geo_roi_i)
+                    grid_roi_i, pool_roi_i = model_roi_windows(shape_preps[i], geo_roi_i)
 
                     if output.mode == "pooled":
                         if cropped_i:
                             grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(
                                 tokens, n_frames, output.pooling
                             )
-                            grid = crop_grid_to_roi(grid, geo_roi_i)
+                            grid = crop_grid_to_roi(grid, pool_roi_i)
                             vec = (
                                 grid.max(axis=(1, 2))
                                 if output.pooling == "max"
@@ -1874,12 +1889,11 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         continue
 
                     if output.mode == "grid":
-                        grid, (h, w), cls_removed = tokens_to_grid_dhw_tchw(
+                        grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(
                             tokens, n_frames, output.pooling
                         )
-                        if cropped_i:
-                            grid = crop_grid_to_roi(grid, geo_roi_i)
-                            h, w = int(grid.shape[1]), int(grid.shape[2])
+                        grid = crop_grid_to_roi(grid, grid_roi_i)
+                        h, w = int(grid.shape[1]), int(grid.shape[2])
                         meta.update(
                             {
                                 "grid_hw": (h, w),

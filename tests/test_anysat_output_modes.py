@@ -99,7 +99,7 @@ def test_anysat_grid_defaults_to_dense(monkeypatch):
     monkeypatch.setattr(
         anysat,
         "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: {"shape": tuple(raw_tchw.shape)},
+        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
     )
 
     out = emb.get_embedding(
@@ -135,7 +135,7 @@ def test_anysat_pooled_keeps_patch_pooling(monkeypatch):
     monkeypatch.setattr(
         anysat,
         "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: {"shape": tuple(raw_tchw.shape)},
+        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
     )
 
     out = emb.get_embedding(
@@ -170,7 +170,7 @@ def test_anysat_grid_feature_mode_can_fall_back_to_patch(monkeypatch):
     monkeypatch.setattr(
         anysat,
         "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: {"shape": tuple(raw_tchw.shape)},
+        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
     )
 
     out = emb.get_embedding(
@@ -205,7 +205,7 @@ def test_anysat_pooled_source_can_use_tile(monkeypatch):
     monkeypatch.setattr(
         anysat,
         "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: {"shape": tuple(raw_tchw.shape)},
+        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
     )
 
     out = emb.get_embedding(
@@ -225,3 +225,44 @@ def test_anysat_pooled_source_can_use_tile(monkeypatch):
     assert out.meta["pooling"] == "tile_native"
     assert out.meta["requested_pooling"] == "max"
     assert out.meta["pooled_source"] == "tile"
+
+
+def test_anysat_crops_the_roi_in_the_squared_frame(monkeypatch):
+    """The ROI window is mapped through the squaring before the grid crop (#139)."""
+    import rs_embed.embedders.onthefly_anysat as anysat
+
+    emb = AnySatEmbedder()
+    model = _FakeAnySatModel()
+    _patch_fake_torch(monkeypatch)
+    monkeypatch.setenv("RS_EMBED_ANYSAT_FRAMES", "2")
+    monkeypatch.setattr(
+        anysat,
+        "_load_anysat",
+        lambda **kwargs: (model, {"loaded_from": "test"}, "cpu"),
+    )
+    # The input was padded top and bottom: it fills rows 1..2 of the 4-row grid.
+    monkeypatch.setattr(
+        anysat,
+        "_prepare_anysat_s2_input",
+        lambda raw_tchw, **kwargs: (
+            {"shape": tuple(raw_tchw.shape)},
+            {"input_window": (0.25, 0.75, 0.0, 1.0)},
+        ),
+    )
+
+    def _embed(output, fetch_meta=None):
+        return emb.get_embedding(
+            spatial=_bbox(),
+            temporal=TemporalSpec.range("2020-01-01", "2020-03-01"),
+            sensor=None,
+            output=output,
+            backend="auto",
+            input_chw=np.zeros((2, 10, 8, 8), dtype=np.float32),
+            fetch_meta=fetch_meta,
+        )
+
+    # Whole ROI: the grid drops the padding rows ...
+    assert np.asarray(_embed(OutputSpec.grid()).data).shape == (12, 2, 4)
+    # ... and a sub-window (lower half of the input) maps to grid row 2 only.
+    sub = _embed(OutputSpec.grid(), {"roi_window_geo": (0.5, 1.0, 0.0, 1.0)})
+    assert np.asarray(sub.data).shape == (12, 1, 4)

@@ -42,9 +42,9 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_to_roi,
     geo_roi_from_meta,
+    model_roi_windows,
     prepare_square,
     roi_fetch_meta,
-    roi_is_full,
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
@@ -65,16 +65,17 @@ def ensure_torch() -> None:
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
 
-def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
+def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str, Any]]:
     """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
 
     A rectangular ROI is reflect-padded to square before resizing (see
-    :mod:`rs_embed.tools.shape`) rather than stretched.
+    :mod:`rs_embed.tools.shape`) rather than stretched. Returns ``(out,
+    shape_prep)``; the record maps ROI windows into the model's frame.
     """
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
-    out, _ = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
-    return out
+    out, meta = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
+    return out, meta["shape_prep"]
 
 
 def _normalize_series(x_tchw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -397,7 +398,9 @@ def _prepare_anysat_s2_input(
     doy0_values: np.ndarray,
     norm_mode: str,
     device: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Model inputs for AnySat's S2 branch, plus the squaring record (``None``
+    when the input is fed at its own size)."""
     ensure_torch()
     import torch
 
@@ -405,8 +408,9 @@ def _prepare_anysat_s2_input(
         raise ModelError(f"AnySat s2 expects [T,10,H,W], got shape={raw_tchw.shape}")
     x_tchw = raw_tchw.astype(np.float32, copy=False)
 
+    shape_prep = None
     if image_size > 0 and (x_tchw.shape[-1] != image_size or x_tchw.shape[-2] != image_size):
-        x_tchw = _resize_tchw(x_tchw, out_hw=image_size)
+        x_tchw, shape_prep = _resize_tchw(x_tchw, out_hw=image_size)
 
     x_tchw = _normalize_series(x_tchw, mode=norm_mode)
     t = int(x_tchw.shape[0])
@@ -422,7 +426,7 @@ def _prepare_anysat_s2_input(
     return {
         "s2": torch.from_numpy(x_tchw[None, ...]).to(device),  # [1,T,10,H,W]
         "s2_dates": torch.from_numpy(dates).to(device),  # [1,T]
-    }
+    }, shape_prep
 
 
 def _anysat_spatial_features(
@@ -682,7 +686,7 @@ class AnySatEmbedder(EmbedderBase):
             device=device,
         )
 
-        s2_input = _prepare_anysat_s2_input(
+        s2_input, shape_prep = _prepare_anysat_s2_input(
             raw_tchw,
             image_size=image_size,
             doy0_values=doy0_values,
@@ -706,10 +710,12 @@ class AnySatEmbedder(EmbedderBase):
                 feature_mode=feature_mode,
             )
 
-        # Crop the token grid back to the ROI when the fetch enlarged a rectangle
-        # to a square (no-op when full; tile-pooled output has no grid to crop).
-        if grid is not None and not roi_is_full(geo_roi):
-            grid = crop_grid_to_roi(grid, geo_roi)
+        # Crop the token grid back to the ROI, mapped through the squaring: grid
+        # output always (dropping padding), pooled output only for an ROI
+        # sub-window (no-op when full; tile-pooled output has no grid to crop).
+        if grid is not None:
+            grid_roi, pool_roi = model_roi_windows(shape_prep, geo_roi)
+            grid = crop_grid_to_roi(grid, grid_roi if output.mode == "grid" else pool_roi)
 
         meta = build_meta(
             model=self.model_name,

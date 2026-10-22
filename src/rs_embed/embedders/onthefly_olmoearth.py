@@ -35,6 +35,7 @@ from ..providers.resolution import is_provider_backend
 from ..tools.runtime import load_cached_with_device as _load_cached_with_device
 from ..tools.shape import (
     crop_grid_to_roi,
+    model_roi_windows,
     parallel_indexed_fetch,
     prepare_square,
     roi_fetch_meta,
@@ -1561,14 +1562,16 @@ def _merge_geo_roi(
     """Make a fetch-square geo ROI the effective ``roi_window`` in shape_meta.
 
     When the fetch enlarged a rectangular ROI to a square of real imagery, the
-    ROI's window within that square (``geo_roi``) is the crop target — it
-    overrides the residual pad window from squaring the fetched pixels. A full or
-    missing geo ROI leaves shape_meta untouched (input_chw / already-square fetch).
+    ROI's window within that square (``geo_roi``) is the crop target. It is
+    relative to the fetched pixels, so it is mapped through the squaring of
+    those pixels (``model_roi_windows``) rather than replacing the pad window.
+    A full or missing geo ROI leaves shape_meta untouched (input_chw /
+    already-square fetch), so the pad window alone is cropped.
     """
     if geo_roi is None or roi_is_full(tuple(geo_roi)):
         return shape_meta
     sp = dict(shape_meta.get("shape_prep") or {})
-    sp["roi_window"] = tuple(float(v) for v in geo_roi)
+    sp["roi_window"], _ = model_roi_windows(sp, tuple(geo_roi))
     sp["roi_source"] = "fetch_square"
     return {**shape_meta, "shape_prep": sp}
 

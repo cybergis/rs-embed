@@ -392,6 +392,27 @@ def test_clay_batch_from_inputs_reads_fetch_metas_roi(monkeypatch):
     assert out[0].data.shape == (2, 4, 2)  # cropped to left half
 
 
+def test_clay_tensor_batch_from_inputs_crops_fetch_metas_roi(monkeypatch):
+    # The tensor backend loops get_embedding per item; it used to drop the
+    # fetch_metas, so the ROI was never cropped on that path (#139).
+    import rs_embed.embedders.onthefly_clay as clay
+
+    emb = ClayEmbedder()
+    monkeypatch.setattr(clay, "_load_clay_model", _fake_load)
+    monkeypatch.setattr(clay, "_clay_forward_tokens_and_cls_batch", _fake_forward)
+
+    out = emb.get_embeddings_batch_from_inputs(
+        spatials=[PointBuffer(lon=0.0, lat=0.0, buffer_m=256)],
+        input_chws=[np.full((10, 8, 8), 5000.0, dtype=np.float32)],
+        temporal=None,
+        sensor=SensorSpec(collection="COPERNICUS/S2_SR_HARMONIZED", bands=tuple(_CLAY_S2_BANDS)),
+        output=OutputSpec.grid(),
+        backend="tensor",
+        fetch_metas=[{"roi_window_geo": (0.0, 1.0, 0.0, 0.5)}],
+    )
+    assert out[0].data.shape == (2, 4, 2)  # cropped to left half
+
+
 def test_clay_describe_is_serializable():
     import json
 
