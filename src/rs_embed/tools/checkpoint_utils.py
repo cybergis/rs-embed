@@ -48,7 +48,14 @@ def store_prefetch_checkpoint_arrays(
     sensor_by_key: dict[str, SensorSpec],
     inputs_cache: dict[tuple[int, str], np.ndarray],
     n_items: int,
+    fetch_meta: dict[tuple[int, str], dict[str, Any]] | None = None,
 ) -> None:
+    """Store prefetched inputs, and their fetch metadata, in a checkpoint.
+
+    The fetch metadata (e.g. a square fetch's ``roi_window_geo``, or flags that
+    change how the input is processed) is part of the input: a resume that
+    restores the arrays without it embeds them differently.
+    """
     drop_prefetch_checkpoint_arrays(arrays)
     prefetch_meta: dict[str, Any] = {}
     for skey in sorted(sensor_by_key.keys()):
@@ -58,6 +65,13 @@ def store_prefetch_checkpoint_arrays(
         if not hit_items:
             continue
         entry: dict[str, Any] = {"sensor": _jsonable(sensor_by_key[skey])}
+        item_metas = {
+            str(i): _jsonable(fetch_meta[(i, skey)])
+            for i, _ in hit_items
+            if fetch_meta and fetch_meta.get((i, skey))
+        }
+        if item_metas:
+            entry["fetch_meta"] = item_metas
 
         def _store_per_item(
             items: list[tuple[int, np.ndarray]],
@@ -120,6 +134,22 @@ def restore_prefetch_checkpoint_cache(
                     idx = int(j)
                 cache[(idx, str(skey))] = np.asarray(arrays[key], dtype=np.float32)
     return cache
+
+
+def restore_prefetch_checkpoint_fetch_meta(
+    *,
+    prefetch_meta: dict[str, Any],
+) -> dict[tuple[int, str], dict[str, Any]]:
+    """The per-item fetch metadata stored by :func:`store_prefetch_checkpoint_arrays`."""
+    out: dict[tuple[int, str], dict[str, Any]] = {}
+    for skey, entry in prefetch_meta.items():
+        metas = entry.get("fetch_meta") if isinstance(entry, dict) else None
+        if not isinstance(metas, dict):
+            continue
+        for i, meta in metas.items():
+            if isinstance(meta, dict):
+                out[(int(i), str(skey))] = dict(meta)
+    return out
 
 
 def drop_model_arrays(arrays: dict[str, np.ndarray], model_name: str, *, sanitize_key) -> None:

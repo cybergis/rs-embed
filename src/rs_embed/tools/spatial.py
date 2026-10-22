@@ -95,4 +95,4 @@ def square_spatial(
     x0f = (1.0 - w / side) / 2.0
     y0f = (1.0 - h / side) / 2.0
     roi = (y0f, y0f + h / side, x0f, x0f + w / side)
-    return square, tuple(round(float(v), 6) for v in roi)
+    return square, tuple(float(v) for v in roi)

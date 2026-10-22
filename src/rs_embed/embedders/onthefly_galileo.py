@@ -45,11 +45,10 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
     prepare_square,
     roi_fetch_meta,
-    roi_is_full,
     square_fetch_batch,
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
@@ -216,17 +215,18 @@ def _is_galileo_official_stats_mode(mode: str) -> bool:
     }
 
 
-def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
+def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str, Any]]:
     """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
 
     A rectangular ROI is reflect-padded to square before resizing (see
     :mod:`rs_embed.tools.shape`) rather than stretched, which would smear a
-    non-square ROI into distorted, striped embeddings.
+    non-square ROI into distorted, striped embeddings. Returns ``(out,
+    shape_prep)``; the record maps ROI windows into the model's frame.
     """
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
-    out, _ = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
-    return out
+    out, meta = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
+    return out, meta["shape_prep"]
 
 
 def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -620,8 +620,9 @@ def _prepare_galileo_encoder_inputs(
     raw_norm_mode = "none" if _is_galileo_official_stats_mode(mode_l) else norm_mode
 
     x_tchw = raw_tchw.astype(np.float32, copy=False)
+    shape_prep = None
     if x_tchw.shape[-2] != image_size or x_tchw.shape[-1] != image_size:
-        x_tchw = _resize_tchw(x_tchw, out_hw=image_size)
+        x_tchw, shape_prep = _resize_tchw(x_tchw, out_hw=image_size)
     x_tchw = _normalize_s2(x_tchw, mode=raw_norm_mode)  # [T,10,H,W]
 
     # [H,W,T,10]
@@ -694,6 +695,7 @@ def _prepare_galileo_encoder_inputs(
         "image_size": int(image_size),
         "patch_size": int(patch_size),
         "n_frames": int(t),
+        **({"shape_prep": shape_prep} if shape_prep is not None else {}),
         "months": tuple(int(v) + 1 for v in months_arr.tolist()),
         "month": int(months_arr[len(months_arr) // 2]) + 1,
         "month_indices": tuple(int(v) for v in months_arr.tolist()),
@@ -1056,11 +1058,15 @@ class GalileoEmbedder(EmbedderBase):
             device=dev,
         )
 
-        # Crop the token grid back to the ROI when the fetch enlarged a rectangle
-        # to a square (no-op when geo_roi is full). grid is (D, H', W').
-        cropped_to_roi = not roi_is_full(geo_roi)
-        if cropped_to_roi:
-            grid = crop_grid_to_roi(grid, geo_roi)
+        # Crop the token grid (D, H', W') back to the ROI, mapped through the
+        # squaring: grid output always (dropping padding), pooled output only
+        # for an ROI sub-window (no-op when the window is full).
+        grid, cropped_to_roi = crop_grid_for_output(
+            grid,
+            geo_roi=geo_roi,
+            shape_prep=pmeta.get("shape_prep"),
+            pooled=output.mode == "pooled",
+        )
 
         meta = build_meta(
             model=self.model_name,

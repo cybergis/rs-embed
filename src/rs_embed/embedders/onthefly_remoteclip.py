@@ -38,7 +38,7 @@ from ..tools.runtime import (
     resolve_device_auto_torch,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
     roi_is_full,
     square_fetch_batch,
@@ -332,6 +332,42 @@ def _first_nchw_grid(out: Any):
 # -----------------------------
 # RemoteCLIP inference adapter
 # -----------------------------
+def _remoteclip_preprocess(image_size: int):
+    """RemoteCLIP's built-in preprocessing, used unless the wrapper has a ``transform``.
+
+    Resize(short side) + CenterCrop; :func:`_remoteclip_shape_prep` records
+    where it places the image.
+    """
+    from torchvision import transforms
+
+    return transforms.Compose(
+        [
+            transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
+            transforms.CenterCrop(image_size),
+            transforms.ToTensor(),
+            transforms.Normalize(
+                mean=(0.48145466, 0.4578275, 0.40821073),
+                std=(0.26862954, 0.26130258, 0.27577711),
+            ),
+        ]
+    )
+
+
+def _remoteclip_shape_prep(rgb_u8: np.ndarray, model: Any = None) -> dict[str, Any] | None:
+    """Where an HxW image lies in the model input after :func:`_remoteclip_preprocess`.
+
+    The short axis fills the crop; the long axis is ``L/S`` crops long and
+    centered, so it extends past ``[0, 1]`` (see ``shape.model_roi_window``).
+    ``None`` when *model* brings its own ``transform``, whose geometry is unknown.
+    """
+    if callable(getattr(model, "transform", None)):
+        return None
+    h, w = int(rgb_u8.shape[0]), int(rgb_u8.shape[1])
+    short = float(min(h, w))
+    y_half, x_half = h / (2.0 * short), w / (2.0 * short)
+    return {"input_window": (0.5 - y_half, 0.5 + y_half, 0.5 - x_half, 0.5 + x_half)}
+
+
 def _remoteclip_encode_tokens(
     model,
     rgb_u8: np.ndarray,
@@ -354,7 +390,6 @@ def _remoteclip_encode_tokens(
     """
     import torch
     from PIL import Image
-    from torchvision import transforms
 
     dev = (
         "cuda"
@@ -370,19 +405,7 @@ def _remoteclip_encode_tokens(
         # a float32 array skips that /255 and Normalize() then runs ~255x OOD.
         x = model.transform(rgb_u8, image_size).unsqueeze(0)
     else:
-        preprocess = transforms.Compose(
-            [
-                transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
-                transforms.CenterCrop(image_size),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=(0.48145466, 0.4578275, 0.40821073),
-                    std=(0.26862954, 0.26130258, 0.27577711),
-                ),
-            ]
-        )
-        img = Image.fromarray(rgb_u8, mode="RGB")
-        x = preprocess(img).unsqueeze(0)
+        x = _remoteclip_preprocess(image_size)(Image.fromarray(rgb_u8, mode="RGB")).unsqueeze(0)
 
     x = x.to(dev)
 
@@ -486,7 +509,6 @@ def _remoteclip_encode_pooled_batch(
 
     import torch
     from PIL import Image
-    from torchvision import transforms
 
     dev = (
         "cuda"
@@ -510,17 +532,7 @@ def _remoteclip_encode_pooled_batch(
                 )
             xs.append(x)
     else:
-        preprocess = transforms.Compose(
-            [
-                transforms.Resize(image_size, interpolation=transforms.InterpolationMode.BICUBIC),
-                transforms.CenterCrop(image_size),
-                transforms.ToTensor(),
-                transforms.Normalize(
-                    mean=(0.48145466, 0.4578275, 0.40821073),
-                    std=(0.26862954, 0.26130258, 0.27577711),
-                ),
-            ]
-        )
+        preprocess = _remoteclip_preprocess(image_size)
         for rgb_u8 in rgb_u8_batch:
             img = Image.fromarray(rgb_u8, mode="RGB")
             xs.append(preprocess(img))
@@ -757,6 +769,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
 
         # load model once per (ckpt, cache_dir, device)
         model, wmeta, dev = self._get_model(ckpt=ckpt, cache_dir=cache_dir, device=device)
+        shape_prep = _remoteclip_shape_prep(rgb_u8, model)
 
         sensor_meta = {
             "collection": "COPERNICUS/S2_SR_HARMONIZED",
@@ -782,6 +795,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 **wmeta,
                 **tmeta,
                 **extra_checks,
+                **({"shape_prep": shape_prep} if shape_prep is not None else {}),
             }
             return build_meta(
                 model=self.model_name,
@@ -807,7 +821,12 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 )
                 if tokens_or_vec.ndim == 2:
                     grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                    g = crop_grid_to_roi(grid_dhw, geo_roi)
+                    g, _ = crop_grid_for_output(
+                        grid_dhw,
+                        geo_roi=geo_roi,
+                        shape_prep=shape_prep,
+                        pooled=True,
+                    )
                     reduce = g.max if output.pooling == "max" else g.mean
                     vec = reduce(axis=(1, 2)).astype(np.float32)
                     base_meta = _build_base_meta(
@@ -838,9 +857,14 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 )
 
             grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-            if cropped_to_roi:
-                grid_dhw = crop_grid_to_roi(grid_dhw, geo_roi)
-                gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
+            # ROI mapped through the center crop (also drops a cropped-away margin).
+            grid_dhw, _ = crop_grid_for_output(
+                grid_dhw,
+                geo_roi=geo_roi,
+                shape_prep=shape_prep,
+                pooled=False,
+            )
+            gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
             meta = {
                 **base_meta,
                 **gmeta,
@@ -970,7 +994,9 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 return geo_roi_from_meta(None)
             return geo_roi_from_meta({"roi_window_geo": _roi_windows_geo[i]})
 
-        def _base_meta_for(extra_kind: dict[str, Any]) -> dict[str, Any]:
+        shape_preps = [_remoteclip_shape_prep(rgb, model) for rgb in rgb_u8_all]
+
+        def _base_meta_for(i: int, extra_kind: dict[str, Any]) -> dict[str, Any]:
             extra = {
                 "bands": sensor_meta["bands"],
                 "scale_m": scale_m,
@@ -986,6 +1012,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 "input_override": True,
                 **wmeta,
                 **extra_kind,
+                **({"shape_prep": shape_preps[i]} if shape_preps[i] is not None else {}),
             }
             return build_meta(
                 model=self.model_name,
@@ -1017,21 +1044,27 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                         )
                         if tokens_or_vec.ndim == 2:
                             grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                            g = crop_grid_to_roi(grid_dhw, geo_roi)
+                            g, _ = crop_grid_for_output(
+                                grid_dhw,
+                                geo_roi=geo_roi,
+                                shape_prep=shape_preps[i],
+                                pooled=True,
+                            )
                             reduce = g.max if output.pooling == "max" else g.mean
                             vec = reduce(axis=(1, 2)).astype(np.float32)
                             meta = _base_meta_for(
+                                i,
                                 {
                                     **tmeta,
                                     **gmeta,
                                     "pooling": f"roi_grid_{output.pooling}",
                                     "batch_infer": False,
-                                }
+                                },
                             )
                             out[i] = Embedding(data=vec, meta=meta)
                             continue
                         # No token grid: fall back to the global pooled vector below.
-                    meta = _base_meta_for({"tokens_kind": "pooled_batch", "batch_infer": True})
+                    meta = _base_meta_for(i, {"tokens_kind": "pooled_batch", "batch_infer": True})
                     out[i] = Embedding(data=vecs[j].astype(np.float32), meta=meta)
         elif output.mode == "grid":
             for i in range(n):
@@ -1048,11 +1081,15 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                         "Your RemoteCLIP wrapper only provides pooled vectors (no forward_encoder tokens)."
                     )
                 grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                if not roi_is_full(geo_roi):
-                    grid_dhw = crop_grid_to_roi(grid_dhw, geo_roi)
-                    gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
+                grid_dhw, _ = crop_grid_for_output(
+                    grid_dhw,
+                    geo_roi=geo_roi,
+                    shape_prep=shape_preps[i],
+                    pooled=False,
+                )
+                gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
                 meta = _base_meta_for(
-                    {**tmeta, **gmeta, "batch_infer": False, "grid_type": "vit_tokens"}
+                    i, {**tmeta, **gmeta, "batch_infer": False, "grid_type": "vit_tokens"}
                 )
                 da = grid_to_dataarray(grid_dhw, meta=meta)
                 out[i] = Embedding(data=da, meta=meta)
