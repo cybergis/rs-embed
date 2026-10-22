@@ -101,7 +101,7 @@ flowchart LR
 | `RS_EMBED_THOR_NORMALIZE`         | `thor_stats`   | S2: `thor_stats`, `unit_scale`, or `none`; S1: `thor_stats` (shared S1 log normalize) or `none` |
 | `RS_EMBED_THOR_GROUP_MERGE`       | `mean`         | THOR group-grid aggregation: `mean`, `sum`, `concat`                                            |
 | `RS_EMBED_THOR_PATCH_SIZE`        | `8`            | THOR flexi patch size parameter                                                                 |
-| `RS_EMBED_THOR_SHAPE_ADJUST`      | `crop`         | How `native_snap` resolves small non-square inputs: `crop` or `pad`                             |
+| `RS_EMBED_THOR_SHAPE_ADJUST`      | `crop`         | Side `native_snap` snaps from for near-square inputs: `crop` (short side) or `pad` (long side)  |
 | `RS_EMBED_THOR_SHAPE_TOL_PX`      | `8`            | Maximum `abs(H-W)` tolerated before `native_snap` falls back to fixed resize                    |
 | `RS_EMBED_THOR_MAX_NATIVE_SIDE`   | `384`          | Snapped native side above which THOR falls back to fixed resize, if that lowers the token count |
 | `RS_EMBED_THOR_MAX_NATIVE_TOKENS` | `3000`         | Patch-token count above which THOR falls back to fixed resize, if that lowers the count         |
@@ -125,12 +125,16 @@ flowchart LR
 
     For the current default S2 10m/20m path with `patch_size=8`, `side=384` corresponds to about `2880` patch tokens, which is why `384` is the default ceiling.
 
+    `native_snap` snaps to the nearest valid side (a multiple of 16 px at `patch_size=8` and 10 m; a tie pads up), starting from the short side under `shape_adjust=crop` or the long side under `pad`, and center-fits the input to it, padding by replicating edge pixels. A 1 px fetch overshoot (289 px for a 2880 m ROI) therefore crops back to 288 px, and no zero fill reaches the model. When the snapped side would break one of the limits above and the valid side one unit below meets them, that side is used instead if the breach would resample the input to `RS_EMBED_THOR_IMG`, or if the snap was a tie that padded up (e.g. 393–407 px run natively at 384 px instead of a 288 px resize).
+
+    `meta["shape_prep"]["input_window"]` records where the input lies in the array fed to THOR, and the ROI crop is mapped through it. Grid output drops the ROI's context margin and any whole tokens of padding; `shape_prep.model_grid_hw` and `shape_prep.grid_crop_box` record the uncropped grid and the kept token box. Pooled output pools THOR's tokens inside the ROI window for every ROI (`pooling="roi_token_<mean|max>"` for an ROI sub-window), so pooled vectors have the same length, scale and group weighting whatever the ROI's shape.
+
     Each distinct native side has its own ground cover, and THOR builds one model per ground cover (up to 8 stay cached). THOR exports run point by point in input order, so ROIs that snap to many different sides rebuild the model often (about 0.6 s each for `base` with cached weights). Use ROIs of one size, e.g. a fixed `PointBuffer` radius, to keep a single model.
 
     Past either limit, THOR falls back to a fixed resize to `RS_EMBED_THOR_IMG`, but only when that resize actually lowers the token count, i.e. when `RS_EMBED_THOR_IMG` is smaller than the snapped side. The token count is set by ground cover / (`patch_size` × GSD), so a resize to a larger side would add tokens and misstate the geometry. In that case THOR runs the input natively, emits a `UserWarning` and records `meta["native_limit_exceeded"]`. With `patch_size=4`, for example, a 256 px input needs 5120 tokens and runs natively (the 288 px fallback would need 6480), while a 380 px input falls back to 288 px. Raise `RS_EMBED_THOR_MAX_NATIVE_TOKENS` to keep larger inputs native. Under `input_prep="resize"`, switching to `"tile"` also keeps inputs larger than one tile at native spacing.
 
 !!! warning "Fixed resize changes the pixel spacing THOR assumes"
-    THOR reads each band's GSD (10 m / 20 m) from its channel config and is told a ground cover of `scale_m × RS_EMBED_THOR_IMG`. Any fixed resize of an input whose side is not `RS_EMBED_THOR_IMG` therefore runs the model at the wrong scale. For example, a 256 px (2560 m) input stretched to 288 px is treated as 2880 m at 10 m, but the real spacing is 8.89 m, and patch-size embeddings and output grid cells are off by the same factor. THOR emits a `UserWarning` when this happens and records the real spacing in `meta["effective_gsd_m"]` (per axis, `(y, x)`) and `meta["gsd_mismatch"]`. `native_snap` only crops or pads, so its spacing stays exact.
+    THOR reads each band's GSD (10 m / 20 m) from its channel config and is told a ground cover of `scale_m × RS_EMBED_THOR_IMG`. Any fixed resize of an input whose side is not `RS_EMBED_THOR_IMG` therefore runs the model at the wrong scale. For example, a 256 px (2560 m) input stretched to 288 px is treated as 2880 m at 10 m, but the real spacing is 8.89 m, and patch-size embeddings and output grid cells are off by the same factor. THOR emits a `UserWarning` when this happens and records the real spacing in `meta["effective_gsd_m"]` (per axis, `(y, x)`) and `meta["gsd_mismatch"]`. `native_snap` never resamples, so its spacing stays exact.
 
 ## Model-specific Settings
 

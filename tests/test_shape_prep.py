@@ -8,10 +8,13 @@ import pytest
 from rs_embed.core.errors import ModelError
 from rs_embed.tools.shape import (
     center_crop_to_square,
+    center_fit,
+    center_offset,
     center_pad_to_square,
     crop_grid_to_roi,
     prepare_square,
     resize_square,
+    roi_in_frame,
     roi_is_full,
     roi_token_box,
 )
@@ -227,3 +230,46 @@ def test_square_fetch_batch():
     assert len(raws) == 2 and len(geo_rois) == 2
     assert geo_rois[0] != (0.0, 1.0, 0.0, 1.0)
     assert geo_rois[1] == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_roi_in_frame_maps_a_window_through_padding_and_cropping():
+    # Input padded 4 px each side into a 208 px array: its frame is (4/208, 204/208).
+    frame = (4 / 208, 204 / 208, 4 / 208, 204 / 208)
+    assert roi_in_frame(frame, (0.0, 1.0, 0.0, 1.0)) == pytest.approx(frame)
+    assert roi_in_frame(frame, (0.5, 1.0, 0.0, 0.5)) == pytest.approx(
+        (104 / 208, 204 / 208, 4 / 208, 104 / 208)
+    )
+    # A cropped axis extends past [0, 1]; the mapped window is clipped to the array.
+    assert roi_in_frame((-0.1, 1.1, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)) == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_center_fit_crops_and_pads_each_axis_around_center_offset():
+    x = np.arange(5 * 3, dtype=np.float32).reshape(1, 5, 3)
+    y, window = center_fit(x, out_h=4, out_w=6, pad_mode="edge")
+
+    assert y.shape == (1, 4, 6)
+    top, left = center_offset(5, 4), center_offset(3, 6)
+    assert (top, left) == (0, 1)  # 1 px cropped after on H; 1 before / 2 after on W
+    np.testing.assert_array_equal(y[0, :, 1:4], x[0, 0:4, :])
+    np.testing.assert_array_equal(y[0, :, 0], x[0, 0:4, 0])  # edge replicated
+    assert window == pytest.approx((0.0, 5 / 4, 1 / 6, 4 / 6))
+    same, full = center_fit(x, out_h=5, out_w=3)
+    assert same is x
+    assert full == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_center_fit_rejects_bad_targets_and_empty_edge_pads():
+    x = np.ones((1, 4, 4), dtype=np.float32)
+    with pytest.raises(ModelError, match="non-negative"):
+        center_fit(x, out_h=-1, out_w=4)
+    # An empty axis still crops to an empty square, as it always did.
+    assert center_crop_to_square(np.ones((1, 0, 4), dtype=np.float32)).shape == (1, 0, 0)
+    with pytest.raises(ModelError, match="empty input"):
+        center_fit(np.ones((1, 0, 4), dtype=np.float32), out_h=4, out_w=4, pad_mode="edge")
+    padded, _ = center_fit(x, out_h=6, out_w=6, pad_mode="constant", fill_value=-1.0)
+    assert padded[0, 0, 0] == -1.0
+
+
+def test_roi_token_box_ignores_float_round_off_at_token_edges():
+    # 4/392 of a 98-token grid is exactly token 1, but evaluates to 0.99999...
+    assert roi_token_box((4 / 392, 1.0, 0.0, 1.0), grid_h=98, grid_w=98) == (1, 98, 0, 98)

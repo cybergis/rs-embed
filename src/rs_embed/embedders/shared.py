@@ -17,6 +17,15 @@ import numpy as np
 from ..core.errors import ModelError
 
 
+def reduce_tokens(tokens, pooling):
+    """Mean- or max-reduce tokens [N,D] over N -> float32 [D]."""
+    if pooling == "mean":
+        return tokens.mean(axis=0).astype("float32")
+    if pooling == "max":
+        return tokens.max(axis=0).astype("float32")
+    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
+
+
 def pool_from_tokens(tokens, pooling):
     """Pool ViT patch tokens [N,D] -> (vec [D], cls_removed). Excludes CLS if present."""
     n = len(tokens)
@@ -25,11 +34,7 @@ def pool_from_tokens(tokens, pooling):
     patch = tokens[1:] if has_cls else tokens
     if len(patch) == 0:
         return tokens[0].astype("float32"), has_cls
-    if pooling == "mean":
-        return patch.mean(axis=0).astype("float32"), has_cls
-    if pooling == "max":
-        return patch.max(axis=0).astype("float32"), has_cls
-    raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
+    return reduce_tokens(patch, pooling), has_cls
 
 
 def tokens_to_grid_dhw(tokens):

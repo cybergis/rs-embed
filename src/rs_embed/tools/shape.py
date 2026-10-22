@@ -22,8 +22,9 @@ output can always be cropped back to the real ROI — it never silently stretche
 All helpers operate on the **last two axes** (``..., H, W``) so the same code
 serves ``CHW`` and ``TCHW`` (and any leading-dim) layouts identically.
 
-Mirrors the proven crop/pad-to-square logic in the THOR embedder; THOR keeps its
-own multi-GSD ``native_snap`` path and is intentionally left untouched.
+Every centered crop and pad here places the input with :func:`center_offset`,
+so callers that need to know where the input landed (e.g. THOR's ``native_snap``
+via :func:`center_fit`) can compute it with the same convention.
 """
 
 from __future__ import annotations
@@ -40,11 +41,14 @@ from ..core.specs import SpatialSpec
 from .spatial import FULL_WINDOW, square_spatial
 
 __all__ = [
+    "center_offset",
+    "center_fit",
     "center_crop_to_square",
     "center_pad_to_square",
     "resize_square",
     "prepare_square",
     "roi_is_full",
+    "roi_in_frame",
     "roi_token_box",
     "crop_grid_to_roi",
     "geo_roi_from_meta",
@@ -67,13 +71,67 @@ def _hw(x: np.ndarray) -> tuple[int, int]:
     return int(x.shape[-2]), int(x.shape[-1])
 
 
+def center_offset(inner: int, outer: int) -> int:
+    """Start of a centered length-*inner* span within length *outer*.
+
+    Negative when *inner* is longer (the span is cropped). The odd pixel of a
+    pad or crop always goes after the span.
+    """
+    return (outer - inner) // 2 if outer >= inner else -((inner - outer) // 2)
+
+
+def center_fit(
+    x: np.ndarray,
+    *,
+    out_h: int,
+    out_w: int,
+    pad_mode: str = "edge",
+    fill_value: float = 0.0,
+) -> tuple[np.ndarray, tuple[float, float, float, float]]:
+    """Center-crop or center-pad the last two axes to ``(out_h, out_w)``.
+
+    Each axis is cropped where it is longer and padded (``np.pad`` *pad_mode*;
+    ``'constant'`` uses *fill_value*) where it is shorter, placed with
+    :func:`center_offset`. Returns ``(array, window)``: *window* is where the
+    input lies in the result, as fractions ``(y0, y1, x0, x1)`` that extend
+    past ``[0, 1]`` on a cropped axis (see :func:`roi_in_frame`). The array is
+    always C-contiguous (``x`` itself when it already matches and is).
+    """
+    h, w = _hw(x)
+    out_h, out_w = int(out_h), int(out_w)
+    if out_h < 0 or out_w < 0:
+        raise ModelError(f"center_fit target must be non-negative, got {(out_h, out_w)}.")
+    top, left = center_offset(h, out_h), center_offset(w, out_w)
+    window = (
+        top / max(out_h, 1),
+        (top + h) / max(out_h, 1),
+        left / max(out_w, 1),
+        (left + w) / max(out_w, 1),
+    )
+    if (h, w) == (out_h, out_w):
+        return np.ascontiguousarray(x), window
+    kept_h, kept_w = min(h, out_h), min(w, out_w)
+    if (kept_h != out_h or kept_w != out_w) and (h == 0 or w == 0) and pad_mode != "constant":
+        raise ModelError(f"center_fit cannot {pad_mode!r}-pad an empty input of shape {x.shape}.")
+    y0, x0 = max(0, -top), max(0, -left)
+    x = x[..., y0 : y0 + kept_h, x0 : x0 + kept_w]
+    if kept_h != out_h or kept_w != out_w:
+        pad_top, pad_left = max(0, top), max(0, left)
+        pad_width = [(0, 0)] * (x.ndim - 2) + [
+            (pad_top, out_h - kept_h - pad_top),
+            (pad_left, out_w - kept_w - pad_left),
+        ]
+        if pad_mode == "constant":
+            x = np.pad(x, pad_width, mode="constant", constant_values=float(fill_value))
+        else:
+            x = np.pad(x, pad_width, mode=pad_mode)
+    return np.ascontiguousarray(x), window
+
+
 def center_crop_to_square(x: np.ndarray) -> np.ndarray:
     """Center-crop the last two axes (``..., H, W``) to ``side = min(H, W)``."""
-    h, w = _hw(x)
-    side = min(h, w)
-    y0 = (h - side) // 2
-    x0 = (w - side) // 2
-    return np.ascontiguousarray(x[..., y0 : y0 + side, x0 : x0 + side])
+    side = min(_hw(x))
+    return center_fit(x, out_h=side, out_w=side)[0]
 
 
 def center_pad_to_square(
@@ -91,21 +149,11 @@ def center_pad_to_square(
     """
     h, w = _hw(x)
     side = max(h, w)
-    if side == min(h, w):
-        return np.ascontiguousarray(x)
-    pad_h, pad_w = side - h, side - w
-    top, left = pad_h // 2, pad_w // 2
-    pad_width = [(0, 0)] * (x.ndim - 2) + [(top, pad_h - top), (left, pad_w - left)]
-
     mode = str(pad_mode).lower()
-    if mode == "reflect" and (pad_h >= h or pad_w >= w):
+    if mode == "reflect" and (side - h >= h or side - w >= w):
         # reflect needs pad < dim along each axis; replicate the edge instead.
         mode = "edge"
-    if mode == "constant":
-        return np.ascontiguousarray(
-            np.pad(x, pad_width, mode="constant", constant_values=float(fill_value))
-        )
-    return np.ascontiguousarray(np.pad(x, pad_width, mode=mode))
+    return center_fit(x, out_h=side, out_w=side, pad_mode=mode, fill_value=fill_value)[0]
 
 
 def resize_square(x: np.ndarray, *, size: int, interp: str = "bilinear") -> np.ndarray:
@@ -203,7 +251,7 @@ def prepare_square(
     # the output token grid (and pooled tokens) back to the real ROI.
     if applied == "pad_to_square":
         s = max(h, w)
-        top, left = (s - h) // 2, (s - w) // 2
+        top, left = center_offset(h, s), center_offset(w, s)
         roi = (top / s, (top + h) / s, left / s, (left + w) / s)
     else:
         roi = (0.0, 1.0, 0.0, 1.0)
@@ -218,6 +266,31 @@ def roi_is_full(roi_window: tuple[float, float, float, float], *, eps: float = 1
     return y0 <= eps and y1 >= 1.0 - eps and x0 <= eps and x1 >= 1.0 - eps
 
 
+def roi_in_frame(
+    frame: tuple[float, float, float, float],
+    roi_window: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Map *roi_window*, given in an input's frame, into the frame of the array fed to the model.
+
+    *frame* is where the input lies in that array, as fractions ``(y0, y1, x0,
+    x1)`` of the array; it extends past ``[0, 1]`` on axes where the input was
+    cropped, and lies inside on axes where it was padded. The result is clipped
+    to the array, so it is the window to crop the model's token grid to.
+    """
+    fy0, fy1, fx0, fx1 = (float(v) for v in frame)
+    y0, y1, x0, x1 = (float(v) for v in roi_window)
+
+    def _clip(v: float) -> float:
+        return min(1.0, max(0.0, v))
+
+    return (
+        _clip(fy0 + y0 * (fy1 - fy0)),
+        _clip(fy0 + y1 * (fy1 - fy0)),
+        _clip(fx0 + x0 * (fx1 - fx0)),
+        _clip(fx0 + x1 * (fx1 - fx0)),
+    )
+
+
 def roi_token_box(
     roi_window: tuple[float, float, float, float], *, grid_h: int, grid_w: int
 ) -> tuple[int, int, int, int]:
@@ -225,12 +298,16 @@ def roi_token_box(
 
     Rounds outward (floor low edge, ceil high edge) so the ROI is never
     under-covered, and always returns at least a 1×1 box clamped to the grid.
+    An edge within float round-off (1e-6 of a token) of a token boundary counts
+    as on it, so a window computed from pixel fractions does not pull in a whole
+    extra token.
     """
+    eps = 1e-6
     y0f, y1f, x0f, x1f = roi_window
-    y0 = max(0, min(int(np.floor(y0f * grid_h)), grid_h - 1))
-    y1 = max(y0 + 1, min(int(np.ceil(y1f * grid_h)), grid_h))
-    x0 = max(0, min(int(np.floor(x0f * grid_w)), grid_w - 1))
-    x1 = max(x0 + 1, min(int(np.ceil(x1f * grid_w)), grid_w))
+    y0 = max(0, min(int(np.floor(y0f * grid_h + eps)), grid_h - 1))
+    y1 = max(y0 + 1, min(int(np.ceil(y1f * grid_h - eps)), grid_h))
+    x0 = max(0, min(int(np.floor(x0f * grid_w + eps)), grid_w - 1))
+    x1 = max(x0 + 1, min(int(np.ceil(x1f * grid_w - eps)), grid_w))
     return y0, y1, x0, x1
 
 

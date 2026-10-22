@@ -19,6 +19,21 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
   - **Every fixed resize inside THOR warns and records the real spacing.** `resize_mode="fixed"`, rectangular inputs beyond `RS_EMBED_THOR_SHAPE_TOL_PX`, native-limit fallbacks, and tiles whose size differs from `RS_EMBED_THOR_IMG` emit a `UserWarning`. They also record `effective_gsd_m` (per axis, `(y, x)`) and `gsd_mismatch` in the metadata; `native_snap` outputs carry the same keys. These keys only describe THOR's own resize: when the shared tiler first shrinks an input that needs several tiles (snap-to-tile, up to `tile_snap_frac`), that is recorded separately in `meta["input_prep"]["snapped_from_hw"]`.
   - **The default tile size follows `RS_EMBED_THOR_IMG`.** `describe()` reported a fixed 288, so with a custom `RS_EMBED_THOR_IMG` every default-size tile was resampled.
   - **Who was affected:** `thor` ROIs smaller than 288 px under the default input prep; `RS_EMBED_THOR_PATCH_SIZE` below 8 on inputs over the token limit (at `patch_size=4`, above about 196 px); custom `RS_EMBED_THOR_IMG` with tiling; and the fixed-resize cases above on inputs whose side was not `RS_EMBED_THOR_IMG`. Re-export affected THOR embeddings.
+- **`thor` `native_snap` no longer pads with zeros or crops the ROI in the wrong frame, and its pooled output no longer depends on the ROI's shape** ([#137](https://github.com/cybergis/rs-embed/issues/137)). To reach a valid side (a multiple of 16 px at `patch_size=8` and 10 m), `native_snap` padded with the fill value (0), whose pixels fed the border tokens and the pooled mean, and a tie cropped (a 200 px input lost 4 px per side, about 8% of the ROI). The ROI window (`roi_window_geo`) was then applied as if the output grid covered the unsnapped input, so a rectangular ROI could be cropped one token off. Rectangular ROIs also pooled the group-merged grid while square ROIs pooled tokens, so under `group_merge="concat"` or `"sum"` the two gave vectors of different length or scale.
+  - **What changed:**
+    - `native_snap` snaps to the nearest valid side, a tie now pads up, and padding replicates edge pixels. `RS_EMBED_THOR_SHAPE_ADJUST=pad` replicates edges too.
+    - When the snapped side would break `RS_EMBED_THOR_MAX_NATIVE_SIDE` / `MAX_NATIVE_TOKENS`, the valid side one unit below is used if it meets the limits and either the breach would force a resample to `RS_EMBED_THOR_IMG` or the snap was a tie that padded up.
+    - The input's position is recorded in `meta["shape_prep"]["input_window"]`, and the ROI crop is mapped through it.
+    - Grid output drops the ROI's context margin and any whole tokens of padding, and records the kept box in `shape_prep.grid_crop_box` (of `shape_prep.model_grid_hw`).
+    - Every ROI's pooled output pools THOR's tokens inside the ROI window, per channel group. ROI sub-windows are labelled `pooling="roi_token_<mean|max>"` (previously `roi_grid_<mean|max>` over the merged grid).
+    - An empty input raises a `ModelError`.
+  - **Who was affected:**
+    - `thor` with the default `RS_EMBED_THOR_RESIZE_MODE=native_snap`, under `input_prep="resize"` and (since the fix above) for ROIs smaller than one tile under the default prep.
+    - Inputs that were padded now see edge values instead of zeros.
+    - Inputs halfway between two valid sides now pad up instead of cropping (200 px gives 26×26 instead of 24×24 at `patch_size=8`).
+    - Inputs from 393 to 407 px under default limits now run natively at 384 px instead of a 288 px resize.
+    - Pooled vectors of rectangular ROIs change: groups are weighted by token count, and under `concat` the length matches square ROIs.
+    - Re-export THOR pooled embeddings of rectangular ROIs, and grids of affected sizes.
 
 ## [0.3.1] — 2026-10-14
 
