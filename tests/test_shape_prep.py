@@ -13,8 +13,7 @@ from rs_embed.tools.shape import (
     center_pad_to_square,
     crop_grid_for_output,
     crop_grid_to_roi,
-    fetch_metas_with_roi,
-    model_roi_windows,
+    model_roi_window,
     prepare_square,
     resize_square,
     roi_in_frame,
@@ -292,21 +291,17 @@ def test_prepare_square_records_the_input_window_for_crop_and_none():
     assert meta["shape_prep"]["input_window"] == (0.0, 1.0, 0.0, 1.0)
 
 
-def test_model_roi_windows_maps_the_geo_roi_into_the_model_frame():
+def test_model_roi_window_maps_the_geo_roi_into_the_model_frame():
     pad = {"input_window": (0.25, 0.75, 0.0, 1.0)}  # input padded top and bottom
-    # Whole ROI: crop grid output to the input (drop the pad), keep native pooling.
-    assert model_roi_windows(pad, (0.0, 1.0, 0.0, 1.0)) == (
-        (0.25, 0.75, 0.0, 1.0),
-        (0.0, 1.0, 0.0, 1.0),
-    )
-    # Sub-window ROI: both windows are the ROI mapped through the pad.
-    grid, pool = model_roi_windows(pad, (0.5, 1.0, 0.0, 1.0))
-    assert grid == pool == (0.5, 0.75, 0.0, 1.0)
+    # Whole ROI: the input's own window, so a crop drops the pad.
+    assert model_roi_window(pad, (0.0, 1.0, 0.0, 1.0)) == (0.25, 0.75, 0.0, 1.0)
+    # Sub-window ROI: mapped through the pad.
+    assert model_roi_window(pad, (0.5, 1.0, 0.0, 1.0)) == (0.5, 0.75, 0.0, 1.0)
     # A cropped axis is clipped to the model input.
     crop = {"input_window": (-0.125, 1.125, 0.0, 1.0)}
-    assert model_roi_windows(crop, (0.0, 0.5, 0.0, 1.0))[0] == (0.0, 0.5, 0.0, 1.0)
+    assert model_roi_window(crop, (0.0, 0.5, 0.0, 1.0)) == (0.0, 0.5, 0.0, 1.0)
     # No preprocessing record (as-is or stretched input): the frames agree.
-    assert model_roi_windows(None, (0.2, 0.8, 0.0, 1.0)) == ((0.2, 0.8, 0.0, 1.0),) * 2
+    assert model_roi_window(None, (0.2, 0.8, 0.0, 1.0)) == (0.2, 0.8, 0.0, 1.0)
 
 
 def test_square_spatial_window_is_exact():
@@ -343,17 +338,7 @@ def test_crop_grid_for_output_splits_grid_and_pooled_crops():
     assert g[0, :, 0].tolist() == [4.0, 5.0] and roi_pooled is True
 
 
-def test_model_roi_windows_warns_when_the_roi_is_cropped_away():
+def test_model_roi_window_warns_when_the_roi_is_cropped_away():
     crop = {"input_window": (0.0, 1.0, -0.5, 1.5)}  # the long axis lost a quarter each side
     with pytest.warns(UserWarning, match="lies outside the part of the input"):
-        model_roi_windows(crop, (0.0, 1.0, 0.0, 0.2))
-
-
-def test_fetch_metas_with_roi_lets_the_window_list_win():
-    metas = [{"roi_window_geo": (0.0, 1.0, 0.0, 1.0), "flag": True}, None, {"x": 1}]
-    windows = [(0.0, 0.5, 0.0, 1.0), np.array([0.25, 0.75, 0.0, 1.0]), None]
-    out = fetch_metas_with_roi(metas, windows, 3)
-    assert out[0] == {"flag": True, "roi_window_geo": (0.0, 0.5, 0.0, 1.0)}
-    assert out[1] == {"roi_window_geo": (0.25, 0.75, 0.0, 1.0)}  # numpy windows work
-    assert out[2] == {"x": 1}
-    assert fetch_metas_with_roi(metas, None, 3) is metas
+        model_roi_window(crop, (0.0, 1.0, 0.0, 0.2))

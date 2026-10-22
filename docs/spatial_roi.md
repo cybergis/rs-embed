@@ -47,7 +47,7 @@ The encoder's token grid / feature map is cropped to `roi_window`
 (`crop_grid_to_roi` / `roi_token_box`); for `pooled` output only the ROI tokens are
 pooled (`crop_grid_and_pool`). `roi_window` is relative to the fetched square, so a
 model that pads, crops or center-crops that array on the way in first maps the
-window into its own input's frame (`model_roi_windows`, through
+window into its own input's frame (`model_roi_window`, through
 `meta["shape_prep"]["input_window"]`). Grid output also drops whole cells of such
 padding; `pooled` output pools ROI tokens only when the ROI is a sub-window, and
 otherwise keeps the model's own pooled vector (`olmoearth` and `thor` pool only the
@@ -126,10 +126,10 @@ this fallback; see the THOR page.
 | Field | Meaning |
 | ----- | ------- |
 | `meta["input_prep"]["roi_cropped"]` | `True` when the output was cropped back to a sub-ROI |
-| `meta["shape_prep"]["applied"]` | `none` / `pad_to_square` / `crop_to_square` (fallback path) |
+| `meta["shape_prep"]["applied"]` | `none` / `pad_to_square` / `crop_to_square` (fallback path); `pad_bottom_right` for `prithvi` with `RS_EMBED_PRITHVI_PREP=pad`, which pads only the bottom and right edges up to a patch multiple and records just `orig_hw`, `square_hw` and the windows |
 | `meta["shape_prep"]["orig_hw"]` / `["square_hw"]` / `["target_hw"]` | ROI shape, squared shape, final model size |
 | `meta["shape_prep"]["aspect"]` | `long_side / short_side` (≥ 2.0 triggers the heavy-padding warning) |
-| `meta["shape_prep"]["input_window"]` | Where the input lies in the squared array, as exact fractions `(y0, y1, x0, x1)`; past `[0, 1]` on a cropped axis. Recorded by models that square their input (`clay` and `dofa` under `meta["preprocess"]["resize_meta"]["shape_prep"]`) |
+| `meta["shape_prep"]["input_window"]` | Where the input lies in the squared array, as exact fractions `(y0, y1, x0, x1)`; past `[0, 1]` on a cropped axis. Recorded by models that square their input (`clay` and `dofa` under `meta["preprocess"]["resize_meta"]["shape_prep"]`; `remoteclip` only with its built-in preprocessing) |
 | `meta["shape_prep"]["roi_window"]` | `input_window` clipped to the square |
 
 `roi_cropped=True` means you got the ROI, not the square.

@@ -49,13 +49,12 @@ __all__ = [
     "prepare_square",
     "roi_is_full",
     "roi_in_frame",
-    "model_roi_windows",
+    "model_roi_window",
     "crop_grid_for_output",
     "roi_token_box",
     "crop_grid_to_roi",
     "geo_roi_from_meta",
     "roi_fetch_meta",
-    "fetch_metas_with_roi",
     "crop_grid_and_pool",
     "square_fetch_batch",
 ]
@@ -214,7 +213,7 @@ def prepare_square(
     - otherwise → **pad** (default, keeps the whole ROI) or **crop** to square,
       *then* resize to ``size`` — never a plain stretch, so the output grid /
       ROI-pooled vector can always be cropped back to the real ROI (see
-      :func:`model_roi_windows`). Aspect ratios ≥ ``aspect_tol`` warn
+      :func:`model_roi_window`). Aspect ratios ≥ ``aspect_tol`` warn
       that the padded square is dominated by synthetic border (a square *fetch*
       of real imagery, or tiling, serves such ROIs better) but still pad —
       distorting silently is worse than padding loudly.
@@ -300,34 +299,28 @@ def roi_in_frame(
     )
 
 
-def model_roi_windows(
+def model_roi_window(
     shape_prep: dict[str, Any] | None,
     geo_roi: tuple[float, float, float, float],
-) -> tuple[tuple[float, float, float, float], tuple[float, float, float, float]]:
-    """``(grid_window, pool_window)`` for cropping a model's output to the ROI.
+) -> tuple[float, float, float, float]:
+    """*geo_roi*, the ROI's window in the fetched input, in the model's frame.
 
-    *geo_roi* is the ROI's window in the fetched input; *shape_prep* is the
-    preprocessing record whose ``input_window`` says where that input lies in
-    the array fed to the model (``None`` or no ``input_window``: the model fed
-    the input as-is or stretched it, so the frames agree).
-
-    - ``grid_window``: *geo_roi* in the model's frame. Crop grid output to it
-      always; when *geo_roi* is full it still drops whole cells of padding.
-    - ``pool_window``: ``grid_window`` when *geo_roi* is a sub-window, else
-      :data:`FULL_WINDOW`. Pool the ROI's cells only when it is not full;
-      otherwise keep the model's native pooled vector.
+    *shape_prep* is the preprocessing record whose ``input_window`` says where
+    that input lies in the array fed to the model (``None`` or no
+    ``input_window``: the model fed the input as-is or stretched it, so the
+    frames agree). For a whole *geo_roi* the result is the input's own window,
+    so cropping to it drops whole cells of padding.
     """
     frame = (shape_prep or {}).get("input_window") or FULL_WINDOW
-    grid_window = roi_in_frame(tuple(frame), tuple(geo_roi))
-    if grid_window[1] <= grid_window[0] or grid_window[3] <= grid_window[2]:
+    window = roi_in_frame(tuple(frame), tuple(geo_roi))
+    if window[1] <= window[0] or window[3] <= window[2]:
         warnings.warn(
             f"The ROI window {tuple(geo_roi)} lies outside the part of the input the model "
             f"sees (input window {tuple(frame)}); the output covers the nearest edge instead.",
             UserWarning,
             stacklevel=3,
         )
-    pool_window = FULL_WINDOW if roi_is_full(tuple(geo_roi)) else grid_window
-    return grid_window, pool_window
+    return window
 
 
 def crop_grid_for_output(
@@ -349,12 +342,9 @@ def crop_grid_for_output(
       sub-window (pool them), else the grid unchanged and ``False`` (keep the
       model's own pooled vector).
     """
-    grid_window, pool_window = model_roi_windows(shape_prep, geo_roi)
-    if not pooled:
-        return crop_grid_to_roi(grid_dhw, grid_window), False
-    if roi_is_full(tuple(geo_roi)):
+    if pooled and roi_is_full(tuple(geo_roi)):
         return grid_dhw, False
-    return crop_grid_to_roi(grid_dhw, pool_window), True
+    return crop_grid_to_roi(grid_dhw, model_roi_window(shape_prep, geo_roi)), pooled
 
 
 def roi_token_box(
@@ -416,32 +406,6 @@ def roi_fetch_meta(
     """Wrap a geo ROI as ``fetch_meta`` for re-feeding ``get_embedding`` (the batch
     path), or ``None`` when the ROI is the full frame (nothing to crop)."""
     return None if roi_is_full(geo_roi) else {"roi_window_geo": geo_roi}
-
-
-def fetch_metas_with_roi(
-    fetch_metas: list[dict[str, Any] | None] | None,
-    roi_windows: list[tuple[float, float, float, float] | None] | None,
-    n_items: int,
-) -> list[dict[str, Any] | None] | None:
-    """Per-item ``fetch_metas`` carrying the ROI windows of *roi_windows*.
-
-    An item's window, when given, replaces any ``roi_window_geo`` in its
-    fetch_meta (the window list wins, as for the batch paths that take it);
-    other fetch_meta keys are kept. Returns *fetch_metas* unchanged when
-    there is no window list.
-    """
-    if roi_windows is None:
-        return fetch_metas
-    base = list(fetch_metas) if fetch_metas is not None else [None] * int(n_items)
-    out: list[dict[str, Any] | None] = []
-    for meta, roi in zip(base, roi_windows, strict=True):
-        if roi is None:
-            out.append(meta)
-            continue
-        merged = {k: v for k, v in (meta or {}).items() if k != "roi_window_geo"}
-        merged.update(roi_fetch_meta(tuple(float(v) for v in roi)) or {})
-        out.append(merged or None)
-    return out
 
 
 def square_fetch_request(spatial: SpatialSpec) -> tuple[SpatialSpec, dict[str, Any]]:

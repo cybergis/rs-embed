@@ -830,3 +830,89 @@ def test_point_payload_sync_fallback_squares_and_reuses_provider():
         h = float(sq.maxlat) - float(sq.minlat)
         assert abs(w - h) / max(w, h) < 0.15
     assert len(providers_created) == 1
+
+
+def test_combined_resume_keeps_the_roi_window(tmp_path, monkeypatch):
+    """A resumed combined export must hand restored inputs their ROI window (#139).
+
+    The first run fails in the second model after the square-fetched inputs
+    were checkpointed. The resume restores them instead of fetching again, and
+    used to drop their fetch_meta, so the output was not cropped to the ROI.
+    """
+    seen: dict[str, list] = {"good": [], "flaky": []}
+    flaky_fails = {"on": True}
+
+    def _dummy(name):
+        class Dummy:
+            def describe(self):
+                return dict(_DESCRIBE)
+
+            def get_embedding(
+                self,
+                *,
+                spatial,
+                temporal,
+                sensor,
+                output,
+                backend,
+                device="auto",
+                input_chw=None,
+                fetch_meta=None,
+            ):
+                _ = spatial, temporal, sensor, output, backend, device, input_chw
+                if name == "flaky" and flaky_fails["on"]:
+                    raise RuntimeError("flaky")
+                seen[name].append((fetch_meta or {}).get("roi_window_geo"))
+                return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
+
+        return Dummy
+
+    registry.register("dummy_sq_good")(_dummy("good"))
+    registry.register("dummy_sq_flaky")(_dummy("flaky"))
+
+    import rs_embed.api as api
+
+    fetches = {"n": 0}
+
+    def fake_fetch(provider, *, spatial, temporal, sensor):
+        _ = provider, spatial, temporal, sensor
+        fetches["n"] += 1
+        return np.full((1, 4, 4), 0.5, dtype=np.float32)
+
+    _patch_provider(monkeypatch)
+    monkeypatch.setattr("rs_embed.providers.fetch.fetch_sensor_patch_chw", fake_fetch)
+
+    rects = [
+        BBox(minlon=0.0, minlat=0.0, maxlon=0.2, maxlat=0.05),
+        BBox(minlon=1.0, minlat=1.0, maxlon=1.2, maxlat=1.05),
+    ]
+    kwargs = dict(
+        spatials=rects,
+        temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
+        models=["dummy_sq_good", "dummy_sq_flaky"],
+        target=ExportTarget.combined(str(tmp_path / "combined.npz")),
+        backend="gee",
+        device="cpu",
+        output=OutputSpec.pooled(),
+    )
+    with pytest.raises(RuntimeError, match="flaky"):
+        api.export_batch(
+            config=ExportConfig(save_inputs=False, save_embeddings=True, show_progress=False),
+            **kwargs,
+        )
+    assert len(seen["good"]) == 2 and all(w is not None for w in seen["good"])
+    n_fetches = fetches["n"]
+
+    flaky_fails["on"] = False
+    result = api.export_batch(
+        config=ExportConfig(
+            save_inputs=False, save_embeddings=True, resume=True, show_progress=False
+        ),
+        **kwargs,
+    )
+
+    assert result["status"] == "ok"
+    assert fetches["n"] == n_fetches  # inputs came from the checkpoint
+    assert len(seen["good"]) == 2  # the finished model was not re-run
+    # Same windows the first run used, restored with the inputs.
+    assert seen["flaky"] == [pytest.approx(w) for w in seen["good"]]

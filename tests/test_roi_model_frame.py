@@ -3,7 +3,7 @@
 A fetch-square ROI window (``roi_window_geo``) is relative to the fetched array.
 Models that square that array (``prepare_square`` pad/crop, a center crop, a
 bottom/right pad) feed the encoder a different frame, so each maps the window
-through its preprocessing record (``shape.model_roi_windows``) before cropping.
+through its preprocessing record (``shape.model_roi_window``) before cropping.
 """
 
 from __future__ import annotations
@@ -11,7 +11,7 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
-from rs_embed.core.specs import OutputSpec
+from rs_embed.core.specs import OutputSpec, TemporalSpec
 
 # Input padded top and bottom: on an 8-row model grid it fills rows 2..5.
 _PAD_ROWS = {"input_window": (0.25, 0.75, 0.0, 1.0)}
@@ -91,15 +91,14 @@ def test_olmoearth_merge_handles_a_cropped_input():
 
 def test_remoteclip_center_crop_window():
     from rs_embed.embedders.onthefly_remoteclip import _remoteclip_shape_prep
-    from rs_embed.tools.shape import model_roi_windows
+    from rs_embed.tools.shape import model_roi_window
 
     # 100x200 RGB: Resize(short=100 -> 224) then CenterCrop keeps the middle half
     # of the width, so the input spans x in (-0.5, 1.5) of the model input.
     prep = _remoteclip_shape_prep(np.zeros((100, 200, 3), np.uint8))
     assert prep["input_window"] == (0.0, 1.0, -0.5, 1.5)
     # A ROI over the middle half of the width is the whole model input.
-    grid, _ = model_roi_windows(prep, (0.0, 1.0, 0.25, 0.75))
-    assert grid == (0.0, 1.0, 0.0, 1.0)
+    assert model_roi_window(prep, (0.0, 1.0, 0.25, 0.75)) == (0.0, 1.0, 0.0, 1.0)
     # A square image is fed as-is.
     assert _remoteclip_shape_prep(np.zeros((64, 64, 3), np.uint8))["input_window"] == _FULL
 
@@ -150,3 +149,95 @@ def test_squaring_helpers_return_their_input_window(module, fn, x):
     assert out.shape[-2:] == (16, 16)
     # 20 rows reflect-padded to a centered 30-row square.
     assert shape_prep["input_window"] == pytest.approx((5 / 30, 25 / 30, 0.0, 1.0))
+
+
+@pytest.mark.parametrize("transpose", [False, True])
+def test_remoteclip_window_matches_its_preprocessing(transpose):
+    """The recorded window is where the built-in preprocessing really puts the image."""
+    pytest.importorskip("torchvision")
+    from PIL import Image
+
+    from rs_embed.embedders.onthefly_remoteclip import (
+        _remoteclip_preprocess,
+        _remoteclip_shape_prep,
+    )
+
+    img = np.zeros((100, 200, 3), np.uint8)
+    img[20:40, 60:90] = 255
+    if transpose:
+        img = np.ascontiguousarray(img.transpose(1, 0, 2))
+    h, w = img.shape[:2]
+    x = _remoteclip_preprocess(224)(Image.fromarray(img, mode="RGB"))[0].numpy()
+
+    # Centroid of the bright patch in the model input, in pixels.
+    weight = np.clip(x - x.min(), 0.0, None)
+    centers = np.arange(224) + 0.5
+    cy = (weight.sum(axis=1) * centers).sum() / weight.sum()
+    cx = (weight.sum(axis=0) * centers).sum() / weight.sum()
+
+    # Where the recorded window puts the patch's centroid.
+    rows, cols = np.nonzero(img[..., 0])
+    y0, y1, x0, x1 = _remoteclip_shape_prep(img)["input_window"]
+    want_y = (y0 + (rows + 0.5).mean() / h * (y1 - y0)) * 224
+    want_x = (x0 + (cols + 0.5).mean() / w * (x1 - x0)) * 224
+    assert cy == pytest.approx(want_y, abs=0.5)
+    assert cx == pytest.approx(want_x, abs=0.5)
+
+
+def test_remoteclip_records_shape_prep_in_meta(monkeypatch):
+    from rs_embed.core.specs import PointBuffer
+    from rs_embed.embedders import onthefly_remoteclip as rc
+
+    monkeypatch.setattr(
+        rc,
+        "_remoteclip_encode_pooled_batch",
+        lambda model, rgbs, **kw: np.zeros((len(rgbs), 4), np.float32),
+    )
+    monkeypatch.setattr(
+        rc.RemoteCLIPS2RGBEmbedder, "_get_model", lambda self, **k: (object(), {}, "cpu")
+    )
+    emb = rc.RemoteCLIPS2RGBEmbedder()
+    kw = dict(temporal=TemporalSpec.range("2020-01-01", "2020-02-01"), output=OutputSpec.pooled())
+    chw = np.full((3, 16, 32), 1000.0, np.float32)
+    spatial = PointBuffer(lon=0.0, lat=0.0, buffer_m=100)
+    want = (0.0, 1.0, -0.5, 1.5)
+
+    single = emb.get_embedding(spatial=spatial, sensor=None, backend="gee", input_chw=chw, **kw)
+    assert single.meta["shape_prep"]["input_window"] == want
+    (batch,) = emb.get_embeddings_batch_from_inputs(
+        spatials=[spatial], input_chws=[chw], backend="gee", **kw
+    )
+    assert batch.meta["shape_prep"]["input_window"] == want
+
+
+@pytest.mark.parametrize(("mode", "pooling"), [("grid", "token_mean"), ("pooled", "roi_grid_mean")])
+def test_fomo_labels_the_vector_it_pooled(monkeypatch, mode, pooling):
+    import rs_embed.embedders.onthefly_fomo as fomo
+
+    monkeypatch.setenv("RS_EMBED_FOMO_IMG", "16")
+    monkeypatch.setenv("RS_EMBED_FOMO_PATCH", "2")
+    monkeypatch.setattr(fomo, "_resolve_fomo_ckpt_path", lambda: "unused")
+    monkeypatch.setattr(fomo, "_load_fomo", lambda **kw: (object(), {}, "cpu"))
+    # 12 modalities of an 8x8 token grid whose value is the token's row.
+    monkeypatch.setattr(
+        fomo,
+        "_fomo_forward_tokens",
+        lambda model, x, *, spectral_keys, device: (
+            np.tile(_row_tokens(), (len(spectral_keys), 1)),
+            {},
+        ),
+    )
+    out = fomo.FoMoEmbedder().get_embedding(
+        spatial=None,
+        temporal=TemporalSpec.range("2022-06-01", "2022-09-01"),
+        sensor=None,
+        output=OutputSpec.grid() if mode == "grid" else OutputSpec.pooled(),
+        backend="auto",
+        input_chw=np.ones((12, 16, 16), np.float32),
+        fetch_meta={"roi_window_geo": (0.5, 1.0, 0.0, 1.0)},
+    )
+    # Grid output keeps the whole-input token mean as its vector (rows 0..7);
+    # pooled output pools the ROI's rows 4..7. The label must say which.
+    assert out.meta["pooling"] == pooling
+    if mode == "pooled":
+        np.testing.assert_allclose(out.data, [5.5, 5.5])

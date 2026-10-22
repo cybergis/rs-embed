@@ -45,7 +45,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     center_fit,
     geo_roi_from_meta,
-    model_roi_windows,
+    model_roi_window,
     roi_fetch_meta,
     roi_is_full,
     roi_token_box,
@@ -456,7 +456,7 @@ def _prepare_thor_raw_chw(
 
     ``input_window`` is the raw input's position in the returned array, as
     fractions ``(y0, y1, x0, x1)``; it extends past ``[0, 1]`` on a cropped
-    axis. ``get_embedding`` maps the ROI window through it (``roi_in_frame``)
+    axis. ``get_embedding`` maps the ROI window through it (``shape.model_roi_window``)
     so the output covers the ROI, not the padding.
     """
     x = np.asarray(raw_chw, dtype=np.float32)
@@ -1414,7 +1414,7 @@ class THORBaseEmbedder(EmbedderBase):
         # The ROI window is relative to the fetched input; native_snap padded (or
         # cropped) it on the way into the model, so map the window into the
         # model input's frame before cropping.
-        roi, _ = model_roi_windows(prep_meta["shape_prep"], geo_roi)
+        roi = model_roi_window(prep_meta["shape_prep"], geo_roi)
 
         if output.mode == "pooled":
             # Every ROI pools THOR's patch tokens inside its window, per channel

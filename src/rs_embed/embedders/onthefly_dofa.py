@@ -33,7 +33,6 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device_auto,
 )
 from ..tools.shape import (
-    fetch_metas_with_roi,
     geo_roi_from_meta,
     prepare_square,
     square_fetch_batch,
@@ -1033,8 +1032,9 @@ class DOFAEmbedder(EmbedderBase):
 
         backend_l = backend.lower().strip()
         if backend_l == "tensor":
-            # The per-item loop must still crop each output back to its ROI.
-            fetch_metas = fetch_metas_with_roi(fetch_metas, _roi_windows_geo, len(input_chws))
+            # The per-item loop crops each output to the ROI in its fetch_meta
+            # (get_embeddings_batch, the only caller passing _roi_windows_geo,
+            # rejects backend="tensor").
             return super().get_embeddings_batch_from_inputs(
                 spatials=spatials,
                 input_chws=input_chws,

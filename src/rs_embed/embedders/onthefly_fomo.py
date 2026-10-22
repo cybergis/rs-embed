@@ -37,7 +37,6 @@ from ..tools.shape import (
     geo_roi_from_meta,
     prepare_square,
     roi_fetch_meta,
-    roi_is_full,
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
@@ -680,8 +679,7 @@ class FoMoEmbedder(EmbedderBase):
             grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=output.mode == "pooled"
         )
         vec = _pool_grid_cells(grid, output.pooling) if roi_pooled else token_pooled
-        cropped_to_roi = not roi_is_full(geo_roi)
-        pooling = f"roi_grid_{output.pooling}" if cropped_to_roi else f"token_{output.pooling}"
+        pooling = f"roi_grid_{output.pooling}" if roi_pooled else f"token_{output.pooling}"
 
         meta = build_meta(
             model=self.model_name,
@@ -830,8 +828,7 @@ class FoMoEmbedder(EmbedderBase):
                 grid, geo_roi=geo_roi, shape_prep=shape_preps[k], pooled=output.mode == "pooled"
             )
             vec = _pool_grid_cells(grid, output.pooling) if roi_pooled else token_pooled
-            cropped_to_roi = not roi_is_full(geo_roi)
-            pooling = f"roi_grid_{output.pooling}" if cropped_to_roi else f"token_{output.pooling}"
+            pooling = f"roi_grid_{output.pooling}" if roi_pooled else f"token_{output.pooling}"
 
             meta = build_meta(
                 model=self.model_name,
