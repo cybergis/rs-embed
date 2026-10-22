@@ -34,6 +34,23 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
     - Inputs from 393 to 407 px under default limits now run natively at 384 px instead of a 288 px resize.
     - Pooled vectors of rectangular ROIs change: groups are weighted by token count, and under `concat` the length matches square ROIs.
     - Re-export THOR pooled embeddings of rectangular ROIs, and grids of affected sizes.
+- **Square-input models crop the ROI in their own input's frame** ([#139](https://github.com/cybergis/rs-embed/issues/139)). A square fetch records the ROI's window relative to the fetched array (`roi_window_geo`), but several models pad, crop or center-crop that array before the encoder, and cropped their output grid with the raw window anyway.
+  - **What was wrong:**
+    - When the fetched or user-provided array was not exactly square, the ROI crop could land one token row or column off.
+    - Padding cells were never removed from grid output.
+    - The window was also rounded to 6 decimals in `square_spatial` and `prepare_square`, so an edge exactly on a token boundary pulled in an extra token on large grids.
+  - **Models affected:**
+    - `agrifm`, `anysat`, `clay`, `dofa`, `fomo`, `galileo` and `prithvi` (both `RS_EMBED_PRITHVI_PREP` modes);
+    - `remoteclip`, whose resize-then-center-crop drops the long axis' margins;
+    - `olmoearth` with a sub-window ROI, where `_merge_geo_roi` replaced the pad window with the raw ROI window instead of composing the two.
+    - Models that resize the whole array (`satmae`, `satmaepp`, `satmaepp_s2`, `scalemae`, `satvision_toa`, `terrafm`, `terramind`, `wildsat`) were already correct.
+  - **What changed:**
+    - `prepare_square` records the input's exact position in the square as `meta["shape_prep"]["input_window"]`, for pad, crop and none; `roi_window` is now that window clipped to the square, unrounded.
+    - The shared `shape.model_roi_windows` maps the ROI window through it. Every model above uses it: grid output is cropped to the mapped window, which also drops whole cells of padding; pooled output pools the ROI's cells only when the ROI is a sub-window, and otherwise keeps the model's own pooled vector.
+    - `square_spatial` returns exact windows.
+  - **Who was affected:** grid and ROI-pooled output of the models above whenever the array fed to them was not square. That covers rectangular arrays passed through `get_embedding_from_data` / `input_chw` (whose grids now exclude padding cells, so their shape changes) and fetches off by a pixel. It also covers windows on token boundaries of large grids.
+- **ROI windows and fetch flags survive a combined-export resume.** A resumed combined export restored the prefetched input arrays from the checkpoint but not their fetch metadata. Resumed square-fetched inputs were therefore not cropped back to the ROI, and processing flags such as `satvision_toa`'s `already_unit_scaled` were lost. The prefetch checkpoint now stores and restores each input's fetch metadata.
+- **`clay` and `dofa` crop the ROI on the tensor-backend batch path.** `get_embeddings_batch_from_inputs(backend="tensor")` dropped the per-item `fetch_metas`, so the outputs covered the whole fetched square.
 
 ## [0.3.1] — 2026-10-14
 

@@ -301,3 +301,42 @@ def test_request_fingerprint_tracks_input_prep_version_only_when_it_matters(
     before = _fp()
     monkeypatch.setattr(manifest, "INPUT_PREP_VERSION", manifest.INPUT_PREP_VERSION + 1)
     assert (_fp() != before) is expect_change
+
+
+def test_prefetch_checkpoint_round_trips_fetch_meta():
+    """A resumed combined export must get each input's fetch metadata back (#139).
+
+    Restored inputs skip the fetch, so without it they lost the square fetch's
+    ROI window (never cropped back) and processing flags such as
+    ``already_unit_scaled``.
+    """
+    from rs_embed.core.specs import SensorSpec
+    from rs_embed.pipelines.checkpoint import CheckpointManager
+    from rs_embed.tools.checkpoint_utils import store_prefetch_checkpoint_arrays
+    from rs_embed.tools.serialization import jsonable
+
+    arrays: dict = {}
+    manifest: dict = {}
+    sensor = SensorSpec(collection="COPERNICUS/S2_SR_HARMONIZED", bands=("B4",))
+    fetch_meta = {
+        (0, "s2"): {"roi_window_geo": (0.25, 0.75, 0.0, 1.0)},
+        (1, "s2"): {"already_unit_scaled": True},
+    }
+    store_prefetch_checkpoint_arrays(
+        arrays=arrays,
+        manifest=manifest,
+        sensor_by_key={"s2": sensor},
+        inputs_cache={(0, "s2"): np.ones((1, 4, 4)), (1, "s2"): np.ones((1, 4, 4))},
+        n_items=2,
+        fetch_meta=fetch_meta,
+    )
+    # The manifest goes through JSON on disk.
+    manifest = json.loads(json.dumps(jsonable(manifest)))
+
+    restored = CheckpointManager.restore_prefetch_fetch_meta(manifest)
+    assert restored[(1, "s2")] == {"already_unit_scaled": True}
+    # JSON turns the window tuple into a list; geo_roi_from_meta reads either.
+    from rs_embed.tools.shape import geo_roi_from_meta
+
+    assert geo_roi_from_meta(restored[(0, "s2")]) == (0.25, 0.75, 0.0, 1.0)
+    assert set(CheckpointManager.restore_prefetch_cache(manifest, arrays)) == set(restored)
