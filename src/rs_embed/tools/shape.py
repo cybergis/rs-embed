@@ -294,11 +294,11 @@ def roi_token_box(
 
     Rounds outward (floor low edge, ceil high edge) so the ROI is never
     under-covered, and always returns at least a 1×1 box clamped to the grid.
-    An edge within 1e-4 of a token boundary counts as on it, so float and
-    6-decimal window round-off (e.g. ``round(8/38, 6) * 38 = 7.99999``) does not
-    pull in a whole extra token.
+    An edge within float round-off (1e-6 of a token) of a token boundary counts
+    as on it, so a window computed from pixel fractions does not pull in a whole
+    extra token.
     """
-    eps = 1e-4
+    eps = 1e-6
     y0f, y1f, x0f, x1f = roi_window
     y0 = max(0, min(int(np.floor(y0f * grid_h + eps)), grid_h - 1))
     y1 = max(y0 + 1, min(int(np.ceil(y1f * grid_h - eps)), grid_h))

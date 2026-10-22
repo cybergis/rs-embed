@@ -159,9 +159,9 @@ def _prepare_default(raw, **overrides):
     return thor._prepare_thor_raw_chw(raw, **kwargs)
 
 
-def test_prepare_thor_raw_chw_native_snap_pads_up_with_edge_values():
-    # 200 px snaps up to 208 (never down to 192): no ROI pixel is dropped, and
-    # the 4 px border repeats the edge instead of the zero fill value.
+def test_prepare_thor_raw_chw_native_snap_tie_pads_up_with_edge_values():
+    # 200 px is halfway between 192 and 208: the tie pads up (main cropped 8 px),
+    # and the 4 px border repeats the edge instead of the zero fill value.
     raw = np.arange(200 * 200, dtype=np.float32).reshape(1, 200, 200).repeat(10, axis=0) + 1.0
     out, meta = _prepare_default(raw)
 
@@ -170,8 +170,20 @@ def test_prepare_thor_raw_chw_native_snap_pads_up_with_edge_values():
     np.testing.assert_array_equal(out[:, 4:204, 4:204], raw)
     np.testing.assert_array_equal(out[:, :4, 4:204], np.repeat(raw[:, :1, :], 4, axis=1))
     assert (out != 0).all()
-    assert meta["input_window"] == pytest.approx((4 / 208, 204 / 208, 4 / 208, 204 / 208))
+    assert meta["shape_prep"]["input_window"] == pytest.approx(
+        (4 / 208, 204 / 208, 4 / 208, 204 / 208)
+    )
     assert meta["ground_cover_m"] == 2080
+
+
+@pytest.mark.parametrize(("side", "snapped"), [(289, 288), (290, 288), (296, 304), (303, 304)])
+def test_prepare_thor_raw_chw_native_snap_goes_to_the_nearest_valid_side(side, snapped):
+    # A 1 px fetch overshoot (289 px for a 2880 m ROI) stays on the nominal side
+    # instead of padding most of a 16 px unit.
+    out, meta = _prepare_default(np.ones((10, side, side), dtype=np.float32))
+
+    assert out.shape == (10, snapped, snapped)
+    assert meta["ground_cover_m"] == 10 * snapped
 
 
 def test_prepare_thor_raw_chw_input_window_tracks_square_crop():
@@ -181,7 +193,7 @@ def test_prepare_thor_raw_chw_input_window_tracks_square_crop():
     out, meta = _prepare_default(raw)
 
     assert out.shape == (10, 288, 288)
-    assert meta["input_window"] == pytest.approx((-1 / 288, 289 / 288, 0.0, 1.0))
+    assert meta["shape_prep"]["input_window"] == pytest.approx((-1 / 288, 289 / 288, 0.0, 1.0))
 
 
 def test_prepare_thor_raw_chw_shape_adjust_pad_uses_edge_values():
@@ -191,7 +203,7 @@ def test_prepare_thor_raw_chw_shape_adjust_pad_uses_edge_values():
     assert meta["shape_adjust_applied"] == "pad_to_square"
     assert out.shape == (10, 288, 288)
     assert (out == 1.0).all()
-    assert meta["input_window"] == pytest.approx((0.0, 1.0, 2 / 288, 286 / 288))
+    assert meta["shape_prep"]["input_window"] == pytest.approx((0.0, 1.0, 2 / 288, 286 / 288))
 
 
 def test_prepare_thor_raw_chw_tile_mode_forces_fixed_resize():
@@ -229,7 +241,7 @@ def test_prepare_thor_raw_chw_fallback_drops_abandoned_native_meta():
 
     assert meta["shape_adjust_applied"] == "none"
     assert "square_side" not in meta
-    assert meta["snapped_side"] == 528
+    assert meta["snapped_side"] == 512
     assert meta["effective_gsd_m"] == pytest.approx((18.0556, 17.8472))
 
 
@@ -477,88 +489,119 @@ def test_thor_get_embedding_s1_uses_vvvh_model_bands(monkeypatch):
     assert out.meta["sensor"]["bands_thor"] == ("VV", "VH")
 
 
-def _thor_with_fake_forward(monkeypatch, *, grid_side, tokens=None, fmeta=None):
+def _thor_with_fake_forward(monkeypatch, *, grid_side, tokens=None, env=None):
+    """THOR with a stubbed model: a single grid_side x grid_side token grid.
+
+    Grid cell (r, c) holds ``100 * r + c`` so tests can see which cells a crop
+    kept; tokens default to the same values, laid out row-major.
+    """
     import os
 
     import rs_embed.embedders.onthefly_thor as thor
 
     for var in [k for k in os.environ if k.startswith("RS_EMBED_THOR_")]:
         monkeypatch.delenv(var)
-    rows = np.arange(grid_side, dtype=np.float32)[None, :, None]
-    grid = np.broadcast_to(rows, (8, grid_side, grid_side)).copy()
+    for k, v in (env or {}).items():
+        monkeypatch.setenv(k, v)
+    r, c = np.meshgrid(np.arange(grid_side), np.arange(grid_side), indexing="ij")
+    cell = (100.0 * r + c).astype(np.float32)
+    grid = np.broadcast_to(cell, (8, grid_side, grid_side)).copy()
     if tokens is None:
-        tokens = np.ones((grid_side * grid_side, 8), dtype=np.float32)
+        tokens = np.repeat(cell.reshape(-1, 1), 8, axis=1)
+    fmeta = {
+        "expected_patch_tokens": grid_side * grid_side,
+        "group_token_layout": ((0, grid_side, grid_side),),
+    }
 
     monkeypatch.setattr(thor, "_load_thor", lambda **kwargs: (object(), {"embed_dim": 8}, "cpu"))
     monkeypatch.setattr(
         thor,
         "_thor_forward_single",
-        lambda model, x_chw, *, device, group_merge: (tokens, grid, dict(fmeta or {})),
+        lambda model, x_chw, *, device, group_merge: (tokens, grid, dict(fmeta)),
     )
     return thor.THORBaseEmbedder()
 
 
-def test_thor_roi_crop_uses_the_snapped_frame(monkeypatch):
-    # 290 px snaps up to 304 (7 px pad per side), giving a 38x38 grid. The ROI
-    # starts at 20% of the fetched input, which is row 65 of 304 in the model
-    # input, i.e. token row 8 (not row 7, as 20% of the unpadded frame gives).
-    emb = _thor_with_fake_forward(monkeypatch, grid_side=38)
-    out = emb.get_embedding(
-        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=1450),
-        temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
-        sensor=None,
-        output=OutputSpec.grid(),
-        backend="gee",
-        device="cpu",
-        input_chw=np.ones((10, 290, 290), dtype=np.float32),
-        fetch_meta={"roi_window_geo": (0.2, 1.0, 0.0, 1.0)},
-    )
-
-    data = np.asarray(out.data)
-    assert data.shape == (8, 30, 38)
-    assert data[0, 0, 0] == 8.0
-
-
-def _thor_embed(emb, side, output, fetch_meta=None):
+def _thor_embed(emb, hw, output, fetch_meta=None):
+    h, w = (hw, hw) if isinstance(hw, int) else hw
     return emb.get_embedding(
-        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=5 * side),
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=5 * max(h, w)),
         temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
         sensor=None,
         output=output,
         backend="gee",
         device="cpu",
-        input_chw=np.ones((10, side, side), dtype=np.float32),
+        input_chw=np.ones((10, h, w), dtype=np.float32),
         fetch_meta=fetch_meta,
     )
 
 
+# 296x288 under shape_adjust='pad': squared to 296, which ties between 288 and
+# 304 and pads up, so x gets 8 px (one whole 8 px token) of padding per side.
+_PAD_ENV = {"RS_EMBED_THOR_SHAPE_ADJUST": "pad"}
+
+
+def test_thor_roi_crop_uses_the_snapped_frame(monkeypatch):
+    # The ROI starts at 25% of the fetched width, i.e. x = 8 + 72 = 80 px of the
+    # 304 px model input: token column 10 (25% of the unpadded frame gives 9).
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=38, env=_PAD_ENV)
+    out = _thor_embed(emb, (296, 288), OutputSpec.grid(), {"roi_window_geo": (0.0, 1.0, 0.25, 1.0)})
+
+    data = np.asarray(out.data)
+    assert data.shape == (8, 38, 27)
+    assert data[0, 0, 0] == 10.0
+
+
+def test_thor_grid_drops_whole_tokens_of_snap_padding_and_records_the_box(monkeypatch):
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=38, env=_PAD_ENV)
+    out = _thor_embed(emb, (296, 288), OutputSpec.grid())
+
+    assert np.asarray(out.data).shape == (8, 38, 36)
+    assert out.meta["shape_prep"]["model_grid_hw"] == (38, 38)
+    assert out.meta["shape_prep"]["grid_crop_box"] == (0, 38, 1, 37)
+
+
+def test_thor_whole_roi_token_pool_skips_tokens_of_pure_padding(monkeypatch):
+    # The pure-padding token columns 0 and 37 carry 1000, every real token 1, so
+    # the pool is exactly 1 only if they are skipped.
+    tokens = np.ones((38, 38, 8), dtype=np.float32)
+    tokens[:, [0, 37], :] = 1000.0
+    emb = _thor_with_fake_forward(
+        monkeypatch, grid_side=38, tokens=tokens.reshape(-1, 8), env=_PAD_ENV
+    )
+    out = _thor_embed(emb, (296, 288), OutputSpec.pooled())
+
+    assert out.meta["pooling"] == "mean"
+    np.testing.assert_array_equal(out.data, np.ones(8, dtype=np.float32))
+
+
 @pytest.mark.parametrize("side", [288, 289, 290])
-def test_thor_whole_roi_always_keeps_token_pooling(monkeypatch, side):
-    # Whether the snap padding fills a whole token (289 pads 7/8 px to 304) or
-    # not (290 pads 7/7), a whole ROI pools THOR's tokens, so neighbouring ROI
-    # sizes stay comparable (and keep the same length under concat merging).
-    emb = _thor_with_fake_forward(monkeypatch, grid_side=38)
+def test_thor_whole_roi_pools_every_token_without_padding(monkeypatch, side):
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=36)
     out = _thor_embed(emb, side, OutputSpec.pooled())
 
     assert out.meta["pooling"] == "mean"
-    assert out.data.shape == (8,)
+    cells = 100.0 * np.arange(36)[:, None] + np.arange(36)[None, :]
+    np.testing.assert_allclose(out.data, np.full(8, cells.mean()), rtol=1e-6)
 
 
-def test_thor_grid_drops_whole_tokens_of_snap_padding(monkeypatch):
-    # 289 px pads 7 px before and 8 px after to reach 304; the last 8 px token
-    # row/column is pure padding and is cropped from grid output.
-    emb = _thor_with_fake_forward(monkeypatch, grid_side=38)
-    out = _thor_embed(emb, 289, OutputSpec.grid())
+def test_thor_sub_window_pools_the_tokens_of_its_window(monkeypatch):
+    # Rows 9..36 of a 36x36 grid (ROI from 25% of 288 px): the token pool over
+    # exactly those cells, labelled as an ROI token pool.
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=36)
+    out = _thor_embed(emb, 288, OutputSpec.pooled(), {"roi_window_geo": (0.25, 1.0, 0.0, 1.0)})
 
-    assert np.asarray(out.data).shape == (8, 37, 37)
+    assert out.meta["pooling"] == "roi_token_mean"
+    cells = 100.0 * np.arange(9, 36)[:, None] + np.arange(36)[None, :]
+    np.testing.assert_allclose(out.data, np.full(8, cells.mean()), rtol=1e-6)
 
 
 def test_prepare_thor_raw_chw_steps_down_instead_of_breaking_the_side_limit():
-    # 388 px would pad up to 400 > max_native_side=384 and fall back to a 288 px
-    # resize; cropping 2 px per side to 384 keeps it native at exact spacing.
+    # 393 px is nearer 400 than 384, but 400 > max_native_side=384 would resample
+    # it to 288 px; cropping 4/5 px to 384 keeps it native at exact spacing.
     import warnings
 
-    raw = np.ones((10, 388, 388), dtype=np.float32)
+    raw = np.ones((10, 393, 393), dtype=np.float32)
     with warnings.catch_warnings():
         warnings.simplefilter("error")
         out, meta = _prepare_default(raw)
@@ -566,7 +609,9 @@ def test_prepare_thor_raw_chw_steps_down_instead_of_breaking_the_side_limit():
     assert out.shape == (10, 384, 384)
     assert meta["preprocess_strategy"] == "native_snap"
     assert meta["snap_adjust_applied"] == "crop_to_valid_side"
-    assert meta["input_window"] == pytest.approx((-2 / 384, 386 / 384, -2 / 384, 386 / 384))
+    assert meta["shape_prep"]["input_window"] == pytest.approx(
+        (-4 / 384, 389 / 384, -4 / 384, 389 / 384)
+    )
 
 
 def test_prepare_thor_raw_chw_rejects_empty_input():
@@ -576,39 +621,11 @@ def test_prepare_thor_raw_chw_rejects_empty_input():
         _prepare_default(np.zeros((10, 0, 0), dtype=np.float32))
 
 
-def test_thor_whole_roi_token_pool_skips_tokens_of_pure_padding(monkeypatch):
-    # 289 px pads 7/8 px to 304: the 10 m group (38x38 tokens) gets one row and
-    # one column of pure padding; the 20 m group (19x19) none. Those 75 tokens
-    # carry 100, every real token 1, so the pool is exactly 1 if they are skipped.
-    g10 = np.ones((38, 38, 8), dtype=np.float32)
-    g10[37, :, :] = 100.0
-    g10[:, 37, :] = 100.0
-    tokens = np.concatenate([g10.reshape(-1, 8), np.ones((19 * 19, 8), np.float32)])
-    emb = _thor_with_fake_forward(
-        monkeypatch,
-        grid_side=38,
-        tokens=tokens,
-        fmeta={"group_patch_sizes": (38, 19), "expected_patch_tokens": 38 * 38 + 19 * 19},
-    )
-    out = _thor_embed(emb, 289, OutputSpec.pooled())
-
-    assert out.meta["pooling"] == "mean"
-    np.testing.assert_array_equal(out.data, np.ones(8, dtype=np.float32))
-
-
-def test_thor_grid_records_its_crop_box(monkeypatch):
-    emb = _thor_with_fake_forward(monkeypatch, grid_side=38)
-    out = _thor_embed(emb, 289, OutputSpec.grid())
-
-    assert out.meta["model_grid_hw"] == (38, 38)
-    assert out.meta["grid_crop_box"] == (0, 37, 0, 37)
-
-
 @pytest.mark.parametrize(
     ("hw", "geo_roi"),
     [
-        # Steps down to 384, cropping away the 1 px ROI margin entirely.
-        ((388, 388), (1 / 388, 387 / 388, 0.0, 1.0)),
+        # 393 px steps down to 384, cropping away the 1 px ROI margin entirely.
+        ((393, 393), (1 / 393, 392 / 393, 0.0, 1.0)),
         # shape_adjust='crop' crops the long axis to 288 and its 1 px margin.
         ((290, 288), (1 / 290, 289 / 290, 0.0, 1.0)),
     ],
@@ -616,19 +633,10 @@ def test_thor_grid_records_its_crop_box(monkeypatch):
 def test_thor_pooled_sub_window_survives_a_mapped_window_that_clips_to_full(
     monkeypatch, hw, geo_roi
 ):
-    emb = _thor_with_fake_forward(monkeypatch, grid_side=48)
-    out = emb.get_embedding(
-        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=2000),
-        temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
-        sensor=None,
-        output=OutputSpec.pooled(),
-        backend="gee",
-        device="cpu",
-        input_chw=np.ones((10, *hw), dtype=np.float32),
-        fetch_meta={"roi_window_geo": geo_roi},
-    )
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=36)
+    out = _thor_embed(emb, hw, OutputSpec.pooled(), {"roi_window_geo": geo_roi})
 
-    assert out.meta["pooling"] == "roi_grid_mean"
+    assert out.meta["pooling"] == "mean"
     assert out.data.shape == (8,)
 
 
@@ -645,9 +653,9 @@ def test_prepare_thor_raw_chw_does_not_step_down_when_no_resample_would_follow()
 
 
 def test_prepare_thor_raw_chw_crop_mode_label_reflects_the_actual_fit():
-    # Under 'crop' the snap starts from the short side (294 -> 304), which is
+    # Under 'crop' the snap starts from the short side (297 -> 304), which is
     # longer than the long side too, so both axes are padded, not cropped.
-    raw = np.ones((10, 300, 294), dtype=np.float32)
+    raw = np.ones((10, 300, 297), dtype=np.float32)
     out, meta = _prepare_default(raw, shape_adjust="crop")
 
     assert out.shape == (10, 304, 304)

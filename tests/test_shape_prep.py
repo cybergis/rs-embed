@@ -268,8 +268,6 @@ def test_center_fit_rejects_bad_targets_and_empty_edge_pads():
     assert padded[0, 0, 0] == -1.0
 
 
-def test_roi_token_box_ignores_round_off_at_token_edges():
+def test_roi_token_box_ignores_float_round_off_at_token_edges():
     # 4/392 of a 98-token grid is exactly token 1, but evaluates to 0.99999...
     assert roi_token_box((4 / 392, 1.0, 0.0, 1.0), grid_h=98, grid_w=98) == (1, 98, 0, 98)
-    # fetch-square windows are rounded to 6 decimals: round(8/38, 6) * 38 = 7.999988
-    assert roi_token_box((round(8 / 38, 6), 1.0, 0.0, 1.0), grid_h=38, grid_w=38)[0] == 8
