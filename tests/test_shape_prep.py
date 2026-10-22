@@ -260,8 +260,10 @@ def test_center_fit_crops_and_pads_each_axis_around_center_offset():
 
 def test_center_fit_rejects_bad_targets_and_empty_edge_pads():
     x = np.ones((1, 4, 4), dtype=np.float32)
-    with pytest.raises(ModelError, match="positive"):
-        center_fit(x, out_h=0, out_w=4)
+    with pytest.raises(ModelError, match="non-negative"):
+        center_fit(x, out_h=-1, out_w=4)
+    # An empty axis still crops to an empty square, as it always did.
+    assert center_crop_to_square(np.ones((1, 0, 4), dtype=np.float32)).shape == (1, 0, 0)
     with pytest.raises(ModelError, match="empty input"):
         center_fit(np.ones((1, 0, 4), dtype=np.float32), out_h=4, out_w=4, pad_mode="edge")
     padded, _ = center_fit(x, out_h=6, out_w=6, pad_mode="constant", fill_value=-1.0)

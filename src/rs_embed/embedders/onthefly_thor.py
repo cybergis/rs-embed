@@ -44,7 +44,6 @@ from ..tools.runtime import (
 )
 from ..tools.shape import (
     center_fit,
-    crop_grid_to_roi,
     geo_roi_from_meta,
     roi_fetch_meta,
     roi_in_frame,
@@ -56,7 +55,13 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    pool_from_tokens,
+    reduce_tokens,
+    tokens_to_grid_dhw,
+    verify_loaded_params,
+)
 
 
 def ensure_torch() -> None:
@@ -542,17 +547,15 @@ def _prepare_thor_raw_chw(
         band_gsds=tuple(band_gsds),
     )
     est_tokens, limit_reason = _tokens_and_limit(snapped_side)
-    if (
-        limit_reason is not None
-        and int(image_size) < snapped_side
-        and snapped_side > square_side > side_unit
-    ):
-        # Padding up broke a limit, so the input would be resampled to
-        # image_size; if the valid side below meets the limits, cropping less
-        # than one unit beats that resample.
-        lower_tokens, lower_limit = _tokens_and_limit(snapped_side - side_unit)
-        if lower_limit is None:
-            snapped_side, est_tokens, limit_reason = snapped_side - side_unit, lower_tokens, None
+    lower_side = snapped_side - side_unit
+    if limit_reason is not None and lower_side >= side_unit:
+        # The valid side one unit below may meet the limits. Take it when the
+        # breach would resample the input to image_size (cropping less than two
+        # units beats that), or when the snap was a tie that padded up.
+        lower_tokens, lower_limit = _tokens_and_limit(lower_side)
+        was_tie = 2 * square_side == snapped_side + lower_side
+        if lower_limit is None and (int(image_size) < snapped_side or was_tie):
+            snapped_side, est_tokens, limit_reason = lower_side, lower_tokens, None
 
     meta["square_side"] = int(square_side)
     meta["side_unit"] = int(side_unit)
@@ -585,8 +588,11 @@ def _prepare_thor_raw_chw(
     x_native, input_window = center_fit(x, out_h=snapped_side, out_w=snapped_side, pad_mode="edge")
     meta["shape_prep"] = {"input_window": input_window}
     if h != w:
+        cropped, padded = max(h, w) > snapped_side, min(h, w) < snapped_side
         meta["shape_adjust_applied"] = (
-            "crop_to_square" if max(h, w) > snapped_side else "pad_to_square"
+            "crop_and_pad_to_square"
+            if cropped and padded
+            else ("crop_to_square" if cropped else "pad_to_square")
         )
     if snapped_side > square_side:
         meta["snap_adjust_applied"] = "pad_to_valid_side"
@@ -797,10 +803,10 @@ def _thor_window_token_index(
     """Indices into THOR's tokens of every patch token inside *window*.
 
     *layout* lists ``(start, rows, cols)`` per row-major token grid, as the
-    grid builders record it in ``meta['group_token_layout']``. ``None`` (no
-    layout, or a full window) keeps every patch token.
+    grid builders record it in ``meta['group_token_layout']``; ``None`` when
+    there is no layout.
     """
-    if not layout or roi_is_full(window):
+    if not layout:
         return None
     parts = []
     for start, rows, cols in layout:
@@ -810,31 +816,13 @@ def _thor_window_token_index(
     return np.concatenate(parts)
 
 
-def _reduce_thor_tokens(tokens: np.ndarray, pooling: str) -> np.ndarray:
-    if pooling == "mean":
-        return tokens.mean(axis=0).astype(np.float32)
-    if pooling == "max":
-        return tokens.max(axis=0).astype(np.float32)
-    raise ModelError(f"Unknown pooling='{pooling}' (expected 'mean' or 'max').")
-
-
 def _pool_thor_tokens(
     tokens: np.ndarray,
     *,
     pooling: str,
     expected_patch_tokens: int | None,
-    token_index: np.ndarray | None = None,
 ) -> tuple[np.ndarray, bool]:
-    """Pool THOR's patch tokens, CLS excluded.
-
-    With *token_index* (from :func:`_thor_window_token_index`), only those
-    tokens are pooled; the index never includes the CLS token.
-    """
-    if token_index is not None:
-        cls_removed = expected_patch_tokens is not None and int(tokens.shape[0]) == (
-            int(expected_patch_tokens) + 1
-        )
-        return _reduce_thor_tokens(tokens[token_index], pooling), bool(cls_removed)
+    """Pool THOR's patch tokens, CLS excluded, when the token layout is unknown."""
     if (
         expected_patch_tokens is not None
         and tokens.ndim == 2
@@ -842,7 +830,7 @@ def _pool_thor_tokens(
     ):
         cls_removed = int(tokens.shape[0]) == int(expected_patch_tokens) + 1
         patch_tokens = tokens[1:] if cls_removed else tokens
-        return _reduce_thor_tokens(patch_tokens, pooling), bool(cls_removed)
+        return reduce_tokens(patch_tokens, pooling), bool(cls_removed)
     return pool_from_tokens(tokens, pooling)
 
 
@@ -1434,12 +1422,22 @@ class THORBaseEmbedder(EmbedderBase):
             # padding stay out, and the vector has the same length, scale and
             # group weighting whatever the ROI's shape.
             token_index = _thor_window_token_index(fmeta.get("group_token_layout"), roi)
-            vec, cls_removed = _pool_thor_tokens(
-                tokens,
-                pooling=output.pooling,
-                expected_patch_tokens=fmeta.get("expected_patch_tokens"),
-                token_index=token_index,
-            )
+            if token_index is not None:
+                vec = reduce_tokens(tokens[token_index], output.pooling)
+                cls_removed = bool(fmeta.get("cls_removed"))
+            else:
+                if not roi_is_full(geo_roi):
+                    warnings.warn(
+                        "THOR could not resolve its token layout, so the pooled vector "
+                        "covers the whole fetched square, not just the ROI.",
+                        UserWarning,
+                        stacklevel=2,
+                    )
+                vec, cls_removed = _pool_thor_tokens(
+                    tokens,
+                    pooling=output.pooling,
+                    expected_patch_tokens=fmeta.get("expected_patch_tokens"),
+                )
             roi_pooled = token_index is not None and not roi_is_full(geo_roi)
             out_meta = {
                 **meta,
@@ -1459,7 +1457,8 @@ class THORBaseEmbedder(EmbedderBase):
             # model input (final_hw / ground_cover_m describe the uncropped grid).
             gh, gw = int(grid.shape[-2]), int(grid.shape[-1])
             crop_box = tuple(int(v) for v in roi_token_box(roi, grid_h=gh, grid_w=gw))
-            grid = crop_grid_to_roi(grid, roi)
+            y0, y1, x0, x1 = crop_box
+            grid = np.ascontiguousarray(grid[:, y0:y1, x0:x1])
             gmeta = {
                 **meta,
                 "grid_shape": tuple(grid.shape),

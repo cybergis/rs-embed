@@ -489,7 +489,7 @@ def test_thor_get_embedding_s1_uses_vvvh_model_bands(monkeypatch):
     assert out.meta["sensor"]["bands_thor"] == ("VV", "VH")
 
 
-def _thor_with_fake_forward(monkeypatch, *, grid_side, tokens=None, env=None):
+def _thor_with_fake_forward(monkeypatch, *, grid_side, tokens=None, env=None, fmeta=None):
     """THOR with a stubbed model: a single grid_side x grid_side token grid.
 
     Grid cell (r, c) holds ``100 * r + c`` so tests can see which cells a crop
@@ -508,10 +508,11 @@ def _thor_with_fake_forward(monkeypatch, *, grid_side, tokens=None, env=None):
     grid = np.broadcast_to(cell, (8, grid_side, grid_side)).copy()
     if tokens is None:
         tokens = np.repeat(cell.reshape(-1, 1), 8, axis=1)
-    fmeta = {
-        "expected_patch_tokens": grid_side * grid_side,
-        "group_token_layout": ((0, grid_side, grid_side),),
-    }
+    if fmeta is None:
+        fmeta = {
+            "expected_patch_tokens": grid_side * grid_side,
+            "group_token_layout": ((0, grid_side, grid_side),),
+        }
 
     monkeypatch.setattr(thor, "_load_thor", lambda **kwargs: (object(), {"embed_dim": 8}, "cpu"))
     monkeypatch.setattr(
@@ -614,6 +615,74 @@ def test_prepare_thor_raw_chw_steps_down_instead_of_breaking_the_side_limit():
     )
 
 
+@pytest.mark.parametrize("side", [393, 400, 401, 407])
+def test_prepare_thor_raw_chw_one_unit_step_down_is_monotonic(side):
+    # Every input whose snapped side is one unit over the side limit runs at 384,
+    # whether the snap padded up (393) or not (400, 401).
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out, meta = _prepare_default(np.ones((10, side, side), dtype=np.float32))
+
+    assert out.shape == (10, 384, 384)
+    assert meta["preprocess_strategy"] == "native_snap"
+
+
+def test_prepare_thor_raw_chw_falls_back_two_units_over_the_limit():
+    # 408 ties between 400 and 416; both are over the 384 limit, so the input
+    # is resampled to 288 px as before.
+    with pytest.warns(UserWarning, match="native_side_limit"):
+        _, meta = _prepare_default(np.ones((10, 408, 408), dtype=np.float32))
+
+    assert meta["preprocess_strategy"] == "fixed_resize"
+
+
+def test_prepare_thor_raw_chw_tie_does_not_pad_past_a_limit():
+    # patch_size=4: 196 ties between 192 (2880 tokens) and 200 (3125 > 3000). The
+    # tie must not pad past the token limit the side below meets.
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out, meta = _prepare_default(np.ones((10, 196, 196), dtype=np.float32), patch_size=4)
+
+    assert out.shape == (10, 192, 192)
+    assert meta["estimated_patch_tokens"] == 2880
+
+
+def test_prepare_thor_raw_chw_labels_mixed_crop_and_pad():
+    # 305x300 under 'crop' snaps from 300 to 304: H is cropped, W is padded.
+    _, meta = _prepare_default(np.ones((10, 305, 300), dtype=np.float32), shape_adjust="crop")
+
+    assert meta["shape_adjust_applied"] == "crop_and_pad_to_square"
+
+
+def test_thor_pooled_cls_flag_comes_from_the_token_layout(monkeypatch):
+    # patch_tokens-style layout with a CLS token first: a sub-window pool skips
+    # it and reports cls_removed, as a whole-ROI pool does.
+    tokens = np.ones((36 * 36 + 1, 8), dtype=np.float32)
+    tokens[0] = 1000.0
+    emb = _thor_with_fake_forward(
+        monkeypatch,
+        grid_side=36,
+        tokens=tokens,
+        fmeta={"group_token_layout": ((1, 36, 36),), "cls_removed": True},
+    )
+    out = _thor_embed(emb, 288, OutputSpec.pooled(), {"roi_window_geo": (0.25, 1.0, 0.0, 1.0)})
+
+    assert out.meta["cls_removed"] is True
+    np.testing.assert_array_equal(out.data, np.ones(8, dtype=np.float32))
+
+
+def test_thor_pooled_sub_window_warns_without_a_token_layout(monkeypatch):
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=36, fmeta={})
+    with pytest.warns(UserWarning, match="could not resolve its token layout"):
+        out = _thor_embed(emb, 288, OutputSpec.pooled(), {"roi_window_geo": (0.25, 1.0, 0.0, 1.0)})
+
+    assert out.meta["pooling"] == "mean"
+
+
 def test_prepare_thor_raw_chw_rejects_empty_input():
     from rs_embed.core.errors import ModelError
 
@@ -636,7 +705,8 @@ def test_thor_pooled_sub_window_survives_a_mapped_window_that_clips_to_full(
     emb = _thor_with_fake_forward(monkeypatch, grid_side=36)
     out = _thor_embed(emb, hw, OutputSpec.pooled(), {"roi_window_geo": geo_roi})
 
-    assert out.meta["pooling"] == "mean"
+    # Still an ROI pool (labelled by the ROI, not by how its window clips).
+    assert out.meta["pooling"] == "roi_token_mean"
     assert out.data.shape == (8,)
 
 

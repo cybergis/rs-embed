@@ -95,16 +95,21 @@ def center_fit(
     :func:`center_offset`. Returns ``(array, window)``: *window* is where the
     input lies in the result, as fractions ``(y0, y1, x0, x1)`` that extend
     past ``[0, 1]`` on a cropped axis (see :func:`roi_in_frame`). The array is
-    ``x`` itself when the shape already matches.
+    always C-contiguous (``x`` itself when it already matches and is).
     """
     h, w = _hw(x)
     out_h, out_w = int(out_h), int(out_w)
-    if out_h <= 0 or out_w <= 0:
-        raise ModelError(f"center_fit target must be positive, got {(out_h, out_w)}.")
+    if out_h < 0 or out_w < 0:
+        raise ModelError(f"center_fit target must be non-negative, got {(out_h, out_w)}.")
     top, left = center_offset(h, out_h), center_offset(w, out_w)
-    window = (top / out_h, (top + h) / out_h, left / out_w, (left + w) / out_w)
+    window = (
+        top / max(out_h, 1),
+        (top + h) / max(out_h, 1),
+        left / max(out_w, 1),
+        (left + w) / max(out_w, 1),
+    )
     if (h, w) == (out_h, out_w):
-        return x, window
+        return np.ascontiguousarray(x), window
     kept_h, kept_w = min(h, out_h), min(w, out_w)
     if (kept_h != out_h or kept_w != out_w) and (h == 0 or w == 0) and pad_mode != "constant":
         raise ModelError(f"center_fit cannot {pad_mode!r}-pad an empty input of shape {x.shape}.")
@@ -126,7 +131,7 @@ def center_fit(
 def center_crop_to_square(x: np.ndarray) -> np.ndarray:
     """Center-crop the last two axes (``..., H, W``) to ``side = min(H, W)``."""
     side = min(_hw(x))
-    return np.ascontiguousarray(center_fit(x, out_h=side, out_w=side)[0])
+    return center_fit(x, out_h=side, out_w=side)[0]
 
 
 def center_pad_to_square(
@@ -148,8 +153,7 @@ def center_pad_to_square(
     if mode == "reflect" and (side - h >= h or side - w >= w):
         # reflect needs pad < dim along each axis; replicate the edge instead.
         mode = "edge"
-    out, _ = center_fit(x, out_h=side, out_w=side, pad_mode=mode, fill_value=fill_value)
-    return np.ascontiguousarray(out)
+    return center_fit(x, out_h=side, out_w=side, pad_mode=mode, fill_value=fill_value)[0]
 
 
 def resize_square(x: np.ndarray, *, size: int, interp: str = "bilinear") -> np.ndarray:
