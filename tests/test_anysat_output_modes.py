@@ -1,8 +1,10 @@
 import sys
 import types
 from contextlib import nullcontext
+from dataclasses import replace
 
 import numpy as np
+import pytest
 
 try:
     import xarray  # noqa: F401
@@ -25,6 +27,7 @@ except ImportError:
 
     sys.modules["xarray"] = types.SimpleNamespace(DataArray=_FakeDataArray)
 
+from rs_embed.core.errors import ModelError
 from rs_embed.core.specs import BBox, OutputSpec, TemporalSpec
 from rs_embed.embedders.onthefly_anysat import AnySatEmbedder
 
@@ -266,3 +269,89 @@ def test_anysat_crops_the_roi_in_the_squared_frame(monkeypatch):
     # ... and a sub-window (lower half of the input) maps to grid row 2 only.
     sub = _embed(OutputSpec.grid(), {"roi_window_geo": (0.5, 1.0, 0.0, 1.0)})
     assert np.asarray(sub.data).shape == (12, 1, 4)
+
+
+def _embedder_with_fake_model(monkeypatch):
+    import rs_embed.embedders.onthefly_anysat as anysat
+
+    model = _FakeAnySatModel()
+    _patch_fake_torch(monkeypatch)
+    monkeypatch.setenv("RS_EMBED_ANYSAT_FRAMES", "2")
+    monkeypatch.setattr(
+        anysat,
+        "_load_anysat",
+        lambda **kwargs: (model, {"loaded_from": "test"}, "cpu"),
+    )
+    monkeypatch.setattr(
+        anysat,
+        "_prepare_anysat_s2_input",
+        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
+    )
+    return AnySatEmbedder(), model
+
+
+def _embed_patch_grid(emb, *, sensor=None, model_config=None):
+    return emb.get_embedding(
+        spatial=_bbox(),
+        temporal=TemporalSpec.range("2020-01-01", "2020-03-01"),
+        sensor=sensor,
+        output=OutputSpec.grid(),
+        backend="auto",
+        input_chw=np.zeros((2, 10, 8, 8), dtype=np.float32),
+        model_config={"grid_feature_mode": "patch", **(model_config or {})},
+    )
+
+
+def test_anysat_patch_size_is_passed_to_the_model_in_meters(monkeypatch):
+    emb, model = _embedder_with_fake_model(monkeypatch)
+
+    out = _embed_patch_grid(emb, model_config={"patch_size": 2})
+
+    assert model.outputs == [(20, "patch")]
+    assert out.meta["patch_size"] == 2
+    assert out.meta["patch_size_m"] == 20
+
+
+def test_anysat_patch_size_env_and_model_config_precedence(monkeypatch):
+    emb, model = _embedder_with_fake_model(monkeypatch)
+    monkeypatch.setenv("RS_EMBED_ANYSAT_PATCH_SIZE", "3")
+
+    _embed_patch_grid(emb)
+    _embed_patch_grid(emb, model_config={"patch_size": 4})
+
+    assert model.outputs == [(30, "patch"), (40, "patch")]
+
+
+def test_anysat_patch_size_does_not_follow_sensor_scale(monkeypatch):
+    """sensor.scale_m is the fetch GSD; it used to double as AnySat's patch size."""
+    emb, model = _embedder_with_fake_model(monkeypatch)
+    sensor = replace(AnySatEmbedder._default_sensor(), scale_m=20)
+
+    _embed_patch_grid(emb, sensor=sensor)
+
+    assert model.outputs == [(10, "patch")]
+
+
+@pytest.mark.parametrize("patch_size", [0, -1, "x", 5])
+def test_anysat_rejects_invalid_patch_size(monkeypatch, patch_size):
+    emb, model = _embedder_with_fake_model(monkeypatch)
+    monkeypatch.setenv("RS_EMBED_ANYSAT_IMG", "24")
+
+    with pytest.raises(ModelError, match="patch_size"):
+        _embed_patch_grid(emb, model_config={"patch_size": patch_size})
+    assert model.outputs == []
+
+
+def test_anysat_native_input_side_must_fit_the_patch():
+    from rs_embed.embedders.onthefly_anysat import _prepare_anysat_s2_input
+
+    pytest.importorskip("torch")
+    with pytest.raises(ModelError, match="divisible by patch_size"):
+        _prepare_anysat_s2_input(
+            np.zeros((2, 10, 9, 9), dtype=np.float32),
+            image_size=0,
+            patch_size=2,
+            doy0_values=np.array([10, 40]),
+            norm_mode="none",
+            device="cpu",
+        )

@@ -63,6 +63,11 @@ def ensure_torch() -> None:
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
+# AnySat's own ``patch_size`` argument is in meters at its nominal S2 resolution
+# (``AnySat.res["s2"]``): ``patch_size // 10`` is the patch side in pixels.
+_ANYSAT_S2_RES_M = 10
+_DEFAULT_PATCH_SIZE = 1  # pixels per patch side → AnySat patch_size=10
+
 
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str, Any]]:
     """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
@@ -153,6 +158,28 @@ def _normalize_anysat_pooled_source(value: Any) -> str:
     return resolved
 
 
+def _coerce_anysat_patch_size(value: Any, *, source: str) -> int:
+    try:
+        ps = int(value)
+    except (TypeError, ValueError) as e:
+        raise ModelError(
+            f"AnySat patch_size from {source} must be an integer, got {value!r}."
+        ) from e
+    if ps < 1:
+        raise ModelError(f"AnySat patch_size must be >= 1 pixel, got {ps}.")
+    return ps
+
+
+def _resolve_anysat_patch_size(model_config: dict[str, Any] | None) -> int:
+    v = model_config_value(model_config, "patch_size")
+    if v is not None:
+        return _coerce_anysat_patch_size(v, source="model_config")
+    env = os.environ.get("RS_EMBED_ANYSAT_PATCH_SIZE", "").strip()
+    if env:
+        return _coerce_anysat_patch_size(env, source="RS_EMBED_ANYSAT_PATCH_SIZE")
+    return _DEFAULT_PATCH_SIZE
+
+
 def _resolve_anysat_runtime_config(
     *,
     model_config: dict[str, Any] | None,
@@ -176,6 +203,14 @@ def _resolve_anysat_runtime_config(
     }
 
     image_size = int(os.environ.get("RS_EMBED_ANYSAT_IMG", "24"))
+
+    # The S2 projector unfolds patch_size x patch_size pixel blocks and drops a
+    # remainder silently, which would shift the grid against the ROI window.
+    patch_size = _resolve_anysat_patch_size(model_config)
+    if image_size > 0 and image_size % patch_size != 0:
+        raise ModelError(
+            f"AnySat image_size ({image_size}) must be divisible by patch_size ({patch_size})."
+        )
 
     n_frames = max(1, int(os.environ.get("RS_EMBED_ANYSAT_FRAMES", str(default_frames))))
 
@@ -210,6 +245,7 @@ def _resolve_anysat_runtime_config(
         "flash_attn": bool(flash_attn),
         "pretrained": bool(pretrained),
         "image_size": int(image_size),
+        "patch_size": int(patch_size),
         "n_frames": int(n_frames),
         "norm_mode": norm_mode,
         "grid_feature_mode": grid_feature_mode,
@@ -394,6 +430,7 @@ def _prepare_anysat_s2_input(
     raw_tchw: np.ndarray,
     *,
     image_size: int,
+    patch_size: int,
     doy0_values: np.ndarray,
     norm_mode: str,
     device: str,
@@ -410,6 +447,14 @@ def _prepare_anysat_s2_input(
     shape_prep = None
     if image_size > 0 and (x_tchw.shape[-1] != image_size or x_tchw.shape[-2] != image_size):
         x_tchw, shape_prep = _resize_tchw(x_tchw, out_hw=image_size)
+    # Only reachable when fed at its own size (image_size <= 0): a resize target
+    # is checked against patch_size when the runtime config is resolved.
+    side = int(x_tchw.shape[-1])
+    if side % int(patch_size) != 0:
+        raise ModelError(
+            f"AnySat input side ({side}) must be divisible by patch_size ({patch_size}); "
+            "set RS_EMBED_ANYSAT_IMG to a multiple of it."
+        )
 
     x_tchw = _normalize_series(x_tchw, mode=norm_mode)
     t = int(x_tchw.shape[0])
@@ -432,17 +477,13 @@ def _anysat_spatial_features(
     model: Any,
     s2_input: dict[str, Any],
     *,
-    patch_size_m: int,
+    patch_size: int,
     feature_mode: str,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
-    if patch_size_m <= 0 or (patch_size_m % 10) != 0:
-        raise ModelError(
-            f"AnySat patch_size must be a positive multiple of 10 (meters), got {patch_size_m}"
-        )
-
+    patch_size_m = _ANYSAT_S2_RES_M * int(patch_size)
     native_output = str(feature_mode).strip().lower()
     if native_output not in {"patch", "dense"}:
         raise ModelError(
@@ -467,6 +508,7 @@ def _anysat_spatial_features(
         "feature_mode": native_output,
         "native_output_hw": (int(arr.shape[0]), int(arr.shape[1])),
         "feature_dim": int(arr.shape[2]),
+        "patch_size": int(patch_size),
         "patch_size_m": int(patch_size_m),
     }
     if native_output == "patch":
@@ -480,16 +522,12 @@ def _anysat_tile_features(
     model: Any,
     s2_input: dict[str, Any],
     *,
-    patch_size_m: int,
+    patch_size: int,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
-    if patch_size_m <= 0 or (patch_size_m % 10) != 0:
-        raise ModelError(
-            f"AnySat patch_size must be a positive multiple of 10 (meters), got {patch_size_m}"
-        )
-
+    patch_size_m = _ANYSAT_S2_RES_M * int(patch_size)
     with torch.no_grad():
         out = model(s2_input, patch_size=int(patch_size_m), output="tile")
 
@@ -505,6 +543,7 @@ def _anysat_tile_features(
     meta = {
         "pooled_source": "tile",
         "feature_dim": int(vec.shape[0]),
+        "patch_size": int(patch_size),
         "patch_size_m": int(patch_size_m),
     }
     return vec, meta
@@ -554,7 +593,7 @@ class AnySatEmbedder(EmbedderBase):
             "defaults": {
                 "model_size": "base",
                 "variant": "base",
-                "patch_size_m": 10,
+                "patch_size": _DEFAULT_PATCH_SIZE,
                 "image_size": self.input_spec.image_size,
                 "n_frames": self.DEFAULT_FRAMES,
                 "scale_m": self.input_spec.scale_m,
@@ -569,6 +608,14 @@ class AnySatEmbedder(EmbedderBase):
                     "type": "string",
                     "default": "base",
                     "choices": ["base"],
+                },
+                "patch_size": {
+                    "type": "int",
+                    "default": _DEFAULT_PATCH_SIZE,
+                    "description": (
+                        "Patch side in pixels (AnySat's own patch_size = 10 m x this). "
+                        "image_size must be divisible by it. Larger = fewer, coarser patch tokens."
+                    ),
                 },
                 "grid_feature_mode": {
                     "type": "string",
@@ -586,6 +633,7 @@ class AnySatEmbedder(EmbedderBase):
                 "This adapter builds T frames by splitting TemporalSpec.range into equal sub-windows.",
                 "Loads AnySat from a vendored local runtime and optional Hugging Face checkpoint.",
                 "grid output defaults to AnySat output='dense'; pooled defaults to patch-grid pooling but can opt into native tile output.",
+                "patch_size sets the patch-token grid (image_size / patch_size per side); the dense grid stays at pixel resolution.",
             ],
         }
 
@@ -635,7 +683,7 @@ class AnySatEmbedder(EmbedderBase):
         norm_mode = str(runtime_cfg["norm_mode"])
         grid_feature_mode = str(runtime_cfg["grid_feature_mode"])
         pooled_source = str(runtime_cfg["pooled_source"])
-        patch_size_m = int(ss.scale_m)
+        patch_size = int(runtime_cfg["patch_size"])
 
         if input_chw is None:
             provider = self._get_provider(backend)
@@ -688,6 +736,7 @@ class AnySatEmbedder(EmbedderBase):
         s2_input, shape_prep = _prepare_anysat_s2_input(
             raw_tchw,
             image_size=image_size,
+            patch_size=patch_size,
             doy0_values=doy0_values,
             norm_mode=norm_mode,
             device=dev,
@@ -698,14 +747,14 @@ class AnySatEmbedder(EmbedderBase):
             pooled_vec, fmeta = _anysat_tile_features(
                 model,
                 s2_input,
-                patch_size_m=patch_size_m,
+                patch_size=patch_size,
             )
             grid = None
         else:
             grid, fmeta = _anysat_spatial_features(
                 model,
                 s2_input,
-                patch_size_m=patch_size_m,
+                patch_size=patch_size,
                 feature_mode=feature_mode,
             )
 
