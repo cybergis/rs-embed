@@ -2996,7 +2996,7 @@ Use it when you want to change common knobs such as resolution or compositing, b
 </tbody>
 </table>
 <p>Recommended rule: use <code>fetch=FetchSpec(...)</code> for normal public API usage. Use <code>sensor=SensorSpec(...)</code> only when you need advanced control over <code>collection</code>, <code>bands</code>, <code>modality</code>, or similar source-level details.</p>
-<p>Important constraints: <code>fetch</code> and <code>sensor</code> cannot be passed together in the same request, and <code>fetch</code> is always applied on top of the model's default sensor contract. Some models use <code>scale_m</code> as more than fetch resolution: for example, <code>scalemae</code> uses it as semantic scale conditioning, and <code>anysat</code> uses it as both fetch resolution and patch-size control.</p>
+<p>Important constraints: <code>fetch</code> and <code>sensor</code> cannot be passed together in the same request, and <code>fetch</code> is always applied on top of the model's default sensor contract. Some models use <code>scale_m</code> as more than fetch resolution: for example, <code>scalemae</code> uses it as semantic scale conditioning.</p>
 <p>Example:</p>
 <div class="highlight"><pre><span></span><code><span class="kn">from</span><span class="w"> </span><span class="nn">rs_embed</span><span class="w"> </span><span class="kn">import</span> <span class="n">FetchSpec</span><span class="p">,</span> <span class="n">get_embedding</span>
 

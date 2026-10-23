@@ -1275,6 +1275,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Output Semantics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#patch-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Patch size
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2387,6 +2404,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="Output Semantics">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#patch-size" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Patch size
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2494,7 +2528,7 @@
 </tr>
 <tr>
 <td>Model config keys</td>
-<td><code>variant</code> (default: <code>base</code>; choices: <code>base</code>)</td>
+<td><code>variant</code> (default: <code>base</code>; choices: <code>base</code>), <code>patch_size</code> (default: <code>1</code>), <code>grid_feature_mode</code>, <code>pooled_source</code></td>
 </tr>
 <tr>
 <td>Training alignment</td>
@@ -2509,7 +2543,7 @@
 <ul>
 <li><strong>required</strong> <code>s2_dates</code> (per-frame DOY) derived from frame-bin midpoints: see <a href="#input-contract">Input Contract</a></li>
 <li>dense sub-patch grid as the default <code>grid</code> path, denser than the usual ViT patch grid: see <a href="#output-semantics">Output Semantics</a></li>
-<li><code>sensor.scale_m</code> / <code>fetch.scale_m</code> must be a positive multiple of 10 m: see <a href="#preprocessing-pipeline">Preprocessing Pipeline</a></li>
+<li>adjustable <code>patch_size</code> (pixels per patch side, AnySat's own <code>patch_size</code> = 10 m × it) that sets the patch-token grid: see <a href="#patch-size">Patch size</a></li>
 </ul>
 </div>
 <hr />
@@ -2540,7 +2574,7 @@
 </tr>
 <tr>
 <td>Default fetch</td>
-<td><code>scale_m=10</code> (must be a positive multiple of 10), <code>cloudy_pct=30</code>, <code>composite="median"</code>, <code>fill_value=0.0</code></td>
+<td><code>scale_m=10</code>, <code>cloudy_pct=30</code>, <code>composite="median"</code>, <code>fill_value=0.0</code></td>
 </tr>
 <tr>
 <td><code>input_chw</code></td>
@@ -2552,7 +2586,7 @@
 </tr>
 </tbody>
 </table>
-<p><code>T</code> is controlled by <code>RS_EMBED_ANYSAT_FRAMES</code> (default <code>8</code>). <code>sensor.scale_m</code> / <code>fetch.scale_m</code> must be a positive multiple of 10 m.</p>
+<p><code>T</code> is controlled by <code>RS_EMBED_ANYSAT_FRAMES</code> (default <code>8</code>). AnySat's S2 branch assumes 10 m pixels: at another <code>scale_m</code> it reads the input at the wrong pixel spacing, and nothing warns about it.</p>
 <hr />
 <h2 id="preprocessing-pipeline">Preprocessing Pipeline<a class="headerlink" href="#preprocessing-pipeline" title="Permanent link">&para;</a></h2>
 <div class="admonition tip">
@@ -2566,7 +2600,7 @@
     FWD -- pooled --&gt; POOL["spatial mean/max"]</code></pre>
 <div class="admonition warning">
 <p class="admonition-title">Important constraint</p>
-<p><code>sensor.scale_m</code> or <code>fetch.scale_m</code> must be a positive multiple of 10 meters.</p>
+<p>The resize target (<code>RS_EMBED_ANYSAT_IMG</code>, default <code>24</code>) must be divisible by <code>patch_size</code>; otherwise the call raises a <code>ModelError</code>.</p>
 </div>
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
@@ -2603,6 +2637,11 @@
 <td><code>RS_EMBED_ANYSAT_IMG</code></td>
 <td><code>24</code></td>
 <td>Per-frame resize target (square)</td>
+</tr>
+<tr>
+<td><code>RS_EMBED_ANYSAT_PATCH_SIZE</code></td>
+<td><code>1</code></td>
+<td>Patch side in pixels (<code>model_config["patch_size"]</code> wins)</td>
 </tr>
 <tr>
 <td><code>RS_EMBED_ANYSAT_NORM</code></td>
@@ -2673,6 +2712,51 @@
 <h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
 <p><strong><code>pooled</code></strong>: defaults to spatial pooling over AnySat's <code>patch</code> grid; pass <code>pooled_source="tile"</code> (or <code>RS_EMBED_ANYSAT_POOLED_SOURCE=tile</code>) to use the native AnySat tile embedding instead.</p>
 <p><strong><code>grid</code></strong>: defaults to AnySat <code>dense</code> sub-patch features <code>(D,H,W)</code>; pass <code>grid_feature_mode="patch"</code> (or <code>RS_EMBED_ANYSAT_GRID_MODE=patch</code>) to recover the older patch-grid behavior.</p>
+<h3 id="patch-size">Patch size<a class="headerlink" href="#patch-size" title="Permanent link">&para;</a></h3>
+<p>AnySat is trained across patch sizes, so the patch is a free knob, like <code>patch_size</code> on <code>olmoearth</code> and <code>RS_EMBED_THOR_PATCH_SIZE</code> on <code>thor</code>. In <code>rs-embed</code> it is given in pixels per patch side: <code>model_config={"patch_size": 2}</code> (or <code>RS_EMBED_ANYSAT_PATCH_SIZE=2</code>) calls AnySat with its own <code>patch_size=20</code> (meters at its nominal 10 m S2 resolution). It does not follow <code>sensor.scale_m</code>, which only sets the fetch resolution.</p>
+<p>At the default <code>image_size=24</code>:</p>
+<table>
+<thead>
+<tr>
+<th><code>patch_size</code></th>
+<th>AnySat <code>patch_size</code></th>
+<th><code>patch</code> grid</th>
+<th><code>dense</code> grid</th>
+<th><code>tile</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>1</code> (default)</td>
+<td><code>10</code></td>
+<td><code>24×24</code></td>
+<td><code>24×24</code></td>
+<td><code>(768,)</code></td>
+</tr>
+<tr>
+<td><code>2</code></td>
+<td><code>20</code></td>
+<td><code>12×12</code></td>
+<td><code>24×24</code></td>
+<td><code>(768,)</code></td>
+</tr>
+<tr>
+<td><code>3</code></td>
+<td><code>30</code></td>
+<td><code>8×8</code></td>
+<td><code>24×24</code></td>
+<td><code>(768,)</code></td>
+</tr>
+<tr>
+<td><code>4</code></td>
+<td><code>40</code></td>
+<td><code>6×6</code></td>
+<td><code>24×24</code></td>
+<td><code>(768,)</code></td>
+</tr>
+</tbody>
+</table>
+<p>Larger patches mean fewer tokens and coarser patch-grid / patch-pooled output. The <code>dense</code> grid stays at pixel resolution: each pixel carries its patch token next to its own sub-patch feature. <code>meta</code> records both <code>patch_size</code> (pixels) and <code>patch_size_m</code> (the value passed to AnySat).</p>
 <hr />
 <h2 id="examples">Examples<a class="headerlink" href="#examples" title="Permanent link">&para;</a></h2>
 <h3 id="minimal-example">Minimal example<a class="headerlink" href="#minimal-example" title="Permanent link">&para;</a></h3>
@@ -2701,7 +2785,7 @@
 <hr />
 <h2 id="reference">Reference<a class="headerlink" href="#reference" title="Permanent link">&para;</a></h2>
 <ul>
-<li><code>sensor.scale_m</code> / <code>fetch.scale_m</code> must be a positive multiple of 10 m — non-multiples raise immediately.</li>
+<li><code>patch_size</code> is in pixels; the resize target must be divisible by it — otherwise the call raises immediately.</li>
 <li>The default grid output uses <code>dense</code> (sub-patch resolution), which differs from most other models' patch-level grids.</li>
 <li>Single-frame <code>CHW</code> input is silently repeated to <code>T</code> frames — this is valid but produces a different temporal signal than actual multi-frame data.</li>
 </ul>
