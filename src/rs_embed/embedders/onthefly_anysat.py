@@ -49,7 +49,7 @@ from ..tools.shape import (
 from ..tools.spatial import square_spatial
 from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
-from .config import model_config_value
+from .config import model_config_value, resolve_config_positive_int
 from .meta import build_meta, temporal_to_range
 from .shared import grid_to_dataarray, hf_hub_download_cache_first, verify_loaded_params
 
@@ -158,28 +158,6 @@ def _normalize_anysat_pooled_source(value: Any) -> str:
     return resolved
 
 
-def _coerce_anysat_patch_size(value: Any, *, source: str) -> int:
-    try:
-        ps = int(value)
-    except (TypeError, ValueError) as e:
-        raise ModelError(
-            f"AnySat patch_size from {source} must be an integer, got {value!r}."
-        ) from e
-    if ps < 1:
-        raise ModelError(f"AnySat patch_size must be >= 1 pixel, got {ps}.")
-    return ps
-
-
-def _resolve_anysat_patch_size(model_config: dict[str, Any] | None) -> int:
-    v = model_config_value(model_config, "patch_size")
-    if v is not None:
-        return _coerce_anysat_patch_size(v, source="model_config")
-    env = os.environ.get("RS_EMBED_ANYSAT_PATCH_SIZE", "").strip()
-    if env:
-        return _coerce_anysat_patch_size(env, source="RS_EMBED_ANYSAT_PATCH_SIZE")
-    return _DEFAULT_PATCH_SIZE
-
-
 def _resolve_anysat_runtime_config(
     *,
     model_config: dict[str, Any] | None,
@@ -206,7 +184,13 @@ def _resolve_anysat_runtime_config(
 
     # The S2 projector unfolds patch_size x patch_size pixel blocks and drops a
     # remainder silently, which would shift the grid against the ROI window.
-    patch_size = _resolve_anysat_patch_size(model_config)
+    patch_size = resolve_config_positive_int(
+        model_config,
+        "patch_size",
+        env_var="RS_EMBED_ANYSAT_PATCH_SIZE",
+        default=_DEFAULT_PATCH_SIZE,
+        model_name="AnySat",
+    )
     if image_size > 0 and image_size % patch_size != 0:
         raise ModelError(
             f"AnySat image_size ({image_size}) must be divisible by patch_size ({patch_size})."

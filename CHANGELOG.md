@@ -16,6 +16,7 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 - **`anysat` no longer takes its patch size from `sensor.scale_m`.** The adapter passed the fetch resolution as AnySat's patch size in meters, a leftover from when `OutputSpec` carried its own `scale_m`; that is also why `scale_m` had to be a multiple of 10. A fetch at `scale_m=20` therefore ran with 2×2-pixel patches. The patch size now comes from `patch_size` alone, and `scale_m` no longer needs to be a multiple of 10.
   - **Who was affected:** `anysat` calls with `scale_m` other than 10. Pass `patch_size=scale_m // 10` to reproduce their earlier outputs.
+- **`olmoearth` `patch_size` / `image_size` reject non-integers.** A bool or a fractional value (`2.9`, `np.float32(3.7)`, `True`) used to be truncated by `int()` and run silently at a size nobody asked for; it now raises a `ModelError`. Whole-number floats such as `4.0` are still accepted. `anysat`'s `patch_size` follows the same rule.
 
 ### Fixed
 
