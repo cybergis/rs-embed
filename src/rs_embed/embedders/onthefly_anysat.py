@@ -230,6 +230,7 @@ def _resolve_anysat_runtime_config(
         "pretrained": bool(pretrained),
         "image_size": int(image_size),
         "patch_size": int(patch_size),
+        "patch_size_m": _ANYSAT_S2_RES_M * int(patch_size),
         "n_frames": int(n_frames),
         "norm_mode": norm_mode,
         "grid_feature_mode": grid_feature_mode,
@@ -433,10 +434,10 @@ def _prepare_anysat_s2_input(
         x_tchw, shape_prep = _resize_tchw(x_tchw, out_hw=image_size)
     # Only reachable when fed at its own size (image_size <= 0): a resize target
     # is checked against patch_size when the runtime config is resolved.
-    side = int(x_tchw.shape[-1])
-    if side % int(patch_size) != 0:
+    h, w = (int(v) for v in x_tchw.shape[-2:])
+    if h % int(patch_size) or w % int(patch_size):
         raise ModelError(
-            f"AnySat input side ({side}) must be divisible by patch_size ({patch_size}); "
+            f"AnySat input ({h}x{w}) must be divisible by patch_size ({patch_size}); "
             "set RS_EMBED_ANYSAT_IMG to a multiple of it."
         )
 
@@ -461,13 +462,12 @@ def _anysat_spatial_features(
     model: Any,
     s2_input: dict[str, Any],
     *,
-    patch_size: int,
+    patch_size_m: int,
     feature_mode: str,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
-    patch_size_m = _ANYSAT_S2_RES_M * int(patch_size)
     native_output = str(feature_mode).strip().lower()
     if native_output not in {"patch", "dense"}:
         raise ModelError(
@@ -492,7 +492,6 @@ def _anysat_spatial_features(
         "feature_mode": native_output,
         "native_output_hw": (int(arr.shape[0]), int(arr.shape[1])),
         "feature_dim": int(arr.shape[2]),
-        "patch_size": int(patch_size),
         "patch_size_m": int(patch_size_m),
     }
     if native_output == "patch":
@@ -506,12 +505,11 @@ def _anysat_tile_features(
     model: Any,
     s2_input: dict[str, Any],
     *,
-    patch_size: int,
+    patch_size_m: int,
 ) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
 
-    patch_size_m = _ANYSAT_S2_RES_M * int(patch_size)
     with torch.no_grad():
         out = model(s2_input, patch_size=int(patch_size_m), output="tile")
 
@@ -527,7 +525,6 @@ def _anysat_tile_features(
     meta = {
         "pooled_source": "tile",
         "feature_dim": int(vec.shape[0]),
-        "patch_size": int(patch_size),
         "patch_size_m": int(patch_size_m),
     }
     return vec, meta
@@ -668,6 +665,7 @@ class AnySatEmbedder(EmbedderBase):
         grid_feature_mode = str(runtime_cfg["grid_feature_mode"])
         pooled_source = str(runtime_cfg["pooled_source"])
         patch_size = int(runtime_cfg["patch_size"])
+        patch_size_m = int(runtime_cfg["patch_size_m"])
 
         if input_chw is None:
             provider = self._get_provider(backend)
@@ -731,14 +729,14 @@ class AnySatEmbedder(EmbedderBase):
             pooled_vec, fmeta = _anysat_tile_features(
                 model,
                 s2_input,
-                patch_size=patch_size,
+                patch_size_m=patch_size_m,
             )
             grid = None
         else:
             grid, fmeta = _anysat_spatial_features(
                 model,
                 s2_input,
-                patch_size=patch_size,
+                patch_size_m=patch_size_m,
                 feature_mode=feature_mode,
             )
 
@@ -771,6 +769,7 @@ class AnySatEmbedder(EmbedderBase):
                 "normalization": norm_mode,
                 "grid_feature_mode": grid_feature_mode,
                 "pooled_source": pooled_source,
+                "patch_size": patch_size,
                 **({"shape_prep": shape_prep} if shape_prep is not None else {}),
                 "start": t.start,
                 "end": t.end,

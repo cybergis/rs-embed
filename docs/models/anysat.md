@@ -34,7 +34,7 @@
 | `input_chw`           | `CHW` (`C=10`, repeated to `T`) **or** `TCHW` (`C=10`, padded/truncated to exact `T`); raw SR `0..10000` |
 | Side inputs           | **required** `s2_dates` `[1,T]` — auto-derived from per-frame midpoint DOY         |
 
-`T` is controlled by `RS_EMBED_ANYSAT_FRAMES` (default `8`).
+`T` is controlled by `RS_EMBED_ANYSAT_FRAMES` (default `8`). AnySat's S2 branch assumes 10 m pixels: at another `scale_m` it reads the input at the wrong pixel spacing, and nothing warns about it.
 
 ---
 
@@ -52,7 +52,7 @@ flowchart LR
 ```
 
 !!! warning "Important constraint"
-    The resize target (`RS_EMBED_ANYSAT_IMG`, default `24`) must be divisible by `patch_size`; otherwise the call raises a `ModelError` before anything is fetched.
+    The resize target (`RS_EMBED_ANYSAT_IMG`, default `24`) must be divisible by `patch_size`; otherwise the call raises a `ModelError`.
 
 ---
 
