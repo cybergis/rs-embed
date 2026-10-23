@@ -1,8 +1,11 @@
+import os
 import sys
 import types
 from contextlib import nullcontext
+from dataclasses import replace
 
 import numpy as np
+import pytest
 
 try:
     import xarray  # noqa: F401
@@ -25,6 +28,7 @@ except ImportError:
 
     sys.modules["xarray"] = types.SimpleNamespace(DataArray=_FakeDataArray)
 
+from rs_embed.core.errors import ModelError
 from rs_embed.core.specs import BBox, OutputSpec, TemporalSpec
 from rs_embed.embedders.onthefly_anysat import AnySatEmbedder
 
@@ -84,10 +88,13 @@ def _patch_fake_torch(monkeypatch):
     )
 
 
-def test_anysat_grid_defaults_to_dense(monkeypatch):
+def _embedder_with_fake_model(monkeypatch, *, shape_prep=None):
+    """An AnySatEmbedder whose model and input prep are faked; the shell's
+    ``RS_EMBED_ANYSAT_*`` settings are cleared so the defaults are exercised."""
     import rs_embed.embedders.onthefly_anysat as anysat
 
-    emb = AnySatEmbedder()
+    for key in [k for k in os.environ if k.startswith("RS_EMBED_ANYSAT_")]:
+        monkeypatch.delenv(key)
     model = _FakeAnySatModel()
     _patch_fake_torch(monkeypatch)
     monkeypatch.setenv("RS_EMBED_ANYSAT_FRAMES", "2")
@@ -99,17 +106,37 @@ def test_anysat_grid_defaults_to_dense(monkeypatch):
     monkeypatch.setattr(
         anysat,
         "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
+        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, shape_prep),
     )
+    return AnySatEmbedder(), model
 
-    out = emb.get_embedding(
+
+def _embed(emb, output, *, sensor=None, model_config=None, fetch_meta=None):
+    return emb.get_embedding(
         spatial=_bbox(),
         temporal=TemporalSpec.range("2020-01-01", "2020-03-01"),
-        sensor=None,
-        output=OutputSpec.grid(),
+        sensor=sensor,
+        output=output,
         backend="auto",
         input_chw=np.zeros((2, 10, 8, 8), dtype=np.float32),
+        model_config=model_config,
+        fetch_meta=fetch_meta,
     )
+
+
+def _embed_patch_grid(emb, *, sensor=None, model_config=None):
+    return _embed(
+        emb,
+        OutputSpec.grid(),
+        sensor=sensor,
+        model_config={"grid_feature_mode": "patch", **(model_config or {})},
+    )
+
+
+def test_anysat_grid_defaults_to_dense(monkeypatch):
+    emb, model = _embedder_with_fake_model(monkeypatch)
+
+    out = _embed(emb, OutputSpec.grid())
 
     arr = np.asarray(out.data, dtype=np.float32)
     assert model.outputs == [(10, "dense")]
@@ -121,31 +148,9 @@ def test_anysat_grid_defaults_to_dense(monkeypatch):
 
 
 def test_anysat_pooled_keeps_patch_pooling(monkeypatch):
-    import rs_embed.embedders.onthefly_anysat as anysat
+    emb, model = _embedder_with_fake_model(monkeypatch)
 
-    emb = AnySatEmbedder()
-    model = _FakeAnySatModel()
-    _patch_fake_torch(monkeypatch)
-    monkeypatch.setenv("RS_EMBED_ANYSAT_FRAMES", "2")
-    monkeypatch.setattr(
-        anysat,
-        "_load_anysat",
-        lambda **kwargs: (model, {"loaded_from": "test"}, "cpu"),
-    )
-    monkeypatch.setattr(
-        anysat,
-        "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
-    )
-
-    out = emb.get_embedding(
-        spatial=_bbox(),
-        temporal=TemporalSpec.range("2020-01-01", "2020-03-01"),
-        sensor=None,
-        output=OutputSpec.pooled(),
-        backend="auto",
-        input_chw=np.zeros((2, 10, 8, 8), dtype=np.float32),
-    )
+    out = _embed(emb, OutputSpec.pooled())
 
     arr = np.asarray(out.data, dtype=np.float32)
     assert model.outputs == [(10, "patch")]
@@ -156,32 +161,9 @@ def test_anysat_pooled_keeps_patch_pooling(monkeypatch):
 
 
 def test_anysat_grid_feature_mode_can_fall_back_to_patch(monkeypatch):
-    import rs_embed.embedders.onthefly_anysat as anysat
+    emb, model = _embedder_with_fake_model(monkeypatch)
 
-    emb = AnySatEmbedder()
-    model = _FakeAnySatModel()
-    _patch_fake_torch(monkeypatch)
-    monkeypatch.setenv("RS_EMBED_ANYSAT_FRAMES", "2")
-    monkeypatch.setattr(
-        anysat,
-        "_load_anysat",
-        lambda **kwargs: (model, {"loaded_from": "test"}, "cpu"),
-    )
-    monkeypatch.setattr(
-        anysat,
-        "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
-    )
-
-    out = emb.get_embedding(
-        spatial=_bbox(),
-        temporal=TemporalSpec.range("2020-01-01", "2020-03-01"),
-        sensor=None,
-        output=OutputSpec.grid(),
-        backend="auto",
-        input_chw=np.zeros((2, 10, 8, 8), dtype=np.float32),
-        model_config={"grid_feature_mode": "patch"},
-    )
+    out = _embed_patch_grid(emb)
 
     arr = np.asarray(out.data, dtype=np.float32)
     assert model.outputs == [(10, "patch")]
@@ -191,32 +173,9 @@ def test_anysat_grid_feature_mode_can_fall_back_to_patch(monkeypatch):
 
 
 def test_anysat_pooled_source_can_use_tile(monkeypatch):
-    import rs_embed.embedders.onthefly_anysat as anysat
+    emb, model = _embedder_with_fake_model(monkeypatch)
 
-    emb = AnySatEmbedder()
-    model = _FakeAnySatModel()
-    _patch_fake_torch(monkeypatch)
-    monkeypatch.setenv("RS_EMBED_ANYSAT_FRAMES", "2")
-    monkeypatch.setattr(
-        anysat,
-        "_load_anysat",
-        lambda **kwargs: (model, {"loaded_from": "test"}, "cpu"),
-    )
-    monkeypatch.setattr(
-        anysat,
-        "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: ({"shape": tuple(raw_tchw.shape)}, None),
-    )
-
-    out = emb.get_embedding(
-        spatial=_bbox(),
-        temporal=TemporalSpec.range("2020-01-01", "2020-03-01"),
-        sensor=None,
-        output=OutputSpec.pooled("max"),
-        backend="auto",
-        input_chw=np.zeros((2, 10, 8, 8), dtype=np.float32),
-        model_config={"pooled_source": "tile"},
-    )
+    out = _embed(emb, OutputSpec.pooled("max"), model_config={"pooled_source": "tile"})
 
     arr = np.asarray(out.data, dtype=np.float32)
     assert model.outputs == [(10, "tile")]
@@ -229,40 +188,78 @@ def test_anysat_pooled_source_can_use_tile(monkeypatch):
 
 def test_anysat_crops_the_roi_in_the_squared_frame(monkeypatch):
     """The ROI window is mapped through the squaring before the grid crop (#139)."""
-    import rs_embed.embedders.onthefly_anysat as anysat
-
-    emb = AnySatEmbedder()
-    model = _FakeAnySatModel()
-    _patch_fake_torch(monkeypatch)
-    monkeypatch.setenv("RS_EMBED_ANYSAT_FRAMES", "2")
-    monkeypatch.setattr(
-        anysat,
-        "_load_anysat",
-        lambda **kwargs: (model, {"loaded_from": "test"}, "cpu"),
-    )
     # The input was padded top and bottom: it fills rows 1..2 of the 4-row grid.
-    monkeypatch.setattr(
-        anysat,
-        "_prepare_anysat_s2_input",
-        lambda raw_tchw, **kwargs: (
-            {"shape": tuple(raw_tchw.shape)},
-            {"input_window": (0.25, 0.75, 0.0, 1.0)},
-        ),
+    emb, _ = _embedder_with_fake_model(
+        monkeypatch, shape_prep={"input_window": (0.25, 0.75, 0.0, 1.0)}
     )
-
-    def _embed(output, fetch_meta=None):
-        return emb.get_embedding(
-            spatial=_bbox(),
-            temporal=TemporalSpec.range("2020-01-01", "2020-03-01"),
-            sensor=None,
-            output=output,
-            backend="auto",
-            input_chw=np.zeros((2, 10, 8, 8), dtype=np.float32),
-            fetch_meta=fetch_meta,
-        )
 
     # Whole ROI: the grid drops the padding rows ...
-    assert np.asarray(_embed(OutputSpec.grid()).data).shape == (12, 2, 4)
+    assert np.asarray(_embed(emb, OutputSpec.grid()).data).shape == (12, 2, 4)
     # ... and a sub-window (lower half of the input) maps to grid row 2 only.
-    sub = _embed(OutputSpec.grid(), {"roi_window_geo": (0.5, 1.0, 0.0, 1.0)})
+    sub = _embed(emb, OutputSpec.grid(), fetch_meta={"roi_window_geo": (0.5, 1.0, 0.0, 1.0)})
     assert np.asarray(sub.data).shape == (12, 1, 4)
+
+
+def test_anysat_ignores_patch_size_from_the_shell(monkeypatch):
+    """Default-asserting tests above must not depend on the developer's env."""
+    monkeypatch.setenv("RS_EMBED_ANYSAT_PATCH_SIZE", "2")
+    emb, model = _embedder_with_fake_model(monkeypatch)
+
+    _embed_patch_grid(emb)
+
+    assert model.outputs == [(10, "patch")]
+
+
+def test_anysat_patch_size_is_passed_to_the_model_in_meters(monkeypatch):
+    emb, model = _embedder_with_fake_model(monkeypatch)
+
+    out = _embed_patch_grid(emb, model_config={"patch_size": 2})
+
+    assert model.outputs == [(20, "patch")]
+    assert out.meta["patch_size"] == 2
+    assert out.meta["patch_size_m"] == 20
+
+
+def test_anysat_patch_size_env_and_model_config_precedence(monkeypatch):
+    emb, model = _embedder_with_fake_model(monkeypatch)
+    monkeypatch.setenv("RS_EMBED_ANYSAT_PATCH_SIZE", "3")
+
+    _embed_patch_grid(emb)
+    _embed_patch_grid(emb, model_config={"patch_size": 4})
+
+    assert model.outputs == [(30, "patch"), (40, "patch")]
+
+
+def test_anysat_patch_size_does_not_follow_sensor_scale(monkeypatch):
+    """sensor.scale_m is the fetch GSD; it used to double as AnySat's patch size."""
+    emb, model = _embedder_with_fake_model(monkeypatch)
+    sensor = replace(AnySatEmbedder._default_sensor(), scale_m=20)
+
+    _embed_patch_grid(emb, sensor=sensor)
+
+    assert model.outputs == [(10, "patch")]
+
+
+@pytest.mark.parametrize("patch_size", [0, -1, "x", 2.9, True, 5])
+def test_anysat_rejects_invalid_patch_size(monkeypatch, patch_size):
+    emb, model = _embedder_with_fake_model(monkeypatch)
+
+    with pytest.raises(ModelError, match="patch_size"):
+        _embed_patch_grid(emb, model_config={"patch_size": patch_size})
+    assert model.outputs == []
+
+
+@pytest.mark.parametrize("hw", [(9, 9), (25, 24), (24, 25)])
+def test_anysat_native_input_must_fit_the_patch(hw):
+    from rs_embed.embedders.onthefly_anysat import _prepare_anysat_s2_input
+
+    pytest.importorskip("torch")
+    with pytest.raises(ModelError, match="divisible by patch_size"):
+        _prepare_anysat_s2_input(
+            np.zeros((2, 10, *hw), dtype=np.float32),
+            image_size=0,
+            patch_size=2,
+            doy0_values=np.array([10, 40]),
+            norm_mode="none",
+            device="cpu",
+        )

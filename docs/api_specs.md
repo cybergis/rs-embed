@@ -132,7 +132,7 @@ FetchSpec(
 
 Recommended rule: use `fetch=FetchSpec(...)` for normal public API usage. Use `sensor=SensorSpec(...)` only when you need advanced control over `collection`, `bands`, `modality`, or similar source-level details.
 
-Important constraints: `fetch` and `sensor` cannot be passed together in the same request, and `fetch` is always applied on top of the model's default sensor contract. Some models use `scale_m` as more than fetch resolution: for example, `scalemae` uses it as semantic scale conditioning, and `anysat` uses it as both fetch resolution and patch-size control.
+Important constraints: `fetch` and `sensor` cannot be passed together in the same request, and `fetch` is always applied on top of the model's default sensor contract. Some models use `scale_m` as more than fetch resolution: for example, `scalemae` uses it as semantic scale conditioning.
 
 Example:
 

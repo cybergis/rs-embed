@@ -49,7 +49,7 @@ from ..tools.shape import (
 from ..tools.spatial import square_spatial
 from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
-from .config import model_config_value
+from .config import model_config_value, resolve_config_positive_int
 from .meta import build_meta, temporal_to_range
 from .shared import grid_to_dataarray, hf_hub_download_cache_first, verify_loaded_params
 
@@ -62,6 +62,11 @@ def ensure_torch() -> None:
 
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
+
+# AnySat's own ``patch_size`` argument is in meters at its nominal S2 resolution
+# (``AnySat.res["s2"]``): ``patch_size // 10`` is the patch side in pixels.
+_ANYSAT_S2_RES_M = 10
+_DEFAULT_PATCH_SIZE = 1  # pixels per patch side → AnySat patch_size=10
 
 
 def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str, Any]]:
@@ -177,6 +182,20 @@ def _resolve_anysat_runtime_config(
 
     image_size = int(os.environ.get("RS_EMBED_ANYSAT_IMG", "24"))
 
+    # The S2 projector unfolds patch_size x patch_size pixel blocks and drops a
+    # remainder silently, which would shift the grid against the ROI window.
+    patch_size = resolve_config_positive_int(
+        model_config,
+        "patch_size",
+        env_var="RS_EMBED_ANYSAT_PATCH_SIZE",
+        default=_DEFAULT_PATCH_SIZE,
+        model_name="AnySat",
+    )
+    if image_size > 0 and image_size % patch_size != 0:
+        raise ModelError(
+            f"AnySat image_size ({image_size}) must be divisible by patch_size ({patch_size})."
+        )
+
     n_frames = max(1, int(os.environ.get("RS_EMBED_ANYSAT_FRAMES", str(default_frames))))
 
     norm_mode = os.environ.get("RS_EMBED_ANYSAT_NORM", "per_tile_zscore").strip()
@@ -210,6 +229,8 @@ def _resolve_anysat_runtime_config(
         "flash_attn": bool(flash_attn),
         "pretrained": bool(pretrained),
         "image_size": int(image_size),
+        "patch_size": int(patch_size),
+        "patch_size_m": _ANYSAT_S2_RES_M * int(patch_size),
         "n_frames": int(n_frames),
         "norm_mode": norm_mode,
         "grid_feature_mode": grid_feature_mode,
@@ -394,6 +415,7 @@ def _prepare_anysat_s2_input(
     raw_tchw: np.ndarray,
     *,
     image_size: int,
+    patch_size: int,
     doy0_values: np.ndarray,
     norm_mode: str,
     device: str,
@@ -410,6 +432,14 @@ def _prepare_anysat_s2_input(
     shape_prep = None
     if image_size > 0 and (x_tchw.shape[-1] != image_size or x_tchw.shape[-2] != image_size):
         x_tchw, shape_prep = _resize_tchw(x_tchw, out_hw=image_size)
+    # Only reachable when fed at its own size (image_size <= 0): a resize target
+    # is checked against patch_size when the runtime config is resolved.
+    h, w = (int(v) for v in x_tchw.shape[-2:])
+    if h % int(patch_size) or w % int(patch_size):
+        raise ModelError(
+            f"AnySat input ({h}x{w}) must be divisible by patch_size ({patch_size}); "
+            "set RS_EMBED_ANYSAT_IMG to a multiple of it."
+        )
 
     x_tchw = _normalize_series(x_tchw, mode=norm_mode)
     t = int(x_tchw.shape[0])
@@ -437,11 +467,6 @@ def _anysat_spatial_features(
 ) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
-
-    if patch_size_m <= 0 or (patch_size_m % 10) != 0:
-        raise ModelError(
-            f"AnySat patch_size must be a positive multiple of 10 (meters), got {patch_size_m}"
-        )
 
     native_output = str(feature_mode).strip().lower()
     if native_output not in {"patch", "dense"}:
@@ -484,11 +509,6 @@ def _anysat_tile_features(
 ) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
-
-    if patch_size_m <= 0 or (patch_size_m % 10) != 0:
-        raise ModelError(
-            f"AnySat patch_size must be a positive multiple of 10 (meters), got {patch_size_m}"
-        )
 
     with torch.no_grad():
         out = model(s2_input, patch_size=int(patch_size_m), output="tile")
@@ -554,7 +574,7 @@ class AnySatEmbedder(EmbedderBase):
             "defaults": {
                 "model_size": "base",
                 "variant": "base",
-                "patch_size_m": 10,
+                "patch_size": _DEFAULT_PATCH_SIZE,
                 "image_size": self.input_spec.image_size,
                 "n_frames": self.DEFAULT_FRAMES,
                 "scale_m": self.input_spec.scale_m,
@@ -569,6 +589,14 @@ class AnySatEmbedder(EmbedderBase):
                     "type": "string",
                     "default": "base",
                     "choices": ["base"],
+                },
+                "patch_size": {
+                    "type": "int",
+                    "default": _DEFAULT_PATCH_SIZE,
+                    "description": (
+                        "Patch side in pixels (AnySat's own patch_size = 10 m x this). "
+                        "image_size must be divisible by it. Larger = fewer, coarser patch tokens."
+                    ),
                 },
                 "grid_feature_mode": {
                     "type": "string",
@@ -586,6 +614,7 @@ class AnySatEmbedder(EmbedderBase):
                 "This adapter builds T frames by splitting TemporalSpec.range into equal sub-windows.",
                 "Loads AnySat from a vendored local runtime and optional Hugging Face checkpoint.",
                 "grid output defaults to AnySat output='dense'; pooled defaults to patch-grid pooling but can opt into native tile output.",
+                "patch_size sets the patch-token grid (image_size / patch_size per side); the dense grid stays at pixel resolution.",
             ],
         }
 
@@ -635,7 +664,8 @@ class AnySatEmbedder(EmbedderBase):
         norm_mode = str(runtime_cfg["norm_mode"])
         grid_feature_mode = str(runtime_cfg["grid_feature_mode"])
         pooled_source = str(runtime_cfg["pooled_source"])
-        patch_size_m = int(ss.scale_m)
+        patch_size = int(runtime_cfg["patch_size"])
+        patch_size_m = int(runtime_cfg["patch_size_m"])
 
         if input_chw is None:
             provider = self._get_provider(backend)
@@ -688,6 +718,7 @@ class AnySatEmbedder(EmbedderBase):
         s2_input, shape_prep = _prepare_anysat_s2_input(
             raw_tchw,
             image_size=image_size,
+            patch_size=patch_size,
             doy0_values=doy0_values,
             norm_mode=norm_mode,
             device=dev,
@@ -738,6 +769,7 @@ class AnySatEmbedder(EmbedderBase):
                 "normalization": norm_mode,
                 "grid_feature_mode": grid_feature_mode,
                 "pooled_source": pooled_source,
+                "patch_size": patch_size,
                 **({"shape_prep": shape_prep} if shape_prep is not None else {}),
                 "start": t.start,
                 "end": t.end,

@@ -44,7 +44,7 @@ from ..tools.shape import (
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
-from .config import model_config_value
+from .config import model_config_value, resolve_config_positive_int
 from .meta import build_meta, temporal_midpoint_str, temporal_to_range
 from .shared import grid_to_dataarray
 
@@ -185,48 +185,25 @@ def _resolve_variant(model_config: dict[str, Any] | None) -> str:
     return _DEFAULT_VARIANT
 
 
-def _coerce_patch_size(v: Any, *, source: str) -> int:
-    try:
-        ps = int(v)
-    except (TypeError, ValueError) as exc:
-        raise ModelError(
-            f"OlmoEarth patch_size from {source} must be an integer, got {v!r}."
-        ) from exc
-    if ps < 1 or ps > 8:
-        raise ModelError(f"OlmoEarth patch_size must be 1–8, got {ps}.")
-    return ps
-
-
 def _resolve_patch_size(model_config: dict[str, Any] | None) -> int:
-    v = model_config_value(model_config, "patch_size")
-    if v is not None:
-        return _coerce_patch_size(v, source="model_config")
-    env = os.environ.get("RS_EMBED_OLMOEARTH_PATCH_SIZE", "").strip()
-    if env:
-        return _coerce_patch_size(env, source="RS_EMBED_OLMOEARTH_PATCH_SIZE")
-    return _DEFAULT_PATCH_SIZE
-
-
-def _coerce_image_size(v: Any, *, source: str) -> int:
-    try:
-        s = int(v)
-    except (TypeError, ValueError) as exc:
-        raise ModelError(
-            f"OlmoEarth image_size from {source} must be an integer, got {v!r}."
-        ) from exc
-    if s < 1:
-        raise ModelError(f"OlmoEarth image_size must be positive, got {s}.")
-    return s
+    return resolve_config_positive_int(
+        model_config,
+        "patch_size",
+        env_var="RS_EMBED_OLMOEARTH_PATCH_SIZE",
+        default=_DEFAULT_PATCH_SIZE,
+        model_name="OlmoEarth",
+        max_value=8,
+    )
 
 
 def _resolve_image_size(model_config: dict[str, Any] | None) -> int:
-    v = model_config_value(model_config, "image_size")
-    if v is not None:
-        return _coerce_image_size(v, source="model_config")
-    env = os.environ.get("RS_EMBED_OLMOEARTH_IMAGE_SIZE", "").strip()
-    if env:
-        return _coerce_image_size(env, source="RS_EMBED_OLMOEARTH_IMAGE_SIZE")
-    return _DEFAULT_IMAGE_SIZE
+    return resolve_config_positive_int(
+        model_config,
+        "image_size",
+        env_var="RS_EMBED_OLMOEARTH_IMAGE_SIZE",
+        default=_DEFAULT_IMAGE_SIZE,
+        model_name="OlmoEarth",
+    )
 
 
 def _resolve_geometry(model_config: dict[str, Any] | None) -> tuple[int, int]:
