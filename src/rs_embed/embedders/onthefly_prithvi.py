@@ -43,6 +43,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     prepare_square,
     roi_fetch_meta,
     roi_in_frame,
@@ -115,6 +116,68 @@ def tokens_to_grid_dhw_tchw(tokens, n_frames: int, pooling: str):
     else:
         raise ModelError(f"Unknown pooling={pooling!r} (expected 'mean' or 'max').")
     return g.transpose(2, 0, 1).astype("float32"), (h, w), has_cls
+
+
+def _build_prithvi_embedding(
+    tokens: np.ndarray,
+    *,
+    n_frames: int | None,
+    geo_roi: tuple[float, float, float, float],
+    shape_prep: dict[str, Any] | None,
+    output: OutputSpec,
+    meta: dict[str, Any],
+) -> Embedding:
+    """Prithvi's Embedding builder for its single/batch and one/multi-frame paths.
+
+    *n_frames* is ``None`` for single-frame tokens; multi-frame tokens are first
+    reduced over time with ``output.pooling``. The ROI is cropped in the prep's
+    frame (squaring or bottom/right pad); *meta* is updated in place.
+    """
+    if n_frames is None:
+
+        def to_grid():
+            return tokens_to_grid_dhw(tokens)
+
+        temporal, tag = {}, ""
+    else:
+
+        def to_grid():
+            return tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
+
+        temporal, tag = {"temporal_pooling": output.pooling}, "temporal_"
+
+    if output.mode == "pooled":
+        if n_frames is None:
+            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
+        else:
+            vec, cls_removed = pool_from_tokens_tchw(tokens, n_frames, output.pooling)
+        vec, pmeta = pool_for_output(
+            vec,
+            None if roi_is_full(geo_roi) else to_grid()[0],
+            geo_roi=geo_roi,
+            shape_prep=shape_prep,
+            pooling=output.pooling,
+            native_pooling=f"patch_{tag}{output.pooling}",
+            roi_pooling=f"roi_grid_{tag}{output.pooling}",
+            model_label="Prithvi",
+        )
+        meta.update({**pmeta, **temporal, "cls_removed": bool(cls_removed)})
+        return Embedding(data=vec, meta=meta)
+
+    if output.mode == "grid":
+        grid, _hw, cls_removed = to_grid()
+        grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=shape_prep)
+        meta.update(
+            {
+                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "grid_kind": "patch_tokens",
+                **temporal,
+                "cls_removed": bool(cls_removed),
+            }
+        )
+        return Embedding(data=grid_to_dataarray(grid, meta=meta), meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
 
 
 # -------------------------
@@ -1264,46 +1327,14 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             },
         )
 
-        cropped_to_roi = not roi_is_full(geo_roi)
-        # The ROI is cropped in the prep's frame (squaring or bottom/right pad).
-        shape_prep = prep_meta.get("shape_prep")
-
-        if output.mode == "pooled":
-            if cropped_to_roi:
-                # Pool only the ROI's tokens (exclude the real-neighborhood context
-                # fetched to make the input square).
-                grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                grid, _ = crop_grid_for_output(
-                    grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=True
-                )
-                vec = (
-                    grid.max(axis=(1, 2)) if output.pooling == "max" else grid.mean(axis=(1, 2))
-                ).astype("float32")
-                pooling = f"roi_grid_{output.pooling}"
-            else:
-                vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-                pooling = f"patch_{output.pooling}"
-            meta.update({"pooling": pooling, "cls_removed": bool(cls_removed)})
-            return Embedding(data=vec, meta=meta)
-
-        if output.mode == "grid":
-            grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-            grid, _ = crop_grid_for_output(
-                grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=False
-            )
-            h, w = int(grid.shape[1]), int(grid.shape[2])
-            meta.update(
-                {
-                    "grid_hw": (h, w),
-                    "grid_kind": "patch_tokens",
-                    "cls_removed": bool(cls_removed),
-                }
-            )
-
-            da = grid_to_dataarray(grid, meta=meta)
-            return Embedding(data=da, meta=meta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return _build_prithvi_embedding(
+            tokens,
+            n_frames=None,
+            geo_roi=geo_roi,
+            shape_prep=prep_meta.get("shape_prep"),
+            output=output,
+            meta=meta,
+        )
 
     def _get_embedding_multiframe(
         self,
@@ -1425,51 +1456,14 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
             },
         )
 
-        cropped_to_roi = not roi_is_full(geo_roi)
-        # The ROI is cropped in the prep's frame (squaring or bottom/right pad).
-        shape_prep = prep_meta.get("shape_prep")
-
-        if output.mode == "pooled":
-            if cropped_to_roi:
-                # Pool only the ROI's tokens (time-collapsed grid, then ROI crop).
-                grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
-                grid, _ = crop_grid_for_output(
-                    grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=True
-                )
-                vec = (
-                    grid.max(axis=(1, 2)) if output.pooling == "max" else grid.mean(axis=(1, 2))
-                ).astype("float32")
-                pooling = f"roi_grid_temporal_{output.pooling}"
-            else:
-                vec, cls_removed = pool_from_tokens_tchw(tokens, n_frames, output.pooling)
-                pooling = f"patch_temporal_{output.pooling}"
-            meta.update(
-                {
-                    "pooling": pooling,
-                    "temporal_pooling": output.pooling,
-                    "cls_removed": bool(cls_removed),
-                }
-            )
-            return Embedding(data=vec, meta=meta)
-
-        if output.mode == "grid":
-            grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(tokens, n_frames, output.pooling)
-            grid, _ = crop_grid_for_output(
-                grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=False
-            )
-            h, w = int(grid.shape[1]), int(grid.shape[2])
-            meta.update(
-                {
-                    "grid_hw": (h, w),
-                    "grid_kind": "patch_tokens",
-                    "temporal_pooling": output.pooling,
-                    "cls_removed": bool(cls_removed),
-                }
-            )
-            da = grid_to_dataarray(grid, meta=meta)
-            return Embedding(data=da, meta=meta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return _build_prithvi_embedding(
+            tokens,
+            n_frames=n_frames,
+            geo_roi=geo_roi,
+            shape_prep=prep_meta.get("shape_prep"),
+            output=output,
+            meta=meta,
+        )
 
     def get_embeddings_batch(
         self,
@@ -1699,46 +1693,14 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         },
                     )
 
-                    geo_roi_i = _roi_at(i)
-                    cropped_i = not roi_is_full(geo_roi_i)
-
-                    if output.mode == "pooled":
-                        if cropped_i:
-                            grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                            grid, _ = crop_grid_for_output(
-                                grid, geo_roi=geo_roi_i, shape_prep=shape_preps[i], pooled=True
-                            )
-                            vec = (
-                                grid.max(axis=(1, 2))
-                                if output.pooling == "max"
-                                else grid.mean(axis=(1, 2))
-                            ).astype("float32")
-                            pooling = f"roi_grid_{output.pooling}"
-                        else:
-                            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-                            pooling = f"patch_{output.pooling}"
-                        meta.update({"pooling": pooling, "cls_removed": bool(cls_removed)})
-                        out[i] = Embedding(data=vec, meta=meta)
-                        continue
-
-                    if output.mode == "grid":
-                        grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                        grid, _ = crop_grid_for_output(
-                            grid, geo_roi=geo_roi_i, shape_prep=shape_preps[i], pooled=False
-                        )
-                        h, w = int(grid.shape[1]), int(grid.shape[2])
-                        meta.update(
-                            {
-                                "grid_hw": (h, w),
-                                "grid_kind": "patch_tokens",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                        da = grid_to_dataarray(grid, meta=meta)
-                        out[i] = Embedding(data=da, meta=meta)
-                        continue
-
-                    raise ModelError(f"Unknown output mode: {output.mode}")
+                    out[i] = _build_prithvi_embedding(
+                        tokens,
+                        n_frames=None,
+                        geo_roi=_roi_at(i),
+                        shape_prep=shape_preps[i],
+                        output=output,
+                        meta=meta,
+                    )
 
         if any(e is None for e in out):
             raise ModelError("prithvi_eo_v2_s2_6b batch inference produced incomplete outputs.")
@@ -1875,59 +1837,14 @@ class PrithviEOV2S2_6B_Embedder(EmbedderBase):
                         },
                     )
 
-                    geo_roi_i = _roi_at(i)
-                    cropped_i = not roi_is_full(geo_roi_i)
-
-                    if output.mode == "pooled":
-                        if cropped_i:
-                            grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(
-                                tokens, n_frames, output.pooling
-                            )
-                            grid, _ = crop_grid_for_output(
-                                grid, geo_roi=geo_roi_i, shape_prep=shape_preps[i], pooled=True
-                            )
-                            vec = (
-                                grid.max(axis=(1, 2))
-                                if output.pooling == "max"
-                                else grid.mean(axis=(1, 2))
-                            ).astype("float32")
-                            pooling = f"roi_grid_temporal_{output.pooling}"
-                        else:
-                            vec, cls_removed = pool_from_tokens_tchw(
-                                tokens, n_frames, output.pooling
-                            )
-                            pooling = f"patch_temporal_{output.pooling}"
-                        meta.update(
-                            {
-                                "pooling": pooling,
-                                "temporal_pooling": output.pooling,
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                        out[i] = Embedding(data=vec, meta=meta)
-                        continue
-
-                    if output.mode == "grid":
-                        grid, _hw, cls_removed = tokens_to_grid_dhw_tchw(
-                            tokens, n_frames, output.pooling
-                        )
-                        grid, _ = crop_grid_for_output(
-                            grid, geo_roi=geo_roi_i, shape_prep=shape_preps[i], pooled=False
-                        )
-                        h, w = int(grid.shape[1]), int(grid.shape[2])
-                        meta.update(
-                            {
-                                "grid_hw": (h, w),
-                                "grid_kind": "patch_tokens",
-                                "temporal_pooling": output.pooling,
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                        da = grid_to_dataarray(grid, meta=meta)
-                        out[i] = Embedding(data=da, meta=meta)
-                        continue
-
-                    raise ModelError(f"Unknown output mode: {output.mode}")
+                    out[i] = _build_prithvi_embedding(
+                        tokens,
+                        n_frames=n_frames,
+                        geo_roi=_roi_at(i),
+                        shape_prep=shape_preps[i],
+                        output=output,
+                        meta=meta,
+                    )
 
         if any(e is None for e in out):
             raise ModelError("prithvi_eo_v2_s2_6b batch inference produced incomplete outputs.")

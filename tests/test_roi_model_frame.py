@@ -8,6 +8,8 @@ through its preprocessing record (``shape.model_roi_window``) before cropping.
 
 from __future__ import annotations
 
+import types
+
 import numpy as np
 import pytest
 
@@ -37,14 +39,15 @@ def test_builder_crops_grid_in_the_model_frame(model):
             )
         from rs_embed.embedders.onthefly_dofa import _build_dofa_embedding
 
+        # Without global pooling DOFA's tokens are already normed: no ROI head.
         return _build_dofa_embedding(
             tokens,
             pooled,
+            model=types.SimpleNamespace(global_pool=False, patch_size=16),
             geo_roi=geo_roi,
             shape_prep=shape_prep,
             output=output,
             base_meta={},
-            patch_size=16,
         )
 
     # Whole ROI on a padded input: grid drops the padding rows, pooled stays native.

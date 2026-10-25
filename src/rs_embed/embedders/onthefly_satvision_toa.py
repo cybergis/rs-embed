@@ -37,8 +37,8 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
     geo_roi_from_meta,
+    pool_for_output,
     roi_fetch_meta,
     roi_is_full,
 )
@@ -46,8 +46,7 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .meta import base_meta, temporal_to_range
 from .shared import (
-    grid_to_dataarray,
-    pool_from_tokens,
+    build_token_embedding,
     snapshot_download_cache_first,
     tokens_to_grid_dhw,
     verify_loaded_params,
@@ -61,63 +60,50 @@ def ensure_torch() -> None:
         raise ModelError("This embedder requires torch installed.") from e
 
 
-def build_satvision_embedding(out_arr, *, geo_roi, output, meta):
+def build_satvision_embedding(out_arr, *, geo_roi, output, meta, roi_tokens=None):
     """Turn a SatVision forward output into an Embedding, cropping to the ROI.
 
-    ``out_arr`` is either a ``[N,D]`` token / feature-map sequence or a ``[D]``
-    model-pooled vector. When the input was enlarged to a square at fetch time
-    (``geo_roi`` is a sub-window) and tokens are available, the patch grid is
-    cropped back to the ROI before pooling / emitting. When ``geo_roi`` is the
-    full frame this reproduces the legacy behaviour exactly. A 1-D model-pooled
-    vector has no spatial tokens, so it cannot be cropped and is returned as-is.
-    ``meta`` is mutated in place with the chosen pooling / grid provenance.
+    ``out_arr`` is either a ``[N,D]`` token / feature-map sequence (see
+    ``build_token_embedding``) or a ``[D]`` model-pooled vector, the mean of the
+    normed last-stage tokens. For an ROI sub-window ``roi_tokens()`` supplies
+    those tokens (``_satvision_normed_tokens``), so the ROI's mean is the same
+    vector restricted to the ROI. ``meta`` is mutated in place with the chosen
+    pooling / grid provenance.
     """
-    cropped = not roi_is_full(geo_roi)
+    if out_arr.ndim == 2:
+        feature_map = str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
+        return build_token_embedding(
+            out_arr,
+            geo_roi=geo_roi,
+            output=output,
+            meta=meta,
+            model_label="SatVision-TOA",
+            grid_kind="last_stage_feature_map" if feature_map else "patch_tokens",
+        )
 
     if output.mode == "pooled":
-        if out_arr.ndim == 2:
-            if cropped:
-                grid, _hw, cls_removed = tokens_to_grid_dhw(out_arr)
-                g = crop_grid_to_roi(grid, geo_roi)
-                reduce = g.max if output.pooling == "max" else g.mean
-                vec = reduce(axis=(1, 2)).astype(np.float32)
-                meta.update(
-                    {"pooling": f"roi_grid_{output.pooling}", "cls_removed": bool(cls_removed)}
-                )
-            else:
-                vec, cls_removed = pool_from_tokens(out_arr, output.pooling)
-                meta.update(
-                    {"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)}
-                )
-            return Embedding(data=vec, meta=meta)
         if out_arr.ndim == 1:
-            meta.update({"pooling": "model_pooled", "cls_removed": False})
-            return Embedding(data=out_arr.astype(np.float32), meta=meta)
+            sub_window = not roi_is_full(tuple(geo_roi))
+            tokens = roi_tokens() if sub_window and roi_tokens is not None else None
+            vec, pmeta = pool_for_output(
+                out_arr,
+                None if tokens is None else tokens_to_grid_dhw(tokens)[0],
+                geo_roi=geo_roi,
+                shape_prep=None,
+                pooling=output.pooling,
+                native_reduce="mean",
+                native_pooling="model_pooled",
+                model_label="SatVision-TOA",
+            )
+            meta.update({**pmeta, "cls_removed": False})
+            return Embedding(data=vec, meta=meta)
         raise ModelError(f"Unexpected SatVision output shape for pooled mode: {out_arr.shape}")
 
     if output.mode == "grid":
-        if out_arr.ndim != 2:
-            raise ModelError(
-                "grid output requires token sequence [N,D]. "
-                f"Got {out_arr.shape} (tokens_kind={meta.get('tokens_kind')})."
-            )
-        grid, (h, w), cls_removed = tokens_to_grid_dhw(out_arr)
-        if cropped:
-            grid = crop_grid_to_roi(grid, geo_roi)
-            h, w = int(grid.shape[1]), int(grid.shape[2])
-        meta.update(
-            {
-                "grid_hw": (h, w),
-                "grid_kind": (
-                    "last_stage_feature_map"
-                    if str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
-                    else "patch_tokens"
-                ),
-                "cls_removed": bool(cls_removed),
-            }
+        raise ModelError(
+            "grid output requires token sequence [N,D]. "
+            f"Got {out_arr.shape} (tokens_kind={meta.get('tokens_kind')})."
         )
-        da = grid_to_dataarray(grid, meta=meta)
-        return Embedding(data=da, meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")
 
@@ -907,6 +893,28 @@ def _coerce_fetch_result(res: Any) -> tuple[np.ndarray, dict[str, Any]]:
     }
 
 
+def _satvision_normed_tokens(model: Any, x_chw: np.ndarray, *, device: str) -> np.ndarray | None:
+    """One input's last-stage tokens [N, D] after the final norm, or ``None``.
+
+    ``forward_features`` is the mean of these tokens, so their mean over an ROI
+    is the same vector restricted to it. ``None`` when the model does not
+    expose ``_forward_tokens`` and ``norm``.
+    """
+    forward_tokens = getattr(model, "_forward_tokens", None)
+    norm = getattr(model, "norm", None)
+    if not callable(forward_tokens) or not callable(norm):
+        return None
+    ensure_torch()
+    import torch
+
+    x = torch.from_numpy(np.asarray(x_chw, dtype=np.float32)[None]).to(_resolve_device(device))
+    with torch.no_grad():
+        tokens = norm(forward_tokens(x))
+    if getattr(tokens, "ndim", None) != 3:
+        return None
+    return tokens[0].detach().float().cpu().numpy().astype(np.float32)
+
+
 def _satvision_forward_batch(
     model: Any,
     x_chw_batch: list[np.ndarray],
@@ -1324,7 +1332,13 @@ class SatVisionTOAEmbedder(EmbedderBase):
             },
         )
 
-        return build_satvision_embedding(out_arr, geo_roi=geo_roi, output=output, meta=meta)
+        return build_satvision_embedding(
+            out_arr,
+            geo_roi=geo_roi,
+            output=output,
+            meta=meta,
+            roi_tokens=lambda: _satvision_normed_tokens(rt["model"], x, device=rt["device"]),
+        )
 
     def get_embeddings_batch(
         self,
@@ -1456,7 +1470,15 @@ class SatVisionTOAEmbedder(EmbedderBase):
                         **fmeta,
                     },
                 )
-                out[i] = build_satvision_embedding(arr, geo_roi=geo_roi, output=output, meta=meta)
+                out[i] = build_satvision_embedding(
+                    arr,
+                    geo_roi=geo_roi,
+                    output=output,
+                    meta=meta,
+                    roi_tokens=lambda x=x_batch[j]: _satvision_normed_tokens(
+                        rt["model"], x, device=rt["device"]
+                    ),
+                )
 
         if any(e is None for e in out):
             raise ModelError("satvision_toa batch inference produced incomplete outputs.")
@@ -1557,7 +1579,15 @@ class SatVisionTOAEmbedder(EmbedderBase):
             )
 
             embeddings.append(
-                build_satvision_embedding(arr, geo_roi=geo_rois[j], output=output, meta=meta)
+                build_satvision_embedding(
+                    arr,
+                    geo_roi=geo_rois[j],
+                    output=output,
+                    meta=meta,
+                    roi_tokens=lambda x=x_batch[j]: _satvision_normed_tokens(
+                        rt["model"], x, device=rt["device"]
+                    ),
+                )
             )
 
         return embeddings

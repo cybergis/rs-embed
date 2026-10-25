@@ -14,12 +14,14 @@ from rs_embed.tools.shape import (
     crop_grid_for_output,
     crop_grid_to_roi,
     model_roi_window,
+    pool_for_output,
     prepare_square,
     resize_square,
     roi_in_frame,
     roi_is_full,
     roi_token_box,
 )
+from rs_embed.tools.spatial import FULL_WINDOW
 
 
 def test_crop_to_square_chw():
@@ -202,26 +204,6 @@ def test_roi_fetch_meta():
     assert roi_fetch_meta((0.2, 0.8, 0.0, 1.0)) == {"roi_window_geo": (0.2, 0.8, 0.0, 1.0)}
 
 
-def test_crop_grid_and_pool_full_returns_fallback():
-    from rs_embed.tools.shape import crop_grid_and_pool
-    from rs_embed.tools.spatial import FULL_WINDOW
-
-    grid = np.random.rand(8, 6, 6).astype(np.float32)
-    fb = np.ones(8, np.float32)
-    g, vec = crop_grid_and_pool(grid, FULL_WINDOW, pooling="mean", pooled_fallback=fb)
-    assert g is grid
-    assert vec is fb
-
-
-def test_crop_grid_and_pool_crops_and_pools():
-    from rs_embed.tools.shape import crop_grid_and_pool
-
-    grid = np.random.rand(8, 8, 8).astype(np.float32)
-    g, vec = crop_grid_and_pool(grid, (0.25, 0.75, 0.0, 1.0), pooling="mean")
-    assert g.shape[0] == 8 and g.shape[1] < 8 and g.shape[2] == 8
-    np.testing.assert_allclose(vec, g.mean(axis=(1, 2)), rtol=1e-5)
-
-
 def test_square_fetch_batch():
     from rs_embed.core.specs import BBox, PointBuffer
     from rs_embed.tools.shape import square_fetch_batch
@@ -321,21 +303,81 @@ def test_square_spatial_window_is_exact():
     assert geo[0] != round(geo[0], 6)
 
 
-def test_crop_grid_for_output_splits_grid_and_pooled_crops():
-    grid = np.arange(8, dtype=np.float32)[None, :, None].repeat(4, axis=2)  # (1, 8, 4)
-    pad = {"input_window": (0.25, 0.75, 0.0, 1.0)}
-    full = (0.0, 1.0, 0.0, 1.0)
-    # Grid output drops the padding rows even for a whole ROI.
-    g, roi_pooled = crop_grid_for_output(grid, geo_roi=full, shape_prep=pad, pooled=False)
-    assert g[0, :, 0].tolist() == [2.0, 3.0, 4.0, 5.0] and roi_pooled is False
-    # Pooled output of a whole ROI keeps the grid for the model's own pooling.
-    g, roi_pooled = crop_grid_for_output(grid, geo_roi=full, shape_prep=pad, pooled=True)
-    assert g is grid and roi_pooled is False
-    # A sub-window is pooled over its cells, mapped through the pad.
-    g, roi_pooled = crop_grid_for_output(
-        grid, geo_roi=(0.5, 1.0, 0.0, 1.0), shape_prep=pad, pooled=True
+def _row_grid() -> np.ndarray:
+    """(1, 8, 4) grid whose value is the row index."""
+    return np.arange(8, dtype=np.float32)[None, :, None].repeat(4, axis=2)
+
+
+_PAD = {"input_window": (0.25, 0.75, 0.0, 1.0)}  # input fills rows 2..5 of 8
+_LOWER_HALF = (0.5, 1.0, 0.0, 1.0)  # of the input → grid rows 4..5
+
+
+def test_crop_grid_for_output_drops_padding_even_for_a_whole_roi():
+    g = crop_grid_for_output(_row_grid(), geo_roi=FULL_WINDOW, shape_prep=_PAD)
+    assert g[0, :, 0].tolist() == [2.0, 3.0, 4.0, 5.0]
+
+
+def _pool(native, grid, geo_roi, **kw):
+    kw.setdefault("pooling", "mean")
+    kw.setdefault("native_pooling", "native")
+    return pool_for_output(
+        native, grid, geo_roi=geo_roi, shape_prep=_PAD, model_label="Model", **kw
     )
-    assert g[0, :, 0].tolist() == [4.0, 5.0] and roi_pooled is True
+
+
+def test_pool_for_output_keeps_the_native_vector_for_a_whole_roi():
+    vec, meta = _pool(np.array([42.0]), _row_grid(), FULL_WINDOW)
+    assert vec.tolist() == [42.0] and vec.dtype == np.float32
+    assert meta == {"pooling": "native"}
+
+
+@pytest.mark.parametrize(("pooling", "expected"), [("mean", 4.5), ("max", 5.0)])
+def test_pool_for_output_pools_the_roi_cells_in_the_model_frame(pooling, expected):
+    vec, meta = _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, pooling=pooling)
+    assert vec.tolist() == [expected]
+    assert meta == {"pooling": f"roi_grid_{pooling}", "roi_pooled": True}
+
+
+def test_pool_for_output_follows_a_fixed_native_reduction():
+    whole, whole_meta = _pool(
+        np.array([42.0]), _row_grid(), FULL_WINDOW, pooling="max", native_reduce="mean"
+    )
+    assert whole_meta == {"pooling": "native", "requested_pooling": "max"}
+    vec, meta = _pool(
+        np.array([42.0]), _row_grid(), _LOWER_HALF, pooling="max", native_reduce="mean"
+    )
+    assert vec.tolist() == [4.5]
+    assert meta == {"pooling": "roi_grid_mean", "requested_pooling": "max", "roi_pooled": True}
+
+
+def test_pool_for_output_applies_the_head_after_the_reduction():
+    vec, _ = _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, head=lambda v: v * 2)
+    assert vec.tolist() == [9.0]
+
+
+def test_pool_for_output_reduces_the_whole_grid_without_a_native_vector():
+    vec, meta = _pool(None, _row_grid(), FULL_WINDOW, pooling="max")
+    assert vec.tolist() == [7.0] and meta == {"pooling": "native"}
+    with pytest.raises(ModelError, match="neither a pooled vector nor a grid"):
+        _pool(None, None, FULL_WINDOW)
+
+
+def test_pool_for_output_warns_when_the_roi_cannot_be_pooled():
+    with pytest.warns(UserWarning, match="no token grid"):
+        vec, meta = _pool(np.array([42.0]), None, _LOWER_HALF)
+    assert vec.tolist() == [42.0]
+    assert meta == {"pooling": "native", "roi_pooled": False}
+
+
+def test_pool_for_output_rejects_a_roi_vector_in_another_space():
+    with pytest.raises(ModelError, match="same space"):
+        _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, head=lambda v: np.concatenate([v, v]))
+
+
+@pytest.mark.parametrize("kw", [{"pooling": "median"}, {"native_reduce": "cls"}])
+def test_pool_for_output_rejects_unknown_pooling(kw):
+    with pytest.raises(ModelError, match="Unknown pooling"):
+        _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, **kw)
 
 
 def test_model_roi_window_warns_when_the_roi_is_cropped_away():

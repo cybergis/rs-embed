@@ -35,8 +35,9 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     roi_is_full,
     square_fetch_batch,
 )
@@ -778,40 +779,29 @@ class TerraMindEmbedder(EmbedderBase):
         output: OutputSpec,
         meta: dict[str, Any],
     ) -> Embedding:
-        # Build the patch grid whenever we crop (ROI sub-window) or grid is asked.
-        # When the ROI is full this reproduces the legacy token-pool / full-grid
-        # behaviour exactly (data and metadata identical).
-        cropped = not roi_is_full(geo_roi)
-
+        # TerraMind sees the fetched input's full frame, so the ROI needs no
+        # frame mapping; pooled output pools the ROI's cells for a sub-window.
         if output.mode == "pooled":
-            if cropped:
-                grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-                g = crop_grid_to_roi(grid, geo_roi)
-                reduce = g.max if output.pooling == "max" else g.mean
-                vec = reduce(axis=(1, 2)).astype(np.float32)
-                ometa = {
-                    **meta,
-                    "pooling": f"roi_grid_{output.pooling}",
-                    "cls_removed": bool(cls_removed),
-                }
-            else:
-                vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-                ometa = {
-                    **meta,
-                    "pooling": output.pooling,
-                    "cls_removed": bool(cls_removed),
-                }
-            return Embedding(data=vec.astype(np.float32), meta=ometa)
+            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
+            vec, pmeta = pool_for_output(
+                vec,
+                None if roi_is_full(geo_roi) else tokens_to_grid_dhw(tokens)[0],
+                geo_roi=geo_roi,
+                shape_prep=None,
+                pooling=output.pooling,
+                native_pooling=output.pooling,
+                model_label="TerraMind",
+            )
+            ometa = {**meta, **pmeta, "cls_removed": bool(cls_removed)}
+            return Embedding(data=vec, meta=ometa)
 
         if output.mode == "grid":
-            grid, (gh, gw), cls_removed = tokens_to_grid_dhw(tokens)
-            if cropped:
-                grid = crop_grid_to_roi(grid, geo_roi)
-                gh, gw = int(grid.shape[1]), int(grid.shape[2])
+            grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
+            grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=None)
             gmeta = {
                 **meta,
                 "grid_type": "vit_patch_tokens",
-                "grid_hw": (int(gh), int(gw)),
+                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
                 "grid_shape": tuple(grid.shape),
                 "cls_removed": bool(cls_removed),
             }

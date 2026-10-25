@@ -37,9 +37,9 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_and_pool,
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     roi_fetch_meta,
     roi_is_full,
     square_fetch_batch,
@@ -51,6 +51,7 @@ from .meta import build_meta, temporal_to_range
 from .shared import (
     grid_to_dataarray,
     hf_hub_download_cache_first,
+    module_vector_head,
     pool_from_tokens,
     tokens_to_grid_dhw,
     verify_loaded_params,
@@ -627,6 +628,55 @@ def _rgb_u8_to_bchw_unit(rgb_u8: np.ndarray) -> np.ndarray:
     return x.transpose(2, 0, 1)[None, ...].astype(np.float32)
 
 
+def _build_wildsat_embedding(
+    vec: np.ndarray,
+    grid: np.ndarray | None,
+    fmeta: dict[str, Any],
+    *,
+    image_head: Any | None,
+    geo_roi: tuple[float, float, float, float],
+    output: OutputSpec,
+    meta: dict[str, Any],
+) -> Embedding:
+    """WildSAT's Embedding builder for the single and batch paths.
+
+    The pooled vector is the image head's output, the backbone's CLS token, or
+    (``pooled_from_tokens``) a pool of the backbone tokens. An ROI sub-window
+    pools the ROI's backbone tokens the same way: a token pool by ``pooling``,
+    else their mean, through the image head when the head made the vector. A
+    ``vector_as_1x1`` grid is no token grid. The input is stretched, so the ROI
+    needs no frame mapping.
+    """
+    if output.mode == "pooled":
+        from_tokens = bool(fmeta.get("pooled_from_tokens", False))
+        use_head = not from_tokens and fmeta.get("feature_source") == "image_head"
+        vec, pmeta = pool_for_output(
+            vec,
+            grid if fmeta.get("grid_kind") == "vit_patch_tokens" else None,
+            geo_roi=geo_roi,
+            shape_prep=None,
+            pooling=output.pooling,
+            native_reduce=None if from_tokens else "mean",
+            native_pooling=output.pooling if from_tokens else "identity",
+            model_label="WildSAT",
+            head=module_vector_head(lambda: image_head) if use_head else None,
+        )
+        return Embedding(data=vec, meta={**meta, **pmeta, "pooled_shape": tuple(vec.shape)})
+
+    if output.mode == "grid":
+        if grid is None:
+            raise ModelError("Internal error: grid output requested but grid tensor is missing.")
+        grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=None)
+        gmeta = {
+            **meta,
+            "grid_shape": tuple(grid.shape),
+            "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+        }
+        return Embedding(data=grid_to_dataarray(grid.astype(np.float32), meta=gmeta), meta=gmeta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
+
+
 def _wildsat_forward(
     backbone: Any,
     image_head: Any | None,
@@ -1054,35 +1104,15 @@ class WildSATEmbedder(EmbedderBase):
             },
         )
 
-        if output.mode == "pooled":
-            if cropped_to_roi and grid is not None:
-                # Pool only the ROI tokens (the model's global vector would include
-                # the real-neighborhood context fetched only to square the input).
-                _, vec = crop_grid_and_pool(
-                    grid, geo_roi, pooling=output.pooling, pooled_fallback=vec
-                )
-                pooling = f"roi_grid_{output.pooling}"
-            else:
-                pooling = output.pooling if fmeta.get("pooled_from_tokens", False) else "identity"
-            ometa = {**meta, "pooling": pooling, "pooled_shape": tuple(vec.shape)}
-            return Embedding(data=vec.astype(np.float32), meta=ometa)
-
-        if output.mode == "grid":
-            if grid is None:
-                raise ModelError(
-                    "Internal error: grid output requested but grid tensor is missing."
-                )
-            if cropped_to_roi:
-                grid = crop_grid_to_roi(grid, geo_roi)
-            gmeta = {
-                **meta,
-                "grid_shape": tuple(grid.shape),
-                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
-            }
-            da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
-            return Embedding(data=da, meta=gmeta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return _build_wildsat_embedding(
+            vec,
+            grid,
+            fmeta,
+            image_head=image_head,
+            geo_roi=geo_roi,
+            output=output,
+            meta=meta,
+        )
 
     def get_embeddings_batch(
         self,
@@ -1236,7 +1266,6 @@ class WildSATEmbedder(EmbedderBase):
         embeddings: list[Embedding] = []
         for _i, (vec, grid, fmeta) in enumerate(batch_results):
             geo_roi = geo_rois[_i]
-            cropped_to_roi = not roi_is_full(geo_roi)
             meta = build_meta(
                 model=self.model_name,
                 kind="on_the_fly",
@@ -1261,39 +1290,16 @@ class WildSATEmbedder(EmbedderBase):
                 },
             )
 
-            if output.mode == "pooled":
-                if cropped_to_roi and grid is not None:
-                    # Pool only the ROI tokens (the model's global vector would include
-                    # the real-neighborhood context fetched only to square the input).
-                    _, vec = crop_grid_and_pool(
-                        grid, geo_roi, pooling=output.pooling, pooled_fallback=vec
-                    )
-                    pooling = f"roi_grid_{output.pooling}"
-                else:
-                    pooling = (
-                        output.pooling if fmeta.get("pooled_from_tokens", False) else "identity"
-                    )
-                ometa = {
-                    **meta,
-                    "pooling": pooling,
-                    "pooled_shape": tuple(vec.shape),
-                }
-                embeddings.append(Embedding(data=vec.astype(np.float32), meta=ometa))
-            elif output.mode == "grid":
-                if grid is None:
-                    raise ModelError(
-                        "Internal error: grid output requested but grid tensor is missing."
-                    )
-                if cropped_to_roi:
-                    grid = crop_grid_to_roi(grid, geo_roi)
-                gmeta = {
-                    **meta,
-                    "grid_shape": tuple(grid.shape),
-                    "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
-                }
-                da = grid_to_dataarray(grid.astype(np.float32), meta=gmeta)
-                embeddings.append(Embedding(data=da, meta=gmeta))
-            else:
-                raise ModelError(f"Unknown output mode: {output.mode}")
+            embeddings.append(
+                _build_wildsat_embedding(
+                    vec,
+                    grid,
+                    fmeta,
+                    image_head=image_head,
+                    geo_roi=geo_roi,
+                    output=output,
+                    meta=meta,
+                )
+            )
 
         return embeddings

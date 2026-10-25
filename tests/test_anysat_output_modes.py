@@ -49,6 +49,9 @@ class _FakeAnySatModel:
             return _FakeTensor(np.arange(1 * 2 * 2 * 6, dtype=np.float32).reshape(1, 2, 2, 6))
         if output == "tile":
             return _FakeTensor(np.arange(1 * 9, dtype=np.float32).reshape(1, 9))
+        if output == "all":
+            # The tile (CLS) token, then a 2x2 patch grid in row-major order.
+            return _FakeTensor(np.arange(1 * 5 * 9, dtype=np.float32).reshape(1, 5, 9))
         raise AssertionError(f"unexpected output mode: {output}")
 
 
@@ -184,6 +187,26 @@ def test_anysat_pooled_source_can_use_tile(monkeypatch):
     assert out.meta["pooling"] == "tile_native"
     assert out.meta["requested_pooling"] == "max"
     assert out.meta["pooled_source"] == "tile"
+
+
+def test_anysat_tile_pools_an_roi_subwindow_from_its_patch_tokens(monkeypatch):
+    """The tile vector is a CLS token: an ROI sub-window mean-pools the ROI's
+    patch tokens from the same forward instead of returning the whole tile (#140)."""
+    emb, model = _embedder_with_fake_model(monkeypatch)
+
+    out = _embed(
+        emb,
+        OutputSpec.pooled("max"),
+        model_config={"pooled_source": "tile"},
+        fetch_meta={"roi_window_geo": (0.0, 0.5, 0.0, 1.0)},  # the top patch row
+    )
+
+    tokens = np.arange(5 * 9, dtype=np.float32).reshape(5, 9)
+    assert model.outputs == [(10, "all")]
+    np.testing.assert_allclose(out.data, tokens[1:3].mean(axis=0))
+    assert out.meta["pooling"] == "roi_grid_mean"
+    assert out.meta["requested_pooling"] == "max"
+    assert out.meta["roi_pooled"] is True
 
 
 def test_anysat_crops_the_roi_in_the_squared_frame(monkeypatch):

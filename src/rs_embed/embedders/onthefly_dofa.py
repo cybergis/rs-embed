@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Callable
 from functools import lru_cache
 from typing import Any
 
@@ -44,6 +45,7 @@ from .meta import build_meta, temporal_to_range
 from .shared import (
     build_vit_patch_embedding,
     hf_hub_download_cache_first,
+    module_vector_head,
     verify_loaded_params,
 )
 
@@ -628,21 +630,34 @@ def _dofa_forward_tokens_and_pooled_batch(
 # -----------------------------
 # Embedder
 # -----------------------------
+def _dofa_roi_head(model: Any) -> Callable[[np.ndarray], np.ndarray] | None:
+    """The head that turns a mean of DOFA's patch tokens into its pooled vector.
+
+    Under global pooling DOFA's pooled vector is ``fc_norm`` of the patch-token
+    mean, so an ROI's token mean needs ``fc_norm`` too. Otherwise the pooled
+    vector is the normed CLS token and the patch tokens are already normed.
+    """
+    if not getattr(model, "global_pool", True):
+        return None
+    return module_vector_head(lambda: model.fc_norm)
+
+
 def _build_dofa_embedding(
     tokens: np.ndarray,
     pooled: np.ndarray,
     *,
+    model: Any,
     geo_roi: tuple[float, float, float, float] | None,
     shape_prep: dict[str, Any] | None,
     output: OutputSpec,
     base_meta: dict[str, Any],
-    patch_size: int,
 ) -> Embedding:
     """DOFA's Embedding builder for the single and batch paths.
 
     ``shape_prep`` is the squaring record from ``_resize_chw``; see
     ``build_vit_patch_embedding`` for the ROI crop. Pooled output is DOFA's
-    own pooled vector unless ``geo_roi`` is a sub-window.
+    own pooled vector, or for an ROI sub-window the ROI's token mean through
+    DOFA's pooled-vector head (``_dofa_roi_head``).
     """
     return build_vit_patch_embedding(
         tokens,
@@ -651,8 +666,9 @@ def _build_dofa_embedding(
         shape_prep=shape_prep,
         output=output,
         base_meta=base_meta,
-        patch_size=patch_size,
+        patch_size=int(getattr(model, "patch_size", 16)),
         model_label="DOFA",
+        roi_head=_dofa_roi_head(model),
     )
 
 
@@ -939,7 +955,7 @@ class DOFAEmbedder(EmbedderBase):
             shape_prep=resize_meta.get("shape_prep"),
             output=output,
             base_meta=base_meta,
-            patch_size=int(getattr(model, "patch_size", 16)),
+            model=model,
         )
 
     def get_embeddings_batch(
@@ -1138,7 +1154,7 @@ class DOFAEmbedder(EmbedderBase):
                     shape_prep=resize_meta_all[i].get("shape_prep"),
                     output=output,
                     base_meta=base_meta,
-                    patch_size=int(getattr(model, "patch_size", 16)),
+                    model=model,
                 )
 
         if any(e is None for e in out):
