@@ -56,7 +56,6 @@ __all__ = [
     "crop_grid_to_roi",
     "geo_roi_from_meta",
     "roi_fetch_meta",
-    "crop_grid_and_pool",
     "square_fetch_batch",
 ]
 
@@ -482,33 +481,6 @@ def square_fetch_request(spatial: SpatialSpec) -> tuple[SpatialSpec, dict[str, A
     """
     sq, geo_roi = square_spatial(spatial)
     return sq, (roi_fetch_meta(geo_roi) or {})
-
-
-def crop_grid_and_pool(
-    grid: np.ndarray,
-    geo_roi: tuple[float, float, float, float],
-    *,
-    pooling: str = "mean",
-    pooled_fallback: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    """Crop a ``(D, H', W')`` token grid to the ROI and pool it.
-
-    Returns ``(grid_out, pooled_vec)``:
-
-    - ROI is a sub-window (a rectangle was enlarged to a square fetch) → crop the
-      grid and pool **only the ROI tokens** (mean/max over ``H', W'``);
-    - ROI is full → return the grid unchanged and ``pooled_fallback`` (the model's
-      own pooled vector, e.g. CLS or global token pool), preserving its semantics.
-
-    Collapses the per-model "if cropped: crop + pool ROI else fallback" blocks
-    into one call. ``pooled_vec`` is ``None`` only when the ROI is full and no
-    fallback was given (the caller is in grid mode and ignores it).
-    """
-    if roi_is_full(geo_roi):
-        return grid, pooled_fallback
-    g = crop_grid_to_roi(grid, geo_roi)
-    vec = (g.max(axis=(1, 2)) if pooling == "max" else g.mean(axis=(1, 2))).astype(np.float32)
-    return g, vec
 
 
 def parallel_indexed_fetch(

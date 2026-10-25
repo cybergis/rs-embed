@@ -50,10 +50,10 @@ from .shape import geo_roi_from_meta, roi_is_full, roi_token_box
 # Preprocessing contract version
 # ---------------------------------------------------------------------------
 
-# Bump whenever tiling/stitching/aggregation or the ROI crop changes in a way
+# Bump whenever tiling/stitching/aggregation or the ROI crop or pool changes in a way
 # that alters produced embeddings. Stamped into every embedding's meta["input_prep"]
 # so downstream consumers can detect a contract change and pin reproducibility.
-INPUT_PREP_VERSION = 3
+INPUT_PREP_VERSION = 4
 
 
 # ---------------------------------------------------------------------------

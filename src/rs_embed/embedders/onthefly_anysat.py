@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 import os
 from datetime import date
 from functools import lru_cache
@@ -45,6 +46,7 @@ from ..tools.shape import (
     pool_for_output,
     prepare_square,
     roi_fetch_meta,
+    roi_is_full,
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
@@ -507,28 +509,48 @@ def _anysat_tile_features(
     s2_input: dict[str, Any],
     *,
     patch_size_m: int,
-) -> tuple[np.ndarray, dict[str, Any]]:
+    with_patch_grid: bool = False,
+) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
+    """AnySat's tile vector, plus its patch-token grid ``(D, H, W)`` when asked.
+
+    The tile vector is the transformer's CLS token. ``with_patch_grid`` runs
+    ``output="all"`` instead, whose tokens are that CLS token followed by the
+    patch tokens in row-major order, so one forward gives both.
+    """
     ensure_torch()
     import torch
 
+    native_output = "all" if with_patch_grid else "tile"
     with torch.no_grad():
-        out = model(s2_input, patch_size=int(patch_size_m), output="tile")
+        out = model(s2_input, patch_size=int(patch_size_m), output=native_output)
 
-    if not hasattr(out, "ndim") or int(out.ndim) != 2:
+    want_ndim = 3 if with_patch_grid else 2
+    if not hasattr(out, "ndim") or int(out.ndim) != want_ndim:
         raise ModelError(
-            "AnySat output='tile' returned unexpected shape/type: "
+            f"AnySat output={native_output!r} returned unexpected shape/type: "
             f"{type(out)} {getattr(out, 'shape', None)}"
         )
     if int(out.shape[0]) != 1:
         raise ModelError(f"AnySat embedder expects B=1 per call, got {tuple(out.shape)}")
 
-    vec = out[0].detach().float().cpu().numpy().astype(np.float32)
+    arr = out[0].detach().float().cpu().numpy().astype(np.float32)
+    grid = None
+    if with_patch_grid:
+        vec, patch = arr[0], arr[1:]
+        side = int(round(math.sqrt(patch.shape[0])))
+        if side * side != patch.shape[0]:
+            raise ModelError(
+                f"AnySat output='all' has {patch.shape[0]} patch tokens, not a square."
+            )
+        grid = patch.reshape(side, side, -1).transpose(2, 0, 1)
+    else:
+        vec = arr
     meta = {
         "pooled_source": "tile",
         "feature_dim": int(vec.shape[0]),
         "patch_size_m": int(patch_size_m),
     }
-    return vec, meta
+    return vec, grid, meta
 
 
 @register("anysat")
@@ -727,12 +749,14 @@ class AnySatEmbedder(EmbedderBase):
         feature_mode = grid_feature_mode if output.mode == "grid" else "patch"
         pooled_vec = None
         if output.mode == "pooled" and pooled_source == "tile":
-            pooled_vec, fmeta = _anysat_tile_features(
+            # An ROI sub-window mean-pools the ROI's patch tokens: the tile
+            # vector is a CLS token, which cannot be restricted to the ROI.
+            pooled_vec, grid, fmeta = _anysat_tile_features(
                 model,
                 s2_input,
                 patch_size_m=patch_size_m,
+                with_patch_grid=not roi_is_full(geo_roi),
             )
-            grid = None
         else:
             grid, fmeta = _anysat_spatial_features(
                 model,
@@ -783,21 +807,15 @@ class AnySatEmbedder(EmbedderBase):
         )
 
         if output.mode == "pooled":
-            if pooled_vec is not None:
-                ometa = {
-                    **meta,
-                    "pooling": "tile_native",
-                    "requested_pooling": output.pooling,
-                    "pooled_shape": tuple(pooled_vec.shape),
-                }
-                return Embedding(data=pooled_vec, meta=ometa)
+            tile = pooled_vec is not None
             vec, pmeta = pool_for_output(
-                None,
+                pooled_vec,
                 grid,
                 geo_roi=geo_roi,
                 shape_prep=shape_prep,
                 pooling=output.pooling,
-                native_pooling=f"{feature_mode}_{output.pooling}",
+                native_reduce="mean" if tile else None,
+                native_pooling="tile_native" if tile else f"{feature_mode}_{output.pooling}",
                 model_label="AnySat",
             )
             return Embedding(data=vec, meta={**meta, **pmeta, "pooled_shape": tuple(vec.shape)})

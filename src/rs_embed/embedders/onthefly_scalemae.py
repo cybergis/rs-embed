@@ -28,6 +28,7 @@ from ..tools.runtime import (
 )
 from ..tools.shape import (
     geo_roi_from_meta,
+    pool_for_output,
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
@@ -71,8 +72,9 @@ def build_scalemae_embedding(out, *, geo_roi, output, meta):
 
     ``out`` is either a token sequence ``[N,D]`` (ndim==2; see
     ``build_token_embedding``) or a model-pooled vector ``[D]`` (ndim==1), which
-    has no spatial tokens to crop and is emitted unchanged. ``meta`` is mutated
-    in place with the chosen pooling / grid provenance.
+    has no spatial tokens to crop: it is emitted unchanged, with a warning for an
+    ROI sub-window. ``meta`` is mutated in place with the chosen pooling / grid
+    provenance.
     """
     if out.ndim == 2:
         return build_token_embedding(
@@ -81,8 +83,18 @@ def build_scalemae_embedding(out, *, geo_roi, output, meta):
 
     if output.mode == "pooled":
         if out.ndim == 1:
-            meta.update({"pooling": "model_pooled", "cls_removed": False})
-            return Embedding(data=out.astype(np.float32), meta=meta)
+            vec, pmeta = pool_for_output(
+                out,
+                None,
+                geo_roi=geo_roi,
+                shape_prep=None,
+                pooling=output.pooling,
+                native_reduce="mean",
+                native_pooling="model_pooled",
+                model_label="ScaleMAE",
+            )
+            meta.update({**pmeta, "cls_removed": False})
+            return Embedding(data=vec, meta=meta)
         raise ModelError(f"Unexpected shape for pooled: {out.shape}")
 
     if output.mode == "grid":

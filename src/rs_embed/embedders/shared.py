@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import math
 import os
+from collections.abc import Callable
 from typing import Any
 
 import numpy as np
@@ -53,13 +54,15 @@ def build_vit_patch_embedding(
     patch_size: int,
     model_label: str,
     native_pooling: str = "model_pooled",
+    roi_head: Callable[[np.ndarray], np.ndarray] | None = None,
 ) -> Embedding:
     """Turn square ViT patch tokens [N,D] + a pooled vector [D] into an Embedding.
 
     The ROI is cropped in the model's frame: grid output is cropped to it,
     dropping padding (``crop_grid_for_output``). Pooled output is *pooled_d*
     (labelled *native_pooling*), a CLS token or fixed mean, so an ROI sub-window
-    mean-pools the ROI's tokens (``pool_for_output``).
+    mean-pools the ROI's tokens and passes the mean through *roi_head*, the head
+    that turns a token mean into *pooled_d*'s space (``pool_for_output``).
     """
     geo_roi = tuple(geo_roi or FULL_WINDOW)
 
@@ -80,6 +83,7 @@ def build_vit_patch_embedding(
             native_reduce="mean",
             native_pooling=native_pooling,
             model_label=model_label,
+            head=roi_head,
         )
         meta = {**base_meta, **pmeta, "pooled_shape": tuple(vec.shape)}
         return Embedding(data=vec, meta=meta)
@@ -96,6 +100,27 @@ def build_vit_patch_embedding(
         return Embedding(data=grid_to_dataarray(grid, meta=meta), meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")
+
+
+def module_vector_head(get_module: Callable[[], Any]) -> Callable[[np.ndarray], np.ndarray]:
+    """A ``pool_for_output`` head that runs a torch module on one vector [D].
+
+    *get_module* is called on use, so a model only pays for (or needs) the
+    module when an ROI sub-window is actually pooled.
+    """
+
+    def head(vec: np.ndarray) -> np.ndarray:
+        import torch
+
+        module = get_module()
+        param = next(iter(module.parameters()), None)
+        x = torch.from_numpy(np.asarray(vec, dtype=np.float32))[None]
+        if param is not None:
+            x = x.to(device=param.device, dtype=param.dtype)
+        with torch.no_grad():
+            return module(x)[0].detach().float().cpu().numpy()
+
+    return head
 
 
 def build_token_embedding(

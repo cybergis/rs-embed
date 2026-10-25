@@ -204,26 +204,6 @@ def test_roi_fetch_meta():
     assert roi_fetch_meta((0.2, 0.8, 0.0, 1.0)) == {"roi_window_geo": (0.2, 0.8, 0.0, 1.0)}
 
 
-def test_crop_grid_and_pool_full_returns_fallback():
-    from rs_embed.tools.shape import crop_grid_and_pool
-    from rs_embed.tools.spatial import FULL_WINDOW
-
-    grid = np.random.rand(8, 6, 6).astype(np.float32)
-    fb = np.ones(8, np.float32)
-    g, vec = crop_grid_and_pool(grid, FULL_WINDOW, pooling="mean", pooled_fallback=fb)
-    assert g is grid
-    assert vec is fb
-
-
-def test_crop_grid_and_pool_crops_and_pools():
-    from rs_embed.tools.shape import crop_grid_and_pool
-
-    grid = np.random.rand(8, 8, 8).astype(np.float32)
-    g, vec = crop_grid_and_pool(grid, (0.25, 0.75, 0.0, 1.0), pooling="mean")
-    assert g.shape[0] == 8 and g.shape[1] < 8 and g.shape[2] == 8
-    np.testing.assert_allclose(vec, g.mean(axis=(1, 2)), rtol=1e-5)
-
-
 def test_square_fetch_batch():
     from rs_embed.core.specs import BBox, PointBuffer
     from rs_embed.tools.shape import square_fetch_batch
