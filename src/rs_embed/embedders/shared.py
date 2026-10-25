@@ -18,7 +18,7 @@ import numpy as np
 from ..core.embedding import Embedding
 from ..core.errors import ModelError
 from ..core.specs import OutputSpec
-from ..tools.shape import crop_grid_for_output, roi_is_full
+from ..tools.shape import crop_grid_for_output, pool_for_output, roi_is_full
 from ..tools.spatial import FULL_WINDOW
 
 
@@ -52,41 +52,40 @@ def build_vit_patch_embedding(
     base_meta: dict[str, Any],
     patch_size: int,
     model_label: str,
-    native_pooling: str | None = None,
+    native_pooling: str = "model_pooled",
 ) -> Embedding:
     """Turn square ViT patch tokens [N,D] + a pooled vector [D] into an Embedding.
 
-    The ROI is cropped in the model's frame (``crop_grid_for_output``): grid
-    output is cropped to it, dropping padding; pooled output means the ROI's
-    tokens (``roi_grid_mean``) when ``geo_roi`` is a sub-window and is
-    *pooled_d* otherwise (labelled *native_pooling* when given).
+    The ROI is cropped in the model's frame: grid output is cropped to it,
+    dropping padding (``crop_grid_for_output``). Pooled output is *pooled_d*
+    (labelled *native_pooling*), a CLS token or fixed mean, so an ROI sub-window
+    mean-pools the ROI's tokens (``pool_for_output``).
     """
     geo_roi = tuple(geo_roi or FULL_WINDOW)
-    pooled_out = output.mode == "pooled"
-    grid = None
-    if output.mode == "grid" or (pooled_out and not roi_is_full(geo_roi)):
+
+    def _grid() -> np.ndarray:
         n, d = tokens_nd.shape
         side = int(round(math.sqrt(n)))
         if side * side != n:
             raise ModelError(f"{model_label} tokens N={n} not square; cannot reshape to grid.")
-        grid = tokens_nd.reshape(side, side, d).transpose(2, 0, 1).astype(np.float32)
-        grid, _ = crop_grid_for_output(
-            grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=pooled_out
-        )
+        return tokens_nd.reshape(side, side, d).transpose(2, 0, 1).astype(np.float32)
 
-    if pooled_out:
-        # The grid is only built for pooled output when the ROI is a sub-window.
-        roi_pooled = grid is not None
-        vec = grid.mean(axis=(1, 2)) if roi_pooled else pooled_d
-        vec = np.asarray(vec, dtype=np.float32)
-        meta = {**base_meta, "pooled_shape": tuple(vec.shape)}
-        if roi_pooled:
-            meta["pooling"] = "roi_grid_mean"
-        elif native_pooling is not None:
-            meta["pooling"] = native_pooling
+    if output.mode == "pooled":
+        vec, pmeta = pool_for_output(
+            pooled_d,
+            None if roi_is_full(geo_roi) else _grid(),
+            geo_roi=geo_roi,
+            shape_prep=shape_prep,
+            pooling=output.pooling,
+            native_reduce="mean",
+            native_pooling=native_pooling,
+            model_label=model_label,
+        )
+        meta = {**base_meta, **pmeta, "pooled_shape": tuple(vec.shape)}
         return Embedding(data=vec, meta=meta)
 
     if output.mode == "grid":
+        grid = crop_grid_for_output(_grid(), geo_roi=geo_roi, shape_prep=shape_prep)
         meta = {
             **base_meta,
             "grid_type": "vit_patch_tokens",
@@ -94,6 +93,52 @@ def build_vit_patch_embedding(
             "grid_hw_tokens": (int(grid.shape[1]), int(grid.shape[2])),
             "patch_size": int(patch_size),
         }
+        return Embedding(data=grid_to_dataarray(grid, meta=meta), meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
+
+
+def build_token_embedding(
+    tokens: np.ndarray,
+    *,
+    geo_roi: tuple[float, float, float, float] | None,
+    output: OutputSpec,
+    meta: dict[str, Any],
+    model_label: str = "ViT",
+    grid_kind: str = "patch_tokens",
+) -> Embedding:
+    """Turn ViT tokens [N,D] (CLS optional) of an as-is or stretched input into an Embedding.
+
+    Pooled output pools the patch tokens (``patch_<pooling>``), or the ROI's
+    cells for an ROI sub-window; grid output is cropped to the ROI. The model
+    sees the fetched input's full frame, so the ROI needs no frame mapping.
+    *meta* is updated in place.
+    """
+    geo_roi = tuple(geo_roi or FULL_WINDOW)
+    if output.mode == "pooled":
+        vec, cls_removed = pool_from_tokens(tokens, output.pooling)
+        vec, pmeta = pool_for_output(
+            vec,
+            None if roi_is_full(geo_roi) else tokens_to_grid_dhw(tokens)[0],
+            geo_roi=geo_roi,
+            shape_prep=None,
+            pooling=output.pooling,
+            native_pooling=f"patch_{output.pooling}",
+            model_label=model_label,
+        )
+        meta.update({**pmeta, "cls_removed": bool(cls_removed)})
+        return Embedding(data=vec, meta=meta)
+
+    if output.mode == "grid":
+        grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
+        grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=None)
+        meta.update(
+            {
+                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "grid_kind": grid_kind,
+                "cls_removed": bool(cls_removed),
+            }
+        )
         return Embedding(data=grid_to_dataarray(grid, meta=meta), meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")

@@ -42,6 +42,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     prepare_square,
     roi_fetch_meta,
     square_fetch_batch,
@@ -740,13 +741,10 @@ class AnySatEmbedder(EmbedderBase):
                 feature_mode=feature_mode,
             )
 
-        # Crop the token grid back to the ROI, mapped through the squaring: grid
-        # output always (dropping padding), pooled output only for an ROI
-        # sub-window (no-op when full; tile-pooled output has no grid to crop).
-        if grid is not None:
-            grid, _ = crop_grid_for_output(
-                grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=output.mode == "pooled"
-            )
+        # Crop the token grid back to the ROI in the model's frame, dropping
+        # padding; pooled output pools the ROI's cells for a sub-window.
+        if output.mode == "grid":
+            grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=shape_prep)
 
         meta = build_meta(
             model=self.model_name,
@@ -793,16 +791,16 @@ class AnySatEmbedder(EmbedderBase):
                     "pooled_shape": tuple(pooled_vec.shape),
                 }
                 return Embedding(data=pooled_vec, meta=ometa)
-            if output.pooling == "max":
-                vec = np.max(grid, axis=(1, 2)).astype(np.float32)
-            else:
-                vec = np.mean(grid, axis=(1, 2)).astype(np.float32)
-            ometa = {
-                **meta,
-                "pooling": f"{feature_mode}_{output.pooling}",
-                "pooled_shape": tuple(vec.shape),
-            }
-            return Embedding(data=vec, meta=ometa)
+            vec, pmeta = pool_for_output(
+                None,
+                grid,
+                geo_roi=geo_roi,
+                shape_prep=shape_prep,
+                pooling=output.pooling,
+                native_pooling=f"{feature_mode}_{output.pooling}",
+                model_label="AnySat",
+            )
+            return Embedding(data=vec, meta={**meta, **pmeta, "pooled_shape": tuple(vec.shape)})
 
         if output.mode == "grid":
             gmeta = {

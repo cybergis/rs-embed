@@ -37,19 +37,15 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
     geo_roi_from_meta,
     roi_fetch_meta,
-    roi_is_full,
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .meta import base_meta, temporal_to_range
 from .shared import (
-    grid_to_dataarray,
-    pool_from_tokens,
+    build_token_embedding,
     snapshot_download_cache_first,
-    tokens_to_grid_dhw,
     verify_loaded_params,
 )
 
@@ -64,60 +60,33 @@ def ensure_torch() -> None:
 def build_satvision_embedding(out_arr, *, geo_roi, output, meta):
     """Turn a SatVision forward output into an Embedding, cropping to the ROI.
 
-    ``out_arr`` is either a ``[N,D]`` token / feature-map sequence or a ``[D]``
-    model-pooled vector. When the input was enlarged to a square at fetch time
-    (``geo_roi`` is a sub-window) and tokens are available, the patch grid is
-    cropped back to the ROI before pooling / emitting. When ``geo_roi`` is the
-    full frame this reproduces the legacy behaviour exactly. A 1-D model-pooled
-    vector has no spatial tokens, so it cannot be cropped and is returned as-is.
-    ``meta`` is mutated in place with the chosen pooling / grid provenance.
+    ``out_arr`` is either a ``[N,D]`` token / feature-map sequence (see
+    ``build_token_embedding``) or a ``[D]`` model-pooled vector, which has no
+    spatial tokens to crop and is returned as-is. ``meta`` is mutated in place
+    with the chosen pooling / grid provenance.
     """
-    cropped = not roi_is_full(geo_roi)
+    if out_arr.ndim == 2:
+        feature_map = str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
+        return build_token_embedding(
+            out_arr,
+            geo_roi=geo_roi,
+            output=output,
+            meta=meta,
+            model_label="SatVision-TOA",
+            grid_kind="last_stage_feature_map" if feature_map else "patch_tokens",
+        )
 
     if output.mode == "pooled":
-        if out_arr.ndim == 2:
-            if cropped:
-                grid, _hw, cls_removed = tokens_to_grid_dhw(out_arr)
-                g = crop_grid_to_roi(grid, geo_roi)
-                reduce = g.max if output.pooling == "max" else g.mean
-                vec = reduce(axis=(1, 2)).astype(np.float32)
-                meta.update(
-                    {"pooling": f"roi_grid_{output.pooling}", "cls_removed": bool(cls_removed)}
-                )
-            else:
-                vec, cls_removed = pool_from_tokens(out_arr, output.pooling)
-                meta.update(
-                    {"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)}
-                )
-            return Embedding(data=vec, meta=meta)
         if out_arr.ndim == 1:
             meta.update({"pooling": "model_pooled", "cls_removed": False})
             return Embedding(data=out_arr.astype(np.float32), meta=meta)
         raise ModelError(f"Unexpected SatVision output shape for pooled mode: {out_arr.shape}")
 
     if output.mode == "grid":
-        if out_arr.ndim != 2:
-            raise ModelError(
-                "grid output requires token sequence [N,D]. "
-                f"Got {out_arr.shape} (tokens_kind={meta.get('tokens_kind')})."
-            )
-        grid, (h, w), cls_removed = tokens_to_grid_dhw(out_arr)
-        if cropped:
-            grid = crop_grid_to_roi(grid, geo_roi)
-            h, w = int(grid.shape[1]), int(grid.shape[2])
-        meta.update(
-            {
-                "grid_hw": (h, w),
-                "grid_kind": (
-                    "last_stage_feature_map"
-                    if str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
-                    else "patch_tokens"
-                ),
-                "cls_removed": bool(cls_removed),
-            }
+        raise ModelError(
+            "grid output requires token sequence [N,D]. "
+            f"Got {out_arr.shape} (tokens_kind={meta.get('tokens_kind')})."
         )
-        da = grid_to_dataarray(grid, meta=meta)
-        return Embedding(data=da, meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")
 

@@ -821,12 +821,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 )
                 if tokens_or_vec.ndim == 2:
                     grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                    g, _ = crop_grid_for_output(
-                        grid_dhw,
-                        geo_roi=geo_roi,
-                        shape_prep=shape_prep,
-                        pooled=True,
-                    )
+                    g = crop_grid_for_output(grid_dhw, geo_roi=geo_roi, shape_prep=shape_prep)
                     reduce = g.max if output.pooling == "max" else g.mean
                     vec = reduce(axis=(1, 2)).astype(np.float32)
                     base_meta = _build_base_meta(
@@ -858,12 +853,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
 
             grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
             # ROI mapped through the center crop (also drops a cropped-away margin).
-            grid_dhw, _ = crop_grid_for_output(
-                grid_dhw,
-                geo_roi=geo_roi,
-                shape_prep=shape_prep,
-                pooled=False,
-            )
+            grid_dhw = crop_grid_for_output(grid_dhw, geo_roi=geo_roi, shape_prep=shape_prep)
             gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
             meta = {
                 **base_meta,
@@ -1044,11 +1034,8 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                         )
                         if tokens_or_vec.ndim == 2:
                             grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                            g, _ = crop_grid_for_output(
-                                grid_dhw,
-                                geo_roi=geo_roi,
-                                shape_prep=shape_preps[i],
-                                pooled=True,
+                            g = crop_grid_for_output(
+                                grid_dhw, geo_roi=geo_roi, shape_prep=shape_preps[i]
                             )
                             reduce = g.max if output.pooling == "max" else g.mean
                             vec = reduce(axis=(1, 2)).astype(np.float32)
@@ -1081,11 +1068,8 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                         "Your RemoteCLIP wrapper only provides pooled vectors (no forward_encoder tokens)."
                     )
                 grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                grid_dhw, _ = crop_grid_for_output(
-                    grid_dhw,
-                    geo_roi=geo_roi,
-                    shape_prep=shape_preps[i],
-                    pooled=False,
+                grid_dhw = crop_grid_for_output(
+                    grid_dhw, geo_roi=geo_roi, shape_prep=shape_preps[i]
                 )
                 gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
                 meta = _base_meta_for(

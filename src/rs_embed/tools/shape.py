@@ -51,6 +51,7 @@ __all__ = [
     "roi_in_frame",
     "model_roi_window",
     "crop_grid_for_output",
+    "pool_for_output",
     "roi_token_box",
     "crop_grid_to_roi",
     "geo_roi_from_meta",
@@ -328,23 +329,85 @@ def crop_grid_for_output(
     *,
     geo_roi: tuple[float, float, float, float],
     shape_prep: dict[str, Any] | None,
-    pooled: bool,
-) -> tuple[np.ndarray, bool]:
-    """Crop a model's ``(D, H', W')`` output grid to the ROI, in the model's frame.
+) -> np.ndarray:
+    """Crop a model's ``(D, H', W')`` grid output to the ROI, in the model's frame.
 
-    The entry point for ROI crops of models that square their input: pass the
-    squaring record as *shape_prep* (``None`` when the input is fed as-is or
-    stretched). Returns ``(grid, roi_pooled)``:
-
-    - grid output (``pooled=False``): the grid cropped to the mapped ROI, which
-      also drops whole cells of padding; ``roi_pooled`` is ``False``;
-    - pooled output: the ROI's cells and ``True`` when *geo_roi* is a
-      sub-window (pool them), else the grid unchanged and ``False`` (keep the
-      model's own pooled vector).
+    The entry point for grid-output ROI crops: pass the squaring record as
+    *shape_prep* (``None`` when the input is fed as-is or stretched). Cropping
+    to the mapped ROI also drops whole cells of padding. Pooled output goes
+    through :func:`pool_for_output` instead.
     """
-    if pooled and roi_is_full(tuple(geo_roi)):
-        return grid_dhw, False
-    return crop_grid_to_roi(grid_dhw, model_roi_window(shape_prep, geo_roi)), pooled
+    return crop_grid_to_roi(grid_dhw, model_roi_window(shape_prep, geo_roi))
+
+
+_POOL_REDUCERS: dict[str, Callable[..., np.ndarray]] = {"mean": np.mean, "max": np.max}
+
+
+def pool_for_output(
+    native: np.ndarray | None,
+    grid_dhw: np.ndarray | None,
+    *,
+    geo_roi: tuple[float, float, float, float] | None,
+    shape_prep: dict[str, Any] | None,
+    pooling: str,
+    native_pooling: str,
+    model_label: str,
+    native_reduce: str | None = None,
+    head: Callable[[np.ndarray], np.ndarray] | None = None,
+    roi_pooling: str | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Pooled output for *geo_roi*, pooled by the model's own rule.
+
+    *native* is the model's pooled vector for the whole input (``None``: the
+    reduction over all of *grid_dhw*) and *grid_dhw* its ``(D, H', W')`` token
+    grid in the model's frame, in the space *head* maps from (``None`` when the
+    model has no real token grid). The reduction is
+    *native_reduce* when the model's pooled vector always uses one (a CLS token
+    or a fixed mean ignores *pooling*; ``requested_pooling`` then records the
+    request), else *pooling*. Returns ``(vec, meta)``:
+
+    - whole ROI: *native*, labelled *native_pooling*;
+    - ROI sub-window: the reduction over the ROI's cells, through *head*,
+      labelled *roi_pooling* (default ``roi_grid_<reduce>``) with
+      ``roi_pooled=True``. It must have *native*'s shape, so the ROI and
+      whole-input vectors of one model stay comparable;
+    - ROI sub-window without a grid: *native*, with ``roi_pooled=False`` and a
+      ``UserWarning``.
+    """
+    reduce = native_reduce or pooling
+    for value in (pooling, reduce):
+        if value not in _POOL_REDUCERS:
+            raise ModelError(f"Unknown pooling={value!r} (expected 'mean' or 'max').")
+    meta: dict[str, Any] = {"pooling": native_pooling}
+    if native_reduce is not None and pooling != native_reduce:
+        meta["requested_pooling"] = pooling
+    if native is None:
+        if grid_dhw is None:
+            raise ModelError(f"{model_label} has neither a pooled vector nor a grid to pool.")
+        native = _POOL_REDUCERS[reduce](grid_dhw, axis=(1, 2))
+    native = np.asarray(native, dtype=np.float32)
+    geo_roi = tuple(geo_roi or FULL_WINDOW)
+    if roi_is_full(geo_roi):
+        return native, meta
+    if grid_dhw is None:
+        warnings.warn(
+            f"{model_label} has no token grid for this input, so its pooled output covers "
+            f"the whole fetched square, not the ROI window {geo_roi}.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return native, {**meta, "roi_pooled": False}
+    cells = crop_grid_to_roi(grid_dhw, model_roi_window(shape_prep, geo_roi))
+    vec = _POOL_REDUCERS[reduce](cells, axis=(1, 2))
+    if head is not None:
+        vec = head(vec)
+    vec = np.asarray(vec, dtype=np.float32)
+    if vec.shape != native.shape:
+        raise ModelError(
+            f"{model_label} pooled the ROI to shape {vec.shape}, but its pooled vector has "
+            f"shape {native.shape}; the ROI must be pooled in the same space."
+        )
+    return vec, {**meta, "pooling": roi_pooling or f"roi_grid_{reduce}", "roi_pooled": True}
 
 
 def roi_token_box(

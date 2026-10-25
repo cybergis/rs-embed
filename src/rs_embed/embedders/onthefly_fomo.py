@@ -35,6 +35,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     prepare_square,
     roi_fetch_meta,
     square_fetch_batch,
@@ -43,7 +44,7 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import build_meta, temporal_to_range
 from .onthefly_terramind import _fetch_s2_sr_12_raw_chw
-from .shared import grid_to_dataarray, normalize_s2, verify_loaded_params
+from .shared import grid_to_dataarray, normalize_s2, reduce_tokens, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -375,9 +376,34 @@ def _resize_chw(x_chw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str
     return out, meta["shape_prep"]
 
 
-def _pool_grid_cells(grid: np.ndarray, pooling: str) -> np.ndarray:
-    """Max- or mean-pool a (D, H, W) grid over its cells."""
-    return (np.max if pooling == "max" else np.mean)(grid, axis=(1, 2)).astype(np.float32)
+def _fomo_pool_and_crop(
+    tokens: np.ndarray,
+    grid: np.ndarray,
+    *,
+    geo_roi: tuple[float, float, float, float],
+    shape_prep: dict[str, Any] | None,
+    output: OutputSpec,
+) -> tuple[np.ndarray, np.ndarray, dict[str, Any]]:
+    """``(pooled vec, grid, pooling meta)`` for one item, in the model's frame.
+
+    The pooled vector reduces all tokens (``token_<pooling>``), or the ROI's
+    cells for an ROI sub-window; grid output is cropped to the ROI, dropping
+    padding.
+    """
+    token_pooled = reduce_tokens(tokens, output.pooling)
+    if output.mode == "pooled":
+        vec, pmeta = pool_for_output(
+            token_pooled,
+            grid,
+            geo_roi=geo_roi,
+            shape_prep=shape_prep,
+            pooling=output.pooling,
+            native_pooling=f"token_{output.pooling}",
+            model_label="FoMo",
+        )
+        return vec, grid, pmeta
+    grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=shape_prep)
+    return token_pooled, grid, {"pooling": f"token_{output.pooling}"}
 
 
 def _normalize_s2(raw_chw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -669,17 +695,9 @@ class FoMoEmbedder(EmbedderBase):
             image_size=image_size,
         )
 
-        # Crop back to the ROI, mapped through the squaring: pooled output pools
-        # the ROI's tokens for an ROI sub-window, else the model's own token pool;
-        # grid output is cropped to the ROI (dropping padding).
-        token_pooled = (np.max if output.pooling == "max" else np.mean)(tokens, axis=0).astype(
-            np.float32
+        vec, grid, pmeta = _fomo_pool_and_crop(
+            tokens, grid, geo_roi=geo_roi, shape_prep=shape_prep, output=output
         )
-        grid, roi_pooled = crop_grid_for_output(
-            grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=output.mode == "pooled"
-        )
-        vec = _pool_grid_cells(grid, output.pooling) if roi_pooled else token_pooled
-        pooling = f"roi_grid_{output.pooling}" if roi_pooled else f"token_{output.pooling}"
 
         meta = build_meta(
             model=self.model_name,
@@ -703,7 +721,7 @@ class FoMoEmbedder(EmbedderBase):
                 "normalization": str(norm_mode),
                 "spectral_keys": tuple(int(k) for k in spectral_keys),
                 "device": dev,
-                "pooling": pooling,
+                **pmeta,
                 "pooled_shape": tuple(vec.shape),
                 **({"shape_prep": shape_prep} if shape_prep is not None else {}),
                 **lmeta,
@@ -820,15 +838,9 @@ class FoMoEmbedder(EmbedderBase):
                 image_size=image_size,
             )
 
-            # Crop back to the ROI, mapped through the squaring (as get_embedding).
-            token_pooled = (np.max if output.pooling == "max" else np.mean)(tokens, axis=0).astype(
-                np.float32
+            vec, grid, pmeta = _fomo_pool_and_crop(
+                tokens, grid, geo_roi=geo_roi, shape_prep=shape_preps[k], output=output
             )
-            grid, roi_pooled = crop_grid_for_output(
-                grid, geo_roi=geo_roi, shape_prep=shape_preps[k], pooled=output.mode == "pooled"
-            )
-            vec = _pool_grid_cells(grid, output.pooling) if roi_pooled else token_pooled
-            pooling = f"roi_grid_{output.pooling}" if roi_pooled else f"token_{output.pooling}"
 
             meta = build_meta(
                 model=self.model_name,
@@ -852,7 +864,7 @@ class FoMoEmbedder(EmbedderBase):
                     "normalization": str(norm_mode),
                     "spectral_keys": tuple(int(k) for k in spectral_keys),
                     "device": dev,
-                    "pooling": pooling,
+                    **pmeta,
                     "pooled_shape": tuple(vec.shape),
                     **({"shape_prep": shape_preps[k]} if shape_preps[k] is not None else {}),
                     **lmeta,
