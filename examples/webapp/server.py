@@ -274,6 +274,92 @@ def _temporal(rs: dict, model: str, start: str, end: str):
     return rs["TemporalSpec"].range(start_d, end_excl)
 
 
+def _export_grids(rs: dict, spatial, temporal, models: list[str]) -> dict[str, np.ndarray | str]:
+    """Run ``models`` in one ``export_batch`` (one shared fetch) → model → (C,H,W) grid,
+    or an error string for a model that produced nothing."""
+    tmp = DOWNLOADS / f"_export_{uuid.uuid4().hex[:8]}.npz"
+    out: dict[str, np.ndarray | str] = {}
+    try:
+        rs["export_batch"](
+            spatials=[spatial],
+            temporal=temporal,
+            models=models,
+            output=rs["OutputSpec"].grid(),
+            target=rs["ExportTarget"].combined(str(tmp)),
+            config=rs["ExportConfig"](
+                save_inputs=False,
+                save_embeddings=True,
+                continue_on_error=True,
+                show_progress=False,
+            ),
+            backend="auto",
+        )
+        er = rs["load_export"](str(tmp))
+        # Read embeddings straight from the .npz arrays keyed by model.
+        # (rs-embed's combined manifest can omit a model's entry even when
+        # its `embeddings__<model>` array was written, so load_export alone
+        # under-reports; the arrays are the source of truth.)
+        with np.load(tmp, allow_pickle=True) as z:
+            by_model = {
+                k[len("embeddings__") :]: k for k in z.files if k.startswith("embeddings__")
+            }
+            for m in models:
+                arr = np.asarray(z[by_model[m]]) if m in by_model else None
+                if arr is None:  # fall back to load_export's view
+                    mr = er.models.get(m)
+                    arr = np.asarray(mr.embeddings) if (mr and mr.embeddings is not None) else None
+                if (
+                    arr is not None
+                    and arr.ndim >= 3
+                    and arr.shape[0] >= 1
+                    and np.isfinite(arr).any()
+                ):
+                    out[m] = H.to_dhw(arr[0])  # (1,C,H,W) → (C,H,W)
+                else:
+                    mr = er.models.get(m)
+                    out[m] = str(getattr(mr, "error", None) or "no embedding produced")
+    finally:
+        for p in (tmp, tmp.with_suffix(".json")):
+            try:
+                p.unlink()
+            except OSError:
+                pass
+    return out
+
+
+def _embed_grids(
+    rs: dict, spatial, models: list[str], start: str, end: str
+) -> tuple[str, dict[str, np.ndarray | str]]:
+    """Grid embedding per model → (compute path, model → (C,H,W) grid or error string).
+
+    Each model's temporal comes from ``_temporal`` on every path, so the same model
+    gets the same year/window whether it is requested alone or with others. Models
+    resolving to the same temporal share one ``export_batch`` (one fetch); a model
+    alone in its temporal runs through ``get_embedding``.
+    """
+    groups: dict[Any, list[str]] = {}
+    for m in models:
+        groups.setdefault(_temporal(rs, m, start, end), []).append(m)
+    grids: dict[str, np.ndarray | str] = {}
+    for temporal, group in groups.items():
+        try:
+            if len(group) > 1:
+                grids.update(_export_grids(rs, spatial, temporal, group))
+                continue
+            emb = rs["get_embedding"](
+                group[0],
+                spatial=spatial,
+                temporal=temporal,
+                output=rs["OutputSpec"].grid(),
+                backend="auto",
+            )
+            grids[group[0]] = H.to_dhw(emb.data)
+        except Exception as e:  # noqa: BLE001
+            grids.update({m: repr(e) for m in group})
+    compute = "export_batch" if any(len(g) > 1 for g in groups.values()) else "get_embedding"
+    return compute, grids
+
+
 def _png_b64(rgb_float_hwc: np.ndarray) -> str:
     """(H,W,3) float in [0,1] → base64 PNG data URI."""
     from PIL import Image
@@ -422,76 +508,16 @@ def api_embed(req: EmbedReq) -> Any:
                 }
             )
 
-        # ── single model → get_embedding ; multiple → export_batch (shared fetch) ──
-        if len(models) <= 1:
-            compute = "get_embedding"
-            for m in models:
-                try:
-                    emb = rs["get_embedding"](
-                        m,
-                        spatial=spatial,
-                        temporal=_temporal(rs, m, req.start, req.end),
-                        output=rs["OutputSpec"].grid(),
-                        backend="auto",
-                    )
-                    _ok(m, H.to_dhw(emb.data))
-                except Exception as e:  # noqa: BLE001
-                    _err(m, repr(e))
-        else:
-            compute = "export_batch"
-            start_d, end_excl, _y0, _y1 = _range_dates(req.start, req.end)
-            # one temporal for all models; gse/annual products convert range→year internally
-            temporal = rs["TemporalSpec"].range(start_d, end_excl)
-            tmp = DOWNLOADS / f"_export_{uuid.uuid4().hex[:8]}.npz"
+        compute, grids = _embed_grids(rs, spatial, models, req.start, req.end)
+        for m in models:  # report in request order
+            g = grids[m]
+            if isinstance(g, str):
+                _err(m, g)
+                continue
             try:
-                rs["export_batch"](
-                    spatials=[spatial],
-                    temporal=temporal,
-                    models=models,
-                    output=rs["OutputSpec"].grid(),
-                    target=rs["ExportTarget"].combined(str(tmp)),
-                    config=rs["ExportConfig"](
-                        save_inputs=False,
-                        save_embeddings=True,
-                        continue_on_error=True,
-                        show_progress=False,
-                    ),
-                    backend="auto",
-                )
-                er = rs["load_export"](str(tmp))
-                # Read embeddings straight from the .npz arrays keyed by model.
-                # (rs-embed's combined manifest can omit a model's entry even when
-                # its `embeddings__<model>` array was written, so load_export alone
-                # under-reports; the arrays are the source of truth.)
-                with np.load(tmp, allow_pickle=True) as z:
-                    by_model = {
-                        k[len("embeddings__") :]: k for k in z.files if k.startswith("embeddings__")
-                    }
-                    for m in models:
-                        arr = np.asarray(z[by_model[m]]) if m in by_model else None
-                        if arr is None:  # fall back to load_export's view
-                            mr = er.models.get(m)
-                            arr = (
-                                np.asarray(mr.embeddings)
-                                if (mr and mr.embeddings is not None)
-                                else None
-                            )
-                        if (
-                            arr is not None
-                            and arr.ndim >= 3
-                            and arr.shape[0] >= 1
-                            and np.isfinite(arr).any()
-                        ):
-                            _ok(m, H.to_dhw(arr[0]))  # (1,C,H,W) → (C,H,W)
-                        else:
-                            mr = er.models.get(m)
-                            _err(m, getattr(mr, "error", None) or "no embedding produced")
-            finally:
-                for p in (tmp, tmp.with_suffix(".json")):
-                    try:
-                        p.unlink()
-                    except OSError:
-                        pass
+                _ok(m, g)
+            except Exception as e:  # noqa: BLE001
+                _err(m, repr(e))
 
         download = None
         package = None
