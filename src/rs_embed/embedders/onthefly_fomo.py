@@ -391,27 +391,22 @@ def _fomo_pool_and_crop(
 
     The pooled vector reduces all tokens (``token_<pooling>``). An ROI
     sub-window reduces the tokens of the ROI's cells instead, each cell's
-    modality tokens by the same reduction, so the two agree. Grid output is the
-    modality-mean grid cropped to the ROI, dropping padding.
+    modality tokens by the same reduction, so the two agree; the grid meta then
+    describes that grid. Grid output is the modality-mean grid cropped to the
+    ROI, dropping padding.
     """
-
-    def to_grid(reduce: str) -> tuple[np.ndarray, dict[str, Any]]:
-        return _tokens_to_grid(
-            tokens,
-            n_modalities=n_modalities,
-            patch_size=patch_size,
-            image_size=image_size,
-            reduce=reduce,
-        )
-
-    grid, gmeta = to_grid("mean")
     token_pooled = reduce_tokens(tokens, output.pooling)
+    sub_window = output.mode == "pooled" and not roi_is_full(geo_roi)
+    grid, gmeta = _tokens_to_grid(
+        tokens,
+        n_modalities=n_modalities,
+        patch_size=patch_size,
+        image_size=image_size,
+        reduce=output.pooling if sub_window else "mean",
+    )
     if output.mode == "pooled":
-        roi_grid = None
-        if not roi_is_full(geo_roi):
-            roi_grid, roi_gmeta = to_grid(output.pooling)
-            if roi_gmeta["grid_kind"] == "vector_as_1x1":
-                roi_grid = None  # tokens that do not form a grid: no ROI cells
+        # Tokens that do not form a grid give no ROI cells.
+        roi_grid = grid if sub_window and gmeta["grid_kind"] != "vector_as_1x1" else None
         vec, pmeta = pool_for_output(
             token_pooled,
             roi_grid,
@@ -547,7 +542,7 @@ def _tokens_to_grid(
         return _vector_as_1x1()
 
     toks = tokens_nd.reshape(n_modalities, gs, gs, dim)  # [K,H,W,D]
-    cells = toks.max(axis=0) if reduce == "max" else toks.mean(axis=0)
+    cells = reduce_tokens(toks, reduce)  # over the K modalities
     grid = cells.transpose(2, 0, 1).astype(np.float32)  # [D,H,W]
     return grid, {
         "grid_kind": f"spectral_{reduce}_patch_tokens",

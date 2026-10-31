@@ -167,36 +167,49 @@ def test_remoteclip_warns_when_its_tokens_cannot_be_projected(monkeypatch, model
         vec, meta = _roi_pooled_remoteclip(monkeypatch, model, _row_tokens(dim=4), tokens_kind)
     np.testing.assert_array_equal(vec, [5.0, 6.0])
     assert meta["roi_pooled"] is False
+    assert "tokens_kind" not in meta  # the unused token pass does not describe the vector
 
 
 # --------------------------------------------------------------------------- wildsat
 
 
-def _wildsat(fmeta, pooling="mean", geo_roi=_TOP):
+def _wildsat(fmeta, native_dim=2, geo_roi=_TOP):
+    """A torchvision-ViT-like backbone: 3-wide encoder tokens, ``heads`` to 5,
+    then an image head to 2 (real vitb16: 768 -> 1000 -> 256)."""
     from rs_embed.embedders.onthefly_wildsat import _build_wildsat_embedding
 
     torch.manual_seed(0)
-    head = torch.nn.Linear(3, 2)
+    backbone = types.SimpleNamespace(heads=torch.nn.Linear(3, 5))
+    image_head = torch.nn.Linear(5, 2)
     tokens = _row_tokens()
-    grid = tokens.reshape(4, 4, 3).transpose(2, 0, 1)
-    native = np.array([5.0, 6.0], dtype=np.float32)
     out = _build_wildsat_embedding(
-        native,
-        grid,
+        np.zeros(native_dim, dtype=np.float32),
+        tokens.reshape(4, 4, 3).transpose(2, 0, 1),
         fmeta,
-        image_head=head,
+        backbone=backbone,
+        image_head=image_head,
         geo_roi=geo_roi,
-        output=OutputSpec.pooled(pooling),
+        output=OutputSpec.pooled(),
         meta={},
     )
-    return out, head, tokens
+    roi_mean = torch.from_numpy(_top_mean(tokens))[None]
+    return out, backbone.heads, image_head, roi_mean
 
 
-def test_wildsat_roi_goes_through_the_image_head():
-    out, head, tokens = _wildsat({"feature_source": "image_head", "grid_kind": "vit_patch_tokens"})
-    expected = head(torch.from_numpy(_top_mean(tokens))[None])[0].detach().numpy()
-    assert out.data.shape == (2,)  # the head's output space, not the 3-wide backbone's
+def test_wildsat_roi_goes_through_the_backbone_heads_and_the_image_head():
+    out, heads, image_head, roi_mean = _wildsat(
+        {"feature_source": "image_head", "grid_kind": "vit_patch_tokens"}
+    )
+    expected = image_head(heads(roi_mean))[0].detach().numpy()
+    assert out.data.shape == (2,)  # the image head's space, not the 3-wide encoder's
     np.testing.assert_allclose(out.data, expected, rtol=1e-6)
+
+
+def test_wildsat_backbone_roi_goes_through_the_backbone_heads():
+    out, heads, _, roi_mean = _wildsat(
+        {"feature_source": "backbone", "grid_kind": "vit_patch_tokens"}, native_dim=5
+    )
+    np.testing.assert_allclose(out.data, heads(roi_mean)[0].detach().numpy(), rtol=1e-6)
 
 
 def test_wildsat_token_pool_honors_max_on_the_roi():
@@ -209,7 +222,8 @@ def test_wildsat_token_pool_honors_max_on_the_roi():
         tokens.max(axis=0),
         tokens.reshape(4, 4, 3).transpose(2, 0, 1),
         {**fmeta, "pooled_from_tokens": True},
-        image_head=torch.nn.Linear(3, 2),
+        backbone=types.SimpleNamespace(heads=torch.nn.Linear(3, 5)),
+        image_head=torch.nn.Linear(5, 2),
         geo_roi=_TOP,
         output=OutputSpec.pooled("max"),
         meta={},
@@ -220,8 +234,8 @@ def test_wildsat_token_pool_honors_max_on_the_roi():
 
 def test_wildsat_vector_as_1x1_is_not_an_roi_grid():
     with pytest.warns(UserWarning, match="no token grid"):
-        out, _, _ = _wildsat({"feature_source": "image_head", "grid_kind": "vector_as_1x1"})
-    np.testing.assert_array_equal(out.data, [5.0, 6.0])
+        out, _, _, _ = _wildsat({"feature_source": "image_head", "grid_kind": "vector_as_1x1"})
+    np.testing.assert_array_equal(out.data, [0.0, 0.0])
     assert out.meta["pooling"] == "identity" and out.meta["roi_pooled"] is False
 
 
@@ -233,35 +247,43 @@ def test_satvision_roi_mean_of_normed_tokens_restricts_forward_features():
 
     tokens = _row_tokens()
     native = tokens.mean(axis=0)  # forward_features: the normed tokens' mean
-    calls = []
-
-    def roi_tokens():
-        calls.append(1)
-        return tokens
 
     def build(geo_roi):
         return build_satvision_embedding(
-            native, geo_roi=geo_roi, output=OutputSpec.pooled(), meta={}, roi_tokens=roi_tokens
+            native, geo_roi=geo_roi, output=OutputSpec.pooled(), meta={}, roi_tokens=tokens
         )
 
     np.testing.assert_array_equal(build(_FULL).data, native)
-    assert calls == []  # the whole ROI needs no extra token forward
     roi = build(_TOP)
     np.testing.assert_allclose(roi.data, _top_mean(tokens))
-    assert roi.meta["pooling"] == "roi_grid_mean" and calls == [1]
+    assert roi.meta["pooling"] == "roi_grid_mean"
 
 
-def test_satvision_normed_tokens_come_from_forward_tokens_then_norm():
-    from rs_embed.embedders.onthefly_satvision_toa import _satvision_normed_tokens
+def test_satvision_roi_tokens_share_one_forward_for_the_rois_that_need_them():
+    from rs_embed.embedders.onthefly_satvision_toa import _satvision_roi_tokens
 
-    model = types.SimpleNamespace(
-        _forward_tokens=lambda x: torch.ones(1, 4, 3), norm=lambda t: t * 2.0
-    )
-    toks = _satvision_normed_tokens(model, np.zeros((3, 8, 8), np.float32), device="cpu")
-    np.testing.assert_array_equal(toks, np.full((4, 3), 2.0, np.float32))
-    assert (
-        _satvision_normed_tokens(types.SimpleNamespace(), np.zeros((3, 8, 8)), device="cpu") is None
-    )
+    batches = []
+
+    def forward_tokens(x):
+        batches.append(int(x.shape[0]))
+        return x.mean(dim=(2, 3))[:, None, :].repeat(1, 4, 1)  # [B, 4, C]
+
+    model = types.SimpleNamespace(_forward_tokens=forward_tokens, norm=lambda t: t * 2.0)
+    xs = [np.full((3, 8, 8), float(v), np.float32) for v in (1, 2, 3)]
+    pooled = [np.zeros(3, np.float32)] * 3
+
+    def roi_tokens(model, geo_rois, output=OutputSpec.pooled()):
+        return _satvision_roi_tokens(model, xs, pooled, geo_rois, output=output, device="cpu")
+
+    toks = roi_tokens(model, [_TOP, _FULL, _TOP])
+    assert batches == [2]  # the whole-ROI input needs no tokens
+    assert toks[1] is None
+    np.testing.assert_array_equal(toks[0], np.full((4, 3), 2.0, np.float32))
+    np.testing.assert_array_equal(toks[2], np.full((4, 3), 6.0, np.float32))
+    assert roi_tokens(model, [_FULL] * 3) == [None] * 3
+    assert roi_tokens(model, [_TOP] * 3, OutputSpec.grid()) == [None] * 3
+    assert roi_tokens(types.SimpleNamespace(), [_TOP] * 3) == [None] * 3
+    assert batches == [2]
 
 
 def test_satvision_warns_without_tokens():
@@ -273,7 +295,7 @@ def test_satvision_warns_without_tokens():
             geo_roi=_TOP,
             output=OutputSpec.pooled(),
             meta={},
-            roi_tokens=lambda: None,
+            roi_tokens=None,
         )
     assert out.meta["roi_pooled"] is False
 
@@ -305,10 +327,21 @@ def test_fomo_roi_max_takes_the_max_over_the_rois_modality_tokens():
         )
 
     whole, _, whole_meta, _ = pool(_FULL)
-    roi, _, roi_meta, _ = pool(_TOP)
+    roi, _, roi_meta, roi_gmeta = pool(_TOP)
     # Both are the max over tokens; a max over modality-mean cells gave 5.
     assert whole.tolist() == [10.0] and whole_meta["pooling"] == "token_max"
     assert roi.tolist() == [10.0] and roi_meta["pooling"] == "roi_grid_max"
+    assert roi_gmeta["grid_kind"] == "spectral_max_patch_tokens"
+
+
+def test_fomo_grid_rejects_an_unknown_modality_reduction():
+    from rs_embed.core.errors import ModelError
+    from rs_embed.embedders.onthefly_fomo import _tokens_to_grid
+
+    with pytest.raises(ModelError, match="Unknown pooling"):
+        _tokens_to_grid(
+            _spike_tokens(groups=2), n_modalities=2, patch_size=4, image_size=16, reduce="median"
+        )
 
 
 def test_fomo_warns_when_its_tokens_form_no_grid():

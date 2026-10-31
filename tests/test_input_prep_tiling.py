@@ -291,6 +291,40 @@ def test_tiled_pooled_mean_uses_area_weighted_merge():
     assert out.meta["input_prep"]["merged_output"] == "pooled_reduce"
 
 
+def test_tiled_pooled_max_merges_fixed_mean_tiles_as_a_mean():
+    """A model whose pooled vector ignores pooling (a CLS token or fixed mean)
+    records requested_pooling; its tiles merge like its pooled vector (#140)."""
+
+    class _FixedMeanTiles(_FakeTileEmbedder):
+        def get_embedding(self, *, output=OutputSpec.pooled(), **kwargs):
+            emb = super().get_embedding(output=output, **kwargs)
+            return Embedding(
+                data=emb.data,
+                meta={"pooling": "model_pooled", "requested_pooling": output.pooling},
+            )
+
+    x = np.arange(36, dtype=np.float32).reshape(1, 6, 6)
+
+    def merged(embedder):
+        return _call_embedder_get_embedding_with_input_prep(
+            embedder=embedder,
+            spatial=_bbox(),
+            temporal=None,
+            sensor=None,
+            output=OutputSpec.pooled("max"),
+            backend="gee",
+            device="cpu",
+            input_chw=x,
+            input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9, pad_edges=False),
+        )
+
+    out = merged(_FixedMeanTiles())
+    np.testing.assert_allclose(np.asarray(out.data)[0], float(x.mean()), rtol=0, atol=1e-6)
+    assert out.meta["requested_pooling"] == "max"
+    # A token-pooling model's tiles still merge by max.
+    assert float(np.asarray(merged(_FakeTileEmbedder()).data)[0]) > float(x.mean())
+
+
 def test_tiled_single_path_falls_back_when_batch_lacks_model_config():
     class _BatchWithoutModelConfig:
         model_name = "batch_without_model_config"

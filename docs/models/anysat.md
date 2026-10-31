@@ -101,7 +101,7 @@ flowchart LR
 
 ## Output Semantics
 
-**`pooled`**: defaults to spatial pooling over AnySat's `patch` grid; pass `pooled_source="tile"` (or `RS_EMBED_ANYSAT_POOLED_SOURCE=tile`) to use the native AnySat tile embedding instead.
+**`pooled`**: defaults to spatial pooling over AnySat's `patch` grid; pass `pooled_source="tile"` (or `RS_EMBED_ANYSAT_POOLED_SOURCE=tile`) to use the native AnySat tile embedding instead. For a rectangular ROI the tile mode mean-pools the ROI's patch tokens from the same forward (see [Pooled output for an ROI sub-window](../spatial_roi.md#pooled-output-for-an-roi-sub-window)).
 
 **`grid`**: defaults to AnySat `dense` sub-patch features `(D,H,W)`; pass `grid_feature_mode="patch"` (or `RS_EMBED_ANYSAT_GRID_MODE=patch`) to recover the older patch-grid behavior.
 

@@ -65,9 +65,9 @@ def build_satvision_embedding(out_arr, *, geo_roi, output, meta, roi_tokens=None
 
     ``out_arr`` is either a ``[N,D]`` token / feature-map sequence (see
     ``build_token_embedding``) or a ``[D]`` model-pooled vector, the mean of the
-    normed last-stage tokens. For an ROI sub-window ``roi_tokens()`` supplies
-    those tokens (``_satvision_normed_tokens``), so the ROI's mean is the same
-    vector restricted to the ROI. ``meta`` is mutated in place with the chosen
+    normed last-stage tokens. For an ROI sub-window ``roi_tokens`` holds those
+    tokens (``_satvision_roi_tokens``), so the ROI's mean is the same vector
+    restricted to the ROI. ``meta`` is mutated in place with the chosen
     pooling / grid provenance.
     """
     if out_arr.ndim == 2:
@@ -83,11 +83,9 @@ def build_satvision_embedding(out_arr, *, geo_roi, output, meta, roi_tokens=None
 
     if output.mode == "pooled":
         if out_arr.ndim == 1:
-            sub_window = not roi_is_full(tuple(geo_roi))
-            tokens = roi_tokens() if sub_window and roi_tokens is not None else None
             vec, pmeta = pool_for_output(
                 out_arr,
-                None if tokens is None else tokens_to_grid_dhw(tokens)[0],
+                None if roi_tokens is None else tokens_to_grid_dhw(roi_tokens)[0],
                 geo_roi=geo_roi,
                 shape_prep=None,
                 pooling=output.pooling,
@@ -893,26 +891,48 @@ def _coerce_fetch_result(res: Any) -> tuple[np.ndarray, dict[str, Any]]:
     }
 
 
-def _satvision_normed_tokens(model: Any, x_chw: np.ndarray, *, device: str) -> np.ndarray | None:
-    """One input's last-stage tokens [N, D] after the final norm, or ``None``.
+def _satvision_roi_tokens(
+    model: Any,
+    x_chw_batch: list[np.ndarray],
+    out_arrs: list[np.ndarray],
+    geo_rois: list[tuple[float, float, float, float]],
+    *,
+    output: OutputSpec,
+    device: str,
+) -> list[np.ndarray | None]:
+    """Last-stage tokens [N, D] after the final norm, for each input whose
+    ``[D]`` pooled vector (*out_arrs*) is pooled over an ROI sub-window, else
+    ``None``.
 
     ``forward_features`` is the mean of these tokens, so their mean over an ROI
-    is the same vector restricted to it. ``None`` when the model does not
-    expose ``_forward_tokens`` and ``norm``.
+    is the same vector restricted to it. The inputs that need them share one
+    forward. All ``None`` when the model does not expose ``_forward_tokens``
+    and ``norm``.
     """
+    tokens_out: list[np.ndarray | None] = [None] * len(x_chw_batch)
+    need = [
+        j
+        for j, (arr, geo_roi) in enumerate(zip(out_arrs, geo_rois, strict=True))
+        if output.mode == "pooled" and arr.ndim == 1 and not roi_is_full(tuple(geo_roi))
+    ]
     forward_tokens = getattr(model, "_forward_tokens", None)
     norm = getattr(model, "norm", None)
-    if not callable(forward_tokens) or not callable(norm):
-        return None
+    if not need or not callable(forward_tokens) or not callable(norm):
+        return tokens_out
     ensure_torch()
     import torch
 
-    x = torch.from_numpy(np.asarray(x_chw, dtype=np.float32)[None]).to(_resolve_device(device))
+    xb = torch.from_numpy(
+        np.stack([np.asarray(x_chw_batch[j], dtype=np.float32) for j in need], axis=0)
+    ).to(_resolve_device(device))
     with torch.no_grad():
-        tokens = norm(forward_tokens(x))
+        tokens = norm(forward_tokens(xb))
     if getattr(tokens, "ndim", None) != 3:
-        return None
-    return tokens[0].detach().float().cpu().numpy().astype(np.float32)
+        return tokens_out
+    tokens_np = tokens.detach().float().cpu().numpy().astype(np.float32)
+    for k, j in enumerate(need):
+        tokens_out[j] = tokens_np[k]
+    return tokens_out
 
 
 def _satvision_forward_batch(
@@ -1337,7 +1357,9 @@ class SatVisionTOAEmbedder(EmbedderBase):
             geo_roi=geo_roi,
             output=output,
             meta=meta,
-            roi_tokens=lambda: _satvision_normed_tokens(rt["model"], x, device=rt["device"]),
+            roi_tokens=_satvision_roi_tokens(
+                rt["model"], [x], [out_arr], [geo_roi], output=output, device=rt["device"]
+            )[0],
         )
 
     def get_embeddings_batch(
@@ -1430,6 +1452,10 @@ class SatVisionTOAEmbedder(EmbedderBase):
                 device=rt["device"],
                 output_mode=output.mode,
             )
+            geo_rois = [geo_roi_from_meta(m) for m in metas]
+            roi_tokens = _satvision_roi_tokens(
+                rt["model"], x_batch, arrs, geo_rois, output=output, device=rt["device"]
+            )
 
             for j, arr in enumerate(arrs):
                 i = s0 + j
@@ -1437,7 +1463,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
                 fetch_meta = prefetched_meta[i]
                 assert raw is not None
                 assert fetch_meta is not None
-                geo_roi = geo_roi_from_meta(fetch_meta)
+                geo_roi = geo_rois[j]
                 # Transport-only ROI window must not leak into the output metadata.
                 fetch_meta = {k: v for k, v in fetch_meta.items() if k != "roi_window_geo"}
                 meta = base_meta(
@@ -1475,9 +1501,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
                     geo_roi=geo_roi,
                     output=output,
                     meta=meta,
-                    roi_tokens=lambda x=x_batch[j]: _satvision_normed_tokens(
-                        rt["model"], x, device=rt["device"]
-                    ),
+                    roi_tokens=roi_tokens[j],
                 )
 
         if any(e is None for e in out):
@@ -1542,6 +1566,9 @@ class SatVisionTOAEmbedder(EmbedderBase):
             device=rt["device"],
             output_mode=output.mode,
         )
+        roi_tokens = _satvision_roi_tokens(
+            rt["model"], x_batch, arrs, geo_rois, output=output, device=rt["device"]
+        )
 
         embeddings: list[Embedding] = []
         for j, arr in enumerate(arrs):
@@ -1584,9 +1611,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
                     geo_roi=geo_rois[j],
                     output=output,
                     meta=meta,
-                    roi_tokens=lambda x=x_batch[j]: _satvision_normed_tokens(
-                        rt["model"], x, device=rt["device"]
-                    ),
+                    roi_tokens=roi_tokens[j],
                 )
             )
 

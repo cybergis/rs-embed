@@ -380,6 +380,12 @@ def test_pool_for_output_rejects_unknown_pooling(kw):
         _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, **kw)
 
 
+def test_pool_for_output_rejects_a_fixed_max():
+    # The tiler merges tiles of a fixed-pooling model as a mean.
+    with pytest.raises(ModelError, match="fixed pooling is a mean"):
+        _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, native_reduce="max")
+
+
 def test_model_roi_window_warns_when_the_roi_is_cropped_away():
     crop = {"input_window": (0.0, 1.0, -0.5, 1.5)}  # the long axis lost a quarter each side
     with pytest.warns(UserWarning, match="lies outside the part of the input"):

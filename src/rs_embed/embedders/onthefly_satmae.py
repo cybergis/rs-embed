@@ -348,7 +348,9 @@ class SatMAERGBEmbedder(EmbedderBase):
             },
         )
 
-        return build_token_embedding(tokens, geo_roi=geo_roi, output=output, meta=meta)
+        return build_token_embedding(
+            tokens, geo_roi=geo_roi, output=output, meta=meta, model_label="SatMAE"
+        )
 
     def get_embeddings_batch(
         self,
@@ -419,7 +421,7 @@ class SatMAERGBEmbedder(EmbedderBase):
                     },
                 )
                 out[i] = build_token_embedding(
-                    tokens, geo_roi=geo_rois[i], output=output, meta=meta
+                    tokens, geo_roi=geo_rois[i], output=output, meta=meta, model_label="SatMAE"
                 )
 
         if any(e is None for e in out):
@@ -507,7 +509,7 @@ class SatMAERGBEmbedder(EmbedderBase):
                     },
                 )
                 out[i] = build_token_embedding(
-                    tokens, geo_roi=geo_rois[i], output=output, meta=meta
+                    tokens, geo_roi=geo_rois[i], output=output, meta=meta, model_label="SatMAE"
                 )
 
         if any(e is None for e in out):

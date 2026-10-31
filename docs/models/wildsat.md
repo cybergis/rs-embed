@@ -134,7 +134,7 @@ emb = get_embedding(
 
 ## Output Semantics
 
-**`pooled`**: defaults to the `image_head` feature vector; set `RS_EMBED_WILDSAT_POOLED_FROM_TOKENS=1` to use token pooling instead; metadata records `feature_source`, `tokens_available`, and `pooled_from_tokens`.
+**`pooled`**: defaults to the `image_head` feature vector; set `RS_EMBED_WILDSAT_POOLED_FROM_TOKENS=1` to use token pooling instead; metadata records `feature_source`, `tokens_available`, and `pooled_from_tokens`. For a rectangular ROI (ViT-B/16), the mean of the ROI's encoder tokens goes through torchvision's `heads` and then the image head, like the CLS token; with token pooling the ROI's tokens are pooled with `pooling` (see [Pooled output for an ROI sub-window](../spatial_roi.md#pooled-output-for-an-roi-sub-window)).
 
 **`grid`**: ViT patch-token grid (`grid_kind="vit_patch_tokens"`) when tokens are available, else `1x1` fallback with `grid_kind="vector_as_1x1"`.
 

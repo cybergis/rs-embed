@@ -624,7 +624,8 @@ def _remoteclip_roi_pooled(
         native_pooling="model_pooled",
         model_label="RemoteCLIP",
     )
-    return vec, {**tmeta, **pmeta}
+    # The token pass describes the vector only when the ROI was pooled from it.
+    return vec, ({**tmeta, **pmeta} if pmeta.get("roi_pooled") else pmeta)
 
 
 @register("remoteclip")

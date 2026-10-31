@@ -361,9 +361,10 @@ def pool_for_output(
     reduction over all of *grid_dhw*) and *grid_dhw* its ``(D, H', W')`` token
     grid in the model's frame, in the space *head* maps from (``None`` when the
     model has no real token grid). The reduction is
-    *native_reduce* when the model's pooled vector always uses one (a CLS token
-    or a fixed mean ignores *pooling*; ``requested_pooling`` then records the
-    request), else *pooling*. Returns ``(vec, meta)``:
+    *native_reduce* (``"mean"``) when the model's pooled vector ignores
+    *pooling* (a CLS token or a fixed mean; ``requested_pooling`` then records
+    the request, and the tiler merges such tiles as a mean), else *pooling*.
+    Returns ``(vec, meta)``:
 
     - whole ROI: *native*, labelled *native_pooling*;
     - ROI sub-window: the reduction over the ROI's cells, through *head*,
@@ -377,6 +378,8 @@ def pool_for_output(
     for value in (pooling, reduce):
         if value not in _POOL_REDUCERS:
             raise ModelError(f"Unknown pooling={value!r} (expected 'mean' or 'max').")
+    if native_reduce not in (None, "mean"):
+        raise ModelError(f"native_reduce={native_reduce!r}: a model's fixed pooling is a mean.")
     meta: dict[str, Any] = {"pooling": native_pooling}
     if native_reduce is not None and pooling != native_reduce:
         meta["requested_pooling"] = pooling

@@ -633,6 +633,7 @@ def _build_wildsat_embedding(
     grid: np.ndarray | None,
     fmeta: dict[str, Any],
     *,
+    backbone: Any,
     image_head: Any | None,
     geo_roi: tuple[float, float, float, float],
     output: OutputSpec,
@@ -640,16 +641,20 @@ def _build_wildsat_embedding(
 ) -> Embedding:
     """WildSAT's Embedding builder for the single and batch paths.
 
-    The pooled vector is the image head's output, the backbone's CLS token, or
-    (``pooled_from_tokens``) a pool of the backbone tokens. An ROI sub-window
-    pools the ROI's backbone tokens the same way: a token pool by ``pooling``,
-    else their mean, through the image head when the head made the vector. A
+    The pooled vector is the image head's output, the backbone's output
+    (torchvision's ``heads`` on the CLS token), or (``pooled_from_tokens``) a
+    pool of the backbone's encoder tokens. An ROI sub-window pools the ROI's
+    encoder tokens the same way: a token pool by ``pooling``, else their mean
+    through ``heads`` and, when the head made the vector, the image head. A
     ``vector_as_1x1`` grid is no token grid. The input is stretched, so the ROI
     needs no frame mapping.
     """
     if output.mode == "pooled":
         from_tokens = bool(fmeta.get("pooled_from_tokens", False))
         use_head = not from_tokens and fmeta.get("feature_source") == "image_head"
+        head_modules = [] if from_tokens else [lambda: backbone.heads]
+        if use_head:
+            head_modules.append(lambda: image_head)
         vec, pmeta = pool_for_output(
             vec,
             grid if fmeta.get("grid_kind") == "vit_patch_tokens" else None,
@@ -659,7 +664,7 @@ def _build_wildsat_embedding(
             native_reduce=None if from_tokens else "mean",
             native_pooling=output.pooling if from_tokens else "identity",
             model_label="WildSAT",
-            head=module_vector_head(lambda: image_head) if use_head else None,
+            head=module_vector_head(*head_modules) if head_modules else None,
         )
         return Embedding(data=vec, meta={**meta, **pmeta, "pooled_shape": tuple(vec.shape)})
 
@@ -1108,6 +1113,7 @@ class WildSATEmbedder(EmbedderBase):
             vec,
             grid,
             fmeta,
+            backbone=backbone,
             image_head=image_head,
             geo_roi=geo_roi,
             output=output,
@@ -1295,6 +1301,7 @@ class WildSATEmbedder(EmbedderBase):
                     vec,
                     grid,
                     fmeta,
+                    backbone=backbone,
                     image_head=image_head,
                     geo_roi=geo_roi,
                     output=output,

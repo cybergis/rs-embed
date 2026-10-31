@@ -898,10 +898,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         out: list[Embedding | None] = [None] * n
         want_grid = output.mode == "grid"
-        any_cropped = any(not roi_is_full(gr) for gr in geo_rois)
-        # group_reduce is needed for grid output, and also for pooled output when an
-        # ROI was enlarged to a square (pooled then derives from the cropped grid).
-        group_reduce = self._resolve_group_reduce() if (want_grid or any_cropped) else "mean"
+        group_reduce = self._resolve_group_reduce() if want_grid else "mean"
         if want_grid:
             import_xarray()  # fail fast before batch inference
 
@@ -1033,10 +1030,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         out: list[Embedding | None] = [None] * len(spatials)
         want_grid = output.mode == "grid"
-        any_cropped = any(not roi_is_full(gr) for gr in geo_rois)
-        # group_reduce is needed for grid output, and also for pooled output when an
-        # ROI was enlarged to a square (pooled then derives from the cropped grid).
-        group_reduce = self._resolve_group_reduce() if (want_grid or any_cropped) else "mean"
+        group_reduce = self._resolve_group_reduce() if want_grid else "mean"
         if want_grid:
             import_xarray()  # fail fast before batch inference
 

@@ -660,7 +660,9 @@ def _aggregate_tiled_embeddings(
         )
         if roi_w is not None and float(roi_w.sum()) <= 0.0:
             roi_w = None  # ROI smaller than a tile gap — fall back to all tiles
-        if str(output.pooling).lower() == "max":
+        # Tiles that record requested_pooling kept their model's fixed mean
+        # instead of max (shape.pool_for_output), so they merge as a mean too.
+        if str(output.pooling).lower() == "max" and "requested_pooling" not in base_meta:
             sel = mat if roi_w is None else mat[roi_w > 0.0]
             out_vec = np.max(sel if len(sel) else mat, axis=0).astype(np.float32, copy=False)
         else:

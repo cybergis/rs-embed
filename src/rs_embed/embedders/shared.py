@@ -102,23 +102,25 @@ def build_vit_patch_embedding(
     raise ModelError(f"Unknown output mode: {output.mode}")
 
 
-def module_vector_head(get_module: Callable[[], Any]) -> Callable[[np.ndarray], np.ndarray]:
-    """A ``pool_for_output`` head that runs a torch module on one vector [D].
+def module_vector_head(*get_modules: Callable[[], Any]) -> Callable[[np.ndarray], np.ndarray]:
+    """A ``pool_for_output`` head that runs torch modules, in order, on one vector [D].
 
-    *get_module* is called on use, so a model only pays for (or needs) the
-    module when an ROI sub-window is actually pooled.
+    Each of *get_modules* is called on use, so a model only pays for (or needs)
+    the modules when an ROI sub-window is actually pooled.
     """
 
     def head(vec: np.ndarray) -> np.ndarray:
         import torch
 
-        module = get_module()
-        param = next(iter(module.parameters()), None)
+        modules = [get_module() for get_module in get_modules]
+        param = next(iter(modules[0].parameters()), None)
         x = torch.from_numpy(np.asarray(vec, dtype=np.float32))[None]
         if param is not None:
             x = x.to(device=param.device, dtype=param.dtype)
         with torch.no_grad():
-            return module(x)[0].detach().float().cpu().numpy()
+            for module in modules:
+                x = module(x)
+        return x[0].detach().float().cpu().numpy()
 
     return head
 
@@ -129,7 +131,7 @@ def build_token_embedding(
     geo_roi: tuple[float, float, float, float] | None,
     output: OutputSpec,
     meta: dict[str, Any],
-    model_label: str = "ViT",
+    model_label: str,
     grid_kind: str = "patch_tokens",
 ) -> Embedding:
     """Turn ViT tokens [N,D] (CLS optional) of an as-is or stretched input into an Embedding.
