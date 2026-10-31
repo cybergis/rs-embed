@@ -37,15 +37,20 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
     geo_roi_from_meta,
+    pool_for_output,
     roi_fetch_meta,
     roi_is_full,
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .meta import base_meta, temporal_to_range
-from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw, verify_loaded_params
+from .shared import (
+    build_token_embedding,
+    snapshot_download_cache_first,
+    tokens_to_grid_dhw,
+    verify_loaded_params,
+)
 
 
 def ensure_torch() -> None:
@@ -55,63 +60,48 @@ def ensure_torch() -> None:
         raise ModelError("This embedder requires torch installed.") from e
 
 
-def build_satvision_embedding(out_arr, *, geo_roi, output, meta):
+def build_satvision_embedding(out_arr, *, geo_roi, output, meta, roi_tokens=None):
     """Turn a SatVision forward output into an Embedding, cropping to the ROI.
 
-    ``out_arr`` is either a ``[N,D]`` token / feature-map sequence or a ``[D]``
-    model-pooled vector. When the input was enlarged to a square at fetch time
-    (``geo_roi`` is a sub-window) and tokens are available, the patch grid is
-    cropped back to the ROI before pooling / emitting. When ``geo_roi`` is the
-    full frame this reproduces the legacy behaviour exactly. A 1-D model-pooled
-    vector has no spatial tokens, so it cannot be cropped and is returned as-is.
-    ``meta`` is mutated in place with the chosen pooling / grid provenance.
+    ``out_arr`` is either a ``[N,D]`` token / feature-map sequence (see
+    ``build_token_embedding``) or a ``[D]`` model-pooled vector, the mean of the
+    normed last-stage tokens. For an ROI sub-window ``roi_tokens`` holds those
+    tokens (``_satvision_forward``), so the ROI's mean is the same vector
+    restricted to the ROI. ``meta`` is mutated in place with the chosen
+    pooling / grid provenance.
     """
-    cropped = not roi_is_full(geo_roi)
+    if out_arr.ndim == 2:
+        feature_map = str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
+        return build_token_embedding(
+            out_arr,
+            geo_roi=geo_roi,
+            output=output,
+            meta=meta,
+            model_label="SatVision-TOA",
+            grid_kind="last_stage_feature_map" if feature_map else "patch_tokens",
+        )
 
     if output.mode == "pooled":
-        if out_arr.ndim == 2:
-            if cropped:
-                grid, _hw, cls_removed = tokens_to_grid_dhw(out_arr)
-                g = crop_grid_to_roi(grid, geo_roi)
-                reduce = g.max if output.pooling == "max" else g.mean
-                vec = reduce(axis=(1, 2)).astype(np.float32)
-                meta.update(
-                    {"pooling": f"roi_grid_{output.pooling}", "cls_removed": bool(cls_removed)}
-                )
-            else:
-                vec, cls_removed = pool_from_tokens(out_arr, output.pooling)
-                meta.update(
-                    {"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)}
-                )
-            return Embedding(data=vec, meta=meta)
         if out_arr.ndim == 1:
-            meta.update({"pooling": "model_pooled", "cls_removed": False})
-            return Embedding(data=out_arr.astype(np.float32), meta=meta)
+            vec, pmeta = pool_for_output(
+                out_arr,
+                None if roi_tokens is None else tokens_to_grid_dhw(roi_tokens)[0],
+                geo_roi=geo_roi,
+                shape_prep=None,
+                pooling=output.pooling,
+                native_reduce="mean",
+                native_pooling="model_pooled",
+                model_label="SatVision-TOA",
+            )
+            meta.update({**pmeta, "cls_removed": False})
+            return Embedding(data=vec, meta=meta)
         raise ModelError(f"Unexpected SatVision output shape for pooled mode: {out_arr.shape}")
 
     if output.mode == "grid":
-        if out_arr.ndim != 2:
-            raise ModelError(
-                "grid output requires token sequence [N,D]. "
-                f"Got {out_arr.shape} (tokens_kind={meta.get('tokens_kind')})."
-            )
-        grid, (h, w), cls_removed = tokens_to_grid_dhw(out_arr)
-        if cropped:
-            grid = crop_grid_to_roi(grid, geo_roi)
-            h, w = int(grid.shape[1]), int(grid.shape[2])
-        meta.update(
-            {
-                "grid_hw": (h, w),
-                "grid_kind": (
-                    "last_stage_feature_map"
-                    if str(meta.get("tokens_kind", "")).startswith("tokens_feature_map")
-                    else "patch_tokens"
-                ),
-                "cls_removed": bool(cls_removed),
-            }
+        raise ModelError(
+            "grid output requires token sequence [N,D]. "
+            f"Got {out_arr.shape} (tokens_kind={meta.get('tokens_kind')})."
         )
-        da = grid_to_dataarray(grid, meta=meta)
-        return Embedding(data=da, meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")
 
@@ -606,20 +596,17 @@ def _resolve_ckpt(
         ckpt_file = _find_ckpt_file(local_ckpt)
         return ckpt_file, "local"
 
-    try:
-        from huggingface_hub import snapshot_download
-    except Exception as e:
-        raise ModelError(
-            "SatVision-TOA requires huggingface_hub when RS_EMBED_SATVISION_TOA_CKPT is not set. "
-            "Install: pip install huggingface_hub"
-        ) from e
-
     token = os.environ.get("HF_TOKEN") or os.environ.get("HUGGINGFACE_HUB_TOKEN")
+
+    def _has_ckpt(d: str) -> bool:
+        return any(fn.lower().endswith((".pth", ".pt", ".ckpt", ".bin")) for fn in os.listdir(d))
+
     try:
-        snap = snapshot_download(
+        snap = snapshot_download_cache_first(
             repo_id=model_id,
             token=token,
             local_files_only=not bool(auto_download),
+            validate=_has_ckpt,
             allow_patterns=[
                 "*.pth",
                 "*.pt",
@@ -902,6 +889,48 @@ def _coerce_fetch_result(res: Any) -> tuple[np.ndarray, dict[str, Any]]:
         "fallback_used": False,
         "already_unit_scaled": False,
     }
+
+
+def _satvision_forward(
+    model: Any,
+    x_chw_batch: list[np.ndarray],
+    geo_rois: list[tuple[float, float, float, float]],
+    *,
+    output: OutputSpec,
+    device: str,
+) -> tuple[list[np.ndarray], dict[str, Any], list[np.ndarray | None]]:
+    """``_satvision_forward_batch``, plus for pooled output the last-stage tokens
+    [N, D] after the final norm of each input pooled over an ROI sub-window
+    (else ``None``).
+
+    ``forward_features`` is ``avgpool(norm(_forward_tokens(x)))``. Running those
+    steps here gives the same vectors and keeps the tokens, so an ROI's mean is
+    the pooled vector restricted to the ROI without a second forward. A model
+    that does not expose the steps gives no tokens.
+    """
+    n = len(x_chw_batch)
+    sub_window = [not roi_is_full(tuple(geo_roi)) for geo_roi in geo_rois]
+    steps = [getattr(model, name, None) for name in ("_forward_tokens", "norm", "avgpool")]
+    if output.mode != "pooled" or not any(sub_window) or not all(callable(f) for f in steps):
+        arrs, fmeta = _satvision_forward_batch(
+            model, x_chw_batch, device=device, output_mode=output.mode
+        )
+        return arrs, fmeta, [None] * n
+    forward_tokens, norm, avgpool = steps
+
+    ensure_torch()
+    import torch
+
+    xb = torch.from_numpy(
+        np.stack([x.astype(np.float32, copy=False) for x in x_chw_batch], axis=0)
+    ).to(_resolve_device(device))
+    with torch.no_grad():
+        tokens = norm(forward_tokens(xb))
+        pooled = torch.flatten(avgpool(tokens.transpose(1, 2)), 1)
+    arrs, fmeta = _decode_tensor_to_batch_arrays(pooled, n, picked_from="first")
+    tokens_np = tokens.detach().float().cpu().numpy().astype(np.float32)
+    roi_tokens = [tokens_np[j] if sub_window[j] else None for j in range(n)]
+    return arrs, {**fmeta, "forward_path": "forward_features"}, roi_tokens
 
 
 def _satvision_forward_batch(
@@ -1284,11 +1313,8 @@ class SatVisionTOAEmbedder(EmbedderBase):
             emissive_maxs=rt["emissive_maxs"],
         )
 
-        arrs, fmeta = _satvision_forward_batch(
-            rt["model"],
-            [x],
-            device=rt["device"],
-            output_mode=output.mode,
+        arrs, fmeta, roi_tokens = _satvision_forward(
+            rt["model"], [x], [geo_roi], output=output, device=rt["device"]
         )
         out_arr = arrs[0]
 
@@ -1321,7 +1347,13 @@ class SatVisionTOAEmbedder(EmbedderBase):
             },
         )
 
-        return build_satvision_embedding(out_arr, geo_roi=geo_roi, output=output, meta=meta)
+        return build_satvision_embedding(
+            out_arr,
+            geo_roi=geo_roi,
+            output=output,
+            meta=meta,
+            roi_tokens=roi_tokens[0],
+        )
 
     def get_embeddings_batch(
         self,
@@ -1407,11 +1439,9 @@ class SatVisionTOAEmbedder(EmbedderBase):
                 )
                 norm_modes_eff.append(norm_mode_eff)
 
-            arrs, fmeta = _satvision_forward_batch(
-                rt["model"],
-                x_batch,
-                device=rt["device"],
-                output_mode=output.mode,
+            geo_rois = [geo_roi_from_meta(m) for m in metas]
+            arrs, fmeta, roi_tokens = _satvision_forward(
+                rt["model"], x_batch, geo_rois, output=output, device=rt["device"]
             )
 
             for j, arr in enumerate(arrs):
@@ -1420,7 +1450,7 @@ class SatVisionTOAEmbedder(EmbedderBase):
                 fetch_meta = prefetched_meta[i]
                 assert raw is not None
                 assert fetch_meta is not None
-                geo_roi = geo_roi_from_meta(fetch_meta)
+                geo_roi = geo_rois[j]
                 # Transport-only ROI window must not leak into the output metadata.
                 fetch_meta = {k: v for k, v in fetch_meta.items() if k != "roi_window_geo"}
                 meta = base_meta(
@@ -1453,7 +1483,13 @@ class SatVisionTOAEmbedder(EmbedderBase):
                         **fmeta,
                     },
                 )
-                out[i] = build_satvision_embedding(arr, geo_roi=geo_roi, output=output, meta=meta)
+                out[i] = build_satvision_embedding(
+                    arr,
+                    geo_roi=geo_roi,
+                    output=output,
+                    meta=meta,
+                    roi_tokens=roi_tokens[j],
+                )
 
         if any(e is None for e in out):
             raise ModelError("satvision_toa batch inference produced incomplete outputs.")
@@ -1511,11 +1547,8 @@ class SatVisionTOAEmbedder(EmbedderBase):
                 )
             )
 
-        arrs, fmeta = _satvision_forward_batch(
-            rt["model"],
-            x_batch,
-            device=rt["device"],
-            output_mode=output.mode,
+        arrs, fmeta, roi_tokens = _satvision_forward(
+            rt["model"], x_batch, geo_rois, output=output, device=rt["device"]
         )
 
         embeddings: list[Embedding] = []
@@ -1554,7 +1587,13 @@ class SatVisionTOAEmbedder(EmbedderBase):
             )
 
             embeddings.append(
-                build_satvision_embedding(arr, geo_roi=geo_rois[j], output=output, meta=meta)
+                build_satvision_embedding(
+                    arr,
+                    geo_roi=geo_rois[j],
+                    output=output,
+                    meta=meta,
+                    roi_tokens=roi_tokens[j],
+                )
             )
 
         return embeddings

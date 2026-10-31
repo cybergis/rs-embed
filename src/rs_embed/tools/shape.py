@@ -22,8 +22,9 @@ output can always be cropped back to the real ROI — it never silently stretche
 All helpers operate on the **last two axes** (``..., H, W``) so the same code
 serves ``CHW`` and ``TCHW`` (and any leading-dim) layouts identically.
 
-Mirrors the proven crop/pad-to-square logic in the THOR embedder; THOR keeps its
-own multi-GSD ``native_snap`` path and is intentionally left untouched.
+Every centered crop and pad here places the input with :func:`center_offset`,
+so callers that need to know where the input landed (e.g. THOR's ``native_snap``
+via :func:`center_fit`) can compute it with the same convention.
 """
 
 from __future__ import annotations
@@ -40,16 +41,21 @@ from ..core.specs import SpatialSpec
 from .spatial import FULL_WINDOW, square_spatial
 
 __all__ = [
+    "center_offset",
+    "center_fit",
     "center_crop_to_square",
     "center_pad_to_square",
     "resize_square",
     "prepare_square",
     "roi_is_full",
+    "roi_in_frame",
+    "model_roi_window",
+    "crop_grid_for_output",
+    "pool_for_output",
     "roi_token_box",
     "crop_grid_to_roi",
     "geo_roi_from_meta",
     "roi_fetch_meta",
-    "crop_grid_and_pool",
     "square_fetch_batch",
 ]
 
@@ -67,13 +73,67 @@ def _hw(x: np.ndarray) -> tuple[int, int]:
     return int(x.shape[-2]), int(x.shape[-1])
 
 
+def center_offset(inner: int, outer: int) -> int:
+    """Start of a centered length-*inner* span within length *outer*.
+
+    Negative when *inner* is longer (the span is cropped). The odd pixel of a
+    pad or crop always goes after the span.
+    """
+    return (outer - inner) // 2 if outer >= inner else -((inner - outer) // 2)
+
+
+def center_fit(
+    x: np.ndarray,
+    *,
+    out_h: int,
+    out_w: int,
+    pad_mode: str = "edge",
+    fill_value: float = 0.0,
+) -> tuple[np.ndarray, tuple[float, float, float, float]]:
+    """Center-crop or center-pad the last two axes to ``(out_h, out_w)``.
+
+    Each axis is cropped where it is longer and padded (``np.pad`` *pad_mode*;
+    ``'constant'`` uses *fill_value*) where it is shorter, placed with
+    :func:`center_offset`. Returns ``(array, window)``: *window* is where the
+    input lies in the result, as fractions ``(y0, y1, x0, x1)`` that extend
+    past ``[0, 1]`` on a cropped axis (see :func:`roi_in_frame`). The array is
+    always C-contiguous (``x`` itself when it already matches and is).
+    """
+    h, w = _hw(x)
+    out_h, out_w = int(out_h), int(out_w)
+    if out_h < 0 or out_w < 0:
+        raise ModelError(f"center_fit target must be non-negative, got {(out_h, out_w)}.")
+    top, left = center_offset(h, out_h), center_offset(w, out_w)
+    window = (
+        top / max(out_h, 1),
+        (top + h) / max(out_h, 1),
+        left / max(out_w, 1),
+        (left + w) / max(out_w, 1),
+    )
+    if (h, w) == (out_h, out_w):
+        return np.ascontiguousarray(x), window
+    kept_h, kept_w = min(h, out_h), min(w, out_w)
+    if (kept_h != out_h or kept_w != out_w) and (h == 0 or w == 0) and pad_mode != "constant":
+        raise ModelError(f"center_fit cannot {pad_mode!r}-pad an empty input of shape {x.shape}.")
+    y0, x0 = max(0, -top), max(0, -left)
+    x = x[..., y0 : y0 + kept_h, x0 : x0 + kept_w]
+    if kept_h != out_h or kept_w != out_w:
+        pad_top, pad_left = max(0, top), max(0, left)
+        pad_width = [(0, 0)] * (x.ndim - 2) + [
+            (pad_top, out_h - kept_h - pad_top),
+            (pad_left, out_w - kept_w - pad_left),
+        ]
+        if pad_mode == "constant":
+            x = np.pad(x, pad_width, mode="constant", constant_values=float(fill_value))
+        else:
+            x = np.pad(x, pad_width, mode=pad_mode)
+    return np.ascontiguousarray(x), window
+
+
 def center_crop_to_square(x: np.ndarray) -> np.ndarray:
     """Center-crop the last two axes (``..., H, W``) to ``side = min(H, W)``."""
-    h, w = _hw(x)
-    side = min(h, w)
-    y0 = (h - side) // 2
-    x0 = (w - side) // 2
-    return np.ascontiguousarray(x[..., y0 : y0 + side, x0 : x0 + side])
+    side = min(_hw(x))
+    return center_fit(x, out_h=side, out_w=side)[0]
 
 
 def center_pad_to_square(
@@ -91,21 +151,20 @@ def center_pad_to_square(
     """
     h, w = _hw(x)
     side = max(h, w)
-    if side == min(h, w):
-        return np.ascontiguousarray(x)
-    pad_h, pad_w = side - h, side - w
-    top, left = pad_h // 2, pad_w // 2
-    pad_width = [(0, 0)] * (x.ndim - 2) + [(top, pad_h - top), (left, pad_w - left)]
+    mode = _square_pad_mode(h, w, pad_mode)
+    return center_fit(x, out_h=side, out_w=side, pad_mode=mode, fill_value=fill_value)[0]
 
+
+def _square_pad_mode(h: int, w: int, pad_mode: str) -> str:
+    """*pad_mode* for padding ``(h, w)`` to a square, with reflect's fallback.
+
+    Reflect needs the pad to be shorter than the axis; otherwise replicate the edge.
+    """
+    side = max(h, w)
     mode = str(pad_mode).lower()
-    if mode == "reflect" and (pad_h >= h or pad_w >= w):
-        # reflect needs pad < dim along each axis; replicate the edge instead.
-        mode = "edge"
-    if mode == "constant":
-        return np.ascontiguousarray(
-            np.pad(x, pad_width, mode="constant", constant_values=float(fill_value))
-        )
-    return np.ascontiguousarray(np.pad(x, pad_width, mode=mode))
+    if mode == "reflect" and (side - h >= h or side - w >= w):
+        return "edge"
+    return mode
 
 
 def resize_square(x: np.ndarray, *, size: int, interp: str = "bilinear") -> np.ndarray:
@@ -153,14 +212,16 @@ def prepare_square(
     - already square → just resize to ``size``;
     - otherwise → **pad** (default, keeps the whole ROI) or **crop** to square,
       *then* resize to ``size`` — never a plain stretch, so the output grid /
-      ROI-pooled vector can always be cropped back to the real ROI via
-      ``meta['shape_prep']['roi_window']``. Aspect ratios ≥ ``aspect_tol`` warn
+      ROI-pooled vector can always be cropped back to the real ROI (see
+      :func:`model_roi_window`). Aspect ratios ≥ ``aspect_tol`` warn
       that the padded square is dominated by synthetic border (a square *fetch*
       of real imagery, or tiling, serves such ROIs better) but still pad —
       distorting silently is worse than padding loudly.
 
     Returns ``(out, meta)`` where ``meta['shape_prep']`` records what happened so
-    callers can surface it in the embedding metadata.
+    callers can surface it in the embedding metadata. Its ``input_window`` is
+    where the input lies in the square (exact fractions, past ``[0, 1]`` on a
+    cropped axis); ``roi_window`` is that window clipped to the square.
     """
     adj = str(shape_adjust).lower()
     if adj not in ("pad", "crop"):
@@ -178,11 +239,9 @@ def prepare_square(
     }
 
     if h == w:
-        applied = "none"
-        sq = x
+        applied, side = "none", h
     elif adj == "crop":
-        applied = "crop_to_square"
-        sq = center_crop_to_square(x)
+        applied, side = "crop_to_square", short_side
     else:
         if aspect >= float(aspect_tol):
             warnings.warn(
@@ -192,22 +251,19 @@ def prepare_square(
                 "automatically on provider-backed paths) or input_prep='tile'.",
                 stacklevel=2,
             )
-        applied = "pad_to_square"
-        sq = center_pad_to_square(x, fill_value=fill_value, pad_mode=pad_mode)
+        applied, side = "pad_to_square", long_side
+    sq, input_window = center_fit(
+        x,
+        out_h=side,
+        out_w=side,
+        pad_mode=_square_pad_mode(h, w, pad_mode),
+        fill_value=fill_value,
+    )
 
     meta["applied"] = applied
     meta["square_hw"] = tuple(int(v) for v in _hw(sq))
-    # ROI window within the square, normalized to [0, 1] as (y0, y1, x0, x1).
-    # Only padding inserts non-ROI border; crop/none cover the whole
-    # square, so their window is the full frame. Downstream code uses this to crop
-    # the output token grid (and pooled tokens) back to the real ROI.
-    if applied == "pad_to_square":
-        s = max(h, w)
-        top, left = (s - h) // 2, (s - w) // 2
-        roi = (top / s, (top + h) / s, left / s, (left + w) / s)
-    else:
-        roi = (0.0, 1.0, 0.0, 1.0)
-    meta["roi_window"] = tuple(round(float(v), 6) for v in roi)
+    meta["input_window"] = input_window
+    meta["roi_window"] = roi_in_frame(input_window, FULL_WINDOW)
     out = resize_square(sq, size=int(size), interp=interp)
     return out, {"shape_prep": meta}
 
@@ -218,6 +274,158 @@ def roi_is_full(roi_window: tuple[float, float, float, float], *, eps: float = 1
     return y0 <= eps and y1 >= 1.0 - eps and x0 <= eps and x1 >= 1.0 - eps
 
 
+def roi_in_frame(
+    frame: tuple[float, float, float, float],
+    roi_window: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """Map *roi_window*, given in an input's frame, into the frame of the array fed to the model.
+
+    *frame* is where the input lies in that array, as fractions ``(y0, y1, x0,
+    x1)`` of the array; it extends past ``[0, 1]`` on axes where the input was
+    cropped, and lies inside on axes where it was padded. The result is clipped
+    to the array, so it is the window to crop the model's token grid to.
+    """
+    fy0, fy1, fx0, fx1 = (float(v) for v in frame)
+    y0, y1, x0, x1 = (float(v) for v in roi_window)
+
+    def _clip(v: float) -> float:
+        return min(1.0, max(0.0, v))
+
+    return (
+        _clip(fy0 + y0 * (fy1 - fy0)),
+        _clip(fy0 + y1 * (fy1 - fy0)),
+        _clip(fx0 + x0 * (fx1 - fx0)),
+        _clip(fx0 + x1 * (fx1 - fx0)),
+    )
+
+
+def model_roi_window(
+    shape_prep: dict[str, Any] | None,
+    geo_roi: tuple[float, float, float, float],
+) -> tuple[float, float, float, float]:
+    """*geo_roi*, the ROI's window in the fetched input, in the model's frame.
+
+    *shape_prep* is the preprocessing record whose ``input_window`` says where
+    that input lies in the array fed to the model (``None`` or no
+    ``input_window``: the model fed the input as-is or stretched it, so the
+    frames agree). For a whole *geo_roi* the result is the input's own window,
+    so cropping to it drops whole cells of padding.
+    """
+    frame = (shape_prep or {}).get("input_window") or FULL_WINDOW
+    window = roi_in_frame(tuple(frame), tuple(geo_roi))
+    if window[1] <= window[0] or window[3] <= window[2]:
+        warnings.warn(
+            f"The ROI window {tuple(geo_roi)} lies outside the part of the input the model "
+            f"sees (input window {tuple(frame)}); the output covers the nearest edge instead.",
+            UserWarning,
+            stacklevel=3,
+        )
+    return window
+
+
+def crop_grid_for_output(
+    grid_dhw: np.ndarray,
+    *,
+    geo_roi: tuple[float, float, float, float],
+    shape_prep: dict[str, Any] | None,
+) -> np.ndarray:
+    """Crop a model's ``(D, H', W')`` grid output to the ROI, in the model's frame.
+
+    The entry point for grid-output ROI crops: pass the squaring record as
+    *shape_prep* (``None`` when the input is fed as-is or stretched). Cropping
+    to the mapped ROI also drops whole cells of padding. Pooled output goes
+    through :func:`pool_for_output` instead.
+    """
+    return crop_grid_to_roi(grid_dhw, model_roi_window(shape_prep, geo_roi))
+
+
+_POOL_REDUCERS: dict[str, Callable[..., np.ndarray]] = {"mean": np.mean, "max": np.max}
+
+
+def pool_for_output(
+    native: np.ndarray | None,
+    grid_dhw: np.ndarray | None,
+    *,
+    geo_roi: tuple[float, float, float, float] | None,
+    shape_prep: dict[str, Any] | None,
+    pooling: str,
+    native_pooling: str,
+    model_label: str,
+    native_reduce: str | None = None,
+    head: Callable[[np.ndarray], np.ndarray] | None = None,
+    roi_pooling: str | None = None,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Pooled output for *geo_roi*, pooled by the model's own rule.
+
+    *native* is the model's pooled vector for the whole input (``None``: the
+    reduction over all of *grid_dhw*, through *head*) and *grid_dhw* its
+    ``(D, H', W')`` token grid in the model's frame, in the space *head* maps
+    from (``None`` when the model has no real token grid). The reduction is
+    *native_reduce* (``"mean"``) when the model's pooled vector ignores
+    *pooling* (a CLS token or a fixed mean; ``requested_pooling`` then records
+    the request, and the tiler merges such tiles as a mean), else *pooling*.
+    Returns ``(vec, meta)``:
+
+    - whole ROI, or a sub-window whose cells are the whole grid (its margin is
+      under a token on every side): *native*, labelled *native_pooling*;
+    - ROI sub-window: the reduction over the ROI's cells, through *head*,
+      labelled *roi_pooling* (default ``roi_grid_<reduce>``) with
+      ``roi_pooled=True`` and the cells' ``roi_grid_hw``. It must have
+      *native*'s shape, so the ROI and whole-input vectors of one model stay
+      comparable;
+    - ROI sub-window without a grid: *native*, with ``roi_pooled=False`` and a
+      ``UserWarning``.
+    """
+    reduce = native_reduce or pooling
+    for value in (pooling, reduce):
+        if value not in _POOL_REDUCERS:
+            raise ModelError(f"Unknown pooling={value!r} (expected 'mean' or 'max').")
+    if native_reduce not in (None, "mean"):
+        raise ModelError(f"native_reduce={native_reduce!r}: a model's fixed pooling is a mean.")
+    meta: dict[str, Any] = {"pooling": native_pooling}
+    if native_reduce is not None and pooling != native_reduce:
+        meta["requested_pooling"] = pooling
+    if native is None:
+        if grid_dhw is None:
+            raise ModelError(f"{model_label} has neither a pooled vector nor a grid to pool.")
+        native = _POOL_REDUCERS[reduce](grid_dhw, axis=(1, 2))
+        if head is not None:
+            native = head(native)
+    native = np.asarray(native, dtype=np.float32)
+    geo_roi = tuple(geo_roi or FULL_WINDOW)
+    if roi_is_full(geo_roi):
+        return native, meta
+    if grid_dhw is None:
+        # No per-item ROI in the text, so a batch warns once, not once per item.
+        warnings.warn(
+            f"{model_label} has no token grid for this input, so its pooled output covers "
+            "the whole fetched square, not the ROI window.",
+            UserWarning,
+            stacklevel=2,
+        )
+        return native, {**meta, "roi_pooled": False}
+    cells = crop_grid_to_roi(grid_dhw, model_roi_window(shape_prep, geo_roi))
+    if cells.shape == grid_dhw.shape:
+        # The ROI's cells are all the tokens: a CLS model keeps its CLS vector
+        # rather than jumping to a token mean for an almost-square ROI.
+        return native, meta
+    vec = _POOL_REDUCERS[reduce](cells, axis=(1, 2))
+    if head is not None:
+        vec = head(vec)
+    vec = np.asarray(vec, dtype=np.float32)
+    if vec.shape != native.shape:
+        raise ModelError(
+            f"{model_label} pooled the ROI to shape {vec.shape}, but its pooled vector has "
+            f"shape {native.shape}; the ROI must be pooled in the same space."
+        )
+    return vec, {
+        **meta,
+        "pooling": roi_pooling or f"roi_grid_{reduce}",
+        "roi_pooled": True,
+        "roi_grid_hw": (int(cells.shape[1]), int(cells.shape[2])),
+    }
+
+
 def roi_token_box(
     roi_window: tuple[float, float, float, float], *, grid_h: int, grid_w: int
 ) -> tuple[int, int, int, int]:
@@ -225,12 +433,16 @@ def roi_token_box(
 
     Rounds outward (floor low edge, ceil high edge) so the ROI is never
     under-covered, and always returns at least a 1×1 box clamped to the grid.
+    An edge within float round-off (1e-6 of a token) of a token boundary counts
+    as on it, so a window computed from pixel fractions does not pull in a whole
+    extra token.
     """
+    eps = 1e-6
     y0f, y1f, x0f, x1f = roi_window
-    y0 = max(0, min(int(np.floor(y0f * grid_h)), grid_h - 1))
-    y1 = max(y0 + 1, min(int(np.ceil(y1f * grid_h)), grid_h))
-    x0 = max(0, min(int(np.floor(x0f * grid_w)), grid_w - 1))
-    x1 = max(x0 + 1, min(int(np.ceil(x1f * grid_w)), grid_w))
+    y0 = max(0, min(int(np.floor(y0f * grid_h + eps)), grid_h - 1))
+    y1 = max(y0 + 1, min(int(np.ceil(y1f * grid_h - eps)), grid_h))
+    x0 = max(0, min(int(np.floor(x0f * grid_w + eps)), grid_w - 1))
+    x1 = max(x0 + 1, min(int(np.ceil(x1f * grid_w - eps)), grid_w))
     return y0, y1, x0, x1
 
 
@@ -286,33 +498,6 @@ def square_fetch_request(spatial: SpatialSpec) -> tuple[SpatialSpec, dict[str, A
     """
     sq, geo_roi = square_spatial(spatial)
     return sq, (roi_fetch_meta(geo_roi) or {})
-
-
-def crop_grid_and_pool(
-    grid: np.ndarray,
-    geo_roi: tuple[float, float, float, float],
-    *,
-    pooling: str = "mean",
-    pooled_fallback: np.ndarray | None = None,
-) -> tuple[np.ndarray, np.ndarray | None]:
-    """Crop a ``(D, H', W')`` token grid to the ROI and pool it.
-
-    Returns ``(grid_out, pooled_vec)``:
-
-    - ROI is a sub-window (a rectangle was enlarged to a square fetch) → crop the
-      grid and pool **only the ROI tokens** (mean/max over ``H', W'``);
-    - ROI is full → return the grid unchanged and ``pooled_fallback`` (the model's
-      own pooled vector, e.g. CLS or global token pool), preserving its semantics.
-
-    Collapses the per-model "if cropped: crop + pool ROI else fallback" blocks
-    into one call. ``pooled_vec`` is ``None`` only when the ROI is full and no
-    fallback was given (the caller is in grid mode and ignores it).
-    """
-    if roi_is_full(geo_roi):
-        return grid, pooled_fallback
-    g = crop_grid_to_roi(grid, geo_roi)
-    vec = (g.max(axis=(1, 2)) if pooling == "max" else g.mean(axis=(1, 2))).astype(np.float32)
-    return g, vec
 
 
 def parallel_indexed_fetch(

@@ -1,6 +1,7 @@
 import types
 
 import numpy as np
+import pytest
 import torch
 
 from rs_embed.core.specs import OutputSpec, PointBuffer, SensorSpec, TemporalSpec
@@ -105,7 +106,6 @@ def test_prepare_thor_raw_chw_native_snap_crops_small_projection_mismatch():
         max_native_side=384,
         max_native_tokens=3000,
         input_prep_mode="resize",
-        fill_value=0.0,
     )
 
     assert out.shape == (10, 288, 288)
@@ -131,7 +131,6 @@ def test_prepare_thor_raw_chw_native_snap_snaps_square_side_to_valid_grid():
         max_native_side=384,
         max_native_tokens=3000,
         input_prep_mode="resize",
-        fill_value=0.0,
     )
 
     assert out.shape == (10, 304, 304)
@@ -141,24 +140,76 @@ def test_prepare_thor_raw_chw_native_snap_snaps_square_side_to_valid_grid():
     assert meta["estimated_patch_tokens"] == 1805
 
 
-def test_prepare_thor_raw_chw_tile_mode_forces_fixed_resize():
+def _prepare_default(raw, **overrides):
     import rs_embed.embedders.onthefly_thor as thor
 
-    raw = np.zeros((10, 300, 300), dtype=np.float32)
-    out, meta = thor._prepare_thor_raw_chw(
-        raw,
-        scale_m=10,
-        patch_size=8,
-        band_gsds=(10, 20),
-        image_size=288,
-        resize_mode="native_snap",
-        shape_adjust="crop",
-        shape_tol_px=8,
-        max_native_side=384,
-        max_native_tokens=3000,
-        input_prep_mode="tile",
-        fill_value=0.0,
+    kwargs = {
+        "scale_m": 10,
+        "patch_size": 8,
+        "band_gsds": (10, 20),
+        "image_size": 288,
+        "resize_mode": "native_snap",
+        "shape_adjust": "crop",
+        "shape_tol_px": 8,
+        "max_native_side": 384,
+        "max_native_tokens": 3000,
+        "input_prep_mode": "resize",
+        **overrides,
+    }
+    return thor._prepare_thor_raw_chw(raw, **kwargs)
+
+
+def test_prepare_thor_raw_chw_native_snap_tie_pads_up_with_edge_values():
+    # 200 px is halfway between 192 and 208: the tie pads up (main cropped 8 px),
+    # and the 4 px border repeats the edge instead of the zero fill value.
+    raw = np.arange(200 * 200, dtype=np.float32).reshape(1, 200, 200).repeat(10, axis=0) + 1.0
+    out, meta = _prepare_default(raw)
+
+    assert out.shape == (10, 208, 208)
+    assert meta["snap_adjust_applied"] == "pad_to_valid_side"
+    np.testing.assert_array_equal(out[:, 4:204, 4:204], raw)
+    np.testing.assert_array_equal(out[:, :4, 4:204], np.repeat(raw[:, :1, :], 4, axis=1))
+    assert (out != 0).all()
+    assert meta["shape_prep"]["input_window"] == pytest.approx(
+        (4 / 208, 204 / 208, 4 / 208, 204 / 208)
     )
+    assert meta["ground_cover_m"] == 2080
+
+
+@pytest.mark.parametrize(("side", "snapped"), [(289, 288), (290, 288), (296, 304), (303, 304)])
+def test_prepare_thor_raw_chw_native_snap_goes_to_the_nearest_valid_side(side, snapped):
+    # A 1 px fetch overshoot (289 px for a 2880 m ROI) stays on the nominal side
+    # instead of padding most of a 16 px unit.
+    out, meta = _prepare_default(np.ones((10, side, side), dtype=np.float32))
+
+    assert out.shape == (10, snapped, snapped)
+    assert meta["ground_cover_m"] == 10 * snapped
+
+
+def test_prepare_thor_raw_chw_input_window_tracks_square_crop():
+    # 290x288 within tolerance: the long axis is center-cropped to 288 (1 px off
+    # each end, already a valid side), so the window extends past the array.
+    raw = np.ones((10, 290, 288), dtype=np.float32)
+    out, meta = _prepare_default(raw)
+
+    assert out.shape == (10, 288, 288)
+    assert meta["shape_prep"]["input_window"] == pytest.approx((-1 / 288, 289 / 288, 0.0, 1.0))
+
+
+def test_prepare_thor_raw_chw_shape_adjust_pad_uses_edge_values():
+    raw = np.ones((10, 288, 284), dtype=np.float32)
+    out, meta = _prepare_default(raw, shape_adjust="pad")
+
+    assert meta["shape_adjust_applied"] == "pad_to_square"
+    assert out.shape == (10, 288, 288)
+    assert (out == 1.0).all()
+    assert meta["shape_prep"]["input_window"] == pytest.approx((0.0, 1.0, 2 / 288, 286 / 288))
+
+
+def test_prepare_thor_raw_chw_tile_mode_forces_fixed_resize():
+    raw = np.zeros((10, 300, 300), dtype=np.float32)
+    with pytest.warns(UserWarning, match="tile_preserve_stitch_geometry"):
+        out, meta = _prepare_default(raw, input_prep_mode="tile")
 
     assert out.shape == (10, 300, 300)
     assert meta["preprocess_strategy"] == "fixed_resize"
@@ -167,28 +218,206 @@ def test_prepare_thor_raw_chw_tile_mode_forces_fixed_resize():
 
 
 def test_prepare_thor_raw_chw_large_square_falls_back_to_fixed_resize():
-    import rs_embed.embedders.onthefly_thor as thor
-
     raw = np.zeros((10, 512, 512), dtype=np.float32)
-    out, meta = thor._prepare_thor_raw_chw(
-        raw,
-        scale_m=10,
-        patch_size=8,
-        band_gsds=(10, 20),
-        image_size=288,
-        resize_mode="native_snap",
-        shape_adjust="crop",
-        shape_tol_px=8,
-        max_native_side=384,
-        max_native_tokens=3000,
-        input_prep_mode="resize",
-        fill_value=0.0,
-    )
+    with pytest.warns(UserWarning, match="native_side_limit"):
+        out, meta = _prepare_default(raw)
 
     assert out.shape == (10, 512, 512)
     assert meta["preprocess_strategy"] == "fixed_resize"
     assert meta["preprocess_reason"] == "native_side_limit"
     assert meta["effective_image_size"] == 288
+    # 5120 m of real data stretched onto a model told 2880 m at 10 m.
+    assert meta["ground_cover_m"] == 2880
+    assert meta["effective_gsd_m"] == pytest.approx((17.7778, 17.7778))
+    assert meta["gsd_mismatch"] is True
+
+
+def test_prepare_thor_raw_chw_fallback_drops_abandoned_native_meta():
+    # Non-square but within tolerance, so native_snap crops to square before the
+    # side limit sends the uncropped input to the fixed resize.
+    raw = np.zeros((10, 520, 514), dtype=np.float32)
+    with pytest.warns(UserWarning, match="native_side_limit"):
+        _, meta = _prepare_default(raw)
+
+    assert meta["shape_adjust_applied"] == "none"
+    assert "square_side" not in meta
+    assert meta["snapped_side"] == 512
+    assert meta["effective_gsd_m"] == pytest.approx((18.0556, 17.8472))
+
+
+def test_prepare_thor_raw_chw_token_limit_stays_native_when_resize_adds_tokens():
+    # patch_size=4 at 2560 m needs 64^2 + 32^2 = 5120 tokens; resizing to 288
+    # would need 6480 and misstate the cover as 2880 m, so the input stays native.
+    raw = np.zeros((10, 256, 256), dtype=np.float32)
+    with pytest.warns(UserWarning, match="would not reduce it; running natively"):
+        out, meta = _prepare_default(raw, patch_size=4)
+
+    assert out.shape == (10, 256, 256)
+    assert meta["preprocess_strategy"] == "native_snap"
+    assert meta["native_limit_exceeded"] == "native_token_limit"
+    assert meta["ground_cover_m"] == 2560
+    assert meta["estimated_patch_tokens"] == 5120
+    assert meta["effective_gsd_m"] == (10.0, 10.0)
+    assert meta["gsd_mismatch"] is False
+
+
+def test_prepare_thor_raw_chw_token_limit_falls_back_when_resize_cuts_tokens():
+    # 384 px at patch_size=4 needs 11520 tokens; 288 px needs 6480.
+    raw = np.zeros((10, 380, 380), dtype=np.float32)
+    with pytest.warns(UserWarning, match=r"THOR resampled .*native_token_limit"):
+        out, meta = _prepare_default(raw, patch_size=4)
+
+    assert out.shape == (10, 380, 380)
+    assert meta["preprocess_reason"] == "native_token_limit"
+    assert meta["estimated_patch_tokens"] == 6480
+    assert meta["gsd_mismatch"] is True
+
+
+def test_prepare_thor_raw_chw_side_limit_and_token_limit_agree_on_larger_inputs():
+    # Inputs past either limit both resize to 288 (6480 tokens), so a larger ROI
+    # never runs where a smaller one would not.
+    raw = np.zeros((10, 400, 400), dtype=np.float32)
+    with pytest.warns(UserWarning, match="native_side_limit"):
+        _, meta = _prepare_default(raw, patch_size=4)
+
+    assert meta["preprocess_strategy"] == "fixed_resize"
+    assert meta["estimated_patch_tokens"] == 6480
+
+
+def test_prepare_thor_raw_chw_coarse_scale_over_token_limit_does_not_raise():
+    # At 20 m THOR upsamples to the 10 m grid, so 304 px needs 7220 tokens; the
+    # 288 px fallback (6480) is cheaper and still runs.
+    raw = np.zeros((10, 300, 300), dtype=np.float32)
+    with pytest.warns(UserWarning, match="native_token_limit"):
+        _, meta = _prepare_default(raw, scale_m=20)
+
+    assert meta["preprocess_reason"] == "native_token_limit"
+    assert meta["estimated_patch_tokens"] == 6480
+
+
+def test_prepare_thor_raw_chw_token_limit_can_be_raised_to_stay_native():
+    import warnings
+
+    raw = np.zeros((10, 256, 256), dtype=np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out, meta = _prepare_default(raw, patch_size=4, max_native_tokens=6000)
+
+    assert out.shape == (10, 256, 256)
+    assert meta["preprocess_strategy"] == "native_snap"
+    assert "native_limit_exceeded" not in meta
+    assert meta["estimated_patch_tokens"] == 5120
+
+
+def test_prepare_thor_raw_chw_fixed_mode_reports_real_gsd():
+    raw = np.zeros((10, 256, 256), dtype=np.float32)
+    with pytest.warns(UserWarning, match=r"real pixel spacing is 8\.89x8\.89 m"):
+        _, meta = _prepare_default(raw, resize_mode="fixed")
+
+    assert meta["preprocess_reason"] == "fixed_mode"
+    assert meta["ground_cover_m"] == 2880
+    assert meta["effective_gsd_m"] == pytest.approx((8.8889, 8.8889))
+    assert meta["gsd_mismatch"] is True
+
+
+def test_prepare_thor_raw_chw_rectangular_fallback_reports_per_axis_gsd():
+    raw = np.zeros((10, 256, 300), dtype=np.float32)
+    with pytest.warns(UserWarning, match="rectangular_above_tolerance"):
+        _, meta = _prepare_default(raw)
+
+    assert meta["effective_gsd_m"] == pytest.approx((8.8889, 10.4167))
+    assert meta["gsd_mismatch"] is True
+
+
+def test_prepare_thor_raw_chw_fixed_resize_at_model_size_is_silent():
+    import warnings
+
+    # Tiles already at image_size are not resampled, so the geometry is exact.
+    raw = np.zeros((10, 288, 288), dtype=np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        _, meta = _prepare_default(raw, input_prep_mode="tile")
+
+    assert meta["preprocess_strategy"] == "fixed_resize"
+    assert meta["ground_cover_m"] == 2880
+    assert meta["effective_gsd_m"] == (10.0, 10.0)
+    assert meta["gsd_mismatch"] is False
+
+
+def test_thor_describe_image_size_follows_env(monkeypatch):
+    import rs_embed.embedders.onthefly_thor as thor
+
+    monkeypatch.delenv("RS_EMBED_THOR_IMG", raising=False)
+    assert thor.THORBaseEmbedder().describe()["defaults"]["image_size"] == 288
+    # The tiler's default tile size comes from here; it must match the size
+    # THOR consumes, or every tile would be resampled.
+    monkeypatch.setenv("RS_EMBED_THOR_IMG", "256")
+    assert thor.THORBaseEmbedder().describe()["defaults"]["image_size"] == 256
+
+
+def test_thor_malformed_image_size_env_fails_at_embed_time_not_in_describe(monkeypatch):
+    import rs_embed.embedders.onthefly_thor as thor
+    from rs_embed.core.errors import ModelError
+
+    monkeypatch.setenv("RS_EMBED_THOR_IMG", "288px")
+    assert thor.THORBaseEmbedder().describe()["defaults"]["image_size"] == 288
+    with pytest.raises(ModelError, match="RS_EMBED_THOR_IMG must be an integer"):
+        thor._resolve_thor_runtime_config(
+            model_config=None,
+            default_model_key=thor.THORBaseEmbedder.DEFAULT_MODEL_KEY,
+            default_image_size=thor.THORBaseEmbedder.DEFAULT_IMAGE_SIZE,
+        )
+
+
+def test_thor_sub_tile_roi_under_default_tile_prep_keeps_native_geometry(monkeypatch):
+    import warnings
+
+    import rs_embed.embedders.onthefly_thor as thor
+    from rs_embed.tools.tiling import _call_embedder_get_embedding_with_input_prep
+
+    for var in (
+        "RS_EMBED_THOR_IMG",
+        "RS_EMBED_THOR_PATCH_SIZE",
+        "RS_EMBED_THOR_RESIZE_MODE",
+        "RS_EMBED_THOR_MAX_NATIVE_TOKENS",
+        "RS_EMBED_THOR_MAX_NATIVE_SIDE",
+    ):
+        monkeypatch.delenv(var, raising=False)
+    seen: dict[str, object] = {}
+
+    def _fake_load_thor(**kwargs):
+        seen["ground_cover"] = kwargs["ground_cover"]
+        return object(), {"embed_dim": 8}, "cpu"
+
+    def _fake_forward(model, x_chw, *, device, group_merge):
+        seen["x_shape"] = tuple(x_chw.shape)
+        return np.ones((16, 8), dtype=np.float32), None, {}
+
+    monkeypatch.setattr(thor, "_load_thor", _fake_load_thor)
+    monkeypatch.setattr(thor, "_thor_forward_single", _fake_forward)
+
+    # A 2 km ROI (200 px) is smaller than one 288 px tile. The package-default
+    # tile prep used to hand it to THOR with the tile config, which stretched it
+    # to 288 px (6.94 m pixels told as 10 m).
+    with warnings.catch_warnings():
+        warnings.filterwarnings("error", message="THOR")
+        out = _call_embedder_get_embedding_with_input_prep(
+            embedder=thor.THORBaseEmbedder(),
+            spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=1000),
+            temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
+            sensor=None,
+            output=OutputSpec.pooled(),
+            backend="gee",
+            device="cpu",
+            input_chw=np.zeros((10, 200, 200), dtype=np.float32),
+            input_prep=None,
+        )
+
+    assert seen["x_shape"] == (10, 208, 208)
+    assert seen["ground_cover"] == 2080
+    assert out.meta["preprocess_strategy"] == "native_snap"
+    assert out.meta["gsd_mismatch"] is False
+    assert out.meta["input_prep"]["resolved_mode"] == "resize"
 
 
 def test_thor_describe_exposes_s1_modality():
@@ -258,6 +487,249 @@ def test_thor_get_embedding_s1_uses_vvvh_model_bands(monkeypatch):
     assert out.meta["modality"] == "s1"
     assert out.meta["sensor"]["bands"] == ("VV", "VH")
     assert out.meta["sensor"]["bands_thor"] == ("VV", "VH")
+
+
+def _thor_with_fake_forward(monkeypatch, *, grid_side, tokens=None, env=None, fmeta=None):
+    """THOR with a stubbed model: a single grid_side x grid_side token grid.
+
+    Grid cell (r, c) holds ``100 * r + c`` so tests can see which cells a crop
+    kept; tokens default to the same values, laid out row-major.
+    """
+    import os
+
+    import rs_embed.embedders.onthefly_thor as thor
+
+    for var in [k for k in os.environ if k.startswith("RS_EMBED_THOR_")]:
+        monkeypatch.delenv(var)
+    for k, v in (env or {}).items():
+        monkeypatch.setenv(k, v)
+    r, c = np.meshgrid(np.arange(grid_side), np.arange(grid_side), indexing="ij")
+    cell = (100.0 * r + c).astype(np.float32)
+    grid = np.broadcast_to(cell, (8, grid_side, grid_side)).copy()
+    if tokens is None:
+        tokens = np.repeat(cell.reshape(-1, 1), 8, axis=1)
+    if fmeta is None:
+        fmeta = {
+            "expected_patch_tokens": grid_side * grid_side,
+            "group_token_layout": ((0, grid_side, grid_side),),
+        }
+
+    monkeypatch.setattr(thor, "_load_thor", lambda **kwargs: (object(), {"embed_dim": 8}, "cpu"))
+    monkeypatch.setattr(
+        thor,
+        "_thor_forward_single",
+        lambda model, x_chw, *, device, group_merge: (tokens, grid, dict(fmeta)),
+    )
+    return thor.THORBaseEmbedder()
+
+
+def _thor_embed(emb, hw, output, fetch_meta=None):
+    h, w = (hw, hw) if isinstance(hw, int) else hw
+    return emb.get_embedding(
+        spatial=PointBuffer(lon=0.0, lat=0.0, buffer_m=5 * max(h, w)),
+        temporal=TemporalSpec.range("2020-06-01", "2020-08-31"),
+        sensor=None,
+        output=output,
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((10, h, w), dtype=np.float32),
+        fetch_meta=fetch_meta,
+    )
+
+
+# 296x288 under shape_adjust='pad': squared to 296, which ties between 288 and
+# 304 and pads up, so x gets 8 px (one whole 8 px token) of padding per side.
+_PAD_ENV = {"RS_EMBED_THOR_SHAPE_ADJUST": "pad"}
+
+
+def test_thor_roi_crop_uses_the_snapped_frame(monkeypatch):
+    # The ROI starts at 25% of the fetched width, i.e. x = 8 + 72 = 80 px of the
+    # 304 px model input: token column 10 (25% of the unpadded frame gives 9).
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=38, env=_PAD_ENV)
+    out = _thor_embed(emb, (296, 288), OutputSpec.grid(), {"roi_window_geo": (0.0, 1.0, 0.25, 1.0)})
+
+    data = np.asarray(out.data)
+    assert data.shape == (8, 38, 27)
+    assert data[0, 0, 0] == 10.0
+
+
+def test_thor_grid_drops_whole_tokens_of_snap_padding_and_records_the_box(monkeypatch):
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=38, env=_PAD_ENV)
+    out = _thor_embed(emb, (296, 288), OutputSpec.grid())
+
+    assert np.asarray(out.data).shape == (8, 38, 36)
+    assert out.meta["shape_prep"]["model_grid_hw"] == (38, 38)
+    assert out.meta["shape_prep"]["grid_crop_box"] == (0, 38, 1, 37)
+
+
+def test_thor_whole_roi_token_pool_skips_tokens_of_pure_padding(monkeypatch):
+    # The pure-padding token columns 0 and 37 carry 1000, every real token 1, so
+    # the pool is exactly 1 only if they are skipped.
+    tokens = np.ones((38, 38, 8), dtype=np.float32)
+    tokens[:, [0, 37], :] = 1000.0
+    emb = _thor_with_fake_forward(
+        monkeypatch, grid_side=38, tokens=tokens.reshape(-1, 8), env=_PAD_ENV
+    )
+    out = _thor_embed(emb, (296, 288), OutputSpec.pooled())
+
+    assert out.meta["pooling"] == "mean"
+    np.testing.assert_array_equal(out.data, np.ones(8, dtype=np.float32))
+
+
+@pytest.mark.parametrize("side", [288, 289, 290])
+def test_thor_whole_roi_pools_every_token_without_padding(monkeypatch, side):
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=36)
+    out = _thor_embed(emb, side, OutputSpec.pooled())
+
+    assert out.meta["pooling"] == "mean"
+    cells = 100.0 * np.arange(36)[:, None] + np.arange(36)[None, :]
+    np.testing.assert_allclose(out.data, np.full(8, cells.mean()), rtol=1e-6)
+
+
+def test_thor_sub_window_pools_the_tokens_of_its_window(monkeypatch):
+    # Rows 9..36 of a 36x36 grid (ROI from 25% of 288 px): the token pool over
+    # exactly those cells, labelled as an ROI token pool.
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=36)
+    out = _thor_embed(emb, 288, OutputSpec.pooled(), {"roi_window_geo": (0.25, 1.0, 0.0, 1.0)})
+
+    assert out.meta["pooling"] == "roi_token_mean"
+    cells = 100.0 * np.arange(9, 36)[:, None] + np.arange(36)[None, :]
+    np.testing.assert_allclose(out.data, np.full(8, cells.mean()), rtol=1e-6)
+
+
+def test_prepare_thor_raw_chw_steps_down_instead_of_breaking_the_side_limit():
+    # 393 px is nearer 400 than 384, but 400 > max_native_side=384 would resample
+    # it to 288 px; cropping 4/5 px to 384 keeps it native at exact spacing.
+    import warnings
+
+    raw = np.ones((10, 393, 393), dtype=np.float32)
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out, meta = _prepare_default(raw)
+
+    assert out.shape == (10, 384, 384)
+    assert meta["preprocess_strategy"] == "native_snap"
+    assert meta["snap_adjust_applied"] == "crop_to_valid_side"
+    assert meta["shape_prep"]["input_window"] == pytest.approx(
+        (-4 / 384, 389 / 384, -4 / 384, 389 / 384)
+    )
+
+
+@pytest.mark.parametrize("side", [393, 400, 401, 407])
+def test_prepare_thor_raw_chw_one_unit_step_down_is_monotonic(side):
+    # Every input whose snapped side is one unit over the side limit runs at 384,
+    # whether the snap padded up (393) or not (400, 401).
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out, meta = _prepare_default(np.ones((10, side, side), dtype=np.float32))
+
+    assert out.shape == (10, 384, 384)
+    assert meta["preprocess_strategy"] == "native_snap"
+
+
+def test_prepare_thor_raw_chw_falls_back_two_units_over_the_limit():
+    # 408 ties between 400 and 416; both are over the 384 limit, so the input
+    # is resampled to 288 px as before.
+    with pytest.warns(UserWarning, match="native_side_limit"):
+        _, meta = _prepare_default(np.ones((10, 408, 408), dtype=np.float32))
+
+    assert meta["preprocess_strategy"] == "fixed_resize"
+
+
+def test_prepare_thor_raw_chw_tie_does_not_pad_past_a_limit():
+    # patch_size=4: 196 ties between 192 (2880 tokens) and 200 (3125 > 3000). The
+    # tie must not pad past the token limit the side below meets.
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        out, meta = _prepare_default(np.ones((10, 196, 196), dtype=np.float32), patch_size=4)
+
+    assert out.shape == (10, 192, 192)
+    assert meta["estimated_patch_tokens"] == 2880
+
+
+def test_prepare_thor_raw_chw_labels_mixed_crop_and_pad():
+    # 305x300 under 'crop' snaps from 300 to 304: H is cropped, W is padded.
+    _, meta = _prepare_default(np.ones((10, 305, 300), dtype=np.float32), shape_adjust="crop")
+
+    assert meta["shape_adjust_applied"] == "crop_and_pad_to_square"
+
+
+def test_thor_pooled_cls_flag_comes_from_the_token_layout(monkeypatch):
+    # patch_tokens-style layout with a CLS token first: a sub-window pool skips
+    # it and reports cls_removed, as a whole-ROI pool does.
+    tokens = np.ones((36 * 36 + 1, 8), dtype=np.float32)
+    tokens[0] = 1000.0
+    emb = _thor_with_fake_forward(
+        monkeypatch,
+        grid_side=36,
+        tokens=tokens,
+        fmeta={"group_token_layout": ((1, 36, 36),), "cls_removed": True},
+    )
+    out = _thor_embed(emb, 288, OutputSpec.pooled(), {"roi_window_geo": (0.25, 1.0, 0.0, 1.0)})
+
+    assert out.meta["cls_removed"] is True
+    np.testing.assert_array_equal(out.data, np.ones(8, dtype=np.float32))
+
+
+def test_thor_pooled_sub_window_warns_without_a_token_layout(monkeypatch):
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=36, fmeta={})
+    with pytest.warns(UserWarning, match="could not resolve its token layout"):
+        out = _thor_embed(emb, 288, OutputSpec.pooled(), {"roi_window_geo": (0.25, 1.0, 0.0, 1.0)})
+
+    assert out.meta["pooling"] == "mean"
+
+
+def test_prepare_thor_raw_chw_rejects_empty_input():
+    from rs_embed.core.errors import ModelError
+
+    with pytest.raises(ModelError, match="empty input"):
+        _prepare_default(np.zeros((10, 0, 0), dtype=np.float32))
+
+
+@pytest.mark.parametrize(
+    ("hw", "geo_roi"),
+    [
+        # 393 px steps down to 384, cropping away the 1 px ROI margin entirely.
+        ((393, 393), (1 / 393, 392 / 393, 0.0, 1.0)),
+        # shape_adjust='crop' crops the long axis to 288 and its 1 px margin.
+        ((290, 288), (1 / 290, 289 / 290, 0.0, 1.0)),
+    ],
+)
+def test_thor_pooled_sub_window_survives_a_mapped_window_that_clips_to_full(
+    monkeypatch, hw, geo_roi
+):
+    emb = _thor_with_fake_forward(monkeypatch, grid_side=36)
+    out = _thor_embed(emb, hw, OutputSpec.pooled(), {"roi_window_geo": geo_roi})
+
+    # Still an ROI pool (labelled by the ROI, not by how its window clips).
+    assert out.meta["pooling"] == "roi_token_mean"
+    assert out.data.shape == (8,)
+
+
+def test_prepare_thor_raw_chw_does_not_step_down_when_no_resample_would_follow():
+    # With RS_EMBED_THOR_IMG=448 the limit breach would not resample (448 >= 400),
+    # so the input stays native at 400 (with a warning) instead of losing pixels.
+    raw = np.ones((10, 395, 395), dtype=np.float32)
+    with pytest.warns(UserWarning, match="running natively"):
+        out, meta = _prepare_default(raw, image_size=448)
+
+    assert out.shape == (10, 400, 400)
+    assert meta["native_limit_exceeded"] == "native_side_limit"
+    assert meta["snap_adjust_applied"] == "pad_to_valid_side"
+
+
+def test_prepare_thor_raw_chw_crop_mode_label_reflects_the_actual_fit():
+    # Under 'crop' the snap starts from the short side (297 -> 304), which is
+    # longer than the long side too, so both axes are padded, not cropped.
+    raw = np.ones((10, 300, 297), dtype=np.float32)
+    out, meta = _prepare_default(raw, shape_adjust="crop")
+
+    assert out.shape == (10, 304, 304)
+    assert meta["shape_adjust_applied"] == "pad_to_square"
 
 
 def test_enable_alibi_for_timm_patches_block_and_attention():

@@ -39,10 +39,10 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _auto_device,
 )
 from ..tools.shape import (
-    crop_grid_and_pool,
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
     parallel_indexed_fetch,
+    pool_for_output,
     roi_fetch_meta,
     roi_is_full,
 )
@@ -50,7 +50,12 @@ from ..tools.spatial import FULL_WINDOW, square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, resolve_hf_cache_dir, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    hf_hub_download_cache_first,
+    resolve_hf_cache_dir,
+    verify_loaded_params,
+)
 
 HF_REPO_ID = "MBZUAI/TerraFM"
 HF_WEIGHT_FILE_B = "TerraFM-B.pth"
@@ -243,12 +248,9 @@ def _ensure_hf_terrafm_weights(
     min_bytes: int = 50 * 1024 * 1024,
 ) -> str:
     """Returns local TerraFM weight path."""
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as e:
-        raise ModelError("Install huggingface_hub: pip install huggingface_hub") from e
-
-    wt_path = hf_hub_download(repo_id=repo_id, filename=HF_WEIGHT_FILE_B, cache_dir=cache_dir)
+    wt_path = hf_hub_download_cache_first(
+        repo_id=repo_id, filename=HF_WEIGHT_FILE_B, cache_dir=cache_dir
+    )
 
     if not os.path.exists(wt_path):
         raise ModelError(f"Failed to download '{HF_WEIGHT_FILE_B}' from {repo_id}.")
@@ -328,6 +330,44 @@ def _load_terrafm_b(
 # -----------------------------
 # TerraFM forward adapters
 # -----------------------------
+def _build_terrafm_embedding(
+    pooled: np.ndarray,
+    grid: np.ndarray | None,
+    *,
+    geo_roi: tuple[float, float, float, float],
+    output: OutputSpec,
+    base_meta: dict[str, Any],
+) -> Embedding:
+    """TerraFM's Embedding builder for the single and batch paths.
+
+    Pooled output is TerraFM's normed CLS token (``model_cls``), so an ROI
+    sub-window mean-pools the ROI's normed feature-map tokens. Grid output is
+    the last block's feature map cropped to the ROI. The input is stretched, so
+    the ROI needs no frame mapping.
+    """
+    if output.mode == "pooled":
+        vec, pmeta = pool_for_output(
+            pooled,
+            grid,
+            geo_roi=geo_roi,
+            shape_prep=None,
+            pooling=output.pooling,
+            native_reduce="mean",
+            native_pooling="model_cls",
+            model_label="TerraFM",
+        )
+        return Embedding(data=vec, meta={**base_meta, **pmeta})
+
+    if output.mode == "grid":
+        if grid is None:
+            raise ModelError("Grid output requested but TerraFM grid extraction returned None.")
+        grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=None)
+        meta = {**base_meta, "grid_type": "feature_map", "grid_shape": tuple(grid.shape)}
+        return Embedding(data=grid_to_dataarray(grid, meta=meta), meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
+
+
 def _terrafm_pooled_and_grid(
     model,
     x_bchw: np.ndarray,
@@ -795,33 +835,9 @@ class TerraFMBEmbedder(EmbedderBase):
             },
         )
 
-        # ---- pooled output ----
-        if output.mode == "pooled":
-            if cropped_to_roi and grid is not None:
-                # Pool only the ROI tokens (the model's global vector would include
-                # the real-neighborhood context fetched only to square the input).
-                _, pooled = crop_grid_and_pool(
-                    grid, geo_roi, pooling=output.pooling, pooled_fallback=pooled
-                )
-                base_meta["pooling"] = f"roi_grid_{output.pooling}"
-            return Embedding(data=pooled.astype(np.float32), meta=base_meta)
-
-        # ---- grid output ----
-        if output.mode == "grid":
-            if grid is None:
-                raise ModelError("Grid output requested but TerraFM grid extraction returned None.")
-            if cropped_to_roi:
-                grid = crop_grid_to_roi(grid, geo_roi)
-
-            meta = {
-                **base_meta,
-                "grid_type": "feature_map",
-                "grid_shape": tuple(grid.shape),
-            }
-            da = grid_to_dataarray(grid, meta=meta)
-            return Embedding(data=da, meta=meta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return _build_terrafm_embedding(
+            pooled, grid, geo_roi=geo_roi, output=output, base_meta=base_meta
+        )
 
     def get_embeddings_batch(
         self,
@@ -1032,7 +1048,6 @@ class TerraFMBEmbedder(EmbedderBase):
             for j in range(s1 - s0):
                 i = s0 + j
                 geo_roi = geo_rois[i]
-                cropped_to_roi = not roi_is_full(geo_roi)
                 fetch_meta = (
                     {k: v for k, v in (fetch_metas[i] or {}).items() if k != "roi_window_geo"}
                     if fetch_metas is not None and i < len(fetch_metas)
@@ -1072,37 +1087,13 @@ class TerraFMBEmbedder(EmbedderBase):
                     },
                 )
 
-                if output.mode == "pooled":
-                    pooled_vec = pooled_bd[j]
-                    if cropped_to_roi and grid_bdhw is not None:
-                        _, pooled_vec = crop_grid_and_pool(
-                            grid_bdhw[j],
-                            geo_roi,
-                            pooling=output.pooling,
-                            pooled_fallback=pooled_vec,
-                        )
-                        base_meta["pooling"] = f"roi_grid_{output.pooling}"
-                    out[i] = Embedding(data=pooled_vec.astype(np.float32), meta=base_meta)
-                    continue
-
-                if output.mode == "grid":
-                    if grid_bdhw is None:
-                        raise ModelError(
-                            "Grid output requested but TerraFM grid extraction returned None."
-                        )
-                    grid = grid_bdhw[j]
-                    if cropped_to_roi:
-                        grid = crop_grid_to_roi(grid, geo_roi)
-                    meta = {
-                        **base_meta,
-                        "grid_type": "feature_map",
-                        "grid_shape": tuple(grid.shape),
-                    }
-                    da = grid_to_dataarray(grid, meta=meta)
-                    out[i] = Embedding(data=da, meta=meta)
-                    continue
-
-                raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = _build_terrafm_embedding(
+                    pooled_bd[j],
+                    None if grid_bdhw is None else grid_bdhw[j],
+                    geo_roi=geo_roi,
+                    output=output,
+                    base_meta=base_meta,
+                )
 
         if any(e is None for e in out):
             raise ModelError("terrafm_b batch inference produced incomplete outputs.")

@@ -108,7 +108,7 @@ flowchart LR
 
 ## Output Semantics
 
-**`pooled`**: if model returns `[N,D]`, pools patch tokens with `mean`/`max`; if model already returns `(D,)`, returned directly as `model_pooled`.
+**`pooled`**: if model returns `[N,D]`, pools patch tokens with `mean`/`max`; if model already returns `(D,)` (the mean of its normed last-stage tokens), returned directly as `model_pooled`; a rectangular ROI mean-pools those normed tokens inside the ROI instead (`roi_grid_mean`, see [Pooled output for an ROI sub-window](../spatial_roi.md#pooled-output-for-an-roi-sub-window)).
 
 **`grid`**: requires token-sequence output `[N,D]` and reshapes patch tokens to `(D,H,W)`.
 

@@ -45,11 +45,11 @@ from ..tools.runtime import (
     resolve_device_auto_torch as _resolve_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     prepare_square,
     roi_fetch_meta,
-    roi_is_full,
     square_fetch_batch,
 )
 from ..tools.spatial import FULL_WINDOW, square_spatial
@@ -57,7 +57,12 @@ from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, normalize_s2, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    normalize_s2,
+    snapshot_download_cache_first,
+    verify_loaded_params,
+)
 
 
 def ensure_torch() -> None:
@@ -211,17 +216,18 @@ def _is_galileo_official_stats_mode(mode: str) -> bool:
     }
 
 
-def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
+def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str, Any]]:
     """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
 
     A rectangular ROI is reflect-padded to square before resizing (see
     :mod:`rs_embed.tools.shape`) rather than stretched, which would smear a
-    non-square ROI into distorted, striped embeddings.
+    non-square ROI into distorted, striped embeddings. Returns ``(out,
+    shape_prep)``; the record maps ROI windows into the model's frame.
     """
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
-    out, _ = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
-    return out
+    out, meta = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
+    return out, meta["shape_prep"]
 
 
 def _normalize_s2(raw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -330,20 +336,15 @@ def _download_galileo_model_folder(
     hf_repo: str,
     cache_dir: str | None,
 ) -> str:
-    try:
-        from huggingface_hub import snapshot_download
-    except Exception as e:
-        raise ModelError(
-            "Galileo auto-download requires huggingface_hub. Install: pip install huggingface_hub"
-        ) from e
-
-    snap = snapshot_download(
+    required = [
+        f"models/{model_size}/config.json",
+        f"models/{model_size}/encoder.pt",
+    ]
+    snap = snapshot_download_cache_first(
         repo_id=hf_repo,
         cache_dir=cache_dir,
-        allow_patterns=[
-            f"models/{model_size}/config.json",
-            f"models/{model_size}/encoder.pt",
-        ],
+        allow_patterns=required,
+        validate=lambda d: all(os.path.isfile(os.path.join(d, f)) for f in required),
     )
     model_root = os.path.join(snap, "models", str(model_size))
     cfg = os.path.join(model_root, "config.json")
@@ -620,8 +621,9 @@ def _prepare_galileo_encoder_inputs(
     raw_norm_mode = "none" if _is_galileo_official_stats_mode(mode_l) else norm_mode
 
     x_tchw = raw_tchw.astype(np.float32, copy=False)
+    shape_prep = None
     if x_tchw.shape[-2] != image_size or x_tchw.shape[-1] != image_size:
-        x_tchw = _resize_tchw(x_tchw, out_hw=image_size)
+        x_tchw, shape_prep = _resize_tchw(x_tchw, out_hw=image_size)
     x_tchw = _normalize_s2(x_tchw, mode=raw_norm_mode)  # [T,10,H,W]
 
     # [H,W,T,10]
@@ -694,6 +696,7 @@ def _prepare_galileo_encoder_inputs(
         "image_size": int(image_size),
         "patch_size": int(patch_size),
         "n_frames": int(t),
+        **({"shape_prep": shape_prep} if shape_prep is not None else {}),
         "months": tuple(int(v) + 1 for v in months_arr.tolist()),
         "month": int(months_arr[len(months_arr) // 2]) + 1,
         "month_indices": tuple(int(v) for v in months_arr.tolist()),
@@ -1056,11 +1059,10 @@ class GalileoEmbedder(EmbedderBase):
             device=dev,
         )
 
-        # Crop the token grid back to the ROI when the fetch enlarged a rectangle
-        # to a square (no-op when geo_roi is full). grid is (D, H', W').
-        cropped_to_roi = not roi_is_full(geo_roi)
-        if cropped_to_roi:
-            grid = crop_grid_to_roi(grid, geo_roi)
+        # Crop the token grid (D, H', W') back to the ROI in the model's frame,
+        # dropping padding; pooled output pools the ROI's cells for a sub-window.
+        if output.mode == "grid":
+            grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=pmeta.get("shape_prep"))
 
         meta = build_meta(
             model=self.model_name,
@@ -1094,19 +1096,17 @@ class GalileoEmbedder(EmbedderBase):
         )
 
         if output.mode == "pooled":
-            if output.pooling == "max":
-                # keep pooled mode semantics with optional max over grid
-                vec_out = np.max(grid, axis=(1, 2)).astype(np.float32)
-                pooling = "grid_max"
-            elif cropped_to_roi:
-                # Pool only the ROI's tokens (the global token mean would include
-                # the real-neighborhood context fetched to make the input square).
-                vec_out = np.mean(grid, axis=(1, 2)).astype(np.float32)
-                pooling = "roi_grid_mean"
-            else:
-                vec_out = vec.astype(np.float32)
-                pooling = "token_mean"
-            ometa = {**meta, "pooling": pooling, "pooled_shape": tuple(vec_out.shape)}
+            # The mean is Galileo's own token average; max is taken over the grid.
+            vec_out, pooling_meta = pool_for_output(
+                vec if output.pooling == "mean" else None,
+                grid,
+                geo_roi=geo_roi,
+                shape_prep=pmeta.get("shape_prep"),
+                pooling=output.pooling,
+                native_pooling="token_mean" if output.pooling == "mean" else "grid_max",
+                model_label="Galileo",
+            )
+            ometa = {**meta, **pooling_meta, "pooled_shape": tuple(vec_out.shape)}
             return Embedding(data=vec_out, meta=ometa)
 
         if output.mode == "grid":

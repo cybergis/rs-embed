@@ -433,7 +433,9 @@ class InputPrepSpec:
         ``InputPrepSpec(tile_size=...)`` configures tiling as written instead
         of silently resolving to a different mode.
     tile_size : int or None
-        Tile edge length for tile-based modes.
+        Tile edge length for tile-based modes. An input that fits one tile
+        (after snapping) is not tiled: it is passed to the model whole, as in
+        ``"resize"`` mode, so ``tile_size`` does not set its working size.
     tile_stride : int or None
         Tile stride for tile-based modes.
     max_tiles : int
@@ -455,7 +457,9 @@ class InputPrepSpec:
         overlapping shifted edge tile (which duplicates cells in the stitched
         grid). ``0`` disables snapping. Defaults to ``0.1`` — only the most
         degenerate cases (avoided overlap >= 90%) snap, capping the worst-case
-        axis squeeze at ~9%.
+        axis squeeze at ~9%. The snap only applies when the input still needs
+        more than one tile afterwards; an input it would reduce to a single
+        tile is passed whole and unsnapped.
     """
 
     mode: Literal["auto", "resize", "tile"] = "tile"

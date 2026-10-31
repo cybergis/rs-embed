@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib
+import math
 import os
 from datetime import date
 from functools import lru_cache
@@ -40,8 +41,9 @@ from ..tools.runtime import (
     move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     prepare_square,
     roi_fetch_meta,
     roi_is_full,
@@ -50,9 +52,9 @@ from ..tools.shape import (
 from ..tools.spatial import square_spatial
 from ..tools.temporal import temporal_frame_midpoints
 from .base import EmbedderBase
-from .config import model_config_value
+from .config import model_config_value, resolve_config_positive_int
 from .meta import build_meta, temporal_to_range
-from .shared import grid_to_dataarray, verify_loaded_params
+from .shared import grid_to_dataarray, hf_hub_download_cache_first, verify_loaded_params
 
 
 def ensure_torch() -> None:
@@ -64,17 +66,23 @@ def ensure_torch() -> None:
 
 _S2_10_BANDS = ["B2", "B3", "B4", "B5", "B6", "B7", "B8", "B8A", "B11", "B12"]
 
+# AnySat's own ``patch_size`` argument is in meters at its nominal S2 resolution
+# (``AnySat.res["s2"]``): ``patch_size // 10`` is the patch side in pixels.
+_ANYSAT_S2_RES_M = 10
+_DEFAULT_PATCH_SIZE = 1  # pixels per patch side → AnySat patch_size=10
 
-def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
+
+def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str, Any]]:
     """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
 
     A rectangular ROI is reflect-padded to square before resizing (see
-    :mod:`rs_embed.tools.shape`) rather than stretched.
+    :mod:`rs_embed.tools.shape`) rather than stretched. Returns ``(out,
+    shape_prep)``; the record maps ROI windows into the model's frame.
     """
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
-    out, _ = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
-    return out
+    out, meta = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
+    return out, meta["shape_prep"]
 
 
 def _normalize_series(x_tchw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -177,6 +185,20 @@ def _resolve_anysat_runtime_config(
 
     image_size = int(os.environ.get("RS_EMBED_ANYSAT_IMG", "24"))
 
+    # The S2 projector unfolds patch_size x patch_size pixel blocks and drops a
+    # remainder silently, which would shift the grid against the ROI window.
+    patch_size = resolve_config_positive_int(
+        model_config,
+        "patch_size",
+        env_var="RS_EMBED_ANYSAT_PATCH_SIZE",
+        default=_DEFAULT_PATCH_SIZE,
+        model_name="AnySat",
+    )
+    if image_size > 0 and image_size % patch_size != 0:
+        raise ModelError(
+            f"AnySat image_size ({image_size}) must be divisible by patch_size ({patch_size})."
+        )
+
     n_frames = max(1, int(os.environ.get("RS_EMBED_ANYSAT_FRAMES", str(default_frames))))
 
     norm_mode = os.environ.get("RS_EMBED_ANYSAT_NORM", "per_tile_zscore").strip()
@@ -210,6 +232,8 @@ def _resolve_anysat_runtime_config(
         "flash_attn": bool(flash_attn),
         "pretrained": bool(pretrained),
         "image_size": int(image_size),
+        "patch_size": int(patch_size),
+        "patch_size_m": _ANYSAT_S2_RES_M * int(patch_size),
         "n_frames": int(n_frames),
         "norm_mode": norm_mode,
         "grid_feature_mode": grid_feature_mode,
@@ -275,15 +299,7 @@ def _download_anysat_ckpt(
     cache_dir: str | None,
     min_bytes: int,
 ) -> str:
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as e:
-        raise ModelError(
-            "AnySat checkpoint download requires huggingface_hub. "
-            "Install: pip install huggingface_hub"
-        ) from e
-
-    p = hf_hub_download(repo_id=hf_repo, filename=filename, cache_dir=cache_dir)
+    p = hf_hub_download_cache_first(repo_id=hf_repo, filename=filename, cache_dir=cache_dir)
     if not os.path.exists(p):
         raise ModelError(f"Failed to download AnySat checkpoint: {hf_repo}/{filename}")
     sz = os.path.getsize(p)
@@ -402,10 +418,13 @@ def _prepare_anysat_s2_input(
     raw_tchw: np.ndarray,
     *,
     image_size: int,
+    patch_size: int,
     doy0_values: np.ndarray,
     norm_mode: str,
     device: str,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    """Model inputs for AnySat's S2 branch, plus the squaring record (``None``
+    when the input is fed at its own size)."""
     ensure_torch()
     import torch
 
@@ -413,8 +432,17 @@ def _prepare_anysat_s2_input(
         raise ModelError(f"AnySat s2 expects [T,10,H,W], got shape={raw_tchw.shape}")
     x_tchw = raw_tchw.astype(np.float32, copy=False)
 
+    shape_prep = None
     if image_size > 0 and (x_tchw.shape[-1] != image_size or x_tchw.shape[-2] != image_size):
-        x_tchw = _resize_tchw(x_tchw, out_hw=image_size)
+        x_tchw, shape_prep = _resize_tchw(x_tchw, out_hw=image_size)
+    # Only reachable when fed at its own size (image_size <= 0): a resize target
+    # is checked against patch_size when the runtime config is resolved.
+    h, w = (int(v) for v in x_tchw.shape[-2:])
+    if h % int(patch_size) or w % int(patch_size):
+        raise ModelError(
+            f"AnySat input ({h}x{w}) must be divisible by patch_size ({patch_size}); "
+            "set RS_EMBED_ANYSAT_IMG to a multiple of it."
+        )
 
     x_tchw = _normalize_series(x_tchw, mode=norm_mode)
     t = int(x_tchw.shape[0])
@@ -430,7 +458,7 @@ def _prepare_anysat_s2_input(
     return {
         "s2": torch.from_numpy(x_tchw[None, ...]).to(device),  # [1,T,10,H,W]
         "s2_dates": torch.from_numpy(dates).to(device),  # [1,T]
-    }
+    }, shape_prep
 
 
 def _anysat_spatial_features(
@@ -442,11 +470,6 @@ def _anysat_spatial_features(
 ) -> tuple[np.ndarray, dict[str, Any]]:
     ensure_torch()
     import torch
-
-    if patch_size_m <= 0 or (patch_size_m % 10) != 0:
-        raise ModelError(
-            f"AnySat patch_size must be a positive multiple of 10 (meters), got {patch_size_m}"
-        )
 
     native_output = str(feature_mode).strip().lower()
     if native_output not in {"patch", "dense"}:
@@ -486,33 +509,48 @@ def _anysat_tile_features(
     s2_input: dict[str, Any],
     *,
     patch_size_m: int,
-) -> tuple[np.ndarray, dict[str, Any]]:
+    with_patch_grid: bool = False,
+) -> tuple[np.ndarray, np.ndarray | None, dict[str, Any]]:
+    """AnySat's tile vector, plus its patch-token grid ``(D, H, W)`` when asked.
+
+    The tile vector is the transformer's CLS token. ``with_patch_grid`` runs
+    ``output="all"`` instead, whose tokens are that CLS token followed by the
+    patch tokens in row-major order, so one forward gives both.
+    """
     ensure_torch()
     import torch
 
-    if patch_size_m <= 0 or (patch_size_m % 10) != 0:
-        raise ModelError(
-            f"AnySat patch_size must be a positive multiple of 10 (meters), got {patch_size_m}"
-        )
-
+    native_output = "all" if with_patch_grid else "tile"
     with torch.no_grad():
-        out = model(s2_input, patch_size=int(patch_size_m), output="tile")
+        out = model(s2_input, patch_size=int(patch_size_m), output=native_output)
 
-    if not hasattr(out, "ndim") or int(out.ndim) != 2:
+    want_ndim = 3 if with_patch_grid else 2
+    if not hasattr(out, "ndim") or int(out.ndim) != want_ndim:
         raise ModelError(
-            "AnySat output='tile' returned unexpected shape/type: "
+            f"AnySat output={native_output!r} returned unexpected shape/type: "
             f"{type(out)} {getattr(out, 'shape', None)}"
         )
     if int(out.shape[0]) != 1:
         raise ModelError(f"AnySat embedder expects B=1 per call, got {tuple(out.shape)}")
 
-    vec = out[0].detach().float().cpu().numpy().astype(np.float32)
+    arr = out[0].detach().float().cpu().numpy().astype(np.float32)
+    grid = None
+    if with_patch_grid:
+        vec, patch = arr[0], arr[1:]
+        side = int(round(math.sqrt(patch.shape[0])))
+        if side * side != patch.shape[0]:
+            raise ModelError(
+                f"AnySat output='all' has {patch.shape[0]} patch tokens, not a square."
+            )
+        grid = patch.reshape(side, side, -1).transpose(2, 0, 1)
+    else:
+        vec = arr
     meta = {
         "pooled_source": "tile",
         "feature_dim": int(vec.shape[0]),
         "patch_size_m": int(patch_size_m),
     }
-    return vec, meta
+    return vec, grid, meta
 
 
 @register("anysat")
@@ -559,7 +597,7 @@ class AnySatEmbedder(EmbedderBase):
             "defaults": {
                 "model_size": "base",
                 "variant": "base",
-                "patch_size_m": 10,
+                "patch_size": _DEFAULT_PATCH_SIZE,
                 "image_size": self.input_spec.image_size,
                 "n_frames": self.DEFAULT_FRAMES,
                 "scale_m": self.input_spec.scale_m,
@@ -574,6 +612,14 @@ class AnySatEmbedder(EmbedderBase):
                     "type": "string",
                     "default": "base",
                     "choices": ["base"],
+                },
+                "patch_size": {
+                    "type": "int",
+                    "default": _DEFAULT_PATCH_SIZE,
+                    "description": (
+                        "Patch side in pixels (AnySat's own patch_size = 10 m x this). "
+                        "image_size must be divisible by it. Larger = fewer, coarser patch tokens."
+                    ),
                 },
                 "grid_feature_mode": {
                     "type": "string",
@@ -591,6 +637,7 @@ class AnySatEmbedder(EmbedderBase):
                 "This adapter builds T frames by splitting TemporalSpec.range into equal sub-windows.",
                 "Loads AnySat from a vendored local runtime and optional Hugging Face checkpoint.",
                 "grid output defaults to AnySat output='dense'; pooled defaults to patch-grid pooling but can opt into native tile output.",
+                "patch_size sets the patch-token grid (image_size / patch_size per side); the dense grid stays at pixel resolution.",
             ],
         }
 
@@ -640,7 +687,8 @@ class AnySatEmbedder(EmbedderBase):
         norm_mode = str(runtime_cfg["norm_mode"])
         grid_feature_mode = str(runtime_cfg["grid_feature_mode"])
         pooled_source = str(runtime_cfg["pooled_source"])
-        patch_size_m = int(ss.scale_m)
+        patch_size = int(runtime_cfg["patch_size"])
+        patch_size_m = int(runtime_cfg["patch_size_m"])
 
         if input_chw is None:
             provider = self._get_provider(backend)
@@ -690,9 +738,10 @@ class AnySatEmbedder(EmbedderBase):
             device=device,
         )
 
-        s2_input = _prepare_anysat_s2_input(
+        s2_input, shape_prep = _prepare_anysat_s2_input(
             raw_tchw,
             image_size=image_size,
+            patch_size=patch_size,
             doy0_values=doy0_values,
             norm_mode=norm_mode,
             device=dev,
@@ -700,12 +749,14 @@ class AnySatEmbedder(EmbedderBase):
         feature_mode = grid_feature_mode if output.mode == "grid" else "patch"
         pooled_vec = None
         if output.mode == "pooled" and pooled_source == "tile":
-            pooled_vec, fmeta = _anysat_tile_features(
+            # An ROI sub-window mean-pools the ROI's patch tokens: the tile
+            # vector is a CLS token, which cannot be restricted to the ROI.
+            pooled_vec, grid, fmeta = _anysat_tile_features(
                 model,
                 s2_input,
                 patch_size_m=patch_size_m,
+                with_patch_grid=not roi_is_full(geo_roi),
             )
-            grid = None
         else:
             grid, fmeta = _anysat_spatial_features(
                 model,
@@ -714,10 +765,10 @@ class AnySatEmbedder(EmbedderBase):
                 feature_mode=feature_mode,
             )
 
-        # Crop the token grid back to the ROI when the fetch enlarged a rectangle
-        # to a square (no-op when full; tile-pooled output has no grid to crop).
-        if grid is not None and not roi_is_full(geo_roi):
-            grid = crop_grid_to_roi(grid, geo_roi)
+        # Crop the token grid back to the ROI in the model's frame, dropping
+        # padding; pooled output pools the ROI's cells for a sub-window.
+        if output.mode == "grid":
+            grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=shape_prep)
 
         meta = build_meta(
             model=self.model_name,
@@ -740,6 +791,8 @@ class AnySatEmbedder(EmbedderBase):
                 "normalization": norm_mode,
                 "grid_feature_mode": grid_feature_mode,
                 "pooled_source": pooled_source,
+                "patch_size": patch_size,
+                **({"shape_prep": shape_prep} if shape_prep is not None else {}),
                 "start": t.start,
                 "end": t.end,
                 "n_frames": int(raw_tchw.shape[0]),
@@ -754,24 +807,18 @@ class AnySatEmbedder(EmbedderBase):
         )
 
         if output.mode == "pooled":
-            if pooled_vec is not None:
-                ometa = {
-                    **meta,
-                    "pooling": "tile_native",
-                    "requested_pooling": output.pooling,
-                    "pooled_shape": tuple(pooled_vec.shape),
-                }
-                return Embedding(data=pooled_vec, meta=ometa)
-            if output.pooling == "max":
-                vec = np.max(grid, axis=(1, 2)).astype(np.float32)
-            else:
-                vec = np.mean(grid, axis=(1, 2)).astype(np.float32)
-            ometa = {
-                **meta,
-                "pooling": f"{feature_mode}_{output.pooling}",
-                "pooled_shape": tuple(vec.shape),
-            }
-            return Embedding(data=vec, meta=ometa)
+            tile = pooled_vec is not None
+            vec, pmeta = pool_for_output(
+                pooled_vec,
+                grid,
+                geo_roi=geo_roi,
+                shape_prep=shape_prep,
+                pooling=output.pooling,
+                native_reduce="mean" if tile else None,
+                native_pooling="tile_native" if tile else f"{feature_mode}_{output.pooling}",
+                model_label="AnySat",
+            )
+            return Embedding(data=vec, meta={**meta, **pmeta, "pooled_shape": tuple(vec.shape)})
 
         if output.mode == "grid":
             gmeta = {

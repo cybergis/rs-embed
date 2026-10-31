@@ -10,13 +10,13 @@
 | Training alignment | N/A (precomputed product)         |
 
 !!! success "Tessera In 30 Seconds"
-    Tessera is a precomputed 10 m global embedding product distributed as local GeoTessera tiles — `rs-embed` does no model inference here; it mosaics the tiles covering your ROI, reprojects the ROI into each tile's native CRS if needed, and returns the cropped `(D,H,W)` embedding grid in that tile-native CRS.
+    Tessera is a precomputed 10 m global embedding product distributed as local GeoTessera tiles — `rs-embed` does no model inference here; it resamples the tiles covering your ROI (nearest neighbour, each tile through its own UTM CRS) onto the common EPSG:3857 grid at 10 m and returns the `(D,H,W)` embedding grid on that grid — the same grid provider-backed models sample on.
 
     In `rs-embed`, its most important characteristics are:
 
-    - strict north-up mosaic requiring consistent tile CRS/resolution — rotated/sheared or heterogeneous tiles raise: see [Preprocessing / Retrieval Pipeline](#preprocessing-retrieval-pipeline)
+    - output lives on the common EPSG:3857 grid at 10 m, pixel-aligned with provider-backed models for the same ROI: see [Output Semantics](#output-semantics)
+    - a ROI straddling a UTM zone boundary is served (tiles from both zones are resampled independently) with a `UserWarning` about the seam: see [Preprocessing / Retrieval Pipeline](#preprocessing-retrieval-pipeline)
     - year-selector temporal semantics: `TemporalSpec.range(...)` silently uses the `start` year rather than doing real temporal filtering: see [Retrieval Contract](#retrieval-contract)
-    - output CRS follows the tile-native CRS, not the EPSG:3857 default used by provider-backed paths elsewhere: see [Output Semantics](#output-semantics)
 
 ---
 
@@ -25,16 +25,16 @@
 | Field              | Value                                                                                              |
 | ------------------ | -------------------------------------------------------------------------------------------------- |
 | Backend            | `auto` (legacy `local` still accepted)                                                             |
-| `SpatialSpec`      | `BBox` direct, or `PointBuffer` converted to EPSG:4326 BBox (approximate meter-to-degree)          |
+| `SpatialSpec`      | `BBox` / `PointBuffer`, mapped to the common EPSG:3857 grid exactly as provider requests are       |
 | `TemporalSpec`     | `year(YYYY)` — uses `.year`; `range(start, end)` falls back to `start`'s year; default year `2021` |
 | Source             | GeoTessera precomputed tiles                                                                       |
-| Product CRS        | tile-native (varies by tile), **not** EPSG:3857                                                    |
+| Product CRS        | tile-native UTM (varies by tile); output resampled onto EPSG:3857                                  |
 | Product resolution | 10 m                                                                                               |
 | Cache directory    | `RS_EMBED_TESSERA_CACHE`, or per-call `sensor.collection="cache:/path/to/cache"`                   |
 | Side inputs        | none                                                                                               |
 
-!!! warning "Output CRS and temporal semantics"
-    Tessera reads and returns embeddings in the **product-native tile CRS** after mosaic + crop. This differs from the EPSG:3857 default used by provider-backed models. `TemporalSpec.range(...)` is a year selector here, **not** scene-level temporal filtering.
+!!! warning "Temporal semantics"
+    `TemporalSpec.range(...)` is a year selector here, **not** scene-level temporal filtering.
 
 ---
 
@@ -42,10 +42,11 @@
 
 ```mermaid
 flowchart LR
-    INPUT["SpatialSpec\n+ TemporalSpec"] --> QUERY["ROI → EPSG:4326\n→ query tile blocks"]
-    QUERY --> MOSAIC["Fetch tiles\n→ mosaic + crop"]
-    MOSAIC --> POOL["pooled: vector"]
-    MOSAIC --> GRID["grid: (D,H,W)\nin tile-native CRS"]
+    INPUT["SpatialSpec\n+ TemporalSpec"] --> GRIDDEF["ROI → common grid\n(EPSG:3857 @ 10 m)"]
+    GRIDDEF --> QUERY["grid footprint\n→ query tile blocks"]
+    QUERY --> RESAMPLE["Fetch tiles → nearest-neighbour\nresample onto the grid\n(UTM seam → warning)"]
+    RESAMPLE --> POOL["pooled: vector"]
+    RESAMPLE --> GRID["grid: (D,H,W)\non the common grid"]
 ```
 
 ---
@@ -59,14 +60,14 @@ flowchart LR
         STORE["GeoTessera tile blocks\n(local cache)"]
     end
     subgraph Retrieval
-        RES --> BBOX["ROI → EPSG:4326 bbox"]
+        RES --> BBOX["ROI → common grid\nfootprint"]
         STORE --> TILES["Query + fetch\ntile blocks"]
         BBOX --> TILES
-        TILES --> MOS["Strict north-up\nmosaic + crop"]
+        TILES --> MOS["Per-tile nearest\nresample onto grid"]
     end
     subgraph Output
         MOS --> POOL["pooled: spatial\npooling over grid"]
-        MOS --> GRID["grid: (D,H,W)\nin tile-native CRS"]
+        MOS --> GRID["grid: (D,H,W)\non EPSG:3857"]
     end
 ```
 
@@ -88,7 +89,7 @@ flowchart LR
 
 **`pooled`**: spatial pooling over the cropped embedding grid.
 
-**`grid`**: cropped `(D,H,W)` in product pixel space after mosaic + crop; metadata records `input_crs=EPSG:4326` and `output_crs` follows the tile-native CRS.
+**`grid`**: `(D,H,W)` on the common grid. Metadata records `input_crs=EPSG:4326`, `output_crs=EPSG:3857`, `scale_m=10`, the north-up `transform` (affine, pixel → EPSG:3857), `grid_hw`, `tile_crs` (the UTM CRSs the tiles came from), `resampling=nearest`, and `coverage` (fraction of grid pixels a tile covered; the rest are zero vectors).
 
 ---
 
@@ -125,6 +126,6 @@ export RS_EMBED_TESSERA_CACHE=/data/geotessera
 
 ## Reference
 
-- Tile mosaic requires all tiles to be north-up with consistent CRS and resolution — tiles with rotation/shear are rejected.
-- Output CRS is tile-native (not EPSG:3857) — do not compare grids with provider-backed models without reprojecting.
+- Tiles are placed through their own CRS/affine, so mixed UTM zones and rotated tiles are all handled; tiles must share the embedding dimension.
+- A ROI across a UTM zone boundary warns once per request: the two sides are resampled independently, so expect a seam along the boundary.
 - "No tiles found" usually means the ROI/year combination has no coverage in the GeoTessera cache, not that the cache is broken.

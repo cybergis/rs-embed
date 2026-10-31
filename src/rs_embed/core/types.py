@@ -12,7 +12,8 @@ from typing import Any
 
 import numpy as np
 
-from .specs import FetchSpec, InputPrepSpec, SensorSpec
+from .errors import SpecError
+from .specs import FetchSpec, InputPrepSpec, SensorSpec, SpatialSpec, TemporalSpec
 
 # ── Enums ──────────────────────────────────────────────────────────
 
@@ -141,6 +142,156 @@ class FetchResult:
 
     data: np.ndarray
     meta: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class UserData:
+    """User-provided imagery with a declaration of what the pixels are.
+
+    The full description of one piece of user imagery: the pixels, what
+    sensor they came from, and where/when they were acquired. Register once,
+    then any bring-your-own-data entrypoint
+    (:func:`rs_embed.get_embedding_from_data` and friends) needs only the
+    model name. The declaration is matched against the model's input sensor
+    and the request is refused when the data cannot satisfy it — so the
+    declaration, not the array shape, is the contract.
+
+    Values must be raw provider units for *collection* (e.g. Sentinel-2 L2A
+    surface-reflectance DN in ``0..10000``), exactly what a provider fetch
+    would return; per-model normalization stays the embedder's job.
+
+    Attributes
+    ----------
+    data : np.ndarray
+        Pixel array, ``[C,H,W]`` or ``[T,C,H,W]`` with channels in *bands*
+        order. Multi-frame arrays are only meaningful for time-series models;
+        single-frame models reject them.
+    collection : str
+        Provider collection the pixels came from, e.g.
+        ``"COPERNICUS/S2_SR_HARMONIZED"`` or a short alias like ``"s2"``.
+    spatial : SpatialSpec or None
+        Where the imagery is located. Optional, but models whose forward pass
+        conditions on geometry (e.g. lat/lon or GSD encodings — clay,
+        prithvi) refuse declarations without it; coordinates are never
+        fabricated. Supply it whenever you have it.
+    bands : tuple[str, ...] or None
+        Band name per channel, e.g. ``("B2", "B3", "B4", ...)``. Aliases like
+        ``"RED"`` resolve the same way provider fetches resolve them.
+        ``None`` means "the collection's canonical full band order"; this is
+        only accepted for collections with a documented canonical order (e.g.
+        the 12-band Sentinel-2 L2A set) and when the channel count matches —
+        otherwise the declaration must name its bands.
+    temporal : TemporalSpec or None
+        When the imagery was acquired, for models that condition on time.
+    scale_m : int or None
+        Optional nominal pixel size in meters, recorded as provenance.
+    crs : str or None
+        CRS of the array's pixel grid (e.g. ``"EPSG:32616"``), given together
+        with *transform* for a georeferenced raster. When set, the footprint
+        is derived from it (so *spatial* may be omitted) and the array is
+        resampled onto the common EPSG:3857 grid at the model's scale before
+        embedding — the same grid a provider fetch samples on. Without it the
+        array is fed as-is and assumed to already be on that grid.
+    transform : affine.Affine or None
+        Pixel → CRS affine of the array (rasterio convention; ``src.transform``).
+        Required with *crs*.
+    """
+
+    data: np.ndarray
+    collection: str
+    spatial: SpatialSpec | None = None
+    bands: tuple[str, ...] | None = None
+    temporal: TemporalSpec | None = None
+    scale_m: int | None = None
+    crs: str | None = None
+    transform: Any | None = None
+
+    @classmethod
+    def from_raster(
+        cls,
+        path: str,
+        *,
+        collection: str,
+        bands: tuple[str, ...] | None = None,
+        temporal: TemporalSpec | None = None,
+    ) -> UserData:
+        """Register a georeferenced raster file (GeoTIFF, ...) as user data.
+
+        Reads the pixels, CRS and affine transform with ``rasterio`` (an
+        optional dependency), so the projection and footprint are detected
+        from the file rather than declared by hand. Pixel values are taken
+        as stored: the raw-provider-units contract still applies.
+        """
+        try:
+            import rasterio
+        except ImportError as e:
+            raise ImportError("UserData.from_raster needs rasterio: pip install rasterio") from e
+        with rasterio.open(path) as src:
+            pixels = src.read()
+            georef = src.crs is not None
+            crs = src.crs.to_string() if georef else None
+            transform = src.transform if georef else None
+            res_x, res_y = src.res
+            scale_m = None
+            if georef and src.crs.is_projected and abs(res_x - res_y) < 1e-6 and res_x >= 1.0:
+                scale_m = int(round(res_x))
+        return cls(
+            data=pixels,
+            collection=collection,
+            bands=bands,
+            temporal=temporal,
+            scale_m=scale_m,
+            crs=crs,
+            transform=transform,
+        )
+
+    def validate(self) -> None:
+        """Validate the declaration's internal consistency.
+
+        Band identity against a defaulted (``bands=None``) declaration is
+        resolved later by the matching layer; this only checks what the
+        object can know about itself.
+
+        Raises
+        ------
+        SpecError
+            If the collection/bands declaration is empty or malformed, or the
+            array is not CHW/TCHW with one channel per declared band.
+        """
+        if not str(self.collection or "").strip():
+            raise SpecError("UserData.collection must be a non-empty collection id or alias.")
+        if self.bands is not None and (
+            len(self.bands) == 0 or any(not str(b or "").strip() for b in self.bands)
+        ):
+            raise SpecError(
+                "UserData.bands must be a non-empty tuple of band names, or "
+                "None for the collection's canonical band order."
+            )
+        arr = np.asarray(self.data)
+        if arr.ndim not in (3, 4):
+            raise SpecError(
+                "UserData.data must be [C,H,W] or [T,C,H,W], "
+                f"got shape={tuple(int(v) for v in arr.shape)}."
+            )
+        if self.bands is not None:
+            channels = int(arr.shape[-3])
+            if channels != len(self.bands):
+                raise SpecError(
+                    f"UserData.data has {channels} channels but declares "
+                    f"{len(self.bands)} bands; one band name per channel is required."
+                )
+        if self.scale_m is not None and int(self.scale_m) <= 0:
+            raise SpecError("UserData.scale_m must be positive when provided.")
+        if (self.crs is None) != (self.transform is None):
+            raise SpecError(
+                "UserData.crs and UserData.transform must be given together; a "
+                "georeferenced raster needs both its CRS and its pixel->CRS affine."
+            )
+        if self.transform is not None and not all(hasattr(self.transform, k) for k in "abcdef"):
+            raise SpecError(
+                "UserData.transform must be an affine.Affine (rasterio-style pixel -> CRS "
+                f"transform), got {type(self.transform).__name__}."
+            )
 
 
 # ── Typed results ──────────────────────────────────────────────────

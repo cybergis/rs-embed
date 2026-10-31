@@ -8,6 +8,7 @@ from typing import Any
 from ..core.specs import OutputSpec, SpatialSpec, TemporalSpec
 from .serialization import jsonable as _jsonable
 from .serialization import utc_ts as _utc_ts
+from .tiling import INPUT_PREP_VERSION
 
 
 def export_request_fingerprint(
@@ -47,6 +48,12 @@ def export_request_fingerprint(
         "save_embeddings": bool(config.save_embeddings),
         "input_prep": _jsonable(config.input_prep),
     }
+    # An input_prep version bump changes on-the-fly embeddings (tiling and the
+    # ROI crop alike, under any prep mode), so resume must not keep outputs
+    # produced under the previous version. Precomputed-only requests keep
+    # their fingerprint.
+    if any(not getattr(mc, "is_precomputed", False) for mc in models):
+        payload["input_prep_version"] = INPUT_PREP_VERSION
     if spatials is not None:
         payload["spatials"] = [_jsonable(s) for s in spatials]
     if spatial is not None:

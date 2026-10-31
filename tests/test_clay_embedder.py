@@ -304,11 +304,36 @@ def test_clay_get_embedding_uses_model_config_model_size(monkeypatch):
     assert seen["model_size"] == "base"
 
 
+def test_clay_batch_from_inputs_needs_no_provider(monkeypatch):
+    """get_embeddings_batch_from_inputs must honor the same lazy-provider
+    convention as the single path: prefetched inputs never touch the provider
+    (a user-data batch on a machine without GEE must work)."""
+    import rs_embed.embedders.onthefly_clay as clay
+
+    emb = ClayEmbedder()
+
+    def _boom(_backend):
+        raise AssertionError("prefetched batch inputs must not touch the provider")
+
+    monkeypatch.setattr(emb, "_get_provider", _boom)
+    monkeypatch.setattr(clay, "_load_clay_model", _fake_load)
+    monkeypatch.setattr(clay, "_clay_forward_tokens_and_cls_batch", _fake_forward)
+
+    out = emb.get_embeddings_batch_from_inputs(
+        spatials=[PointBuffer(lon=0.0, lat=0.0, buffer_m=256)],
+        input_chws=[np.full((10, 8, 8), 5000.0, dtype=np.float32)],
+        temporal=TemporalSpec.year(2021),
+        output=OutputSpec.pooled(),
+        backend="auto",
+    )
+    assert len(out) == 1
+    assert out[0].data.shape == (2,)
+
+
 def test_clay_batch_from_inputs_crops_per_item_roi(monkeypatch):
     import rs_embed.embedders.onthefly_clay as clay
 
     emb = ClayEmbedder()
-    monkeypatch.setattr(emb, "_get_provider", lambda _backend: object())
     monkeypatch.setattr(clay, "_load_clay_model", _fake_load)
     monkeypatch.setattr(clay, "_clay_forward_tokens_and_cls_batch", _fake_forward)
 
@@ -362,6 +387,27 @@ def test_clay_batch_from_inputs_reads_fetch_metas_roi(monkeypatch):
         temporal=None,
         output=OutputSpec.grid(),
         backend="auto",
+        fetch_metas=[{"roi_window_geo": (0.0, 1.0, 0.0, 0.5)}],
+    )
+    assert out[0].data.shape == (2, 4, 2)  # cropped to left half
+
+
+def test_clay_tensor_batch_from_inputs_crops_fetch_metas_roi(monkeypatch):
+    # The tensor backend loops get_embedding per item; it used to drop the
+    # fetch_metas, so the ROI was never cropped on that path (#139).
+    import rs_embed.embedders.onthefly_clay as clay
+
+    emb = ClayEmbedder()
+    monkeypatch.setattr(clay, "_load_clay_model", _fake_load)
+    monkeypatch.setattr(clay, "_clay_forward_tokens_and_cls_batch", _fake_forward)
+
+    out = emb.get_embeddings_batch_from_inputs(
+        spatials=[PointBuffer(lon=0.0, lat=0.0, buffer_m=256)],
+        input_chws=[np.full((10, 8, 8), 5000.0, dtype=np.float32)],
+        temporal=None,
+        sensor=SensorSpec(collection="COPERNICUS/S2_SR_HARMONIZED", bands=tuple(_CLAY_S2_BANDS)),
+        output=OutputSpec.grid(),
+        backend="tensor",
         fetch_metas=[{"roi_window_geo": (0.0, 1.0, 0.0, 0.5)}],
     )
     assert out[0].data.shape == (2, 4, 2)  # cropped to left half

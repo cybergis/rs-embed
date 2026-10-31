@@ -27,15 +27,16 @@ from ..tools.runtime import (
     move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
     geo_roi_from_meta,
-    roi_is_full,
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import base_meta, temporal_to_range
-from .shared import grid_to_dataarray, pool_from_tokens, tokens_to_grid_dhw
+from .shared import (
+    build_token_embedding,
+    resolve_pretrained_source_cache_first,
+)
 
 
 def ensure_torch() -> None:
@@ -139,44 +140,6 @@ def _satmae_preprocess_tensor_batch(model, rgb_u8_batch: list[np.ndarray], *, im
     return torch.stack(xs, dim=0)
 
 
-def build_token_embedding(tokens, *, geo_roi, output, meta):
-    """Turn ``[N,D]`` tokens into an Embedding, cropping the patch grid to the ROI.
-
-    When the input was enlarged to a square at fetch time (``geo_roi`` is a
-    sub-window) the patch-token grid is cropped back to the ROI before pooling /
-    emitting, so neighbourhood context fetched only to square the input does not
-    leak into the result. When ``geo_roi`` is the full frame this reproduces the
-    legacy token-pool / full-grid behaviour exactly. ``meta`` is mutated in place
-    with the chosen pooling / grid provenance.
-    """
-    cropped = not roi_is_full(geo_roi)
-
-    if output.mode == "pooled":
-        if cropped:
-            grid, _hw, cls_removed = tokens_to_grid_dhw(tokens)
-            g = crop_grid_to_roi(grid, geo_roi)
-            reduce = g.max if output.pooling == "max" else g.mean
-            vec = reduce(axis=(1, 2)).astype("float32")
-            meta.update({"pooling": f"roi_grid_{output.pooling}", "cls_removed": bool(cls_removed)})
-        else:
-            vec, cls_removed = pool_from_tokens(tokens, output.pooling)
-            meta.update({"pooling": f"patch_{output.pooling}", "cls_removed": bool(cls_removed)})
-        return Embedding(data=vec, meta=meta)
-
-    if output.mode == "grid":
-        grid, (h, w), cls_removed = tokens_to_grid_dhw(tokens)
-        if cropped:
-            grid = crop_grid_to_roi(grid, geo_roi)
-            h, w = int(grid.shape[1]), int(grid.shape[2])
-        meta.update(
-            {"grid_hw": (h, w), "grid_kind": "patch_tokens", "cls_removed": bool(cls_removed)}
-        )
-        da = grid_to_dataarray(grid, meta=meta)
-        return Embedding(data=da, meta=meta)
-
-    raise ModelError(f"Unknown output mode: {output.mode}")
-
-
 @lru_cache(maxsize=8)
 def _load_satmae_cached(model_id: str, dev: str):
     ensure_torch()
@@ -186,7 +149,7 @@ def _load_satmae_cached(model_id: str, dev: str):
     except Exception as e:
         raise ModelError("SatMAE requires rshf. Install: pip install rshf") from e
 
-    model = SatMAE.from_pretrained(model_id)
+    model = SatMAE.from_pretrained(resolve_pretrained_source_cache_first(model_id))
     model = _move_model_to_device(model, dev, model_name="SatMAE")
 
     meta = {"model_id": model_id, "device": dev}
@@ -385,7 +348,9 @@ class SatMAERGBEmbedder(EmbedderBase):
             },
         )
 
-        return build_token_embedding(tokens, geo_roi=geo_roi, output=output, meta=meta)
+        return build_token_embedding(
+            tokens, geo_roi=geo_roi, output=output, meta=meta, model_label="SatMAE"
+        )
 
     def get_embeddings_batch(
         self,
@@ -456,7 +421,7 @@ class SatMAERGBEmbedder(EmbedderBase):
                     },
                 )
                 out[i] = build_token_embedding(
-                    tokens, geo_roi=geo_rois[i], output=output, meta=meta
+                    tokens, geo_roi=geo_rois[i], output=output, meta=meta, model_label="SatMAE"
                 )
 
         if any(e is None for e in out):
@@ -544,7 +509,7 @@ class SatMAERGBEmbedder(EmbedderBase):
                     },
                 )
                 out[i] = build_token_embedding(
-                    tokens, geo_roi=geo_rois[i], output=output, meta=meta
+                    tokens, geo_roi=geo_rois[i], output=output, meta=meta, model_label="SatMAE"
                 )
 
         if any(e is None for e in out):

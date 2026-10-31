@@ -31,9 +31,9 @@ from ..tools.runtime import (
     move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
-    crop_grid_and_pool,
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     roi_is_full,
     square_fetch_batch,
 )
@@ -41,7 +41,13 @@ from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .config import model_config_value
 from .meta import base_meta, temporal_to_range
-from .shared import grid_to_dataarray, import_xarray, resolve_hf_cache_dir, verify_loaded_params
+from .shared import (
+    grid_to_dataarray,
+    hf_hub_download_cache_first,
+    import_xarray,
+    resolve_hf_cache_dir,
+    verify_loaded_params,
+)
 
 
 def ensure_torch() -> None:
@@ -223,14 +229,9 @@ def _ensure_satmaepp_s2_assets(
     ckpt_file: str,
     cache_dir: str | None,
 ) -> str:
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as e:
-        raise ModelError(
-            "SatMAE++ Sentinel checkpoint download requires huggingface_hub. Install: pip install huggingface_hub"
-        ) from e
-
-    ckpt_path = hf_hub_download(repo_id=ckpt_repo, filename=ckpt_file, cache_dir=cache_dir)
+    ckpt_path = hf_hub_download_cache_first(
+        repo_id=ckpt_repo, filename=ckpt_file, cache_dir=cache_dir
+    )
     if not os.path.exists(ckpt_path):
         raise ModelError(f"Failed to download checkpoint {ckpt_repo}/{ckpt_file}")
 
@@ -506,6 +507,55 @@ def _satmaepp_s2_grid(
     return grid, (h, w), has_cls, emeta
 
 
+def _build_satmaepp_s2_embedding(
+    tokens_nd: np.ndarray,
+    *,
+    geo_roi: tuple[float, float, float, float],
+    output: OutputSpec,
+    meta: dict[str, Any],
+    group_reduce: str,
+) -> Embedding:
+    """SatMAE++ Sentinel's Embedding builder for the single and batch paths.
+
+    Pooled output reduces all group tokens (``group_tokens_<pooling>``). An ROI
+    sub-window reduces the tokens of the ROI's cells instead, each cell's group
+    tokens by the same reduction, so the two agree. Grid output aggregates each
+    cell's group tokens with *group_reduce* and is cropped to the ROI. The input
+    is stretched, so the ROI needs no frame mapping. *meta* is updated in place.
+    """
+    if output.mode == "pooled":
+        vec, cls_removed = _satmaepp_s2_pool(tokens_nd, output.pooling)
+        roi_grid = None
+        if not roi_is_full(tuple(geo_roi)):
+            roi_grid = _satmaepp_s2_grid(tokens_nd, group_reduce=output.pooling)[0]
+        vec, pmeta = pool_for_output(
+            vec,
+            roi_grid,
+            geo_roi=geo_roi,
+            shape_prep=None,
+            pooling=output.pooling,
+            native_pooling=f"group_tokens_{output.pooling}",
+            model_label="SatMAE++ Sentinel",
+        )
+        meta.update({**pmeta, "cls_removed": bool(cls_removed)})
+        return Embedding(data=vec, meta=meta)
+
+    if output.mode == "grid":
+        grid, _hw, cls_removed, gmeta = _satmaepp_s2_grid(tokens_nd, group_reduce=group_reduce)
+        grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=None)
+        meta.update(
+            {
+                "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "grid_kind": "spatial_tokens_aggregated_over_channel_groups",
+                "cls_removed": bool(cls_removed),
+                **gmeta,
+            }
+        )
+        return Embedding(data=grid_to_dataarray(grid, meta=meta), meta=meta)
+
+    raise ModelError(f"Unknown output mode: {output.mode}")
+
+
 def _fetch_s2_sr_10_raw_chw(
     provider: ProviderBase,
     spatial: SpatialSpec,
@@ -767,54 +817,13 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
             },
         )
 
-        # Build the spatial grid for grid output, or to crop+pool the ROI when the
-        # input was enlarged to a square at fetch time.
-        cropped_to_roi = not roi_is_full(geo_roi)
-
-        if output.mode == "pooled":
-            if cropped_to_roi:
-                # Pool only the ROI tokens (the model's group-token pool would
-                # include the real-neighborhood context fetched only to square the
-                # input). Build the grid, crop to ROI, then pool.
-                group_reduce = self._resolve_group_reduce()
-                grid, _, cls_removed, _ = _satmaepp_s2_grid(tokens, group_reduce=group_reduce)
-                _, vec = crop_grid_and_pool(grid, geo_roi, pooling=output.pooling)
-                assert vec is not None
-                meta.update(
-                    {
-                        "pooling": f"roi_grid_{output.pooling}",
-                        "cls_removed": bool(cls_removed),
-                    }
-                )
-            else:
-                vec, cls_removed = _satmaepp_s2_pool(tokens, output.pooling)
-                meta.update(
-                    {
-                        "pooling": f"group_tokens_{output.pooling}",
-                        "cls_removed": bool(cls_removed),
-                    }
-                )
-            return Embedding(data=vec.astype(np.float32), meta=meta)
-
-        if output.mode == "grid":
-            group_reduce = self._resolve_group_reduce()
-            grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(tokens, group_reduce=group_reduce)
-            if cropped_to_roi:
-                grid = crop_grid_to_roi(grid, geo_roi)
-                h, w = int(grid.shape[1]), int(grid.shape[2])
-            meta.update(
-                {
-                    "grid_hw": (h, w),
-                    "grid_kind": "spatial_tokens_aggregated_over_channel_groups",
-                    "cls_removed": bool(cls_removed),
-                    **gmeta,
-                }
-            )
-
-            da = grid_to_dataarray(grid, meta=meta)
-            return Embedding(data=da, meta=meta)
-
-        raise ModelError(f"Unknown output mode: {output.mode}")
+        return _build_satmaepp_s2_embedding(
+            tokens,
+            geo_roi=geo_roi,
+            output=output,
+            meta=meta,
+            group_reduce=self._resolve_group_reduce() if output.mode == "grid" else "mean",
+        )
 
     def get_embeddings_batch(
         self,
@@ -889,10 +898,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         out: list[Embedding | None] = [None] * n
         want_grid = output.mode == "grid"
-        any_cropped = any(not roi_is_full(gr) for gr in geo_rois)
-        # group_reduce is needed for grid output, and also for pooled output when an
-        # ROI was enlarged to a square (pooled then derives from the cropped grid).
-        group_reduce = self._resolve_group_reduce() if (want_grid or any_cropped) else "mean"
+        group_reduce = self._resolve_group_reduce() if want_grid else "mean"
         if want_grid:
             import_xarray()  # fail fast before batch inference
 
@@ -932,49 +938,13 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                     },
                 )
 
-                cropped_to_roi = not roi_is_full(geo_rois[i])
-
-                if output.mode == "pooled":
-                    if cropped_to_roi:
-                        grid, _, cls_removed, _ = _satmaepp_s2_grid(
-                            tokens, group_reduce=group_reduce
-                        )
-                        _, vec = crop_grid_and_pool(grid, geo_rois[i], pooling=output.pooling)
-                        assert vec is not None
-                        meta.update(
-                            {
-                                "pooling": f"roi_grid_{output.pooling}",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                    else:
-                        vec, cls_removed = _satmaepp_s2_pool(tokens, output.pooling)
-                        meta.update(
-                            {
-                                "pooling": f"group_tokens_{output.pooling}",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                    out[i] = Embedding(data=vec.astype(np.float32), meta=meta)
-                elif output.mode == "grid":
-                    grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(
-                        tokens, group_reduce=group_reduce
-                    )
-                    if cropped_to_roi:
-                        grid = crop_grid_to_roi(grid, geo_rois[i])
-                        h, w = int(grid.shape[1]), int(grid.shape[2])
-                    meta.update(
-                        {
-                            "grid_hw": (h, w),
-                            "grid_kind": "spatial_tokens_aggregated_over_channel_groups",
-                            "cls_removed": bool(cls_removed),
-                            **gmeta,
-                        }
-                    )
-                    da = grid_to_dataarray(grid, meta=meta)
-                    out[i] = Embedding(data=da, meta=meta)
-                else:
-                    raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = _build_satmaepp_s2_embedding(
+                    tokens,
+                    geo_roi=geo_rois[i],
+                    output=output,
+                    meta=meta,
+                    group_reduce=group_reduce,
+                )
 
         if any(e is None for e in out):
             raise ModelError("satmaepp_s2_10b batch inference produced incomplete outputs.")
@@ -1060,10 +1030,7 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
 
         out: list[Embedding | None] = [None] * len(spatials)
         want_grid = output.mode == "grid"
-        any_cropped = any(not roi_is_full(gr) for gr in geo_rois)
-        # group_reduce is needed for grid output, and also for pooled output when an
-        # ROI was enlarged to a square (pooled then derives from the cropped grid).
-        group_reduce = self._resolve_group_reduce() if (want_grid or any_cropped) else "mean"
+        group_reduce = self._resolve_group_reduce() if want_grid else "mean"
         if want_grid:
             import_xarray()  # fail fast before batch inference
 
@@ -1105,49 +1072,13 @@ class SatMAEPPSentinel10Embedder(EmbedderBase):
                     },
                 )
 
-                cropped_to_roi = not roi_is_full(geo_rois[i])
-
-                if output.mode == "pooled":
-                    if cropped_to_roi:
-                        grid, _, cls_removed, _ = _satmaepp_s2_grid(
-                            tokens, group_reduce=group_reduce
-                        )
-                        _, vec = crop_grid_and_pool(grid, geo_rois[i], pooling=output.pooling)
-                        assert vec is not None
-                        meta.update(
-                            {
-                                "pooling": f"roi_grid_{output.pooling}",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                    else:
-                        vec, cls_removed = _satmaepp_s2_pool(tokens, output.pooling)
-                        meta.update(
-                            {
-                                "pooling": f"group_tokens_{output.pooling}",
-                                "cls_removed": bool(cls_removed),
-                            }
-                        )
-                    out[i] = Embedding(data=vec.astype(np.float32), meta=meta)
-                elif output.mode == "grid":
-                    grid, (h, w), cls_removed, gmeta = _satmaepp_s2_grid(
-                        tokens, group_reduce=group_reduce
-                    )
-                    if cropped_to_roi:
-                        grid = crop_grid_to_roi(grid, geo_rois[i])
-                        h, w = int(grid.shape[1]), int(grid.shape[2])
-                    meta.update(
-                        {
-                            "grid_hw": (h, w),
-                            "grid_kind": "spatial_tokens_aggregated_over_channel_groups",
-                            "cls_removed": bool(cls_removed),
-                            **gmeta,
-                        }
-                    )
-                    da = grid_to_dataarray(grid, meta=meta)
-                    out[i] = Embedding(data=da, meta=meta)
-                else:
-                    raise ModelError(f"Unknown output mode: {output.mode}")
+                out[i] = _build_satmaepp_s2_embedding(
+                    tokens,
+                    geo_roi=geo_rois[i],
+                    output=output,
+                    meta=meta,
+                    group_reduce=group_reduce,
+                )
 
         if any(e is None for e in out):
             raise ModelError("satmaepp_s2_10b batch inference produced incomplete outputs.")

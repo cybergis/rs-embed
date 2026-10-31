@@ -42,11 +42,11 @@ from ..tools.runtime import (
     move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
+    crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     prepare_square,
     roi_fetch_meta,
-    roi_is_full,
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
@@ -160,16 +160,17 @@ def _download_agrifm_ckpt(
     return dst
 
 
-def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> np.ndarray:
+def _resize_tchw(x_tchw: np.ndarray, *, out_hw: int) -> tuple[np.ndarray, dict[str, Any]]:
     """Make a [T,C,H,W] stack square ``out_hw`` without aspect-ratio distortion.
 
     A rectangular ROI is reflect-padded to square before resizing (see
-    :mod:`rs_embed.tools.shape`) rather than stretched.
+    :mod:`rs_embed.tools.shape`) rather than stretched. Returns ``(out,
+    shape_prep)``; the record maps ROI windows into the model's frame.
     """
     if x_tchw.ndim != 4:
         raise ModelError(f"Expected [T,C,H,W], got {x_tchw.shape}")
-    out, _ = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
-    return out
+    out, meta = prepare_square(x_tchw, size=int(out_hw), shape_adjust="pad")
+    return out, meta["shape_prep"]
 
 
 def _normalize_s2_for_agrifm(raw_tchw: np.ndarray, *, mode: str) -> np.ndarray:
@@ -755,7 +756,7 @@ class AgriFMEmbedder(EmbedderBase):
             )
 
         x_tchw = _normalize_s2_for_agrifm(raw_tchw, mode=norm_mode)
-        x_tchw = _resize_tchw(x_tchw, out_hw=image_size)
+        x_tchw, shape_prep = _resize_tchw(x_tchw, out_hw=image_size)
 
         model, wmeta, dev = _load_agrifm(
             ckpt_path=ckpt_path,
@@ -763,10 +764,10 @@ class AgriFMEmbedder(EmbedderBase):
         )
 
         grid, fmeta = _agrifm_forward_grid(model, x_tchw, device=dev)
-        # Crop the token grid back to the ROI when the fetch enlarged a rectangle
-        # to a square (no-op when full). grid is (D, H', W'); pooled follows.
-        if not roi_is_full(geo_roi):
-            grid = crop_grid_to_roi(grid, geo_roi)
+        # Crop the token grid (D, H', W') back to the ROI in the model's frame,
+        # dropping padding; pooled output pools the ROI's cells for a sub-window.
+        if output.mode == "grid":
+            grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=shape_prep)
         meta = build_meta(
             model=self.model_name,
             kind="on_the_fly",
@@ -781,6 +782,7 @@ class AgriFMEmbedder(EmbedderBase):
                 "norm_mode": norm_mode,
                 "input_hw": (int(raw_tchw.shape[-2]), int(raw_tchw.shape[-1])),
                 "grid_hw": (int(grid.shape[1]), int(grid.shape[2])),
+                "shape_prep": shape_prep,
                 **diversity_meta,
                 **check_meta,
                 **wmeta,
@@ -789,14 +791,16 @@ class AgriFMEmbedder(EmbedderBase):
         )
 
         if output.mode == "pooled":
-            if output.pooling == "mean":
-                vec = grid.mean(axis=(1, 2)).astype(np.float32)
-            elif output.pooling == "max":
-                vec = grid.max(axis=(1, 2)).astype(np.float32)
-            else:
-                raise ModelError(f"Unknown pooling mode: {output.pooling}")
-            meta = {**meta, "pooling": f"spatial_{output.pooling}"}
-            return Embedding(data=vec, meta=meta)
+            vec, pmeta = pool_for_output(
+                None,
+                grid,
+                geo_roi=geo_roi,
+                shape_prep=shape_prep,
+                pooling=output.pooling,
+                native_pooling=f"spatial_{output.pooling}",
+                model_label="AgriFM",
+            )
+            return Embedding(data=vec, meta={**meta, **pmeta})
 
         if output.mode == "grid":
             da = grid_to_dataarray(grid.astype(np.float32), meta=meta)

@@ -2,19 +2,28 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
 from rs_embed.core.errors import ModelError
 from rs_embed.tools.shape import (
     center_crop_to_square,
+    center_fit,
+    center_offset,
     center_pad_to_square,
+    crop_grid_for_output,
     crop_grid_to_roi,
+    model_roi_window,
+    pool_for_output,
     prepare_square,
     resize_square,
+    roi_in_frame,
     roi_is_full,
     roi_token_box,
 )
+from rs_embed.tools.spatial import FULL_WINDOW
 
 
 def test_crop_to_square_chw():
@@ -92,9 +101,11 @@ def test_prepare_square_roi_window_pad():
     _, meta = prepare_square(x, size=256)
     y0, y1, x0, x1 = meta["shape_prep"]["roi_window"]
     top = (59 - 33) // 2  # 13
-    assert y0 == round(top / 59, 6)
-    assert y1 == round((top + 33) / 59, 6)
+    # Exact fractions: 6-decimal rounding put token-aligned edges a token off.
+    assert y0 == top / 59
+    assert y1 == (top + 33) / 59
     assert (x0, x1) == (0.0, 1.0)  # width unchanged
+    assert meta["shape_prep"]["input_window"] == (y0, y1, x0, x1)
 
 
 def test_prepare_square_roi_window_full_when_not_padded():
@@ -143,8 +154,8 @@ def test_prepare_square_extreme_aspect_pads_and_warns():
     assert meta["shape_prep"]["applied"] == "pad_to_square"
     y0, y1, x0, x1 = meta["shape_prep"]["roi_window"]
     top = (90 - 10) // 2
-    assert y0 == round(top / 90, 6)
-    assert y1 == round((top + 10) / 90, 6)
+    assert y0 == top / 90
+    assert y1 == (top + 10) / 90
     assert (x0, x1) == (0.0, 1.0)
 
 
@@ -195,26 +206,6 @@ def test_roi_fetch_meta():
     assert roi_fetch_meta((0.2, 0.8, 0.0, 1.0)) == {"roi_window_geo": (0.2, 0.8, 0.0, 1.0)}
 
 
-def test_crop_grid_and_pool_full_returns_fallback():
-    from rs_embed.tools.shape import crop_grid_and_pool
-    from rs_embed.tools.spatial import FULL_WINDOW
-
-    grid = np.random.rand(8, 6, 6).astype(np.float32)
-    fb = np.ones(8, np.float32)
-    g, vec = crop_grid_and_pool(grid, FULL_WINDOW, pooling="mean", pooled_fallback=fb)
-    assert g is grid
-    assert vec is fb
-
-
-def test_crop_grid_and_pool_crops_and_pools():
-    from rs_embed.tools.shape import crop_grid_and_pool
-
-    grid = np.random.rand(8, 8, 8).astype(np.float32)
-    g, vec = crop_grid_and_pool(grid, (0.25, 0.75, 0.0, 1.0), pooling="mean")
-    assert g.shape[0] == 8 and g.shape[1] < 8 and g.shape[2] == 8
-    np.testing.assert_allclose(vec, g.mean(axis=(1, 2)), rtol=1e-5)
-
-
 def test_square_fetch_batch():
     from rs_embed.core.specs import BBox, PointBuffer
     from rs_embed.tools.shape import square_fetch_batch
@@ -227,3 +218,216 @@ def test_square_fetch_batch():
     assert len(raws) == 2 and len(geo_rois) == 2
     assert geo_rois[0] != (0.0, 1.0, 0.0, 1.0)
     assert geo_rois[1] == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_roi_in_frame_maps_a_window_through_padding_and_cropping():
+    # Input padded 4 px each side into a 208 px array: its frame is (4/208, 204/208).
+    frame = (4 / 208, 204 / 208, 4 / 208, 204 / 208)
+    assert roi_in_frame(frame, (0.0, 1.0, 0.0, 1.0)) == pytest.approx(frame)
+    assert roi_in_frame(frame, (0.5, 1.0, 0.0, 0.5)) == pytest.approx(
+        (104 / 208, 204 / 208, 4 / 208, 104 / 208)
+    )
+    # A cropped axis extends past [0, 1]; the mapped window is clipped to the array.
+    assert roi_in_frame((-0.1, 1.1, 0.0, 1.0), (0.0, 1.0, 0.0, 1.0)) == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_center_fit_crops_and_pads_each_axis_around_center_offset():
+    x = np.arange(5 * 3, dtype=np.float32).reshape(1, 5, 3)
+    y, window = center_fit(x, out_h=4, out_w=6, pad_mode="edge")
+
+    assert y.shape == (1, 4, 6)
+    top, left = center_offset(5, 4), center_offset(3, 6)
+    assert (top, left) == (0, 1)  # 1 px cropped after on H; 1 before / 2 after on W
+    np.testing.assert_array_equal(y[0, :, 1:4], x[0, 0:4, :])
+    np.testing.assert_array_equal(y[0, :, 0], x[0, 0:4, 0])  # edge replicated
+    assert window == pytest.approx((0.0, 5 / 4, 1 / 6, 4 / 6))
+    same, full = center_fit(x, out_h=5, out_w=3)
+    assert same is x
+    assert full == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_center_fit_rejects_bad_targets_and_empty_edge_pads():
+    x = np.ones((1, 4, 4), dtype=np.float32)
+    with pytest.raises(ModelError, match="non-negative"):
+        center_fit(x, out_h=-1, out_w=4)
+    # An empty axis still crops to an empty square, as it always did.
+    assert center_crop_to_square(np.ones((1, 0, 4), dtype=np.float32)).shape == (1, 0, 0)
+    with pytest.raises(ModelError, match="empty input"):
+        center_fit(np.ones((1, 0, 4), dtype=np.float32), out_h=4, out_w=4, pad_mode="edge")
+    padded, _ = center_fit(x, out_h=6, out_w=6, pad_mode="constant", fill_value=-1.0)
+    assert padded[0, 0, 0] == -1.0
+
+
+def test_roi_token_box_ignores_float_round_off_at_token_edges():
+    # 4/392 of a 98-token grid is exactly token 1, but evaluates to 0.99999...
+    assert roi_token_box((4 / 392, 1.0, 0.0, 1.0), grid_h=98, grid_w=98) == (1, 98, 0, 98)
+
+
+def test_prepare_square_records_the_input_window_for_crop_and_none():
+    # crop: the input extends past the square on the cropped axis.
+    x = np.ones((1, 20, 16), dtype=np.float32)
+    _, meta = prepare_square(x, size=8, shape_adjust="crop")
+    sp = meta["shape_prep"]
+    assert sp["input_window"] == (-2 / 16, 18 / 16, 0.0, 1.0)
+    assert sp["roi_window"] == (0.0, 1.0, 0.0, 1.0)
+    # none: already square, so the input fills the square.
+    _, meta = prepare_square(np.ones((1, 16, 16), dtype=np.float32), size=8)
+    assert meta["shape_prep"]["input_window"] == (0.0, 1.0, 0.0, 1.0)
+
+
+def test_model_roi_window_maps_the_geo_roi_into_the_model_frame():
+    pad = {"input_window": (0.25, 0.75, 0.0, 1.0)}  # input padded top and bottom
+    # Whole ROI: the input's own window, so a crop drops the pad.
+    assert model_roi_window(pad, (0.0, 1.0, 0.0, 1.0)) == (0.25, 0.75, 0.0, 1.0)
+    # Sub-window ROI: mapped through the pad.
+    assert model_roi_window(pad, (0.5, 1.0, 0.0, 1.0)) == (0.5, 0.75, 0.0, 1.0)
+    # A cropped axis is clipped to the model input.
+    crop = {"input_window": (-0.125, 1.125, 0.0, 1.0)}
+    assert model_roi_window(crop, (0.0, 0.5, 0.0, 1.0)) == (0.0, 0.5, 0.0, 1.0)
+    # No preprocessing record (as-is or stretched input): the frames agree.
+    assert model_roi_window(None, (0.2, 0.8, 0.0, 1.0)) == (0.2, 0.8, 0.0, 1.0)
+
+
+def test_square_spatial_window_is_exact():
+    # The window must be the exact fraction, not a 6-decimal approximation:
+    # rounding put token-aligned edges one token off on large grids.
+    from rs_embed.core.specs import BBox
+    from rs_embed.tools.projection import lonlat_to_web_mercator
+    from rs_embed.tools.spatial import square_spatial
+
+    bbox = BBox(minlon=0.0, minlat=-0.0013, maxlon=0.0098, maxlat=0.0011)
+    _, geo = square_spatial(bbox)
+    x0, y0 = lonlat_to_web_mercator(bbox.minlon, bbox.minlat)
+    x1, y1 = lonlat_to_web_mercator(bbox.maxlon, bbox.maxlat)
+    w, h = abs(x1 - x0), abs(y1 - y0)
+    top = (1.0 - h / w) / 2.0
+    assert geo == (top, top + h / w, 0.0, 1.0)
+    assert geo[0] != round(geo[0], 6)
+
+
+def _row_grid() -> np.ndarray:
+    """(1, 8, 4) grid whose value is the row index."""
+    return np.arange(8, dtype=np.float32)[None, :, None].repeat(4, axis=2)
+
+
+_PAD = {"input_window": (0.25, 0.75, 0.0, 1.0)}  # input fills rows 2..5 of 8
+_LOWER_HALF = (0.5, 1.0, 0.0, 1.0)  # of the input → grid rows 4..5
+
+
+def test_crop_grid_for_output_drops_padding_even_for_a_whole_roi():
+    g = crop_grid_for_output(_row_grid(), geo_roi=FULL_WINDOW, shape_prep=_PAD)
+    assert g[0, :, 0].tolist() == [2.0, 3.0, 4.0, 5.0]
+
+
+def _pool(native, grid, geo_roi, **kw):
+    kw.setdefault("pooling", "mean")
+    kw.setdefault("native_pooling", "native")
+    return pool_for_output(
+        native, grid, geo_roi=geo_roi, shape_prep=_PAD, model_label="Model", **kw
+    )
+
+
+def test_pool_for_output_keeps_the_native_vector_for_a_whole_roi():
+    vec, meta = _pool(np.array([42.0]), _row_grid(), FULL_WINDOW)
+    assert vec.tolist() == [42.0] and vec.dtype == np.float32
+    assert meta == {"pooling": "native"}
+
+
+@pytest.mark.parametrize(("pooling", "expected"), [("mean", 4.5), ("max", 5.0)])
+def test_pool_for_output_pools_the_roi_cells_in_the_model_frame(pooling, expected):
+    vec, meta = _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, pooling=pooling)
+    assert vec.tolist() == [expected]
+    assert meta == {"pooling": f"roi_grid_{pooling}", "roi_pooled": True, "roi_grid_hw": (2, 4)}
+
+
+def test_pool_for_output_follows_a_fixed_native_reduction():
+    whole, whole_meta = _pool(
+        np.array([42.0]), _row_grid(), FULL_WINDOW, pooling="max", native_reduce="mean"
+    )
+    assert whole_meta == {"pooling": "native", "requested_pooling": "max"}
+    vec, meta = _pool(
+        np.array([42.0]), _row_grid(), _LOWER_HALF, pooling="max", native_reduce="mean"
+    )
+    assert vec.tolist() == [4.5]
+    assert meta == {
+        "pooling": "roi_grid_mean",
+        "requested_pooling": "max",
+        "roi_pooled": True,
+        "roi_grid_hw": (2, 4),
+    }
+
+
+def test_pool_for_output_keeps_the_native_vector_when_the_roi_covers_every_cell():
+    # An almost-square ROI: its margin is under one token, so its cells are the whole grid.
+    almost_full = (0.0, 1.0, 0.01, 0.99)
+    vec, meta = pool_for_output(
+        np.array([42.0]),
+        _row_grid(),
+        geo_roi=almost_full,
+        shape_prep=None,
+        pooling="mean",
+        native_pooling="native",
+        model_label="Model",
+    )
+    assert vec.tolist() == [42.0] and meta == {"pooling": "native"}
+
+
+def test_pool_for_output_puts_a_grid_reduction_through_the_head_too():
+    def double(v):
+        return v * 2
+
+    whole, _ = _pool(None, _row_grid(), FULL_WINDOW, head=double)
+    roi, _ = _pool(None, _row_grid(), _LOWER_HALF, head=double)
+    assert whole.tolist() == [7.0]  # 2 * mean of rows 0..7
+    assert roi.tolist() == [9.0]  # 2 * mean of rows 4..5
+
+
+def test_pool_for_output_warns_with_one_message_for_any_roi():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for geo_roi in (_LOWER_HALF, (0.0, 0.5, 0.0, 1.0)):
+            _pool(np.array([42.0]), None, geo_roi)
+    # Python's default filter then shows a batch's warning once, not once per item.
+    assert len({str(w.message) for w in caught}) == 1
+
+
+def test_pool_for_output_applies_the_head_after_the_reduction():
+    vec, _ = _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, head=lambda v: v * 2)
+    assert vec.tolist() == [9.0]
+
+
+def test_pool_for_output_reduces_the_whole_grid_without_a_native_vector():
+    vec, meta = _pool(None, _row_grid(), FULL_WINDOW, pooling="max")
+    assert vec.tolist() == [7.0] and meta == {"pooling": "native"}
+    with pytest.raises(ModelError, match="neither a pooled vector nor a grid"):
+        _pool(None, None, FULL_WINDOW)
+
+
+def test_pool_for_output_warns_when_the_roi_cannot_be_pooled():
+    with pytest.warns(UserWarning, match="no token grid"):
+        vec, meta = _pool(np.array([42.0]), None, _LOWER_HALF)
+    assert vec.tolist() == [42.0]
+    assert meta == {"pooling": "native", "roi_pooled": False}
+
+
+def test_pool_for_output_rejects_a_roi_vector_in_another_space():
+    with pytest.raises(ModelError, match="same space"):
+        _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, head=lambda v: np.concatenate([v, v]))
+
+
+@pytest.mark.parametrize("kw", [{"pooling": "median"}, {"native_reduce": "cls"}])
+def test_pool_for_output_rejects_unknown_pooling(kw):
+    with pytest.raises(ModelError, match="Unknown pooling"):
+        _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, **kw)
+
+
+def test_pool_for_output_rejects_a_fixed_max():
+    # The tiler merges tiles of a fixed-pooling model as a mean.
+    with pytest.raises(ModelError, match="fixed pooling is a mean"):
+        _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, native_reduce="max")
+
+
+def test_model_roi_window_warns_when_the_roi_is_cropped_away():
+    crop = {"input_window": (0.0, 1.0, -0.5, 1.5)}  # the long axis lost a quarter each side
+    with pytest.warns(UserWarning, match="lies outside the part of the input"):
+        model_roi_window(crop, (0.0, 1.0, 0.0, 0.2))

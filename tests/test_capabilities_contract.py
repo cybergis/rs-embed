@@ -103,8 +103,14 @@ def test_manages_own_input_prep_flag_matches_expected_models():
     assert flagged == {"gse"}
 
 
-def test_tiled_dispatch_hook_only_overridden_by_thor():
-    """Behavior parity with the removed tiling-level 'thor' hardcode."""
+def test_tiled_dispatch_hook_only_overridden_by_declared_models():
+    """The tiled-dispatch config hook is a deliberate, pinned registry.
+
+    thor: behavior parity with the removed tiling-level 'thor' hardcode.
+    olmoearth: FlexiViT consumes dispatched inputs at exactly ``tile_size``
+    (no internal resize) — also the channel through which the flexible
+    native-size user-data path sets the encoder's per-request size.
+    """
     from rs_embed.embedders.base import EmbedderBase
 
     overriding = {
@@ -113,7 +119,7 @@ def test_tiled_dispatch_hook_only_overridden_by_thor():
         if get_embedder_cls(model_id).tiled_dispatch_model_config
         is not EmbedderBase.tiled_dispatch_model_config
     }
-    assert overriding == {"thor"}
+    assert overriding == {"thor", "olmoearth"}
 
     thor_cls = get_embedder_cls("thor")
     cfg = thor_cls().tiled_dispatch_model_config({"variant": "base"}, tile_size=288)
@@ -122,6 +128,13 @@ def test_tiled_dispatch_hook_only_overridden_by_thor():
         "_input_prep_mode": "tile",
         "_input_prep_tile_size": 288,
     }
+
+    oe_cls = get_embedder_cls("olmoearth")
+    assert oe_cls().tiled_dispatch_model_config({"variant": "base"}, tile_size=128) == {
+        "variant": "base",
+        "image_size": 128,
+    }
+    assert oe_cls().tiled_dispatch_model_config(None, tile_size=256) == {"image_size": 256}
 
 
 def test_declaration_overrides_signature_for_routing():

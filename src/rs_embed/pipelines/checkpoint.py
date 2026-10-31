@@ -20,6 +20,7 @@ from ..tools.checkpoint_utils import (
     is_incomplete_combined_manifest,
     load_saved_arrays,
     restore_prefetch_checkpoint_cache,
+    restore_prefetch_checkpoint_fetch_meta,
     store_prefetch_checkpoint_arrays,
 )
 from ..tools.manifest import (
@@ -28,7 +29,9 @@ from ..tools.manifest import (
 from ..tools.manifest import (
     summarize_status,
 )
-from ..tools.serialization import jsonable, sanitize_key, sensor_cache_key, utc_ts
+from ..tools.normalization import normalize_model_name
+from ..tools.runtime import fetch_semantics_for_model
+from ..tools.serialization import input_cache_key, jsonable, sanitize_key, utc_ts
 from ..writers import write_arrays
 from .runner import run_with_retry
 
@@ -248,6 +251,15 @@ class CheckpointManager:
         return cache
 
     @staticmethod
+    def restore_prefetch_fetch_meta(
+        manifest: dict[str, Any],
+    ) -> dict[tuple[int, str], dict[str, Any]]:
+        prefetch_meta = manifest.get("prefetch")
+        if not isinstance(prefetch_meta, dict):
+            return {}
+        return restore_prefetch_checkpoint_fetch_meta(prefetch_meta=prefetch_meta)
+
+    @staticmethod
     def store_prefetch_arrays(
         *,
         arrays: dict[str, np.ndarray],
@@ -255,6 +267,7 @@ class CheckpointManager:
         sensor_by_key: dict[str, SensorSpec],
         inputs_cache: dict[tuple[int, str], np.ndarray],
         n_items: int,
+        fetch_meta: dict[tuple[int, str], dict[str, Any]] | None = None,
     ) -> None:
         store_prefetch_checkpoint_arrays(
             arrays=arrays,
@@ -262,11 +275,18 @@ class CheckpointManager:
             sensor_by_key=sensor_by_key,
             inputs_cache=inputs_cache,
             n_items=n_items,
+            fetch_meta=fetch_meta,
         )
 
     @staticmethod
-    def drop_prefetch_arrays(arrays: dict[str, np.ndarray]) -> None:
+    def drop_prefetch_arrays(
+        arrays: dict[str, np.ndarray], manifest: dict[str, Any] | None = None
+    ) -> None:
         drop_prefetch_checkpoint_arrays(arrays)
+        # The per-item fetch metadata only serves a resume of these arrays.
+        for entry in ((manifest or {}).get("prefetch") or {}).values():
+            if isinstance(entry, dict):
+                entry.pop("fetch_meta", None)
 
     @staticmethod
     def collect_input_refs(
@@ -285,7 +305,7 @@ class CheckpointManager:
                 continue
             pref = prev.get("inputs")
             if isinstance(pref, dict):
-                sk = sensor_cache_key(ps)
+                sk = input_cache_key(ps, fetch_semantics_for_model(normalize_model_name(pm)))
                 clean = dict(pref)
                 clean.pop("dedup_reused", None)
                 refs.setdefault(sk, clean)

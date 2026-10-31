@@ -23,7 +23,11 @@ def _tokens_with_cls() -> np.ndarray:
 
 def test_full_frame_grid_is_unchanged():
     emb = build_token_embedding(
-        _tokens_with_cls(), geo_roi=(0.0, 1.0, 0.0, 1.0), output=OutputSpec.grid(), meta={}
+        _tokens_with_cls(),
+        geo_roi=(0.0, 1.0, 0.0, 1.0),
+        output=OutputSpec.grid(),
+        meta={},
+        model_label="SatMAE",
     )
     assert emb.meta["grid_hw"] == (_HW, _HW)
     assert emb.meta["cls_removed"] is True
@@ -32,7 +36,9 @@ def test_full_frame_grid_is_unchanged():
 
 def test_subwindow_crops_grid_back_to_roi():
     roi = (0.0, 0.5, 0.0, 0.5)  # top-left quarter
-    emb = build_token_embedding(_tokens_with_cls(), geo_roi=roi, output=OutputSpec.grid(), meta={})
+    emb = build_token_embedding(
+        _tokens_with_cls(), geo_roi=roi, output=OutputSpec.grid(), meta={}, model_label="SatMAE"
+    )
     assert emb.meta["grid_hw"] == (7, 7)
     assert tuple(emb.data.shape) == (_D, 7, 7)
 
@@ -40,10 +46,18 @@ def test_subwindow_crops_grid_back_to_roi():
 def test_pooled_full_vs_roi_differ_and_label():
     tokens = _tokens_with_cls()
     full = build_token_embedding(
-        tokens, geo_roi=(0.0, 1.0, 0.0, 1.0), output=OutputSpec.pooled(), meta={}
+        tokens,
+        geo_roi=(0.0, 1.0, 0.0, 1.0),
+        output=OutputSpec.pooled(),
+        meta={},
+        model_label="SatMAE",
     )
     roi = build_token_embedding(
-        tokens, geo_roi=(0.0, 0.5, 0.0, 0.5), output=OutputSpec.pooled(), meta={}
+        tokens,
+        geo_roi=(0.0, 0.5, 0.0, 0.5),
+        output=OutputSpec.pooled(),
+        meta={},
+        model_label="SatMAE",
     )
     assert full.meta["pooling"] == "patch_mean"
     assert roi.meta["pooling"] == "roi_grid_mean"
@@ -54,7 +68,9 @@ def test_pooled_full_vs_roi_differ_and_label():
 def test_roi_pooled_equals_manual_roi_token_mean():
     tokens = _tokens_with_cls()
     roi = (0.0, 0.5, 0.0, 0.5)
-    emb = build_token_embedding(tokens, geo_roi=roi, output=OutputSpec.pooled(), meta={})
+    emb = build_token_embedding(
+        tokens, geo_roi=roi, output=OutputSpec.pooled(), meta={}, model_label="SatMAE"
+    )
     # Manually: drop CLS, reshape to grid, take top-left 7x7, mean over tokens.
     patch = tokens[1:].reshape(_HW, _HW, _D)
     expected = patch[:7, :7, :].reshape(-1, _D).mean(axis=0).astype(np.float32)

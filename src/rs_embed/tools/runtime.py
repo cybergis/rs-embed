@@ -41,6 +41,11 @@ from .output import normalize_embedding_output
 
 _T = TypeVar("_T")
 
+# A flexible-size model consuming a user input natively beyond this side
+# length gets a UserWarning: ViT attention cost grows quadratically with
+# token count, so very large native passes can be slow or exhaust GPU memory.
+_FLEX_NATIVE_WARN_PX = 512
+
 
 def resolve_device_auto_torch(device: str) -> str:
     if device != "auto":
@@ -340,6 +345,65 @@ def require_model_config_support(
     )
 
 
+def tiled_dispatch_config(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    *,
+    tile_size: int,
+) -> dict[str, Any] | None:
+    """Let the embedder adapt ``model_config`` for a dispatch at *tile_size*.
+
+    Delegates to ``EmbedderBase.tiled_dispatch_model_config``; embedders that
+    do not override the hook get the config back unchanged.
+    """
+    hook = getattr(embedder, "tiled_dispatch_model_config", None)
+    if hook is None:
+        return model_config
+    return hook(model_config, tile_size=int(tile_size))
+
+
+def native_input_size(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    input_hw: tuple[int, int] | None = None,
+) -> int | None:
+    """The input size the embedder resolves for this request, else ``None``.
+
+    Asks ``resolve_input_image_size``: with *input_hw*, a flexible-size
+    embedder answers with the size it consumes that input at; fixed-size
+    embedders (the base hook) and embedders without the hook give ``None``.
+    Errors from the hook propagate.
+    """
+    hook = getattr(embedder, "resolve_input_image_size", None)
+    if not callable(hook):
+        return None
+    if input_hw is None:
+        v = hook(model_config)
+    else:
+        v = hook(model_config, input_hw=(int(input_hw[0]), int(input_hw[1])))
+    return int(v) if v is not None and int(v) > 0 else None
+
+
+def whole_input_config(
+    embedder: Any,
+    model_config: dict[str, Any] | None,
+    *,
+    native: int | None,
+) -> tuple[dict[str, Any] | None, str]:
+    """``(model_config, resolved_mode)`` for an input dispatched whole, untiled.
+
+    A flexible-size embedder consumes it at the size from
+    :func:`native_input_size`, injected through ``tiled_dispatch_model_config``
+    (``"native"``); any other embedder gets the caller's config, exactly as in
+    resize mode (``"resize"``). Shared by the single-point and batch tilers and
+    the user-data dispatch, so an input that needs no tiling is treated the
+    same way on every path.
+    """
+    if native is None:
+        return model_config, "resize"
+    return tiled_dispatch_config(embedder, model_config, tile_size=native), "native"
+
+
 def call_embedder_get_embedding(
     *,
     embedder: Any,
@@ -527,6 +591,34 @@ def embedder_honors_fetch_meta(embedder_cls: type) -> bool:
     per-item sync fallback, PrefetchManager planning) must use this predicate.
     """
     return _embedder_method_accepts_parameter(embedder_cls, "get_embedding", "fetch_meta")
+
+
+def embedder_fetch_semantics(embedder: Any) -> str:
+    """Fingerprint of the temporal semantics of an embedder's provider fetch.
+
+    Two models may share one prefetched input (sensor dedup / band-union
+    merging) only when their fetch semantics are identical — a whole-window
+    composite is not derivable from a binned series or vice versa. Sensor
+    identity alone cannot express this (e.g. clay/agrifm/galileo resolve to
+    the same SensorSpec but need single / equal-division / custom-binned
+    fetches), so cache and plan keys must include this fingerprint.
+
+    - ``"custom:<Class>"`` — overrides ``fetch_input`` (own binning/band contract);
+    - ``"multi:<n>"`` — spec-driven equal-division series (``[T,C,H,W]``);
+    - ``"single"`` — whole-window composite (``[C,H,W]``, the generic default).
+    """
+    if _overrides_base_method(embedder, "fetch_input"):
+        return f"custom:{type(embedder).__name__}"
+    spec = getattr(embedder, "input_spec", None)
+    if spec is not None and str(getattr(spec, "temporal_mode", "single")) == "multi":
+        return f"multi:{int(getattr(spec, 'n_frames', None) or 8)}"
+    return "single"
+
+
+@lru_cache(maxsize=128)
+def fetch_semantics_for_model(model_n: str) -> str:
+    """Cached :func:`embedder_fetch_semantics` by canonical model name."""
+    return embedder_fetch_semantics(get_embedder_cls(model_n)())
 
 
 def fetch_input_extras_from_model_config(
@@ -774,3 +866,210 @@ def run_embedding_request(
         ctx=ctx,
         output=output,
     )
+
+
+def run_user_input_request(
+    *,
+    model_n: str,
+    spatials: list[SpatialSpec],
+    input_arrays: list[np.ndarray],
+    temporal: TemporalSpec | None,
+    sensor: SensorSpec,
+    model_config: dict[str, Any] | None,
+    output: OutputSpec,
+    device: str,
+    input_metas: list[dict[str, Any]] | None = None,
+    batch_size: int | None = None,
+    input_prep: Any | None = None,
+) -> list[Embedding]:
+    """Run an embedding request over user-provided inputs (no provider fetch).
+
+    *input_arrays* must already be matched and sliced to the model's band
+    order for *sensor* (see ``tools.user_data.match_user_data_to_sensor``);
+    this function only dispatches them through the embedder's prefetched-input
+    path. ``backend="auto"`` is passed through so the cached embedder instance
+    is shared with the default fetch path, but with an input array present no
+    embedder resolves a provider, so no provider auth is required.
+
+    Input prep follows the package default: under ``"tile"`` (the default),
+    arrays larger than the model's tile size go through the shared tiler
+    (native-resolution tiles + stitched grids — the same fairness semantics as
+    the fetch path), while arrays that cannot tile keep the efficient batched
+    dispatch. ``"resize"`` sends every array straight to the embedder, which
+    downsamples to its fixed input size.
+
+    Parameters
+    ----------
+    model_n : str
+        Canonical model name.
+    spatials : list[SpatialSpec]
+        Spatial metadata per input (location context for models that condition
+        on geometry, and for embedding meta).
+    input_arrays : list[np.ndarray]
+        Model-band-order arrays aligned with *spatials*.
+    temporal : TemporalSpec or None
+        Temporal metadata for models that condition on time.
+    sensor : SensorSpec
+        The model's resolved input sensor (band order authority).
+    model_config : dict or None
+        Optional model-specific settings.
+    output : OutputSpec
+        Requested output layout.
+    device : str
+        Target inference device.
+    input_metas : list of dict or None
+        Optional per-item provenance recorded as ``meta['user_input']``.
+    batch_size : int or None
+        Upper bound on how many items reach one embedder batch call: the
+        dispatch is chunked to this size. Embedders with a smaller internal
+        per-device forward batch still split further, so this caps GPU memory
+        but cannot raise a model's own default. ``None`` dispatches all items
+        in one call (the embedder's internal chunking applies). Items routed
+        through the tiler are processed one at a time regardless (their tiles
+        are batched by the embedder internally).
+    input_prep : InputPrepSpec or str or None
+        API-side input preprocessing policy; ``None`` uses the package
+        default ``"tile"``. See the function description.
+
+    Returns
+    -------
+    list[Embedding]
+        Embeddings aligned with *spatials*.
+
+    Raises
+    ------
+    ModelError
+        If lengths mismatch, ``batch_size`` is invalid, or the embedder
+        cannot take prefetched inputs.
+    """
+    if len(spatials) != len(input_arrays):
+        raise ModelError(
+            f"spatials/input arrays length mismatch: {len(spatials)} != {len(input_arrays)}"
+        )
+    if batch_size is not None and int(batch_size) < 1:
+        raise ModelError(f"batch_size must be >= 1, got {batch_size}.")
+    device_n = normalize_device_name(device)
+    embedder, lock = get_embedder_bundle_cached(model_n, "auto", device_n)
+    if not embedder_accepts_input_chw(type(embedder)):
+        raise ModelError(
+            f"Model '{model_n}' does not accept prefetched inputs (input_chw); "
+            "it cannot embed user-provided data."
+        )
+    assert_supported(embedder, backend="auto", output=output, temporal=temporal)
+
+    if model_config is not None:
+        require_model_config_support(
+            embedder=embedder,
+            model_config=model_config,
+            method_name="get_embeddings_batch_from_inputs",
+        )
+
+    from .tiling import (
+        _call_embedder_get_embedding_with_input_prep,
+        _resolve_tile_params,
+        _stamp_input_prep_meta,
+    )
+
+    (
+        input_prep_eff,
+        input_prep_resolved,
+        requested_mode,
+        _model_policy,
+    ) = resolve_model_aware_input_prep(model_n=model_n, input_prep=input_prep, output=output)
+
+    # Route per item. Fixed-size models: arrays larger than the model's tile
+    # size go through the shared tiler (native resolution preserved via
+    # tiles), everything else keeps the efficient batched dispatch.
+    # Flexible-size models (resolve_input_image_size adapts to input_hw)
+    # consume any array as one seamless native pass instead — no tiling, with
+    # a warning above _FLEX_NATIVE_WARN_PX since attention cost grows
+    # quadratically with token count. An explicitly configured size restores
+    # fixed-size behavior.
+    tiled_set: set[int] = set()
+    native_sizes: dict[int, int | None] = {}
+    if str(getattr(input_prep_resolved, "mode", "tile")) != "resize":
+        params = _resolve_tile_params(embedder, input_prep_resolved, model_config)
+        for i, x in enumerate(input_arrays):
+            h, w = int(x.shape[-2]), int(x.shape[-1])
+            native = native_input_size(embedder, model_config, (h, w))
+            threshold = native if native is not None else params.tile_size
+            if threshold > 0 and (h > threshold or w > threshold):
+                tiled_set.add(i)
+            else:
+                native_sizes[i] = native
+    else:
+        native_sizes = dict.fromkeys(range(len(input_arrays)))
+
+    max_native = max((v for v in native_sizes.values() if v is not None), default=0)
+    if max_native > _FLEX_NATIVE_WARN_PX:
+        warnings.warn(
+            f"Model '{model_n}' will consume a {max_native}px input as one "
+            f"native pass (> {_FLEX_NATIVE_WARN_PX}px). Attention cost grows "
+            "quadratically with token count; expect high GPU memory/time. "
+            "Pass input_prep=InputPrepSpec(mode='tile', tile_size=...) to "
+            "tile instead, or 'resize' to downsample.",
+            UserWarning,
+            stacklevel=3,
+        )
+
+    results: list[Embedding | None] = [None] * len(input_arrays)
+
+    # Direct items grouped by native size: one embedder batch call per group,
+    # configured by the same whole-input rule as the tilers (a flexible model
+    # consumes the group's inputs at exactly that size).
+    direct_groups: dict[int | None, list[int]] = {}
+    for i in sorted(native_sizes):
+        direct_groups.setdefault(native_sizes[i], []).append(i)
+    for native, indices in direct_groups.items():
+        group_config, resolved_mode = whole_input_config(embedder, model_config, native=native)
+        if group_config is not None and group_config is not model_config:
+            require_model_config_support(
+                embedder=embedder,
+                model_config=group_config,
+                method_name="get_embeddings_batch_from_inputs",
+            )
+        step = int(batch_size) if batch_size is not None else max(1, len(indices))
+        for s0 in range(0, len(indices), step):
+            chunk = indices[s0 : s0 + step]
+            kwargs: dict[str, Any] = {
+                "spatials": [spatials[i] for i in chunk],
+                "input_chws": [input_arrays[i] for i in chunk],
+                "temporal": temporal,
+                "sensor": sensor,
+                "output": output,
+                "backend": "auto",
+                "device": device_n,
+            }
+            if group_config is not None:
+                kwargs["model_config"] = group_config
+            with lock:
+                out = embedder.get_embeddings_batch_from_inputs(**kwargs)
+            for i, emb in zip(chunk, out, strict=True):
+                emb = normalize_embedding_output(emb=emb, output=output)
+                results[i] = _stamp_input_prep_meta(
+                    emb, requested_mode=requested_mode, resolved_mode=resolved_mode
+                )
+
+    for i in sorted(tiled_set):
+        with lock:
+            results[i] = _call_embedder_get_embedding_with_input_prep(
+                embedder=embedder,
+                spatial=spatials[i],
+                temporal=temporal,
+                sensor=sensor,
+                output=output,
+                backend="auto",
+                device=device_n,
+                input_chw=input_arrays[i],
+                input_prep=input_prep_eff,
+                model_config=model_config,
+            )
+
+    embs = [emb for emb in results if emb is not None]
+    if len(embs) != len(input_arrays):
+        raise ModelError("Internal error: user-input dispatch lost items.")
+    if input_metas is not None:
+        for emb, item_meta in zip(embs, input_metas, strict=False):
+            if item_meta and isinstance(getattr(emb, "meta", None), dict):
+                emb.meta.setdefault("user_input", item_meta)
+    return embs

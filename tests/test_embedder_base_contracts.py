@@ -128,14 +128,13 @@ def test_tessera_get_embedding_has_no_input_chw_param(monkeypatch):
 
     embedder = TesseraEmbedder()
     embedder.model_name = "tessera"
-    monkeypatch.setattr(tessera_mod, "_TESSERA_PROJECTION_WARNED", True)
     monkeypatch.setattr(embedder, "_get_gt", lambda _cache: _FakeGeoTessera())
     monkeypatch.setattr(
         tessera_mod,
-        "_mosaic_and_crop_strict_roi",
-        lambda tiles_fn, bbox_4326: (
+        "_resample_tiles_to_common_grid",
+        lambda tile_rows, grid: (
             np.full((64, 1, 1), 1.0, dtype=np.float32),
-            {"mosaic_hw": (1, 1), "crop_hw": (1, 1)},
+            {"tile_crs": ["EPSG:3857"], **grid.meta()},
         ),
     )
 

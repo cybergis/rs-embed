@@ -8,7 +8,7 @@
 | Model ID             | `anysat`                                                            |
 | Family / Backbone    | AnySat (vendored local runtime)                                     |
 | Adapter type         | `on-the-fly`                                                        |
-| Model config keys    | `variant` (default: `base`; choices: `base`)                        |
+| Model config keys    | `variant` (default: `base`; choices: `base`), `patch_size` (default: `1`), `grid_feature_mode`, `pooled_source` |
 | Training alignment   | Medium (depends on frame count, normalization mode, and image size) |
 
 !!! success "AnySat In 30 Seconds"
@@ -18,7 +18,7 @@
 
     - **required** `s2_dates` (per-frame DOY) derived from frame-bin midpoints: see [Input Contract](#input-contract)
     - dense sub-patch grid as the default `grid` path, denser than the usual ViT patch grid: see [Output Semantics](#output-semantics)
-    - `sensor.scale_m` / `fetch.scale_m` must be a positive multiple of 10 m: see [Preprocessing Pipeline](#preprocessing-pipeline)
+    - adjustable `patch_size` (pixels per patch side, AnySat's own `patch_size` = 10 m × it) that sets the patch-token grid: see [Patch size](#patch-size)
 
 ---
 
@@ -30,11 +30,11 @@
 | `TemporalSpec`        | `range` recommended — window split into `T` sub-windows for temporal modeling      |
 | Default collection    | `COPERNICUS/S2_SR_HARMONIZED`                                                      |
 | Default bands (order) | `B2, B3, B4, B5, B6, B7, B8, B8A, B11, B12` (10-band)                              |
-| Default fetch         | `scale_m=10` (must be a positive multiple of 10), `cloudy_pct=30`, `composite="median"`, `fill_value=0.0` |
+| Default fetch         | `scale_m=10`, `cloudy_pct=30`, `composite="median"`, `fill_value=0.0` |
 | `input_chw`           | `CHW` (`C=10`, repeated to `T`) **or** `TCHW` (`C=10`, padded/truncated to exact `T`); raw SR `0..10000` |
 | Side inputs           | **required** `s2_dates` `[1,T]` — auto-derived from per-frame midpoint DOY         |
 
-`T` is controlled by `RS_EMBED_ANYSAT_FRAMES` (default `8`). `sensor.scale_m` / `fetch.scale_m` must be a positive multiple of 10 m.
+`T` is controlled by `RS_EMBED_ANYSAT_FRAMES` (default `8`). AnySat's S2 branch assumes 10 m pixels: at another `scale_m` it reads the input at the wrong pixel spacing, and nothing warns about it.
 
 ---
 
@@ -52,7 +52,7 @@ flowchart LR
 ```
 
 !!! warning "Important constraint"
-    `sensor.scale_m` or `fetch.scale_m` must be a positive multiple of 10 meters.
+    The resize target (`RS_EMBED_ANYSAT_IMG`, default `24`) must be divisible by `patch_size`; otherwise the call raises a `ModelError`.
 
 ---
 
@@ -82,6 +82,7 @@ flowchart LR
 | -------------------------------- | -------------------------- | ------------------------------------------------------------------- |
 | `RS_EMBED_ANYSAT_FRAMES`         | `8`                        | Number of temporal frames `T`                                       |
 | `RS_EMBED_ANYSAT_IMG`            | `24`                       | Per-frame resize target (square)                                    |
+| `RS_EMBED_ANYSAT_PATCH_SIZE`     | `1`                        | Patch side in pixels (`model_config["patch_size"]` wins)            |
 | `RS_EMBED_ANYSAT_NORM`           | `per_tile_zscore`          | Series normalization mode                                           |
 | `RS_EMBED_ANYSAT_MODEL_SIZE`     | `base`                     | AnySat model size                                                   |
 | `RS_EMBED_ANYSAT_GRID_MODE`      | `dense`                    | Grid path native AnySat spatial output (`dense` or `patch`)         |
@@ -100,9 +101,24 @@ flowchart LR
 
 ## Output Semantics
 
-**`pooled`**: defaults to spatial pooling over AnySat's `patch` grid; pass `pooled_source="tile"` (or `RS_EMBED_ANYSAT_POOLED_SOURCE=tile`) to use the native AnySat tile embedding instead.
+**`pooled`**: defaults to spatial pooling over AnySat's `patch` grid; pass `pooled_source="tile"` (or `RS_EMBED_ANYSAT_POOLED_SOURCE=tile`) to use the native AnySat tile embedding instead. For a rectangular ROI the tile mode mean-pools the ROI's patch tokens from the same forward (see [Pooled output for an ROI sub-window](../spatial_roi.md#pooled-output-for-an-roi-sub-window)).
 
 **`grid`**: defaults to AnySat `dense` sub-patch features `(D,H,W)`; pass `grid_feature_mode="patch"` (or `RS_EMBED_ANYSAT_GRID_MODE=patch`) to recover the older patch-grid behavior.
+
+### Patch size
+
+AnySat is trained across patch sizes, so the patch is a free knob, like `patch_size` on `olmoearth` and `RS_EMBED_THOR_PATCH_SIZE` on `thor`. In `rs-embed` it is given in pixels per patch side: `model_config={"patch_size": 2}` (or `RS_EMBED_ANYSAT_PATCH_SIZE=2`) calls AnySat with its own `patch_size=20` (meters at its nominal 10 m S2 resolution). It does not follow `sensor.scale_m`, which only sets the fetch resolution.
+
+At the default `image_size=24`:
+
+| `patch_size` | AnySat `patch_size` | `patch` grid | `dense` grid | `tile` |
+| ------------ | ------------------- | ------------ | ------------ | ------ |
+| `1` (default) | `10`               | `24×24`      | `24×24`      | `(768,)` |
+| `2`          | `20`                | `12×12`      | `24×24`      | `(768,)` |
+| `3`          | `30`                | `8×8`        | `24×24`      | `(768,)` |
+| `4`          | `40`                | `6×6`        | `24×24`      | `(768,)` |
+
+Larger patches mean fewer tokens and coarser patch-grid / patch-pooled output. The `dense` grid stays at pixel resolution: each pixel carries its patch token next to its own sub-patch feature. `meta` records both `patch_size` (pixels) and `patch_size_m` (the value passed to AnySat).
 
 ---
 
@@ -142,6 +158,6 @@ export RS_EMBED_ANYSAT_IMG=24
 
 ## Reference
 
-- `sensor.scale_m` / `fetch.scale_m` must be a positive multiple of 10 m — non-multiples raise immediately.
+- `patch_size` is in pixels; the resize target must be divisible by it — otherwise the call raises immediately.
 - The default grid output uses `dense` (sub-patch resolution), which differs from most other models' patch-level grids.
 - Single-frame `CHW` input is silently repeated to `T` frames — this is valid but produces a different temporal signal than actual multi-frame data.

@@ -120,7 +120,7 @@ flowchart LR
 
 ## Output Semantics
 
-**`pooled`**: TerraFM's own pooled forward output `(D,)` — not token pooling.
+**`pooled`**: TerraFM's own pooled forward output `(D,)` — not token pooling. A rectangular ROI mean-pools the ROI's normed tokens instead (`roi_grid_mean`); `pooling="max"` changes neither vector (see [Pooled output for an ROI sub-window](../spatial_roi.md#pooled-output-for-an-roi-sub-window)).
 
 **`grid`**: last-layer feature map via `extract_feature(...)` `(D,H,W)`; metadata records `grid_type="feature_map"`.
 

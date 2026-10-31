@@ -67,13 +67,7 @@ def _validate_large_file(path: str, *, min_bytes: int = HF_MIN_BYTES) -> str:
 
 
 def _download_embed_tif(data_dir: str) -> str:
-    try:
-        from huggingface_hub import hf_hub_download
-    except Exception as e:
-        raise ModelError(
-            "CopernicusEmbed auto-download requires huggingface_hub. "
-            "Install: pip install huggingface_hub"
-        ) from e
+    from ..shared import hf_hub_download_cache_first
 
     root = _normalize_path(data_dir)
     os.makedirs(root, exist_ok=True)
@@ -87,13 +81,12 @@ def _download_embed_tif(data_dir: str) -> str:
         token=token,
     )
     try:
-        path = hf_hub_download(local_dir=root, **kwargs)
+        path = hf_hub_download_cache_first(local_dir=root, **kwargs)
     except TypeError:
-        path = hf_hub_download(cache_dir=root, **kwargs)
+        path = hf_hub_download_cache_first(cache_dir=root, **kwargs)
     except Exception as e:
         raise ModelError(
-            "Failed to download Copernicus embed GeoTIFF from Hugging Face dataset "
-            f"'{HF_REPO_ID}'."
+            f"Failed to download Copernicus embed GeoTIFF from Hugging Face dataset '{HF_REPO_ID}'."
         ) from e
 
     return _validate_large_file(path)
@@ -160,7 +153,9 @@ def _get_tiff_tag(tags: Any, name: str, code: int):
     return tag
 
 
-def _fallback_global_georef(shape: tuple[int, ...], axis_order: str) -> tuple[float, float, float, float]:
+def _fallback_global_georef(
+    shape: tuple[int, ...], axis_order: str
+) -> tuple[float, float, float, float]:
     if axis_order == "chw":
         _, height, width = shape
     else:

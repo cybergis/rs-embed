@@ -444,6 +444,162 @@ def test_run_batch_tiled_single_tile_keeps_roi_meta():
     assert emb.seen_fetch_metas == [{"roi_window_geo": _ROI}]
 
 
+class _ConfigRecordingTiledRoiEmbedder(_FakeTiledRoiEmbedder):
+    """Records (input shape, model_config) per call; adapts its config for tiles."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls: list = []
+
+    def tiled_dispatch_model_config(self, model_config, *, tile_size):
+        return {**(model_config or {}), "_tiled": int(tile_size)}
+
+    def get_embedding(self, *, input_chw, output, model_config=None, fetch_meta=None, **kwargs):
+        return self.get_embeddings_batch_from_inputs(
+            spatials=[None],
+            input_chws=[input_chw],
+            output=output,
+            model_config=model_config,
+            fetch_metas=[fetch_meta],
+        )[0]
+
+    def get_embeddings_batch_from_inputs(self, *, input_chws, model_config=None, **kwargs):
+        self.calls.extend((tuple(np.asarray(x).shape), model_config) for x in input_chws)
+        return super().get_embeddings_batch_from_inputs(input_chws=input_chws, **kwargs)
+
+
+def _run_batch_tiled_grid(emb, images, *, fetch_metas, model_config=None):
+    from rs_embed.pipelines.inference import InferenceEngine
+
+    cfg = ExportConfig(input_prep=InputPrepSpec.tile(tile_size=4))
+    engine = InferenceEngine(device="cpu", output=OutputSpec.grid(), config=cfg)
+    return engine._run_batch_tiled(
+        idxs=list(range(len(images))),
+        spatials=[BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0)] * len(images),
+        temporal=None,
+        sensor=None,
+        embedder=emb,
+        lock=threading.RLock(),
+        backend="gee",
+        get_input_fn=lambda i: images[i],
+        batch_size=16,
+        continue_on_error=False,
+        on_done=lambda i: None,
+        use_lock=False,
+        model_name="fake_tiled_roi",
+        model_config=model_config,
+        get_fetch_meta_fn=lambda i: dict(fetch_metas[i]),
+    )
+
+
+def test_run_batch_tiled_dispatches_sub_tile_inputs_whole():
+    """A sub-tile input runs unpadded with the plain config; no pad cells in the output."""
+    emb = _ConfigRecordingTiledRoiEmbedder()
+    small = np.arange(9, dtype=np.float32).reshape(1, 3, 3)
+    large = np.arange(64, dtype=np.float32).reshape(1, 8, 8)
+
+    out, succeeded = _run_batch_tiled_grid(
+        emb,
+        [small, large],
+        fetch_metas=[{"roi_window_geo": _ROI}, {}],
+        model_config={"k": 1},
+    )
+
+    assert succeeded
+    # The sub-tile input used to be edge-padded to 4x4, run with the tile config,
+    # and returned with the pad row/column still in the grid.
+    assert ((1, 3, 3), {"k": 1}) in emb.calls
+    assert emb.calls.count(((1, 4, 4), {"k": 1, "_tiled": 4})) == 4
+    np.testing.assert_array_equal(out[0].embedding, small)
+    assert out[0].meta["input_prep"]["resolved_mode"] == "resize"
+    np.testing.assert_array_equal(out[1].embedding, large)
+    assert out[1].meta["input_prep"]["resolved_mode"] == "tile"
+    # The whole-input item keeps its ROI window for the embedder-side crop.
+    assert {"roi_window_geo": _ROI} in emb.seen_fetch_metas
+
+
+def test_run_batch_tiled_groups_whole_inputs_by_native_size():
+    class _Flexible(_ConfigRecordingTiledRoiEmbedder):
+        def resolve_input_image_size(self, model_config, *, input_hw=None):
+            return 4 if input_hw is None else max(input_hw)
+
+    emb = _Flexible()
+    images = [np.ones((1, 3, 3), np.float32), np.ones((1, 2, 2), np.float32)]
+    out, succeeded = _run_batch_tiled_grid(emb, images, fetch_metas=[{}, {}])
+
+    assert succeeded
+    # One dispatch per native size, smallest first, each with its own size.
+    assert emb.calls == [((1, 2, 2), {"_tiled": 2}), ((1, 3, 3), {"_tiled": 3})]
+    assert all(out[i].meta["input_prep"]["resolved_mode"] == "native" for i in (0, 1))
+
+
+def test_run_batch_tiled_whole_input_failure_still_batches_tiled_points():
+    class _FailsOnSubTile(_ConfigRecordingTiledRoiEmbedder):
+        def get_embeddings_batch_from_inputs(self, *, input_chws, model_config=None, **kwargs):
+            if any(np.asarray(x).shape[-1] == 3 for x in input_chws):
+                raise RuntimeError("boom")
+            return super().get_embeddings_batch_from_inputs(
+                input_chws=input_chws, model_config=model_config, **kwargs
+            )
+
+    small = np.arange(9, dtype=np.float32).reshape(1, 3, 3)
+    large = np.arange(64, dtype=np.float32).reshape(1, 8, 8)
+    with pytest.warns(UserWarning, match=r"tiled \(whole-input\) batch inference"):
+        out, succeeded = _run_batch_tiled_grid(
+            _FailsOnSubTile(), [small, large], fetch_metas=[{}, {}]
+        )
+
+    # The failed whole-input point is left to the per-point fallback ...
+    assert succeeded is False
+    assert 0 not in out
+    # ... while the multi-tile point still ran batched and stitched.
+    np.testing.assert_array_equal(out[1].embedding, large)
+
+
+def test_run_batch_tiled_stops_whole_input_groups_after_a_failure():
+    class _FlexibleFailing(_ConfigRecordingTiledRoiEmbedder):
+        attempted: list = []
+
+        def resolve_input_image_size(self, model_config, *, input_hw=None):
+            return 4 if input_hw is None else max(input_hw)
+
+        def get_embeddings_batch_from_inputs(self, *, input_chws, model_config=None, **kwargs):
+            self.attempted.append(tuple(np.asarray(input_chws[0]).shape))
+            raise RuntimeError("boom")
+
+    emb = _FlexibleFailing()
+    images = [np.ones((1, 3, 3), np.float32), np.ones((1, 2, 2), np.float32)]
+    with pytest.warns(UserWarning, match="whole-input"):
+        out, succeeded = _run_batch_tiled_grid(emb, images, fetch_metas=[{}, {}])
+
+    # The 2x2 group fails first; the 3x3 group is left to the per-point fallback
+    # instead of failing (and retrying) on its own.
+    assert succeeded is False
+    assert out == {}
+    assert set(emb.attempted) == {(1, 2, 2)}
+
+
+def test_sub_tile_input_matches_between_single_point_and_batch_tiled():
+    from rs_embed.tools.tiling import _call_embedder_get_embedding_with_input_prep
+
+    small = np.arange(9, dtype=np.float32).reshape(1, 3, 3)
+    out, _ = _run_batch_tiled_grid(_ConfigRecordingTiledRoiEmbedder(), [small], fetch_metas=[{}])
+    single = _call_embedder_get_embedding_with_input_prep(
+        embedder=_ConfigRecordingTiledRoiEmbedder(),
+        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=small,
+        input_prep=InputPrepSpec.tile(tile_size=4),
+    )
+
+    np.testing.assert_array_equal(out[0].embedding, np.asarray(single.data))
+    assert out[0].meta["input_prep"] == single.meta["input_prep"]
+
+
 def test_per_item_pipelined_chunks_keep_square_fetch(tmp_path, monkeypatch):
     """Chunks beyond the first must square-fetch exactly like chunk 1.
 
@@ -674,3 +830,89 @@ def test_point_payload_sync_fallback_squares_and_reuses_provider():
         h = float(sq.maxlat) - float(sq.minlat)
         assert abs(w - h) / max(w, h) < 0.15
     assert len(providers_created) == 1
+
+
+def test_combined_resume_keeps_the_roi_window(tmp_path, monkeypatch):
+    """A resumed combined export must hand restored inputs their ROI window (#139).
+
+    The first run fails in the second model after the square-fetched inputs
+    were checkpointed. The resume restores them instead of fetching again, and
+    used to drop their fetch_meta, so the output was not cropped to the ROI.
+    """
+    seen: dict[str, list] = {"good": [], "flaky": []}
+    flaky_fails = {"on": True}
+
+    def _dummy(name):
+        class Dummy:
+            def describe(self):
+                return dict(_DESCRIBE)
+
+            def get_embedding(
+                self,
+                *,
+                spatial,
+                temporal,
+                sensor,
+                output,
+                backend,
+                device="auto",
+                input_chw=None,
+                fetch_meta=None,
+            ):
+                _ = spatial, temporal, sensor, output, backend, device, input_chw
+                if name == "flaky" and flaky_fails["on"]:
+                    raise RuntimeError("flaky")
+                seen[name].append((fetch_meta or {}).get("roi_window_geo"))
+                return Embedding(data=np.array([1.0], dtype=np.float32), meta={})
+
+        return Dummy
+
+    registry.register("dummy_sq_good")(_dummy("good"))
+    registry.register("dummy_sq_flaky")(_dummy("flaky"))
+
+    import rs_embed.api as api
+
+    fetches = {"n": 0}
+
+    def fake_fetch(provider, *, spatial, temporal, sensor):
+        _ = provider, spatial, temporal, sensor
+        fetches["n"] += 1
+        return np.full((1, 4, 4), 0.5, dtype=np.float32)
+
+    _patch_provider(monkeypatch)
+    monkeypatch.setattr("rs_embed.providers.fetch.fetch_sensor_patch_chw", fake_fetch)
+
+    rects = [
+        BBox(minlon=0.0, minlat=0.0, maxlon=0.2, maxlat=0.05),
+        BBox(minlon=1.0, minlat=1.0, maxlon=1.2, maxlat=1.05),
+    ]
+    kwargs = dict(
+        spatials=rects,
+        temporal=TemporalSpec.range("2020-01-01", "2020-02-01"),
+        models=["dummy_sq_good", "dummy_sq_flaky"],
+        target=ExportTarget.combined(str(tmp_path / "combined.npz")),
+        backend="gee",
+        device="cpu",
+        output=OutputSpec.pooled(),
+    )
+    with pytest.raises(RuntimeError, match="flaky"):
+        api.export_batch(
+            config=ExportConfig(save_inputs=False, save_embeddings=True, show_progress=False),
+            **kwargs,
+        )
+    assert len(seen["good"]) == 2 and all(w is not None for w in seen["good"])
+    n_fetches = fetches["n"]
+
+    flaky_fails["on"] = False
+    result = api.export_batch(
+        config=ExportConfig(
+            save_inputs=False, save_embeddings=True, resume=True, show_progress=False
+        ),
+        **kwargs,
+    )
+
+    assert result["status"] == "ok"
+    assert fetches["n"] == n_fetches  # inputs came from the checkpoint
+    assert len(seen["good"]) == 2  # the finished model was not re-run
+    # Same windows the first run used, restored with the inputs.
+    assert seen["flaky"] == [pytest.approx(w) for w in seen["good"]]

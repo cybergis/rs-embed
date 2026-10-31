@@ -291,6 +291,40 @@ def test_tiled_pooled_mean_uses_area_weighted_merge():
     assert out.meta["input_prep"]["merged_output"] == "pooled_reduce"
 
 
+def test_tiled_pooled_max_merges_fixed_mean_tiles_as_a_mean():
+    """A model whose pooled vector ignores pooling (a CLS token or fixed mean)
+    records requested_pooling; its tiles merge like its pooled vector (#140)."""
+
+    class _FixedMeanTiles(_FakeTileEmbedder):
+        def get_embedding(self, *, output=OutputSpec.pooled(), **kwargs):
+            emb = super().get_embedding(output=output, **kwargs)
+            return Embedding(
+                data=emb.data,
+                meta={"pooling": "model_pooled", "requested_pooling": output.pooling},
+            )
+
+    x = np.arange(36, dtype=np.float32).reshape(1, 6, 6)
+
+    def merged(embedder):
+        return _call_embedder_get_embedding_with_input_prep(
+            embedder=embedder,
+            spatial=_bbox(),
+            temporal=None,
+            sensor=None,
+            output=OutputSpec.pooled("max"),
+            backend="gee",
+            device="cpu",
+            input_chw=x,
+            input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=9, pad_edges=False),
+        )
+
+    out = merged(_FixedMeanTiles())
+    np.testing.assert_allclose(np.asarray(out.data)[0], float(x.mean()), rtol=0, atol=1e-6)
+    assert out.meta["requested_pooling"] == "max"
+    # A token-pooling model's tiles still merge by max.
+    assert float(np.asarray(merged(_FakeTileEmbedder()).data)[0]) > float(x.mean())
+
+
 def test_tiled_single_path_falls_back_when_batch_lacks_model_config():
     class _BatchWithoutModelConfig:
         model_name = "batch_without_model_config"
@@ -760,7 +794,12 @@ def test_snap_disabled_keeps_native_overlap_tiling():
 
 
 def test_snap_collapses_small_overhang_to_single_tile():
-    """A 1px overhang on both axes snaps away, collapsing 4 overlap tiles into one."""
+    """A 1px overhang that snaps to one tile is dispatched whole, unsnapped.
+
+    The snap only exists to avoid near-duplicate shifted edge tiles; once the
+    input fits one tile there is nothing to tile, so resampling it would only
+    change its pixel spacing.
+    """
     pytest.importorskip("torch")
     emb = _FakeTileEmbedder()
     out = _call_embedder_get_embedding_with_input_prep(
@@ -777,10 +816,141 @@ def test_snap_collapses_small_overhang_to_single_tile():
         input_prep=InputPrepSpec.tile(tile_size=4, max_tiles=16, tile_snap_frac=0.25),
     )
     arr = np.asarray(out.data, dtype=np.float32)
-    # Single 4x4 tile fed after snapping 5x5 -> 4x4; no overlap-stitch inflation.
-    assert arr.shape[-2:] == (4, 4)
-    # Single-tile path reports a plain resize, and only one model call ran.
-    assert emb.single_calls + emb.batch_calls >= 1
+    # One plain call with the original 5x5 input; no snap, no overlap tiles.
+    assert arr.shape[-2:] == (5, 5)
+    assert emb.single_calls == 1
+    assert emb.batch_calls == 0
+    assert out.meta["input_prep"]["resolved_mode"] == "resize"
+
+
+class _ConfigRecordingTileEmbedder(_FakeTileEmbedder):
+    """Records the model_config and input shape of every call; adapts its config for tiles."""
+
+    def __init__(self):
+        super().__init__()
+        self.calls = []
+
+    def tiled_dispatch_model_config(self, model_config, *, tile_size):
+        return {**(model_config or {}), "_tiled": int(tile_size)}
+
+    def get_embedding(self, *, input_chw=None, model_config=None, **kwargs):
+        self.calls.append((tuple(np.asarray(input_chw).shape), model_config))
+        return super().get_embedding(input_chw=input_chw, **kwargs)
+
+    def get_embeddings_batch_from_inputs(
+        self, *, spatials, input_chws, model_config=None, **kwargs
+    ):
+        self.batch_calls += 1
+        return [
+            self.get_embedding(input_chw=x, model_config=model_config, spatial=sp, **kwargs)
+            for sp, x in zip(spatials, input_chws, strict=True)
+        ]
+
+
+def test_sub_tile_input_is_dispatched_whole_with_plain_model_config():
+    """An input that fits one tile is a plain call: no tile config, no padding."""
+    emb = _ConfigRecordingTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 3, 3), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4),
+        model_config={"k": 1},
+    )
+
+    # The tile config used to leak into this call (forcing e.g. THOR into a
+    # fixed resize of the whole sub-tile ROI to the tile size).
+    assert emb.calls == [((1, 3, 3), {"k": 1})]
+    assert np.asarray(out.data).shape[-2:] == (3, 3)
+    assert out.meta["input_prep"]["resolved_mode"] == "resize"
+
+
+class _FlexibleRecordingTileEmbedder(_ConfigRecordingTileEmbedder):
+    """Flexible-size fake: consumes any input natively, tiles at 4 otherwise."""
+
+    def resolve_input_image_size(self, model_config, *, input_hw=None):
+        return 4 if input_hw is None else max(input_hw)
+
+
+def test_sub_tile_input_runs_natively_on_a_flexible_model():
+    """Same rule as the user-data path: the native size is injected, not the tile size."""
+    emb = _FlexibleRecordingTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 3, 3), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4),
+        model_config={"k": 1},
+    )
+
+    assert emb.calls == [((1, 3, 3), {"k": 1, "_tiled": 3})]
+    assert out.meta["input_prep"]["resolved_mode"] == "native"
+
+
+def test_multi_tile_input_still_gets_tiled_model_config():
+    emb = _ConfigRecordingTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.grid(),
+        backend="gee",
+        device="cpu",
+        input_chw=np.ones((1, 8, 8), dtype=np.float32),
+        input_prep=InputPrepSpec.tile(tile_size=4),
+        model_config={"k": 1},
+    )
+
+    assert emb.calls == [((1, 4, 4), {"k": 1, "_tiled": 4})] * 4
+    assert out.meta["input_prep"]["resolved_mode"] == "tile"
+
+
+def test_plan_tiling_skips_the_snap_resize_for_whole_inputs(monkeypatch):
+    from rs_embed.tools import tiling
+
+    def _no_resize(*args, **kwargs):
+        raise AssertionError("snap resize should not run for a whole-input dispatch")
+
+    monkeypatch.setattr(tiling, "_resize_spatial_hw", _no_resize)
+    x = np.ones((1, 5, 5), dtype=np.float32)
+    assert tiling._plan_tiling(x, tile_size=4, stride=4, snap_frac=0.25) is None
+
+
+def test_auto_plain_fallback_skips_the_snap_resize(monkeypatch):
+    """Auto falls back to a plain call on the original input, so nothing is resized."""
+    from rs_embed.tools import tiling
+
+    def _no_resize(*args, **kwargs):
+        raise AssertionError("snap resize should not run before a plain fallback")
+
+    monkeypatch.setattr(tiling, "_resize_spatial_hw", _no_resize)
+    emb = _FakeTileEmbedder()
+    out = _call_embedder_get_embedding_with_input_prep(
+        embedder=emb,
+        spatial=_bbox(),
+        temporal=None,
+        sensor=None,
+        output=OutputSpec.pooled(),
+        backend="gee",
+        device="cpu",
+        # 9 px snaps to 8 (two tiles per axis), but pooled output under auto
+        # falls back to one plain call.
+        input_chw=np.ones((1, 9, 9), dtype=np.float32),
+        input_prep=InputPrepSpec.auto(tile_size=4, tile_snap_frac=0.25),
+    )
+
+    assert emb.single_calls == 1
     assert out.meta["input_prep"]["resolved_mode"] == "resize"
 
 

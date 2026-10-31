@@ -11,7 +11,7 @@ import math
 import os
 import warnings
 from dataclasses import dataclass
-from typing import Any
+from typing import Any, NamedTuple
 
 import numpy as np
 
@@ -35,9 +35,14 @@ from .runtime import (
 from .runtime import (
     embedder_accepts_model_config as _embedder_accepts_model_config,
 )
+from .runtime import native_input_size as _native_input_size
 from .runtime import (
     supports_prefetched_batch_api as _supports_prefetched_batch_api,
 )
+from .runtime import (
+    tiled_dispatch_config as _augment_model_config_for_tiled_dispatch,
+)
+from .runtime import whole_input_config as _whole_input_config
 from .serialization import embedding_to_numpy as _embedding_to_numpy
 from .shape import geo_roi_from_meta, roi_is_full, roi_token_box
 
@@ -45,10 +50,10 @@ from .shape import geo_roi_from_meta, roi_is_full, roi_token_box
 # Preprocessing contract version
 # ---------------------------------------------------------------------------
 
-# Bump whenever tiling/stitching/aggregation behavior changes in a way that
-# alters produced embeddings. Stamped into every embedding's meta["input_prep"]
+# Bump whenever tiling/stitching/aggregation or the ROI crop or pool changes in a way
+# that alters produced embeddings. Stamped into every embedding's meta["input_prep"]
 # so downstream consumers can detect a contract change and pin reproducibility.
-INPUT_PREP_VERSION = 1
+INPUT_PREP_VERSION = 4
 
 
 # ---------------------------------------------------------------------------
@@ -230,13 +235,16 @@ class _TileParams:
 def _resolve_tile_params(
     embedder: Any,
     input_prep: _ResolvedInputPrepSpec,
+    model_config: dict[str, Any] | None = None,
 ) -> _TileParams:
     """Resolve tile size/stride and the padding policy for an embedder + spec.
 
-    ``tile_size`` is the explicit ``input_prep.tile_size`` or, failing that, the
-    model's advertised ``describe().defaults.image_size``; ``0`` signals that no
-    tile size could be determined and the caller should fall back to a plain
-    call.
+    ``tile_size`` is the explicit ``input_prep.tile_size``, else the size the
+    embedder resolves for this request via ``resolve_input_image_size(
+    model_config)`` (how flexible-size models raise their tiling threshold),
+    else the model's advertised ``describe().defaults.image_size``; ``0``
+    signals that no tile size could be determined and the caller should fall
+    back to a plain call.
 
     Edge tiles are padded to square whenever ``pad_edges`` is on (the default),
     for every model. The tiling layer must never hand a model a rectangular
@@ -249,7 +257,9 @@ def _resolve_tile_params(
     escape hatch for models that natively handle rectangular inputs with a
     proportional output grid.
     """
-    model_img = _embedder_default_image_size(embedder)
+    model_img = _native_input_size(embedder, model_config)
+    if model_img is None:
+        model_img = _embedder_default_image_size(embedder)
     tile_size = int(input_prep.tile_size or model_img or 0)
     stride = int(input_prep.tile_stride or tile_size)
     return _TileParams(
@@ -260,50 +270,66 @@ def _resolve_tile_params(
     )
 
 
-def _maybe_snap_input(
+def _snapped_hw(
+    h: int, w: int, *, tile_size: int, stride: int, snap_frac: float
+) -> tuple[int, int]:
+    """Target ``(h, w)`` of the snap-to-tile downscale (see :func:`_snap_axis_to_tile`).
+
+    Only applies under the ``stride == tile_size`` overlap-shift model.
+    """
+    if not (stride == tile_size and snap_frac > 0.0):
+        return int(h), int(w)
+    return (
+        _snap_axis_to_tile(h, tile_size=tile_size, snap_frac=snap_frac),
+        _snap_axis_to_tile(w, tile_size=tile_size, snap_frac=snap_frac),
+    )
+
+
+class _TilingPlan(NamedTuple):
+    """Tiling planned by :func:`_plan_tiling` for an input needing several tiles."""
+
+    hw: tuple[int, int]  # (h, w) to tile, after the snap-to-tile downscale
+    num_tiles: int
+
+    def snap(self, x: np.ndarray) -> tuple[np.ndarray, tuple[int, int] | None]:
+        """Resize ``x`` to :attr:`hw`: ``(x_to_tile, snapped_from_hw)``.
+
+        ``snapped_from_hw`` is the original ``(h, w)`` when ``x`` was resized,
+        else ``None`` (no snap planned, or torch unavailable so
+        :func:`_resize_spatial_hw` returned ``x`` unchanged).
+        """
+        hw0 = _input_hw(x)
+        if hw0 == self.hw:
+            return x, None
+        x_snapped = _resize_spatial_hw(x, out_h=self.hw[0], out_w=self.hw[1])
+        if _input_hw(x_snapped) != self.hw:
+            return x, None
+        return x_snapped, hw0
+
+
+def _plan_tiling(
     x: np.ndarray,
     *,
     tile_size: int,
     stride: int,
     snap_frac: float,
-) -> tuple[np.ndarray, tuple[int, int] | None]:
-    """Apply snap-to-tile downscaling to an input before tiling.
+) -> _TilingPlan | None:
+    """Plan the tiling of ``x``, or return ``None`` when it should be dispatched whole.
 
-    Returns ``(x_maybe_resized, snapped_from_hw)``: ``snapped_from_hw`` is the
-    original ``(h, w)`` when a snap happened, else ``None`` (no snap requested,
-    axes already on a tile multiple, or torch unavailable so the resize was a
-    no-op). Only applies under the ``stride == tile_size`` overlap-shift model;
-    see :func:`_snap_axis_to_tile`.
+    An input that fits one tile after snapping gains nothing from tiling:
+    padding it to ``tile_size`` feeds the model fabricated cells that no stitch
+    crops away, and the snap only exists to avoid a near-duplicate shifted edge
+    tile. Single-point and batch tilers both dispatch such an input whole and
+    unsnapped, with the config from :func:`whole_input_config`. Nothing is
+    resized here; callers apply the snap with :meth:`_TilingPlan.snap` once
+    they actually tile.
     """
-    h, w = _input_hw(x)
-    if not (stride == tile_size and snap_frac > 0.0):
-        return x, None
-    snap_h = _snap_axis_to_tile(h, tile_size=tile_size, snap_frac=snap_frac)
-    snap_w = _snap_axis_to_tile(w, tile_size=tile_size, snap_frac=snap_frac)
-    if (snap_h, snap_w) == (h, w):
-        return x, None
-    x_snapped = _resize_spatial_hw(x, out_h=snap_h, out_w=snap_w)
-    # Guard against a no-op when torch is unavailable (resize returns x).
-    if _input_hw(x_snapped) == (h, w):
-        return x, None
-    return x_snapped, (int(h), int(w))
-
-
-def _augment_model_config_for_tiled_dispatch(
-    embedder: Any,
-    model_config: dict[str, Any] | None,
-    *,
-    tile_size: int,
-) -> dict[str, Any] | None:
-    """Let the embedder adapt ``model_config`` for pre-tiled batch dispatch.
-
-    Delegates to ``EmbedderBase.tiled_dispatch_model_config``; embedders that
-    do not override the hook get the config back unchanged.
-    """
-    hook = getattr(embedder, "tiled_dispatch_model_config", None)
-    if hook is None:
-        return model_config
-    return hook(model_config, tile_size=int(tile_size))
+    h0, w0 = _input_hw(x)
+    hw = _snapped_hw(h0, w0, tile_size=tile_size, stride=stride, snap_frac=snap_frac)
+    num_tiles = _estimate_tile_count(h=hw[0], w=hw[1], tile_size=tile_size, stride=stride)
+    if num_tiles <= 1:
+        return None
+    return _TilingPlan(hw=hw, num_tiles=num_tiles)
 
 
 def _tile_yx_starts(*, h: int, w: int, tile_size: int, stride: int) -> tuple[list[int], list[int]]:
@@ -634,7 +660,9 @@ def _aggregate_tiled_embeddings(
         )
         if roi_w is not None and float(roi_w.sum()) <= 0.0:
             roi_w = None  # ROI smaller than a tile gap — fall back to all tiles
-        if str(output.pooling).lower() == "max":
+        # Tiles that record requested_pooling kept their model's fixed mean
+        # instead of max (shape.pool_for_output), so they merge as a mean too.
+        if str(output.pooling).lower() == "max" and "requested_pooling" not in base_meta:
             sel = mat if roi_w is None else mat[roi_w > 0.0]
             out_vec = np.max(sel if len(sel) else mat, axis=0).astype(np.float32, copy=False)
         else:
@@ -806,44 +834,53 @@ def _call_embedder_get_embedding_tiled(
     fetch_meta: dict[str, Any] | None = None,
 ) -> Embedding:
     x = np.asarray(input_chw, dtype=np.float32)
-    params = _resolve_tile_params(embedder, input_prep)
-    tile_size = params.tile_size
-    model_fixed_size = params.model_fixed_size
-    effective_pad_edges = params.effective_pad_edges
-    if tile_size <= 0:
-        # No tile size could be determined (no explicit tile_size and the model
-        # exposes no describe().defaults.image_size). Tiling is the package
-        # default, so degrade gracefully to a plain (resize) call rather than
-        # hard-failing; the dispatch backfills resolved_mode="resize" in meta.
+
+    def _plain_call(config: dict[str, Any] | None = model_config) -> Embedding:
+        # The original input with the caller's model_config, exactly as in
+        # resize mode; the dispatch backfills resolved_mode="resize" in meta.
         return _call_embedder_get_embedding(
             embedder=embedder,
             spatial=spatial,
             temporal=temporal,
             sensor=sensor,
-            model_config=model_config,
+            model_config=config,
             output=output,
             backend=backend,
             device=device,
             input_chw=x,
             fetch_meta=fetch_meta,
         )
+
+    params = _resolve_tile_params(embedder, input_prep, model_config)
+    tile_size = params.tile_size
+    model_fixed_size = params.model_fixed_size
+    effective_pad_edges = params.effective_pad_edges
+    if tile_size <= 0:
+        # No tile size could be determined (no explicit tile_size and the model
+        # exposes no describe().defaults.image_size). Tiling is the package
+        # default, so degrade gracefully to a plain call rather than hard-failing.
+        return _plain_call()
     stride = params.stride
     if stride <= 0:
         raise ModelError(f"Invalid tile_stride={stride}")
-    # Snap-to-tile: when an axis only slightly exceeds a tile multiple, downscale
-    # that overhang away so the axis tiles cleanly instead of spawning a
-    # near-fully-overlapping shifted edge tile (which duplicates cells in the
-    # stitched grid). Only applies under the stride==tile_size overlap-shift model.
-    x, snapped_input_hw = _maybe_snap_input(
-        x, tile_size=tile_size, stride=stride, snap_frac=input_prep.tile_snap_frac
-    )
-    h, w = _input_hw(x)
+    plan = _plan_tiling(x, tile_size=tile_size, stride=stride, snap_frac=input_prep.tile_snap_frac)
+    if plan is None:
+        # Fits one tile: the whole ROI is one input; the embedder squares +
+        # crops it back to the ROI via fetch_meta['roi_window_geo'].
+        whole_config, resolved_mode = _whole_input_config(
+            embedder,
+            model_config,
+            native=_native_input_size(embedder, model_config, _input_hw(x)),
+        )
+        return _stamp_input_prep_meta(
+            _plain_call(whole_config), requested_mode=input_prep.mode, resolved_mode=resolved_mode
+        )
+    (h, w), num_tiles = plan.hw, plan.num_tiles
     tiled_model_config = _augment_model_config_for_tiled_dispatch(
         embedder,
         model_config,
         tile_size=tile_size,
     )
-    num_tiles = _estimate_tile_count(h=h, w=w, tile_size=tile_size, stride=stride)
     if input_prep.mode == "auto":
         # A dimension smaller than a tile only forces a plain resize for models
         # without a fixed input size. Fixed-size models tile the long axis
@@ -852,24 +889,8 @@ def _call_embedder_get_embedding_tiled(
         # wide/flat or tall/thin ROI keeps detail on its long side instead of
         # being squashed by a whole-ROI resize.
         small_dim_forces_resize = (h <= tile_size or w <= tile_size) and not model_fixed_size
-        if (
-            output.mode != "grid"
-            or num_tiles <= 1
-            or num_tiles > input_prep.max_tiles
-            or small_dim_forces_resize
-        ):
-            return _call_embedder_get_embedding(
-                embedder=embedder,
-                spatial=spatial,
-                temporal=temporal,
-                sensor=sensor,
-                model_config=model_config,
-                output=output,
-                backend=backend,
-                device=device,
-                input_chw=x,
-                fetch_meta=fetch_meta,
-            )
+        if output.mode != "grid" or num_tiles > input_prep.max_tiles or small_dim_forces_resize:
+            return _plain_call()
     elif input_prep.mode == "tile":
         if num_tiles > input_prep.max_tiles_hard:
             raise ModelError(
@@ -891,30 +912,16 @@ def _call_embedder_get_embedding_tiled(
         )
 
     fill_value = float(sensor.fill_value) if sensor is not None else 0.0
+    x_tiles, snapped_input_hw = plan.snap(x)
+    h, w = _input_hw(x_tiles)
     tiles, tile_meta, tile_spatials = _tile_one_image(
-        x,
+        x_tiles,
         spatial=spatial,
         tile_size=tile_size,
         stride=stride,
         pad_edges=effective_pad_edges,
         fill_value=fill_value,
     )
-
-    if len(tiles) <= 1:
-        # Single tile = the whole ROI is one input; the embedder squares + crops it
-        # back to the ROI via fetch_meta['roi_window_geo'] (set by the prefetch).
-        return _call_embedder_get_embedding(
-            embedder=embedder,
-            spatial=spatial,
-            temporal=temporal,
-            sensor=sensor,
-            model_config=tiled_model_config if input_prep.mode == "tile" else model_config,
-            output=output,
-            backend=backend,
-            device=device,
-            input_chw=x,
-            fetch_meta=fetch_meta,
-        )
 
     can_batch_tiles = _supports_prefetched_batch_api(embedder) and (
         tiled_model_config is None
@@ -1099,6 +1106,7 @@ def _call_embedder_get_embedding_with_input_prep(
         input_prep=spec,
         fetch_meta=fetch_meta,
     )
-    # Tiled path stamps a rich block when it actually tiles; this only backfills
-    # the single-tile / sub-threshold fall-through where it returned plain.
+    # Tiled path stamps a rich block when it actually tiles, and whole-input
+    # dispatch stamps its own resolved_mode; this only backfills the plain
+    # fall-throughs (no tile size, auto fallbacks).
     return _stamp_input_prep_meta(emb, requested_mode=spec.mode, resolved_mode="resize")

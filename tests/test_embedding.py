@@ -47,6 +47,9 @@ def test_builtin_embedders_use_common_meta_helpers():
         "config_utils.py",
         "meta_utils.py",
         "runtime_utils.py",
+        # Helper module, not an embedder: its builders take a base_meta the
+        # calling embedder made with build_meta().
+        "shared.py",
     }
     missing: list[str] = []
     for path in sorted(root.glob("*.py")):

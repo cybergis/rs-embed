@@ -299,7 +299,13 @@ def test_export_batch_prefetch_reuses_superset_and_slices_subset(tmp_path, monke
     assert DummyS2Superset.seen == [(2.0, 3.0, 4.0, 8.0), (2.0, 3.0, 4.0, 8.0)]
 
 
-def test_export_batch_prefetch_merged_groups_skip_custom_fetcher(tmp_path, monkeypatch):
+def test_export_batch_prefetch_splits_custom_fetcher_from_merged_group(tmp_path, monkeypatch):
+    """A custom-``fetch_input`` model never joins a band-union merged fetch:
+    its temporal/band contract lives in its own fetch group (semantics-qualified
+    plan keys), while same-collection generic models still band-union merge.
+    Pinning the old merge-and-skip behavior silently replaced binned series
+    with a whole-window composite (the olmoearth+terrafm export regression)."""
+
     class DummyRGBCustomFetch(EmbedderBase):
         model_name = "dummy_rgb_custom_fetch"
         fetch_calls = 0
@@ -434,7 +440,7 @@ def test_export_batch_prefetch_merged_groups_skip_custom_fetcher(tmp_path, monke
 
     assert generic_fetch["n"] == len(spatials)
     assert all(len(bands) == 12 for bands in generic_fetch["bands"])
-    assert DummyRGBCustomFetch.fetch_calls == 0
+    assert DummyRGBCustomFetch.fetch_calls == len(spatials)
     assert DummyS2Superset.seen == [(12, 2, 2), (12, 2, 2)]
 
 

@@ -7,6 +7,7 @@ stateless (inputs -> outputs) and reusable across different pipelines.
 Categories
 ----------
 - **Tiling** (``tiling``) — geometric math for cutting images into patches.
+- **Projection** (``projection``) — the common EPSG:3857 grid, resampling onto it, UTM-zone checks.
 - **Inspection** (``inspection``) — histogram calculation and data-quality checks.
 - **Serialization** (``serialization``) — JSON / NPZ saving and hashing.
 - **Temporal** (``temporal``) — date parsing and time-range helpers.

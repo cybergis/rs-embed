@@ -13,6 +13,7 @@ _gee_checks/
 exports/
 examples/**
 demo_export/
+benchmarks/
 *.png
 
 .codex/
@@ -40,3 +41,9 @@ examples/webapp/downloads/
 .DS_Store
 /global_0.1_degree_representation/
 /global_0.1_degree_tiff_all/
+!examples/play_with_embedding.ipynb
+!examples/bring_your_own_data.ipynb
+iguide_dataset/
+!examples/data/
+!examples/data/s2_patches/
+!examples/data/s2_patches/**

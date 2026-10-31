@@ -29,6 +29,8 @@ from __future__ import annotations
 from dataclasses import asdict, replace
 from typing import Any
 
+import numpy as np
+
 from .core.embedding import Embedding
 from .core.errors import ModelError, ProviderError
 from .core.registry import get_embedder_cls as _get_embedder_cls
@@ -44,6 +46,7 @@ from .core.types import (
     ExportConfig,
     ExportModelRequest,
     ExportTarget,
+    UserData,
 )
 from .core.validation import (
     assert_supported as _assert_supported,
@@ -55,7 +58,11 @@ from .core.validation import (
     validate_specs as _validate_specs,
 )
 from .embedders.catalog import MODEL_ALIASES, MODEL_SPECS
+from .embedders.meta import temporal_to_range as _temporal_to_range
 from .providers.fetch import fetch_sensor_patch_chw as _fetch_sensor_patch_chw
+from .providers.prefetch_plan import (
+    select_prefetched_channels as _select_prefetched_channels,
+)
 from .providers.resolution import create_provider_for_backend
 from .tools.export_requests import (
     maybe_return_completed_combined_resume as _maybe_return_completed_combined_resume,
@@ -91,6 +98,9 @@ from .tools.runtime import (
     describe_model_cached as _describe_model_cached,
 )
 from .tools.runtime import (
+    fetch_embedder_input as _fetch_embedder_input,
+)
+from .tools.runtime import (
     model_manages_own_input_prep as _model_manages_own_input_prep,
 )
 from .tools.runtime import (
@@ -99,7 +109,28 @@ from .tools.runtime import (
 from .tools.runtime import (
     run_embedding_request as _run_embedding_request_shared,
 )
+from .tools.runtime import (
+    run_user_input_request as _run_user_input_request,
+)
 from .tools.tiling import _resolve_input_prep_spec as _resolve_input_prep_spec
+from .tools.user_data import (
+    align_to_common_grid as _align_to_common_grid,
+)
+from .tools.user_data import (
+    match_user_data_to_sensor as _match_user_data_to_sensor,
+)
+from .tools.user_data import (
+    normalize_collection_id as _normalize_collection_id,
+)
+from .tools.user_data import (
+    resolve_declared_bands as _resolve_declared_bands,
+)
+from .tools.user_data import (
+    resolve_user_data_spatial as _resolve_user_data_spatial,
+)
+from .tools.user_data import (
+    warn_on_suspicious_value_range as _warn_on_suspicious_value_range,
+)
 
 # -----------------------------------------------------------------------------
 # Internal helpers
@@ -390,6 +421,325 @@ def get_embeddings_batch(
         output=output,
         ctx=ctx,
     )
+
+
+# -----------------------------------------------------------------------------
+# Public: embeddings from user-provided data
+# -----------------------------------------------------------------------------
+
+
+def _resolve_user_data_sensor(model_n: str, *, modality: str | None) -> SensorSpec:
+    """Resolve the sensor a user-data request must satisfy, or refuse."""
+    embedder_cls = _get_embedder_cls(model_n)
+    if getattr(embedder_cls, "_is_precomputed", False):
+        raise ModelError(
+            f"Model '{model_n}' serves precomputed embeddings; it does not "
+            "embed user-provided imagery. Use an on-the-fly model instead."
+        )
+    sensor_eff = _resolve_sensor_for_model(
+        model_n,
+        sensor=None,
+        fetch=None,
+        modality=modality,
+        default_when_missing=True,
+    )
+    if sensor_eff is None:
+        raise ModelError(
+            f"Model '{model_n}' declares no input sensor"
+            + (f" for modality='{modality}'" if modality else "")
+            + "; there is nothing to match user-provided data against."
+        )
+    return sensor_eff
+
+
+def _require_georef_for_model(model_n: str, spatial: SpatialSpec | None) -> None:
+    """Refuse georef-conditioned models when a declaration has no location."""
+    if spatial is None and getattr(_get_embedder_cls(model_n), "_requires_georef", False):
+        raise ModelError(
+            f"Model '{model_n}' conditions on request geometry (lat/lon or "
+            "GSD encodings); it cannot embed data without UserData.spatial, "
+            "and coordinates are never fabricated. Provide spatial (or crs + "
+            "transform) or choose a model without this requirement (see "
+            "list_models_for_data)."
+        )
+
+
+def _prepare_user_data_inputs(
+    model_n: str,
+    datas: list[UserData],
+    sensor_eff: SensorSpec,
+    output: OutputSpec,
+) -> tuple[list[np.ndarray], list[SpatialSpec | None], list[dict[str, Any]]]:
+    """Validate, match, slice to model band order, and put each item on the common grid."""
+    arrays: list[np.ndarray] = []
+    spatials: list[SpatialSpec | None] = []
+    metas: list[dict[str, Any]] = []
+    for data in datas:
+        data.validate()
+        spatial = _resolve_user_data_spatial(data)
+        _require_georef_for_model(model_n, spatial)
+        if spatial is not None:
+            _validate_specs(spatial=spatial, temporal=data.temporal, output=output)
+        elif data.temporal is not None:
+            data.temporal.validate()
+        idx = _match_user_data_to_sensor(data, sensor_eff, model_name=model_n)
+        _warn_on_suspicious_value_range(data)
+        # select_prefetched_channels casts to float32 and returns the input
+        # object unchanged for an identity selection, so no redundant copy.
+        array, projection_meta = _align_to_common_grid(
+            _select_prefetched_channels(data.data, idx),
+            data,
+            scale_m=sensor_eff.scale_m,
+            fill_value=sensor_eff.fill_value,
+        )
+        arrays.append(array)
+        spatials.append(spatial)
+        metas.append(
+            {
+                "source": "user_data",
+                "collection": _normalize_collection_id(data.collection),
+                "declared_bands": list(_resolve_declared_bands(data)),
+                "bands_used": list(sensor_eff.bands),
+                "channel_indices": list(idx),
+                "declared_scale_m": data.scale_m,
+                "projection": projection_meta,
+            }
+        )
+    return arrays, spatials, metas
+
+
+def get_embedding_from_data(
+    model: str,
+    data: UserData,
+    *,
+    modality: str | None = None,
+    output: OutputSpec = OutputSpec.pooled(),
+    device: str = "auto",
+    input_prep: InputPrepSpec | str | None = None,
+    **model_kwargs: Any,
+) -> Embedding:
+    """Compute an embedding from user-provided imagery (no provider fetch).
+
+    The bring-your-own-data counterpart of :func:`get_embedding`: instead of
+    fetching imagery from a provider, the caller registers a
+    :class:`~rs_embed.UserData` describing the imagery completely — pixels,
+    collection + band names (raw provider units), and where/when it was
+    acquired — and then only names the model. The declaration is matched
+    against the model's input sensor: superset band sets are sliced and
+    reordered automatically, while a collection mismatch or missing band
+    refuses the request with a :class:`ModelError` naming what is missing.
+    Call :func:`list_models_for_data` to see which models a declaration can
+    serve.
+
+    Parameters
+    ----------
+    model : str
+        Model identifier or alias. Precomputed models are refused (they have
+        no imagery input).
+    data : UserData
+        The registered imagery. ``data.data`` must be ``[C,H,W]`` (or
+        ``[T,C,H,W]`` for time-series models) with raw provider values;
+        ``data.spatial`` / ``data.temporal`` carry where and when it was
+        acquired.
+    modality : str or None
+        Optional modality selector for models with multiple input branches;
+        the declaration is matched against that modality's sensor profile.
+    output : OutputSpec
+        Output representation policy.
+    device : str
+        Target inference device.
+    input_prep : InputPrepSpec or str or None
+        How arrays larger than the model's input size are handled. ``None``
+        (the default) uses the package default ``"tile"``: the array is cut
+        into model-native tiles at its own resolution and the outputs
+        stitched — every model sees the full detail, regardless of its input
+        size (galileo's 64 px and clay's 256 px get equal treatment). Pass
+        ``"resize"`` to instead downsample the whole array to the model input
+        size in one step. Arrays a single tile already covers are unaffected
+        either way.
+    **model_kwargs
+        Model-specific settings, as in :func:`get_embedding`.
+
+    Returns
+    -------
+    Embedding
+        Normalized embedding; ``meta['user_input']`` records the declaration
+        and the channel selection that was fed to the model, and
+        ``meta['input_prep']`` records how the array was prepared.
+
+    Raises
+    ------
+    ModelError
+        If the model cannot take user data (precomputed / no input sensor) or
+        the declaration does not satisfy the model's sensor.
+    SpecError
+        If the declaration fails validation.
+
+    Examples
+    --------
+    >>> pixels = np.load("s2_patch.npy")  # [12, H, W] raw S2 L2A DN (0..10000)
+    >>> data = UserData(
+    ...     data=pixels,
+    ...     collection="s2",  # 12 channels in canonical order -> bands may be omitted
+    ...     spatial=PointBuffer(lon=-88.2, lat=40.1, buffer_m=640),
+    ...     temporal=TemporalSpec.year(2022),
+    ... )
+    >>> emb = get_embedding_from_data("galileo", data)
+    """
+    return get_embeddings_batch_from_data(
+        model,
+        [data],
+        modality=modality,
+        output=output,
+        device=device,
+        input_prep=input_prep,
+        **model_kwargs,
+    )[0]
+
+
+def get_embeddings_batch_from_data(
+    model: str,
+    datas: list[UserData],
+    *,
+    modality: str | None = None,
+    output: OutputSpec = OutputSpec.pooled(),
+    device: str = "auto",
+    batch_size: int | None = None,
+    input_prep: InputPrepSpec | str | None = None,
+    **model_kwargs: Any,
+) -> list[Embedding]:
+    """Compute embeddings for multiple user-provided inputs.
+
+    Batch counterpart of :func:`get_embedding_from_data`; each item is
+    matched independently, so items may declare different band orders and
+    carry their own ``spatial`` / ``temporal``. Items sharing a temporal are
+    dispatched together (models with true batching benefit); results always
+    come back in input order.
+
+    Parameters
+    ----------
+    model : str
+        Model identifier or alias.
+    datas : list[UserData]
+        Registered imagery, one per item.
+    modality : str or None
+        Optional modality selector.
+    output : OutputSpec
+        Output representation policy.
+    device : str
+        Target inference device.
+    batch_size : int or None
+        Upper bound on how many items reach one model forward batch — use a
+        small value to fit a small GPU. Models keep their own per-device
+        internal default as a further cap, so this lowers but does not raise
+        a model's forward batch (raise via the model's
+        ``RS_EMBED_<MODEL>_BATCH_SIZE`` environment variable). Items large
+        enough to be tiled are processed one at a time (their tiles are
+        batched by the model internally).
+    input_prep : InputPrepSpec or str or None
+        How arrays larger than the model's input size are handled, as in
+        :func:`get_embedding_from_data`: ``None`` uses the package default
+        ``"tile"`` (native-resolution tiles + stitched outputs), ``"resize"``
+        downsamples instead.
+    **model_kwargs
+        Model-specific settings, as in :func:`get_embedding`.
+
+    Returns
+    -------
+    list[Embedding]
+        Embeddings in the same order as *datas*.
+
+    Raises
+    ------
+    ModelError
+        If *datas* is empty, ``batch_size`` is invalid, the model cannot
+        take user data, or any declaration does not satisfy the model's
+        sensor.
+    SpecError
+        If any declaration fails validation.
+    """
+    model_config = model_kwargs or None
+    model_n = _normalize_model_name(model)
+    if not isinstance(datas, list) or len(datas) == 0:
+        raise ModelError("datas must be a non-empty list[UserData].")
+    sensor_eff = _resolve_user_data_sensor(model_n, modality=modality)
+    arrays, spatials, metas = _prepare_user_data_inputs(model_n, datas, sensor_eff, output)
+
+    # The embedder batch path takes one temporal per call, so dispatch one
+    # sub-request per distinct temporal and scatter results back to input
+    # order. TemporalSpec is frozen/hashable; dict preserves insertion order.
+    groups: dict[TemporalSpec | None, list[int]] = {}
+    for i, data in enumerate(datas):
+        groups.setdefault(data.temporal, []).append(i)
+
+    results: list[Embedding | None] = [None] * len(datas)
+    for temporal, indices in groups.items():
+        embs = _run_user_input_request(
+            model_n=model_n,
+            spatials=[spatials[i] for i in indices],
+            input_arrays=[arrays[i] for i in indices],
+            temporal=temporal,
+            sensor=sensor_eff,
+            model_config=model_config,
+            output=output,
+            device=device,
+            input_metas=[metas[i] for i in indices],
+            batch_size=batch_size,
+            input_prep=input_prep,
+        )
+        for i, emb in zip(indices, embs, strict=True):
+            results[i] = emb
+    out = [emb for emb in results if emb is not None]
+    if len(out) != len(datas):
+        raise ModelError("Internal error: temporal-grouped dispatch lost items.")
+    return out
+
+
+def list_models_for_data(data: UserData) -> list[dict[str, Any]]:
+    """Report which catalog models a user-data declaration can serve.
+
+    Runs the same matching as :func:`get_embedding_from_data` against every
+    model in the catalog without loading any weights.
+
+    Parameters
+    ----------
+    data : UserData
+        The imagery declaration to check. ``data.data`` may be a small dummy
+        array; only its shape is validated here.
+
+    Returns
+    -------
+    list[dict[str, Any]]
+        One entry per catalog model, sorted by name, with keys ``model``
+        (str), ``compatible`` (bool), ``bands_used`` (the model's band order,
+        or ``None``), and ``reason`` (why the model is incompatible, or
+        ``None``).
+
+    Examples
+    --------
+    >>> report = list_models_for_data(my_s2_declaration)
+    >>> [r["model"] for r in report if r["compatible"]]
+    """
+    data.validate()
+    report: list[dict[str, Any]] = []
+    for model_id in sorted(MODEL_SPECS.keys()):
+        entry: dict[str, Any] = {
+            "model": model_id,
+            "compatible": False,
+            "bands_used": None,
+            "reason": None,
+        }
+        try:
+            sensor = _resolve_user_data_sensor(model_id, modality=None)
+            _require_georef_for_model(model_id, _resolve_user_data_spatial(data))
+            _match_user_data_to_sensor(data, sensor, model_name=model_id)
+        except ModelError as exc:
+            entry["reason"] = str(exc)
+        else:
+            entry["compatible"] = True
+            entry["bands_used"] = list(sensor.bands)
+        report.append(entry)
+    return report
 
 
 # -----------------------------------------------------------------------------
@@ -690,3 +1040,194 @@ def inspect_gee_patch(
         value_range=value_range,
         return_array=return_array,
     )
+
+
+def _rgb_quicklook_band_indices(
+    bands: tuple[str, ...] | None, *, n_channels: int
+) -> tuple[int, int, int]:
+    """Best-effort (R, G, B) channel indices for quicklooks of a fetched frame."""
+    names = [str(b).upper() for b in (bands or ())]
+    if len(names) == n_channels:
+        try:
+            return (names.index("B4"), names.index("B3"), names.index("B2"))
+        except ValueError:
+            pass
+    return (0, 1, 2)
+
+
+def inspect_model_input(
+    model: str,
+    *,
+    spatial: SpatialSpec,
+    temporal: TemporalSpec | None = None,
+    sensor: SensorSpec | None = None,
+    fetch: FetchSpec | None = None,
+    modality: str | None = None,
+    backend: str = "gee",
+    value_range: tuple[float, float] | None = None,
+    return_arrays: bool = False,
+    **model_kwargs: Any,
+) -> dict[str, Any]:
+    """Fetch and inspect the raw provider input a model would actually receive.
+
+    Unlike :func:`inspect_provider_patch` (a generic sensor fetch), this goes
+    through the embedder's own ``fetch_input`` — the same shared path every
+    embedding pipeline uses — so bands, temporal binning, fetch-square
+    geometry, and empty-bin handling all match what the model sees at embed
+    time. Does **not** load model weights or run inference.
+
+    For multi-frame models (e.g. ``temporal_mode="multi"``) the result contains
+    one entry per temporal bin, including empty bins the model would drop.
+
+    Parameters
+    ----------
+    model : str
+        Model identifier or alias.
+    spatial : SpatialSpec
+        Spatial location to inspect.
+    temporal : TemporalSpec or None
+        Optional temporal filter (same semantics as :func:`get_embedding`).
+    sensor : SensorSpec or None
+        Optional sensor override; ``None`` uses the model's default sensor.
+    fetch : FetchSpec or None
+        Lightweight fetch-policy override applied to the model default sensor.
+        Cannot be combined with ``sensor``.
+    modality : str or None
+        Optional modality selector for models with multiple input branches.
+    backend : str
+        Provider backend name (default ``"gee"``).
+    value_range : tuple[float, float] or None
+        Optional ``(min, max)`` range for value-range checks in per-frame
+        reports.
+    return_arrays : bool
+        If ``True``, attach each frame's raw ``np.ndarray`` as ``array_chw``
+        in the frame entries (not JSON-serializable).
+    **model_kwargs
+        Model-specific settings, as in :func:`get_embedding` (e.g.
+        ``temporal_mode="multi"``). Only fetch-relevant keys affect the result.
+
+    Returns
+    -------
+    dict[str, Any]
+        Report with keys ``ok``, ``model``, ``backend``, ``n_frames``,
+        ``n_empty``, ``frames`` (one entry per temporal frame with ``start``,
+        ``end``, ``empty``, and ``report``), ``fetch_meta``, ``sensor``,
+        ``temporal``, and ``artifacts``.
+
+    Raises
+    ------
+    ModelError
+        If the model is unknown, precomputed (no provider input), or has no
+        applicable sensor.
+    ProviderError
+        If the backend name is empty or the provider fails to initialize.
+    """
+    model_config = model_kwargs or None
+    model_n = _normalize_model_name(model)
+    backend_name = str(backend).strip().lower()
+    if not backend_name:
+        raise ProviderError("backend must be a non-empty provider name.")
+
+    embedder_cls = _get_embedder_cls(model_n)
+    if getattr(embedder_cls, "_is_precomputed", False):
+        raise ModelError(
+            f"Model '{model_n}' serves precomputed embeddings; it has no provider "
+            "input to inspect. Use inspect_provider_patch for raw imagery checks."
+        )
+    sensor_eff = _resolve_sensor_for_model(
+        model_n,
+        sensor=sensor,
+        fetch=fetch,
+        modality=modality,
+        default_when_missing=True,
+    )
+    if sensor_eff is None:
+        raise ModelError(f"Model '{model_n}' has no default sensor; pass sensor=... explicitly.")
+    try:
+        provider = create_provider_for_backend(backend_name, allow_auto=False)
+    except ModelError as exc:
+        raise ProviderError(str(exc)) from exc
+
+    fr = _fetch_embedder_input(
+        embedder=embedder_cls(),
+        provider=provider,
+        spatial=spatial,
+        temporal=temporal,
+        sensor=sensor_eff,
+        model_config=model_config,
+    )
+
+    x = fr.data
+    fetch_meta = dict(fr.meta or {})
+    bin_meta = fetch_meta.pop("frames", None)
+    fetch_meta.pop("n_empty", None)
+    if x.ndim == 4:
+        frames_arr = [x[i] for i in range(x.shape[0])]
+        if not (isinstance(bin_meta, list) and len(bin_meta) == len(frames_arr)):
+            bin_meta = [{} for _ in frames_arr]
+    elif x.ndim == 3:
+        frames_arr = [x]
+        if temporal is not None:
+            t_res = _temporal_to_range(temporal)
+            bin_meta = [{"start": str(t_res.start), "end": str(t_res.end)}]
+        else:
+            bin_meta = [{}]
+    else:
+        raise ModelError(
+            f"Model '{model_n}' fetch_input returned ndim={x.ndim}; expected [C,H,W] or [T,C,H,W]."
+        )
+
+    save_dir = checks_save_dir(sensor_eff)
+    rgb_bands = _rgb_quicklook_band_indices(
+        sensor_eff.bands, n_channels=int(frames_arr[0].shape[0])
+    )
+    frames_out: list[dict[str, Any]] = []
+    artifacts: dict[str, Any] = {}
+    n_empty = 0
+    for i, (frame, bm) in enumerate(zip(frames_arr, bin_meta, strict=True)):
+        empty = bool(bm.get("empty", False)) or bool(np.isnan(frame).all())
+        entry: dict[str, Any] = {
+            "index": i,
+            "start": bm.get("start"),
+            "end": bm.get("end"),
+            "empty": empty,
+        }
+        if empty:
+            n_empty += 1
+        else:
+            entry["report"] = inspect_chw(
+                frame,
+                name=f"{model_n}_input_t{i}",
+                value_range=value_range,
+                fill_value=sensor_eff.fill_value,
+            )
+            if save_dir and frame.ndim == 3 and frame.shape[0] >= 3:
+                try:
+                    import datetime as _dt
+                    import os
+
+                    ts = _dt.datetime.utcnow().strftime("%Y%m%dT%H%M%SZ")
+                    path = os.path.join(save_dir, f"{model_n}_input_t{i}_{ts}.png")
+                    save_quicklook_rgb(frame, path=path, bands=rgb_bands)
+                    artifacts[f"quicklook_rgb_t{i}"] = path
+                except Exception as e:
+                    artifacts[f"quicklook_rgb_t{i}_error"] = repr(e)
+        if return_arrays:
+            entry["array_chw"] = frame
+        frames_out.append(entry)
+
+    ok = n_empty < len(frames_out) and all(
+        f.get("report", {}).get("ok", True) for f in frames_out if not f["empty"]
+    )
+    return {
+        "ok": bool(ok),
+        "model": model_n,
+        "backend": backend_name,
+        "n_frames": len(frames_out),
+        "n_empty": n_empty,
+        "frames": frames_out,
+        "fetch_meta": fetch_meta or None,
+        "sensor": asdict(sensor_eff),
+        "temporal": asdict(temporal) if temporal is not None else None,
+        "artifacts": artifacts or None,
+    }

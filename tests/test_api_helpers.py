@@ -67,37 +67,6 @@ class _FakeBBoxSplitProvider(ProviderBase):
         return h, w, y0, x0
 
 
-class _FakeBoundaryOverlapProvider(_FakeBBoxSplitProvider):
-    """Simulate GEE returning one duplicated boundary column on the left child tile."""
-
-    def fetch_array_chw(self, *, image, bands, region, scale_m, fill_value, collection=None):  # noqa: ARG002
-        self.fetch_calls += 1
-        bbox = region
-        assert isinstance(bbox, BBox)
-        h, w, y0, x0 = self._dims_and_offsets(bbox)
-        if h * w > self.max_pixels:
-            raise RuntimeError(
-                "Image.sampleRectangle: Too many pixels in sample; must be <= "
-                f"{self.max_pixels}. Got "
-                f"{h * w}."
-            )
-
-        # Left child tile includes one extra boundary column, creating a 1-pixel overlap
-        # with the right child tile after splitting the full bbox.
-        if np.isclose(float(bbox.minlon), float(self.full_bbox.minlon)) and float(
-            bbox.maxlon
-        ) < float(self.full_bbox.maxlon):
-            if x0 + w < self.full_w:
-                w += 1
-
-        # fetch_array_chw contract: returns north-up CHW (row 0 = northernmost).
-        yy = np.arange(y0, y0 + h, dtype=np.float32)[:, None]
-        xx = np.arange(x0, x0 + w, dtype=np.float32)[None, :]
-        base = yy * 100.0 + xx
-        out = np.stack([base + float(i) * 1000.0 for i in range(len(bands))], axis=0)
-        return out.astype(np.float32)
-
-
 class _FakeVerticalSouthUpProvider(_FakeBBoxSplitProvider):
     """Force y-splits on south-up tiles."""
 
@@ -186,7 +155,7 @@ def test_fetch_provider_patch_raw_uses_generic_path_for_s1():
 
     arr = fetch_provider_patch_raw(
         provider,
-        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=0.001, maxlat=0.001),
         temporal=TemporalSpec.range("2024-01-01", "2024-02-01"),
         sensor=sensor,
     )
@@ -209,25 +178,6 @@ def test_fetch_provider_patch_raw_returns_north_up_tile():
     )
 
     expected = np.array([[[0, 1, 2], [100, 101, 102]]], dtype=np.float32)
-    assert arr.shape == expected.shape
-    np.testing.assert_allclose(arr, expected)
-
-
-def test_fetch_provider_patch_raw_trims_boundary_overlap_when_stitching():
-    provider = _FakeBoundaryOverlapProvider()
-    sensor = SensorSpec(collection="FAKE/COLL", bands=("B1",), scale_m=75000, fill_value=0.0)
-
-    arr = fetch_provider_patch_raw(
-        provider,
-        spatial=provider.full_bbox,
-        temporal=None,
-        sensor=sensor,
-    )
-
-    expected = np.array(
-        [[[0, 1, 2, 3, 4, 5], [100, 101, 102, 103, 104, 105]]],
-        dtype=np.float32,
-    )
     assert arr.shape == expected.shape
     np.testing.assert_allclose(arr, expected)
 
@@ -271,7 +221,6 @@ def test_fetch_provider_patch_raw_correctly_stitches_recursive_y_split_tiles():
 
 
 def test_stitch_bbox_split_arrays_keeps_normalized_y_tiles_in_spatial_order():
-    provider = _FakeVerticalSouthUpProvider()
     arr_a = np.array(
         [[[0, 1], [100, 101], [200, 201]]],
         dtype=np.float32,
@@ -281,14 +230,7 @@ def test_stitch_bbox_split_arrays_keeps_normalized_y_tiles_in_spatial_order():
         dtype=np.float32,
     )
 
-    out = _stitch_bbox_split_arrays(
-        arr_a=arr_a,
-        arr_b=arr_b,
-        parent_spatial=provider.full_bbox,
-        axis="y",
-        scale_m=75000,
-        fill_value=0.0,
-    )
+    out = _stitch_bbox_split_arrays(arr_a, arr_b, "y")
 
     expected = np.array(
         [[[0, 1], [100, 101], [200, 201], [300, 301], [400, 401], [500, 501]]],

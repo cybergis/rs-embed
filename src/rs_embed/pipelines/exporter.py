@@ -280,6 +280,9 @@ class BatchExporter:
         # Restore prefetch cache from checkpoint
         restored = self.checkpoint.restore_prefetch_cache(manifest, arrays)
         prefetch.cache.update(restored)
+        # Restored inputs skip the fetch, so their fetch metadata (ROI window,
+        # processing flags) must come back from the checkpoint too.
+        prefetch.fetch_meta.update(self.checkpoint.restore_prefetch_fetch_meta(manifest))
 
         # Build prefetch tasks
         all_idxs = list(range(len(self.spatials)))
@@ -312,6 +315,7 @@ class BatchExporter:
                 sensor_by_key=prefetch.sensor_by_key,
                 inputs_cache=prefetch.cache,
                 n_items=len(self.spatials),
+                fetch_meta=prefetch.fetch_meta,
             )
             manifest = self.checkpoint.combined_write_checkpoint(
                 manifest=manifest,
@@ -378,7 +382,7 @@ class BatchExporter:
         )
 
         # Drop prefetch checkpoint arrays before final write
-        self.checkpoint.drop_prefetch_arrays(arrays)
+        self.checkpoint.drop_prefetch_arrays(arrays, manifest)
 
         # Summarize
         model_entries = manifest.get("models", [])
