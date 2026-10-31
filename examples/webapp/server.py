@@ -16,6 +16,12 @@ Run (from the repo root, in the rsembed venv with GEE authenticated)::
 
 Then open http://localhost:8000.
 
+Optional startup warm-up, so the first click on each model skips its one-time
+model loading (see ``_warmup``)::
+
+    WARMUP_MODELS=gse,tessera,clay WARMUP_LONLAT=-88.2272,40.1020 \
+      python -m uvicorn server:app --app-dir examples/webapp --port 8000
+
 The ROI/temporal/model contract mirrors the demo notebook:
 * point  → ``PointBuffer(lon, lat, buffer_m=2048)``  (a ~4 km box)
 * bbox   → ``BBox(minlon, minlat, maxlon, maxlat)``
@@ -31,8 +37,12 @@ import io
 import json
 import os
 import sys
+import threading
+import time
 import traceback
 import uuid
+from concurrent.futures import ThreadPoolExecutor
+from contextlib import asynccontextmanager
 from pathlib import Path
 from typing import Any
 
@@ -327,6 +337,23 @@ def _export_grids(rs: dict, spatial, temporal, models: list[str]) -> dict[str, n
     return out
 
 
+def _embed_group(rs: dict, spatial, temporal, group: list[str]) -> dict[str, np.ndarray | str]:
+    """Models sharing one temporal → model → (C,H,W) grid, or an error string."""
+    try:
+        if len(group) > 1:
+            return _export_grids(rs, spatial, temporal, group)
+        emb = rs["get_embedding"](
+            group[0],
+            spatial=spatial,
+            temporal=temporal,
+            output=rs["OutputSpec"].grid(),
+            backend="auto",
+        )
+        return {group[0]: H.to_dhw(emb.data)}
+    except Exception as e:  # noqa: BLE001
+        return {m: repr(e) for m in group}
+
+
 def _embed_grids(
     rs: dict, spatial, models: list[str], start: str, end: str
 ) -> tuple[str, dict[str, np.ndarray | str]]:
@@ -335,27 +362,16 @@ def _embed_grids(
     Each model's temporal comes from ``_temporal`` on every path, so the same model
     gets the same year/window whether it is requested alone or with others. Models
     resolving to the same temporal share one ``export_batch`` (one fetch); a model
-    alone in its temporal runs through ``get_embedding``.
+    alone in its temporal runs through ``get_embedding``. Groups do their own fetches,
+    so they run concurrently and the request takes as long as the slowest group.
     """
     groups: dict[Any, list[str]] = {}
     for m in models:
         groups.setdefault(_temporal(rs, m, start, end), []).append(m)
     grids: dict[str, np.ndarray | str] = {}
-    for temporal, group in groups.items():
-        try:
-            if len(group) > 1:
-                grids.update(_export_grids(rs, spatial, temporal, group))
-                continue
-            emb = rs["get_embedding"](
-                group[0],
-                spatial=spatial,
-                temporal=temporal,
-                output=rs["OutputSpec"].grid(),
-                backend="auto",
-            )
-            grids[group[0]] = H.to_dhw(emb.data)
-        except Exception as e:  # noqa: BLE001
-            grids.update({m: repr(e) for m in group})
+    with ThreadPoolExecutor(max_workers=max(1, len(groups))) as pool:
+        for out in pool.map(lambda kv: _embed_group(rs, spatial, *kv), groups.items()):
+            grids.update(out)
     compute = "export_batch" if any(len(g) > 1 for g in groups.values()) else "get_embedding"
     return compute, grids
 
@@ -381,8 +397,42 @@ def _s2_rgb_to_float(chw: np.ndarray) -> np.ndarray:
     return np.clip((rgb - lo) / (hi - lo + 1e-6), 0, 1)
 
 
+# --- startup warm-up ---------------------------------------------------------
+def _warmup(models: list[str], lon: float, lat: float) -> None:
+    """Pay the one-time per-process costs (ee init, imports, weight loading, tessera
+    tiles) before the first real click: embed one default-size ROI at (lon, lat)
+    through the same path as /api/embed. Loaded models stay cached in this process."""
+    t0 = time.perf_counter()
+    print(f"[warm-up] {', '.join(models)} at ({lon}, {lat}) ...", flush=True)
+    try:
+        _ensure_ee()
+        rs = _rs()
+        req = EmbedReq(geometry=Geometry(type="point", lon=lon, lat=lat), models=models)
+        spatial = _spatial(rs, req.geometry, req.buffer_m)
+        _, grids = _embed_grids(rs, spatial, models, req.start, req.end)
+    except Exception as e:  # noqa: BLE001
+        print(f"[warm-up] failed: {e!r}", flush=True)
+        return
+    failed = {m: g[:200] for m, g in grids.items() if isinstance(g, str)}
+    msg = f"[warm-up] done in {time.perf_counter() - t0:.0f}s"
+    print(msg + (f"; failed: {failed}" if failed else ""), flush=True)
+
+
+@asynccontextmanager
+async def _lifespan(_app: FastAPI):
+    # WARMUP_MODELS=gse,tessera,clay [WARMUP_LONLAT=lon,lat] warms those models in a
+    # background thread at startup (default location: the map's initial view, UIUC);
+    # the app serves requests meanwhile.
+    models = [m.strip() for m in os.environ.get("WARMUP_MODELS", "").split(",") if m.strip()]
+    if models:
+        lonlat = os.environ.get("WARMUP_LONLAT", "-88.2272,40.1020")
+        lon, lat = (float(v) for v in lonlat.split(","))
+        threading.Thread(target=_warmup, args=(models, lon, lat), daemon=True).start()
+    yield
+
+
 # --- app ---------------------------------------------------------------------
-app = FastAPI(title="rs-embed web demo")
+app = FastAPI(title="rs-embed web demo", lifespan=_lifespan)
 app.mount("/assets", StaticFiles(directory=str(ASSETS)), name="assets")
 
 

@@ -694,6 +694,8 @@ yhat = reg.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># $
 // ---------------------------------------------------------------- preview + embed
 async function onRoiChanged(center){
   updateQuery();
+  // Start embedding now, alongside the preview; Confirm then picks up this request.
+  if (currentTab !== 'use' && selectedModels().length) startEmbed(selectedModels());
   const pop = L.popup({minWidth:240, maxWidth:360, closeOnClick:false, autoClose:false})
     .setLatLng(center).setContent('<div class="pop">Fetching Sentinel-2 preview…</div>').openOn(map);
   try{
@@ -800,14 +802,28 @@ function renderResultsPanel(j){
   sec.style.display = '';
   sec.scrollIntoView({behavior:'smooth', block:'nearest'});
 }
+// /api/embed for the current ROI/time/models. A request with the same body that is
+// already in flight (started by onRoiChanged) is reused instead of sent again; a
+// failed one is forgotten so the next Confirm retries.
+let pendingEmbed = null;   // {body, promise}
+function startEmbed(models){
+  const body = JSON.stringify({geometry, start:startStr(), end:endStr(), models});
+  if (pendingEmbed && pendingEmbed.body === body) return pendingEmbed.promise;
+  const entry = {body};
+  const forget = () => { if (pendingEmbed === entry) pendingEmbed = null; };
+  entry.promise = fetch('/api/embed', {method:'POST', headers:{'Content-Type':'application/json'}, body})
+    .then(r => r.json())
+    .then(j => { if (j.error) forget(); return j; }, e => { forget(); throw e; });
+  entry.promise.catch(() => {});   // nobody may await a speculative request; don't log it as unhandled
+  pendingEmbed = entry;
+  return entry.promise;
+}
 async function runEmbed(pop){
   const models = selectedModels();
   if (!models.length){ if(pop) pop.setContent('<div class="pop">Select at least one model.</div>'); return; }
   if (pop) pop.setContent('<div class="pop"><span class="spin"></span>Embedding '+models.length+' model(s)…<br><span class="status">on-the-fly models may download checkpoints on first use.</span></div>');
   try{
-    const r = await fetch('/api/embed', {method:'POST', headers:{'Content-Type':'application/json'},
-      body: JSON.stringify({geometry, start:startStr(), end:endStr(), models})});
-    const j = await r.json();
+    const j = await startEmbed(models);
     if (j.error){ if(pop) pop.setContent('<div class="pop">⚠️ '+j.error+'</div>'); return; }
     window.lastResults = j.results;
     window.lastEmbedBounds = roiLayer ? roiLayer.getBounds() : null;  // overlay extent
