@@ -113,7 +113,7 @@ def module_vector_head(*get_modules: Callable[[], Any]) -> Callable[[np.ndarray]
         import torch
 
         modules = [get_module() for get_module in get_modules]
-        param = next(iter(modules[0].parameters()), None)
+        param = next((p for module in modules for p in module.parameters()), None)
         x = torch.from_numpy(np.asarray(vec, dtype=np.float32))[None]
         if param is not None:
             x = x.to(device=param.device, dtype=param.dtype)

@@ -358,19 +358,21 @@ def pool_for_output(
     """Pooled output for *geo_roi*, pooled by the model's own rule.
 
     *native* is the model's pooled vector for the whole input (``None``: the
-    reduction over all of *grid_dhw*) and *grid_dhw* its ``(D, H', W')`` token
-    grid in the model's frame, in the space *head* maps from (``None`` when the
-    model has no real token grid). The reduction is
+    reduction over all of *grid_dhw*, through *head*) and *grid_dhw* its
+    ``(D, H', W')`` token grid in the model's frame, in the space *head* maps
+    from (``None`` when the model has no real token grid). The reduction is
     *native_reduce* (``"mean"``) when the model's pooled vector ignores
     *pooling* (a CLS token or a fixed mean; ``requested_pooling`` then records
     the request, and the tiler merges such tiles as a mean), else *pooling*.
     Returns ``(vec, meta)``:
 
-    - whole ROI: *native*, labelled *native_pooling*;
+    - whole ROI, or a sub-window whose cells are the whole grid (its margin is
+      under a token on every side): *native*, labelled *native_pooling*;
     - ROI sub-window: the reduction over the ROI's cells, through *head*,
       labelled *roi_pooling* (default ``roi_grid_<reduce>``) with
-      ``roi_pooled=True``. It must have *native*'s shape, so the ROI and
-      whole-input vectors of one model stay comparable;
+      ``roi_pooled=True`` and the cells' ``roi_grid_hw``. It must have
+      *native*'s shape, so the ROI and whole-input vectors of one model stay
+      comparable;
     - ROI sub-window without a grid: *native*, with ``roi_pooled=False`` and a
       ``UserWarning``.
     """
@@ -387,19 +389,26 @@ def pool_for_output(
         if grid_dhw is None:
             raise ModelError(f"{model_label} has neither a pooled vector nor a grid to pool.")
         native = _POOL_REDUCERS[reduce](grid_dhw, axis=(1, 2))
+        if head is not None:
+            native = head(native)
     native = np.asarray(native, dtype=np.float32)
     geo_roi = tuple(geo_roi or FULL_WINDOW)
     if roi_is_full(geo_roi):
         return native, meta
     if grid_dhw is None:
+        # No per-item ROI in the text, so a batch warns once, not once per item.
         warnings.warn(
             f"{model_label} has no token grid for this input, so its pooled output covers "
-            f"the whole fetched square, not the ROI window {geo_roi}.",
+            "the whole fetched square, not the ROI window.",
             UserWarning,
             stacklevel=2,
         )
         return native, {**meta, "roi_pooled": False}
     cells = crop_grid_to_roi(grid_dhw, model_roi_window(shape_prep, geo_roi))
+    if cells.shape == grid_dhw.shape:
+        # The ROI's cells are all the tokens: a CLS model keeps its CLS vector
+        # rather than jumping to a token mean for an almost-square ROI.
+        return native, meta
     vec = _POOL_REDUCERS[reduce](cells, axis=(1, 2))
     if head is not None:
         vec = head(vec)
@@ -409,7 +418,12 @@ def pool_for_output(
             f"{model_label} pooled the ROI to shape {vec.shape}, but its pooled vector has "
             f"shape {native.shape}; the ROI must be pooled in the same space."
         )
-    return vec, {**meta, "pooling": roi_pooling or f"roi_grid_{reduce}", "roi_pooled": True}
+    return vec, {
+        **meta,
+        "pooling": roi_pooling or f"roi_grid_{reduce}",
+        "roi_pooled": True,
+        "roi_grid_hw": (int(cells.shape[1]), int(cells.shape[2])),
+    }
 
 
 def roi_token_box(

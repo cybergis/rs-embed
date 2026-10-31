@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import warnings
+
 import numpy as np
 import pytest
 
@@ -335,7 +337,7 @@ def test_pool_for_output_keeps_the_native_vector_for_a_whole_roi():
 def test_pool_for_output_pools_the_roi_cells_in_the_model_frame(pooling, expected):
     vec, meta = _pool(np.array([42.0]), _row_grid(), _LOWER_HALF, pooling=pooling)
     assert vec.tolist() == [expected]
-    assert meta == {"pooling": f"roi_grid_{pooling}", "roi_pooled": True}
+    assert meta == {"pooling": f"roi_grid_{pooling}", "roi_pooled": True, "roi_grid_hw": (2, 4)}
 
 
 def test_pool_for_output_follows_a_fixed_native_reduction():
@@ -347,7 +349,46 @@ def test_pool_for_output_follows_a_fixed_native_reduction():
         np.array([42.0]), _row_grid(), _LOWER_HALF, pooling="max", native_reduce="mean"
     )
     assert vec.tolist() == [4.5]
-    assert meta == {"pooling": "roi_grid_mean", "requested_pooling": "max", "roi_pooled": True}
+    assert meta == {
+        "pooling": "roi_grid_mean",
+        "requested_pooling": "max",
+        "roi_pooled": True,
+        "roi_grid_hw": (2, 4),
+    }
+
+
+def test_pool_for_output_keeps_the_native_vector_when_the_roi_covers_every_cell():
+    # An almost-square ROI: its margin is under one token, so its cells are the whole grid.
+    almost_full = (0.0, 1.0, 0.01, 0.99)
+    vec, meta = pool_for_output(
+        np.array([42.0]),
+        _row_grid(),
+        geo_roi=almost_full,
+        shape_prep=None,
+        pooling="mean",
+        native_pooling="native",
+        model_label="Model",
+    )
+    assert vec.tolist() == [42.0] and meta == {"pooling": "native"}
+
+
+def test_pool_for_output_puts_a_grid_reduction_through_the_head_too():
+    def double(v):
+        return v * 2
+
+    whole, _ = _pool(None, _row_grid(), FULL_WINDOW, head=double)
+    roi, _ = _pool(None, _row_grid(), _LOWER_HALF, head=double)
+    assert whole.tolist() == [7.0]  # 2 * mean of rows 0..7
+    assert roi.tolist() == [9.0]  # 2 * mean of rows 4..5
+
+
+def test_pool_for_output_warns_with_one_message_for_any_roi():
+    with warnings.catch_warnings(record=True) as caught:
+        warnings.simplefilter("always")
+        for geo_roi in (_LOWER_HALF, (0.0, 0.5, 0.0, 1.0)):
+            _pool(np.array([42.0]), None, geo_roi)
+    # Python's default filter then shows a batch's warning once, not once per item.
+    assert len({str(w.message) for w in caught}) == 1
 
 
 def test_pool_for_output_applies_the_head_after_the_reduction():

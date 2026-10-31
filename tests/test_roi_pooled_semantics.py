@@ -239,6 +239,15 @@ def test_wildsat_vector_as_1x1_is_not_an_roi_grid():
     assert out.meta["pooling"] == "identity" and out.meta["roi_pooled"] is False
 
 
+def test_module_vector_head_moves_the_vector_to_the_first_module_with_parameters():
+    from rs_embed.embedders.shared import module_vector_head
+
+    linear = torch.nn.Linear(3, 2).double()
+    head = module_vector_head(lambda: torch.nn.Identity(), lambda: linear)
+    expected = linear(torch.ones(1, 3, dtype=torch.float64))[0].detach().numpy()
+    np.testing.assert_allclose(head(np.ones(3, np.float32)), expected)
+
+
 # --------------------------------------------------------------------------- satvision
 
 
@@ -259,8 +268,8 @@ def test_satvision_roi_mean_of_normed_tokens_restricts_forward_features():
     assert roi.meta["pooling"] == "roi_grid_mean"
 
 
-def test_satvision_roi_tokens_share_one_forward_for_the_rois_that_need_them():
-    from rs_embed.embedders.onthefly_satvision_toa import _satvision_roi_tokens
+def test_satvision_pooled_forward_keeps_the_roi_tokens_from_one_forward(monkeypatch):
+    import rs_embed.embedders.onthefly_satvision_toa as sv
 
     batches = []
 
@@ -268,22 +277,33 @@ def test_satvision_roi_tokens_share_one_forward_for_the_rois_that_need_them():
         batches.append(int(x.shape[0]))
         return x.mean(dim=(2, 3))[:, None, :].repeat(1, 4, 1)  # [B, 4, C]
 
-    model = types.SimpleNamespace(_forward_tokens=forward_tokens, norm=lambda t: t * 2.0)
+    model = types.SimpleNamespace(
+        _forward_tokens=forward_tokens,
+        norm=lambda t: t * 2.0,
+        avgpool=torch.nn.AdaptiveAvgPool1d(1),
+    )
     xs = [np.full((3, 8, 8), float(v), np.float32) for v in (1, 2, 3)]
-    pooled = [np.zeros(3, np.float32)] * 3
-
-    def roi_tokens(model, geo_rois, output=OutputSpec.pooled()):
-        return _satvision_roi_tokens(model, xs, pooled, geo_rois, output=output, device="cpu")
-
-    toks = roi_tokens(model, [_TOP, _FULL, _TOP])
-    assert batches == [2]  # the whole-ROI input needs no tokens
-    assert toks[1] is None
-    np.testing.assert_array_equal(toks[0], np.full((4, 3), 2.0, np.float32))
+    arrs, meta, toks = sv._satvision_forward(
+        model, xs, [_TOP, _FULL, _TOP], output=OutputSpec.pooled(), device="cpu"
+    )
+    assert batches == [3]  # forward_features and the ROI tokens share one pass
+    np.testing.assert_array_equal(np.stack(arrs), np.repeat([[2.0], [4.0], [6.0]], 3, axis=1))
+    assert toks[1] is None  # the whole-ROI input needs no tokens
     np.testing.assert_array_equal(toks[2], np.full((4, 3), 6.0, np.float32))
-    assert roi_tokens(model, [_FULL] * 3) == [None] * 3
-    assert roi_tokens(model, [_TOP] * 3, OutputSpec.grid()) == [None] * 3
-    assert roi_tokens(types.SimpleNamespace(), [_TOP] * 3) == [None] * 3
-    assert batches == [2]
+    assert meta["forward_path"] == "forward_features"
+
+    # Without a sub-window, or without the forward_features steps, it is the plain forward.
+    calls = []
+    monkeypatch.setattr(
+        sv, "_satvision_forward_batch", lambda *a, **k: calls.append(1) or (["v"] * 3, {})
+    )
+    assert sv._satvision_forward(
+        model, xs, [_FULL] * 3, output=OutputSpec.pooled(), device="cpu"
+    ) == (["v"] * 3, {}, [None] * 3)
+    sv._satvision_forward(
+        types.SimpleNamespace(), xs, [_TOP] * 3, output=OutputSpec.pooled(), device="cpu"
+    )
+    assert calls == [1, 1] and batches == [3]
 
 
 def test_satvision_warns_without_tokens():
