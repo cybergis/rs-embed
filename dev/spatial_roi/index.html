@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -1911,6 +1911,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The contract, in three stages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pooled-output-for-an-roi-sub-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pooled output for an ROI sub-window
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2290,6 +2307,23 @@
     </span>
   </a>
   
+    <nav class="md-nav" aria-label="The contract, in three stages">
+      <ul class="md-nav__list">
+        
+          <li class="md-nav__item">
+  <a href="#pooled-output-for-an-roi-sub-window" class="md-nav__link">
+    <span class="md-ellipsis">
+      
+        Pooled output for an ROI sub-window
+      
+    </span>
+  </a>
+  
+</li>
+        
+      </ul>
+    </nav>
+  
 </li>
       
         <li class="md-nav__item">
@@ -2420,17 +2454,14 @@ The undistorted square is run through the encoder — resized to the model's fix
 input size on the resize path, or split into native-resolution tiles on the tile
 path (<code>input_prep="tile"</code>, the package default for most models).</p>
 <p><strong>3. Crop the output back to the ROI.</strong>
-The encoder's token grid / feature map is cropped to <code>roi_window</code>
-(<code>crop_grid_to_roi</code> / <code>roi_token_box</code>); for <code>pooled</code> output only the ROI tokens are
-pooled (<code>crop_grid_and_pool</code>). <code>roi_window</code> is relative to the fetched square, so a
-model that pads, crops or center-crops that array on the way in first maps the
-window into its own input's frame (<code>model_roi_window</code>, through
-<code>meta["shape_prep"]["input_window"]</code>). Grid output also drops whole cells of such
-padding; <code>pooled</code> output pools ROI tokens only when the ROI is a sub-window, and
-otherwise keeps the model's own pooled vector (<code>olmoearth</code> and <code>thor</code> pool only the
-input's valid region even then). The stitched grid from the tile path
-is cropped the same way, and tiled <code>pooled</code> embeddings are weighted by each tile's
-ROI-overlap area. The result describes <strong>your</strong> ROI, not the enlarged square.</p>
+<code>grid</code> output is cropped to <code>roi_window</code> (<code>crop_grid_for_output</code>). <code>roi_window</code> is relative to the fetched square, so a model that pads, crops or center-crops that array on the way in first maps the window into its own input's frame (<code>model_roi_window</code>, through <code>meta["shape_prep"]["input_window"]</code>), and the crop also drops whole cells of such padding. <code>pooled</code> output pools the ROI's tokens only when the ROI is a sub-window, and otherwise keeps the model's own pooled vector (<code>olmoearth</code> and <code>thor</code> pool only the input's valid region even then); see <a href="#pooled-output-for-an-roi-sub-window">Pooled output for an ROI sub-window</a>. The stitched grid from the tile path is cropped the same way, and tiled <code>pooled</code> embeddings are weighted by each tile's ROI-overlap area. The result describes <strong>your</strong> ROI, not the enlarged square.</p>
+<h3 id="pooled-output-for-an-roi-sub-window">Pooled output for an ROI sub-window<a class="headerlink" href="#pooled-output-for-an-roi-sub-window" title="Permanent link">&para;</a></h3>
+<p>An ROI-pooled vector is pooled by the model's own rule, so it is comparable with the same model's pooled vector for a whole input: it has the same shape and lies in the same space (<code>shape.pool_for_output</code> checks the shape).</p>
+<ul>
+<li><strong>Models that pool tokens</strong> (<code>satmae</code>, <code>satmaepp</code>, <code>scalemae</code>, <code>prithvi</code>, <code>terramind</code>, <code>galileo</code>, <code>agrifm</code>, <code>fomo</code>, <code>satmaepp_s2</code>, <code>anysat</code> with the default <code>pooled_source="patch"</code>, and <code>wildsat</code> with token pooling) reduce the ROI's tokens with <code>pooling</code> (<code>mean</code> or <code>max</code>), as they reduce all tokens for a whole input. Models with several tokens per cell (spectral groups, modalities, frames) reduce those with the same operation.</li>
+<li><strong>Models whose pooled vector is a CLS token or a fixed mean</strong> (<code>clay</code>, <code>dofa</code>, <code>terrafm</code>, <code>remoteclip</code>, <code>wildsat</code>, <code>anysat</code> with <code>pooled_source="tile"</code>, <code>satvision_toa</code>) mean-pool the ROI's tokens and pass the mean through the same final norm, head or projection: <code>fc_norm</code> for <code>dofa</code>, <code>ln_post</code> and <code>proj</code> for <code>remoteclip</code>, torchvision's <code>heads</code> and the image head for <code>wildsat</code>. <code>pooling="max"</code> does not change these vectors, for a whole input or an ROI, and their tiles from <code>input_prep="tile"</code> merge as a mean too; <code>meta["requested_pooling"]</code> records the request. For a CLS model the ROI vector is a token mean in the CLS token's space, not a CLS token: it is the closest comparable vector without running the model on the ROI alone.</li>
+</ul>
+<p>An ROI-pooled vector is labelled <code>meta["pooling"] = "roi_grid_&lt;mean|max&gt;"</code> (<code>prithvi</code> multi-frame: <code>roi_grid_temporal_&lt;mean|max&gt;</code>) with <code>meta["roi_pooled"] = True</code> and the pooled cells' extent in <code>meta["roi_grid_hw"]</code>. An almost-square ROI whose margin is under one token on every side covers every token, so it keeps the model's own pooled vector. When a model has no token grid for the input (a wrapper that only returns pooled vectors, a backbone without patch tokens, or <code>fomo</code> tokens that do not match its patch grid), the pooled vector covers the whole fetched square instead: a <code>UserWarning</code> says so and <code>meta["roi_pooled"]</code> is <code>False</code>.</p>
 <hr />
 <h2 id="by-roi-shape">By ROI shape<a class="headerlink" href="#by-roi-shape" title="Permanent link">&para;</a></h2>
 <table>
@@ -2636,10 +2667,10 @@ mostly real imagery instead of synthetic border.</p>
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.indexes", "navigation.sections", "navigation.expand", "navigation.top", "toc.follow", "content.code.copy", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "..", "features": ["navigation.tabs", "navigation.indexes", "navigation.sections", "navigation.expand", "navigation.top", "toc.follow", "content.code.copy", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight"], "search": "../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
       

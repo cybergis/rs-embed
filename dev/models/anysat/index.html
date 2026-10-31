@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/images/favicon.png">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.7.7">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
     
     
       
@@ -29,10 +29,10 @@
       
     
     
-      <link rel="stylesheet" href="../../assets/stylesheets/main.ec1eaa64.min.css">
+      <link rel="stylesheet" href="../../assets/stylesheets/main.57a0d79d.min.css">
       
         
-        <link rel="stylesheet" href="../../assets/stylesheets/palette.ab4e12ef.min.css">
+        <link rel="stylesheet" href="../../assets/stylesheets/palette.fb2fffe2.min.css">
       
       
 
@@ -2710,7 +2710,7 @@
 <p>AnySat always feeds a fixed <code>T</code> frames. When a sub-window has no clear scene, the provider back-fills it with the whole-window composite (a duplicate frame). This is no longer silent: <code>meta</code> records <code>n_frames_requested</code> / <code>n_distinct_frames</code> / <code>n_backfilled_frames</code>, and a <code>UserWarning</code> fires when <code>n_distinct_frames &lt; T</code>. See <a href="../../temporal_sampling/#data-availability-empty-sub-windows-are-never-silent">Temporal Sampling → Data availability</a>. Narrow/shift the window or raise <code>cloudy_pct</code> to recover genuine temporal diversity.</p>
 </div>
 <h2 id="output-semantics">Output Semantics<a class="headerlink" href="#output-semantics" title="Permanent link">&para;</a></h2>
-<p><strong><code>pooled</code></strong>: defaults to spatial pooling over AnySat's <code>patch</code> grid; pass <code>pooled_source="tile"</code> (or <code>RS_EMBED_ANYSAT_POOLED_SOURCE=tile</code>) to use the native AnySat tile embedding instead.</p>
+<p><strong><code>pooled</code></strong>: defaults to spatial pooling over AnySat's <code>patch</code> grid; pass <code>pooled_source="tile"</code> (or <code>RS_EMBED_ANYSAT_POOLED_SOURCE=tile</code>) to use the native AnySat tile embedding instead. For a rectangular ROI the tile mode mean-pools the ROI's patch tokens from the same forward (see <a href="../../spatial_roi/#pooled-output-for-an-roi-sub-window">Pooled output for an ROI sub-window</a>).</p>
 <p><strong><code>grid</code></strong>: defaults to AnySat <code>dense</code> sub-patch features <code>(D,H,W)</code>; pass <code>grid_feature_mode="patch"</code> (or <code>RS_EMBED_ANYSAT_GRID_MODE=patch</code>) to recover the older patch-grid behavior.</p>
 <h3 id="patch-size">Patch size<a class="headerlink" href="#patch-size" title="Permanent link">&para;</a></h3>
 <p>AnySat is trained across patch sizes, so the patch is a free knob, like <code>patch_size</code> on <code>olmoearth</code> and <code>RS_EMBED_THOR_PATCH_SIZE</code> on <code>thor</code>. In <code>rs-embed</code> it is given in pixels per patch side: <code>model_config={"patch_size": 2}</code> (or <code>RS_EMBED_ANYSAT_PATCH_SIZE=2</code>) calls AnySat with its own <code>patch_size=20</code> (meters at its nominal 10 m S2 resolution). It does not follow <code>sensor.scale_m</code>, which only sets the fetch resolution.</p>
@@ -2846,10 +2846,10 @@
     
       
       
-      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.indexes", "navigation.sections", "navigation.expand", "navigation.top", "toc.follow", "content.code.copy", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.2c215733.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
+      <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.indexes", "navigation.sections", "navigation.expand", "navigation.top", "toc.follow", "content.code.copy", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.d7400e89.min.js"></script>
+      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
       
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
       
