@@ -96,7 +96,7 @@ flowchart LR
 
 ## Output Semantics
 
-**`pooled`**: returns the projected CLIP image embedding from `encode_image` (e.g. 512-d for the default ViT-B/32 checkpoint) — the canonical RemoteCLIP visual representation that lives in the shared image/text space, suitable for similarity search and retrieval. This is computed identically across the single (`get_embedding`), batch, and tiled paths, so the output dimensionality and values do not depend on ROI size or which API you call.
+**`pooled`**: returns the projected CLIP image embedding from `encode_image` (e.g. 512-d for the default ViT-B/32 checkpoint) — the canonical RemoteCLIP visual representation that lives in the shared image/text space, suitable for similarity search and retrieval. This is computed identically across the single (`get_embedding`), batch, and tiled paths, so the output dimensionality does not depend on the ROI or on which API you call. For a rectangular ROI the vector is the mean of the ROI's patch tokens projected into the same space (`ln_post`, then `proj`, labelled `roi_grid_mean`); see [Pooled output for an ROI sub-window](../spatial_roi.md#pooled-output-for-an-roi-sub-window).
 
 **`grid`**: exposes the ViT patch-token layout, extracted from open_clip's `forward_intermediates` as the deepest dense feature map (`[D, Ht, Wt]`, e.g. `768×7×7` for ViT-B/32 @ 224; `tokens_kind="tokens_intermediates"`). The single and batch paths produce identical grids. RemoteCLIP follows the package-wide default, so `input_prep=None`/`"auto"` resolves to `"tile"`; unlike the dedicated image-level ViT grid adapters (`satmae`, `scalemae`, ...) it is not in the seam-warning set, so it tiles silently. Its grid is nonetheless an image-level CLIP ViT patch-token layout rather than a seamless dense field, so pass `input_prep="resize"` for a single resized forward pass when a seamless grid matters.
 
@@ -152,6 +152,6 @@ emb = get_embedding(
 
 - Provider-only — `backend="tensor"` is not supported.
 - The `rshf` wrapper exposes no `model.transform`, so the adapter always applies the open_clip-equivalent CLIP preprocess — there is no second, divergent preprocessing path.
-- `pooled` uses `encode_image` (projected CLIP embedding) on every path (single / batch / tiled); it is not a token-mean and its dimensionality does not change with ROI size.
+- `pooled` uses `encode_image` (projected CLIP embedding) on every path (single / batch / tiled); a rectangular ROI mean-pools its patch tokens projected into the same space, so the dimensionality never changes with the ROI.
 - `grid` tokens come from open_clip's `forward_intermediates` patch grid; if a wrapper exposes no dense features the adapter falls back to a vision-transformer forward hook (batch-first / sequence-first safe).
 - `input_prep` defaults to `tile` (the package-wide default); tiled RemoteCLIP patch-token grids can show stitching seams, so pass `input_prep="resize"` for a single resized forward pass when that matters.

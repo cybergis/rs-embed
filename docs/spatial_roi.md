@@ -43,17 +43,16 @@ input size on the resize path, or split into native-resolution tiles on the tile
 path (`input_prep="tile"`, the package default for most models).
 
 **3. Crop the output back to the ROI.**
-The encoder's token grid / feature map is cropped to `roi_window`
-(`crop_grid_to_roi` / `roi_token_box`); for `pooled` output only the ROI tokens are
-pooled (`crop_grid_and_pool`). `roi_window` is relative to the fetched square, so a
-model that pads, crops or center-crops that array on the way in first maps the
-window into its own input's frame (`model_roi_window`, through
-`meta["shape_prep"]["input_window"]`). Grid output also drops whole cells of such
-padding; `pooled` output pools ROI tokens only when the ROI is a sub-window, and
-otherwise keeps the model's own pooled vector (`olmoearth` and `thor` pool only the
-input's valid region even then). The stitched grid from the tile path
-is cropped the same way, and tiled `pooled` embeddings are weighted by each tile's
-ROI-overlap area. The result describes **your** ROI, not the enlarged square.
+`grid` output is cropped to `roi_window` (`crop_grid_for_output`). `roi_window` is relative to the fetched square, so a model that pads, crops or center-crops that array on the way in first maps the window into its own input's frame (`model_roi_window`, through `meta["shape_prep"]["input_window"]`), and the crop also drops whole cells of such padding. `pooled` output pools the ROI's tokens only when the ROI is a sub-window, and otherwise keeps the model's own pooled vector (`olmoearth` and `thor` pool only the input's valid region even then); see [Pooled output for an ROI sub-window](#pooled-output-for-an-roi-sub-window). The stitched grid from the tile path is cropped the same way, and tiled `pooled` embeddings are weighted by each tile's ROI-overlap area. The result describes **your** ROI, not the enlarged square.
+
+### Pooled output for an ROI sub-window
+
+An ROI-pooled vector is pooled by the model's own rule, so it is comparable with the same model's pooled vector for a whole input: it has the same shape and lies in the same space (`shape.pool_for_output` checks the shape).
+
+- **Models that pool tokens** (`satmae`, `satmaepp`, `scalemae`, `prithvi`, `terramind`, `galileo`, `agrifm`, `fomo`, `satmaepp_s2`, `anysat` with the default `pooled_source="patch"`, and `wildsat` with token pooling) reduce the ROI's tokens with `pooling` (`mean` or `max`), as they reduce all tokens for a whole input. Models with several tokens per cell (spectral groups, modalities, frames) reduce those with the same operation.
+- **Models whose pooled vector is a CLS token or a fixed mean** (`clay`, `dofa`, `terrafm`, `remoteclip`, `wildsat`, `anysat` with `pooled_source="tile"`, `satvision_toa`) mean-pool the ROI's tokens and pass the mean through the same final norm, head or projection: `fc_norm` for `dofa`, `ln_post` and `proj` for `remoteclip`, torchvision's `heads` and the image head for `wildsat`. `pooling="max"` does not change these vectors, for a whole input or an ROI, and their tiles from `input_prep="tile"` merge as a mean too; `meta["requested_pooling"]` records the request. For a CLS model the ROI vector is a token mean in the CLS token's space, not a CLS token: it is the closest comparable vector without running the model on the ROI alone.
+
+An ROI-pooled vector is labelled `meta["pooling"] = "roi_grid_<mean|max>"` (`prithvi` multi-frame: `roi_grid_temporal_<mean|max>`) with `meta["roi_pooled"] = True` and the pooled cells' extent in `meta["roi_grid_hw"]`. An almost-square ROI whose margin is under one token on every side covers every token, so it keeps the model's own pooled vector. When a model has no token grid for the input (a wrapper that only returns pooled vectors, a backbone without patch tokens, or `fomo` tokens that do not match its patch grid), the pooled vector covers the whole fetched square instead: a `UserWarning` says so and `meta["roi_pooled"]` is `False`.
 
 ---
 

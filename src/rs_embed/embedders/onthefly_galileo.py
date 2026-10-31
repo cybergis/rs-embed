@@ -47,6 +47,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     prepare_square,
     roi_fetch_meta,
     square_fetch_batch,
@@ -1058,15 +1059,10 @@ class GalileoEmbedder(EmbedderBase):
             device=dev,
         )
 
-        # Crop the token grid (D, H', W') back to the ROI, mapped through the
-        # squaring: grid output always (dropping padding), pooled output only
-        # for an ROI sub-window (no-op when the window is full).
-        grid, cropped_to_roi = crop_grid_for_output(
-            grid,
-            geo_roi=geo_roi,
-            shape_prep=pmeta.get("shape_prep"),
-            pooled=output.mode == "pooled",
-        )
+        # Crop the token grid (D, H', W') back to the ROI in the model's frame,
+        # dropping padding; pooled output pools the ROI's cells for a sub-window.
+        if output.mode == "grid":
+            grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=pmeta.get("shape_prep"))
 
         meta = build_meta(
             model=self.model_name,
@@ -1100,19 +1096,17 @@ class GalileoEmbedder(EmbedderBase):
         )
 
         if output.mode == "pooled":
-            if output.pooling == "max":
-                # keep pooled mode semantics with optional max over grid
-                vec_out = np.max(grid, axis=(1, 2)).astype(np.float32)
-                pooling = "grid_max"
-            elif cropped_to_roi:
-                # Pool only the ROI's tokens (the global token mean would include
-                # the real-neighborhood context fetched to make the input square).
-                vec_out = np.mean(grid, axis=(1, 2)).astype(np.float32)
-                pooling = "roi_grid_mean"
-            else:
-                vec_out = vec.astype(np.float32)
-                pooling = "token_mean"
-            ometa = {**meta, "pooling": pooling, "pooled_shape": tuple(vec_out.shape)}
+            # The mean is Galileo's own token average; max is taken over the grid.
+            vec_out, pooling_meta = pool_for_output(
+                vec if output.pooling == "mean" else None,
+                grid,
+                geo_roi=geo_roi,
+                shape_prep=pmeta.get("shape_prep"),
+                pooling=output.pooling,
+                native_pooling="token_mean" if output.pooling == "mean" else "grid_max",
+                model_label="Galileo",
+            )
+            ometa = {**meta, **pooling_meta, "pooled_shape": tuple(vec_out.shape)}
             return Embedding(data=vec_out, meta=ometa)
 
         if output.mode == "grid":

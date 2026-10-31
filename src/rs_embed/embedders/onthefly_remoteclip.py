@@ -40,6 +40,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     roi_is_full,
     square_fetch_batch,
 )
@@ -560,6 +561,73 @@ def _remoteclip_encode_pooled_batch(
     return arr
 
 
+# Token sources taken before ``visual.ln_post``: the block outputs that
+# ``ln_post`` and ``proj`` map into the space of the CLIP image embedding.
+_PRE_LN_POST_TOKENS = frozenset({"tokens_intermediates", "tokens_hook"})
+
+
+def _remoteclip_project_tokens(model: Any, tokens_nd: np.ndarray) -> np.ndarray | None:
+    """Tokens [N,D] mapped into the space of RemoteCLIP's pooled vector, or ``None``.
+
+    The pooled vector (``encode_image``) is ``ln_post(CLS) @ proj``; the same
+    ``ln_post`` and ``proj`` applied to each token put the patch tokens in that
+    space, so a mean over them is comparable (``proj`` is linear). ``None`` when
+    the wrapper exposes neither.
+    """
+    import torch
+
+    visual = getattr(getattr(model, "model", model), "visual", None)
+    ln_post = getattr(visual, "ln_post", None)
+    proj = getattr(visual, "proj", None)
+    if ln_post is None or proj is None:
+        return None
+    with torch.no_grad():
+        t = torch.from_numpy(np.asarray(tokens_nd, dtype=np.float32))
+        t = t.to(device=proj.device, dtype=proj.dtype)
+        return (ln_post(t) @ proj).detach().float().cpu().numpy().astype(np.float32)
+
+
+def _remoteclip_roi_pooled(
+    model: Any,
+    rgb_u8: np.ndarray,
+    native: np.ndarray,
+    *,
+    geo_roi: tuple[float, float, float, float],
+    shape_prep: dict[str, Any] | None,
+    output: OutputSpec,
+    image_size: int,
+    device: str,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """RemoteCLIP's pooled vector and meta for one item (single and batch paths).
+
+    *native* is the projected CLIP image embedding. An ROI sub-window instead
+    mean-pools the ROI's patch tokens projected into the same space; when the
+    wrapper gives no projectable tokens, *native* is returned with a warning.
+    """
+    grid, tmeta = None, {}
+    if not roi_is_full(geo_roi):
+        tokens, tmeta = _remoteclip_encode_tokens(
+            model, rgb_u8, image_size=image_size, device=device
+        )
+        if tokens.ndim == 2 and tmeta.get("tokens_kind") in _PRE_LN_POST_TOKENS:
+            projected = _remoteclip_project_tokens(model, tokens)
+            if projected is not None:
+                grid, gmeta = _tokens_to_grid_dhw(projected)
+                tmeta = {**tmeta, **gmeta}
+    vec, pmeta = pool_for_output(
+        native,
+        grid,
+        geo_roi=geo_roi,
+        shape_prep=shape_prep,
+        pooling=output.pooling,
+        native_reduce="mean",
+        native_pooling="model_pooled",
+        model_label="RemoteCLIP",
+    )
+    # The token pass describes the vector only when the ROI was pooled from it.
+    return vec, ({**tmeta, **pmeta} if pmeta.get("roi_pooled") else pmeta)
+
+
 @register("remoteclip")
 class RemoteCLIPS2RGBEmbedder(EmbedderBase):
     """
@@ -808,40 +876,24 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 extra=extra,
             )
 
-        cropped_to_roi = not roi_is_full(geo_roi)
-
         # ---- pooled output ----
         if output.mode == "pooled":
-            if cropped_to_roi:
-                # The fetch enlarged a rectangle to a square; pool ONLY the ROI's
-                # patch tokens instead of the global CLIP image embedding (which
-                # would include the real-neighborhood context fetched to square it).
-                tokens_or_vec, tmeta = _remoteclip_encode_tokens(
-                    model, rgb_u8, image_size=image_size, device=dev
-                )
-                if tokens_or_vec.ndim == 2:
-                    grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                    g, _ = crop_grid_for_output(
-                        grid_dhw,
-                        geo_roi=geo_roi,
-                        shape_prep=shape_prep,
-                        pooled=True,
-                    )
-                    reduce = g.max if output.pooling == "max" else g.mean
-                    vec = reduce(axis=(1, 2)).astype(np.float32)
-                    base_meta = _build_base_meta(
-                        {**tmeta, **gmeta, "pooling": f"roi_grid_{output.pooling}"}
-                    )
-                    return Embedding(data=vec, meta=base_meta)
-                # No token grid available (wrapper only exposes pooled vectors):
-                # fall back to the global CLIP embedding (cannot crop a 1-D vector).
-            # Use the projected CLIP image embedding (encode_image), identical to the
-            # batch path, so pooled output is the canonical RemoteCLIP representation
-            # with a consistent dimensionality regardless of the single/batch/tiled path.
-            vec = _remoteclip_encode_pooled_batch(
+            # The projected CLIP image embedding (encode_image), as on the batch
+            # path, so every path gives the canonical RemoteCLIP representation.
+            native = _remoteclip_encode_pooled_batch(
                 model, [rgb_u8], image_size=image_size, device=dev
-            )[0].astype(np.float32)
-            base_meta = _build_base_meta({"tokens_kind": "pooled"})
+            )[0]
+            vec, pmeta = _remoteclip_roi_pooled(
+                model,
+                rgb_u8,
+                native,
+                geo_roi=geo_roi,
+                shape_prep=shape_prep,
+                output=output,
+                image_size=image_size,
+                device=dev,
+            )
+            base_meta = _build_base_meta({"tokens_kind": "pooled", **pmeta})
             return Embedding(data=vec, meta=base_meta)
 
         # ---- grid output ----
@@ -858,12 +910,7 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
 
             grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
             # ROI mapped through the center crop (also drops a cropped-away margin).
-            grid_dhw, _ = crop_grid_for_output(
-                grid_dhw,
-                geo_roi=geo_roi,
-                shape_prep=shape_prep,
-                pooled=False,
-            )
+            grid_dhw = crop_grid_for_output(grid_dhw, geo_roi=geo_roi, shape_prep=shape_prep)
             gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
             meta = {
                 **base_meta,
@@ -1036,36 +1083,22 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                 )  # [B,D]
                 for j in range(s1 - s0):
                     i = s0 + j
-                    geo_roi = _roi_at(i)
-                    if not roi_is_full(geo_roi):
-                        # Pool only the ROI's patch tokens (see get_embedding).
-                        tokens_or_vec, tmeta = _remoteclip_encode_tokens(
-                            model, rgb_u8_all[i], image_size=image_size, device=dev
-                        )
-                        if tokens_or_vec.ndim == 2:
-                            grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                            g, _ = crop_grid_for_output(
-                                grid_dhw,
-                                geo_roi=geo_roi,
-                                shape_prep=shape_preps[i],
-                                pooled=True,
-                            )
-                            reduce = g.max if output.pooling == "max" else g.mean
-                            vec = reduce(axis=(1, 2)).astype(np.float32)
-                            meta = _base_meta_for(
-                                i,
-                                {
-                                    **tmeta,
-                                    **gmeta,
-                                    "pooling": f"roi_grid_{output.pooling}",
-                                    "batch_infer": False,
-                                },
-                            )
-                            out[i] = Embedding(data=vec, meta=meta)
-                            continue
-                        # No token grid: fall back to the global pooled vector below.
-                    meta = _base_meta_for(i, {"tokens_kind": "pooled_batch", "batch_infer": True})
-                    out[i] = Embedding(data=vecs[j].astype(np.float32), meta=meta)
+                    vec, pmeta = _remoteclip_roi_pooled(
+                        model,
+                        rgb_u8_all[i],
+                        vecs[j],
+                        geo_roi=_roi_at(i),
+                        shape_prep=shape_preps[i],
+                        output=output,
+                        image_size=image_size,
+                        device=dev,
+                    )
+                    # ROI tokens come from a per-item forward, not the batch one.
+                    batch_infer = not pmeta.get("roi_pooled", False)
+                    meta = _base_meta_for(
+                        i, {"tokens_kind": "pooled_batch", **pmeta, "batch_infer": batch_infer}
+                    )
+                    out[i] = Embedding(data=vec, meta=meta)
         elif output.mode == "grid":
             for i in range(n):
                 geo_roi = _roi_at(i)
@@ -1081,11 +1114,8 @@ class RemoteCLIPS2RGBEmbedder(EmbedderBase):
                         "Your RemoteCLIP wrapper only provides pooled vectors (no forward_encoder tokens)."
                     )
                 grid_dhw, gmeta = _tokens_to_grid_dhw(tokens_or_vec)
-                grid_dhw, _ = crop_grid_for_output(
-                    grid_dhw,
-                    geo_roi=geo_roi,
-                    shape_prep=shape_preps[i],
-                    pooled=False,
+                grid_dhw = crop_grid_for_output(
+                    grid_dhw, geo_roi=geo_roi, shape_prep=shape_preps[i]
                 )
                 gmeta = {**gmeta, "grid_hw": (int(grid_dhw.shape[1]), int(grid_dhw.shape[2]))}
                 meta = _base_meta_for(

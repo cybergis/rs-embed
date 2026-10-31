@@ -44,6 +44,7 @@ from ..tools.runtime import (
 from ..tools.shape import (
     crop_grid_for_output,
     geo_roi_from_meta,
+    pool_for_output,
     prepare_square,
     roi_fetch_meta,
     square_fetch_batch,
@@ -763,12 +764,10 @@ class AgriFMEmbedder(EmbedderBase):
         )
 
         grid, fmeta = _agrifm_forward_grid(model, x_tchw, device=dev)
-        # Crop the token grid (D, H', W') back to the ROI, mapped through the
-        # squaring: grid output always (dropping padding), pooled output only
-        # for an ROI sub-window (no-op when the window is full).
-        grid, _ = crop_grid_for_output(
-            grid, geo_roi=geo_roi, shape_prep=shape_prep, pooled=output.mode == "pooled"
-        )
+        # Crop the token grid (D, H', W') back to the ROI in the model's frame,
+        # dropping padding; pooled output pools the ROI's cells for a sub-window.
+        if output.mode == "grid":
+            grid = crop_grid_for_output(grid, geo_roi=geo_roi, shape_prep=shape_prep)
         meta = build_meta(
             model=self.model_name,
             kind="on_the_fly",
@@ -792,14 +791,16 @@ class AgriFMEmbedder(EmbedderBase):
         )
 
         if output.mode == "pooled":
-            if output.pooling == "mean":
-                vec = grid.mean(axis=(1, 2)).astype(np.float32)
-            elif output.pooling == "max":
-                vec = grid.max(axis=(1, 2)).astype(np.float32)
-            else:
-                raise ModelError(f"Unknown pooling mode: {output.pooling}")
-            meta = {**meta, "pooling": f"spatial_{output.pooling}"}
-            return Embedding(data=vec, meta=meta)
+            vec, pmeta = pool_for_output(
+                None,
+                grid,
+                geo_roi=geo_roi,
+                shape_prep=shape_prep,
+                pooling=output.pooling,
+                native_pooling=f"spatial_{output.pooling}",
+                model_label="AgriFM",
+            )
+            return Embedding(data=vec, meta={**meta, **pmeta})
 
         if output.mode == "grid":
             da = grid_to_dataarray(grid.astype(np.float32), meta=meta)

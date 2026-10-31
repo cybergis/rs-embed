@@ -96,7 +96,7 @@ Even though it is not an environment variable, `sensor.scale_m` is a critical ru
 
 ## Output Semantics
 
-**`pooled`**: if `[N,D]` token sequence → pools with `mean`/`max`; if already `[D]` → returned as `model_pooled`; metadata records `tokens_kind`, `used_patch_size`, and `used_scale_m`.
+**`pooled`**: if `[N,D]` token sequence → pools with `mean`/`max`; if already `[D]` → returned as `model_pooled` (for a rectangular ROI it then covers the whole fetched square, with a `UserWarning` and `roi_pooled=False`); metadata records `tokens_kind`, `used_patch_size`, and `used_scale_m`.
 
 **`grid`**: requires a token sequence; raises a clear error when the wrapper only exposes pooled output. Default/auto input preparation resolves to tile (and warns about seams on grid output), and metadata records `input_prep.model_policy="tile_default_for_image_level_vit_patch_grid"`, `grid_semantics="vit_patch_tokens"`, and `grid_tile_recommended=false`.
 

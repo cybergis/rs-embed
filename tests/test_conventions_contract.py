@@ -11,7 +11,9 @@ loudly during development instead of accruing silently:
 3. ``describe()`` keeps its minimal schema promise (``type`` + ``output``);
 4. "must match / keep in sync" comments are a ratchet: the count may only
    go down — extracting the shared function is the fix, not documenting
-   the duplication.
+   the duplication;
+5. on-the-fly embedders pool an ROI through ``shape.pool_for_output`` and
+   crop grids through ``shape.crop_grid_for_output``, never by hand.
 """
 
 from __future__ import annotations
@@ -108,6 +110,32 @@ def test_describe_minimal_schema(model_id):
     outputs = desc["output"]
     assert isinstance(outputs, list) and outputs, f"{model_id}: 'output' must be a non-empty list"
     assert set(outputs) <= {"pooled", "grid"}, f"{model_id}: unknown outputs {outputs}"
+
+
+# Pool their own (masked or grouped) tokens over the ROI window: olmoearth
+# (``_pool_tokens``) and THOR (``_pool_thor_tokens``).
+_OWN_ROI_TOKEN_POOLING = {"onthefly_olmoearth.py", "onthefly_thor.py"}
+
+
+def test_onthefly_embedders_pool_the_roi_via_the_shared_helper():
+    """ROI pooled output goes through ``shape.pool_for_output`` (and grid crops
+    through ``shape.crop_grid_for_output``), which pools by the model's own rule
+    and checks the ROI vector has its pooled vector's shape (issue #140).
+    Hand-cropping a grid with ``crop_grid_to_roi`` is how per-model ROI pools
+    drifted into other spaces and reductions. This checks the two low-level
+    ROI crops (``crop_grid_to_roi``, ``roi_token_box``); a pooled path that
+    reduced ``crop_grid_for_output``'s grid by hand would pass it.
+    """
+    offenders = [
+        path.name
+        for path in sorted((SRC / "embedders").glob("onthefly_*.py"))
+        if path.name not in _OWN_ROI_TOKEN_POOLING
+        and re.search(r"\b(crop_grid_to_roi|roi_token_box)\b", path.read_text(encoding="utf-8"))
+    ]
+    assert not offenders, (
+        "Pool an ROI with shape.pool_for_output and crop grids with "
+        f"shape.crop_grid_for_output instead of crop_grid_to_roi / roi_token_box: {offenders}"
+    )
 
 
 # ── sync-comment ratchet ────────────────────────────────────────────

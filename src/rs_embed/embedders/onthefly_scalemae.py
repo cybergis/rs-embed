@@ -27,19 +27,16 @@ from ..tools.runtime import (
     move_model_to_device as _move_model_to_device,
 )
 from ..tools.shape import (
-    crop_grid_to_roi,
     geo_roi_from_meta,
-    roi_is_full,
+    pool_for_output,
     square_fetch_batch,
 )
 from ..tools.spatial import square_spatial
 from .base import EmbedderBase
 from .meta import base_meta, temporal_to_range
 from .shared import (
-    grid_to_dataarray,
-    pool_from_tokens,
+    build_token_embedding,
     resolve_pretrained_source_cache_first,
-    tokens_to_grid_dhw,
 )
 
 
@@ -73,68 +70,38 @@ def fetch_s2_rgb_u8_from_provider(provider, *, spatial, temporal, sensor, out_si
 def build_scalemae_embedding(out, *, geo_roi, output, meta):
     """Turn a ScaleMAE forward output into an Embedding, cropping to the ROI.
 
-    ``out`` is either a token sequence ``[N,D]`` (ndim==2) or a model-pooled
-    vector ``[D]`` (ndim==1). When the input was enlarged to a square at fetch
-    time (``geo_roi`` is a sub-window) the patch-token grid is cropped back to the
-    ROI before pooling / emitting, so neighbourhood context fetched only to square
-    the input does not leak into the result. When ``geo_roi`` is the full frame
-    this reproduces the legacy pooling / full-grid behaviour exactly. A model
-    pooled vector (ndim==1) has no spatial tokens to crop, so it is always emitted
-    unchanged. ``meta`` is mutated in place with the chosen pooling / grid
+    ``out`` is either a token sequence ``[N,D]`` (ndim==2; see
+    ``build_token_embedding``) or a model-pooled vector ``[D]`` (ndim==1), which
+    has no spatial tokens to crop: it is emitted unchanged, with a warning for an
+    ROI sub-window. ``meta`` is mutated in place with the chosen pooling / grid
     provenance.
     """
-    cropped = not roi_is_full(geo_roi)
+    if out.ndim == 2:
+        return build_token_embedding(
+            out, geo_roi=geo_roi, output=output, meta=meta, model_label="ScaleMAE"
+        )
 
     if output.mode == "pooled":
-        if out.ndim == 2:
-            if cropped:
-                grid, _hw, cls_removed = tokens_to_grid_dhw(out)
-                g = crop_grid_to_roi(grid, geo_roi)
-                reduce = g.max if output.pooling == "max" else g.mean
-                vec = reduce(axis=(1, 2)).astype("float32")
-                meta.update(
-                    {
-                        "pooling": f"roi_grid_{output.pooling}",
-                        "cls_removed": bool(cls_removed),
-                    }
-                )
-            else:
-                vec, cls_removed = pool_from_tokens(out, output.pooling)
-                meta.update(
-                    {
-                        "pooling": f"patch_{output.pooling}",
-                        "cls_removed": bool(cls_removed),
-                    }
-                )
-            return Embedding(data=vec, meta=meta)
-
         if out.ndim == 1:
-            meta.update({"pooling": "model_pooled", "cls_removed": False})
-            return Embedding(data=out.astype(np.float32), meta=meta)
-
+            vec, pmeta = pool_for_output(
+                out,
+                None,
+                geo_roi=geo_roi,
+                shape_prep=None,
+                pooling=output.pooling,
+                native_reduce="mean",
+                native_pooling="model_pooled",
+                model_label="ScaleMAE",
+            )
+            meta.update({**pmeta, "cls_removed": False})
+            return Embedding(data=vec, meta=meta)
         raise ModelError(f"Unexpected shape for pooled: {out.shape}")
 
     if output.mode == "grid":
-        if out.ndim != 2:
-            raise ModelError(
-                "grid output requires token sequence [N,D]. "
-                f"Got {out.shape} (tokens_kind={meta.get('tokens_kind')})."
-            )
-
-        grid, (h, w), cls_removed = tokens_to_grid_dhw(out)
-        if cropped:
-            grid = crop_grid_to_roi(grid, geo_roi)
-            h, w = int(grid.shape[1]), int(grid.shape[2])
-        meta.update(
-            {
-                "grid_hw": (h, w),
-                "grid_kind": "patch_tokens",
-                "cls_removed": bool(cls_removed),
-            }
+        raise ModelError(
+            "grid output requires token sequence [N,D]. "
+            f"Got {out.shape} (tokens_kind={meta.get('tokens_kind')})."
         )
-
-        da = grid_to_dataarray(grid, meta=meta)
-        return Embedding(data=da, meta=meta)
 
     raise ModelError(f"Unknown output mode: {output.mode}")
 

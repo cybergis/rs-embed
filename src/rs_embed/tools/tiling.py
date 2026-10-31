@@ -50,10 +50,10 @@ from .shape import geo_roi_from_meta, roi_is_full, roi_token_box
 # Preprocessing contract version
 # ---------------------------------------------------------------------------
 
-# Bump whenever tiling/stitching/aggregation or the ROI crop changes in a way
+# Bump whenever tiling/stitching/aggregation or the ROI crop or pool changes in a way
 # that alters produced embeddings. Stamped into every embedding's meta["input_prep"]
 # so downstream consumers can detect a contract change and pin reproducibility.
-INPUT_PREP_VERSION = 3
+INPUT_PREP_VERSION = 4
 
 
 # ---------------------------------------------------------------------------
@@ -660,7 +660,9 @@ def _aggregate_tiled_embeddings(
         )
         if roi_w is not None and float(roi_w.sum()) <= 0.0:
             roi_w = None  # ROI smaller than a tile gap — fall back to all tiles
-        if str(output.pooling).lower() == "max":
+        # Tiles that record requested_pooling kept their model's fixed mean
+        # instead of max (shape.pool_for_output), so they merge as a mean too.
+        if str(output.pooling).lower() == "max" and "requested_pooling" not in base_meta:
             sel = mat if roi_w is None else mat[roi_w > 0.0]
             out_vec = np.max(sel if len(sel) else mat, axis=0).astype(np.float32, copy=False)
         else:
