@@ -25,8 +25,9 @@ model loading (see ``_warmup``)::
 The ROI/temporal/model contract mirrors the demo notebook:
 * point  → ``PointBuffer(lon, lat, buffer_m=2048)``  (a ~4 km box)
 * bbox   → ``BBox(minlon, minlat, maxlon, maxlat)``
-* a year-range [y0, y1] maps to ``TemporalSpec.year(...)`` for annual precomputed
-  models and ``TemporalSpec.range("{y0}-06-01", "{y1}-09-01")`` for on-the-fly ones.
+* a month window [start, end] maps to ``TemporalSpec.year(...)`` for annual precomputed
+  models (the end year, or the one year the product covers — see ``FIXED_YEAR``) and to
+  ``TemporalSpec.range(start, month after end)`` for on-the-fly ones.
 """
 
 from __future__ import annotations
@@ -64,7 +65,7 @@ PRECOMPUTED = {"gse", "tessera", "copernicus"}
 # (agrifm/anysat) or a window-adaptive temporal_mode defaulting to "auto"→multi for
 # multi-month windows (galileo/olmoearth/prithvi). Everything else takes one frame.
 TIMESERIES = {"agrifm", "anysat", "galileo", "olmoearth", "prithvi"}
-COPERNICUS_FIXED_YEAR = 2021  # copernicus product currently covers only 2021
+FIXED_YEAR = {"copernicus": 2021}  # annual products that cover a single year
 
 
 def _input_kind(model: str) -> str | None:
@@ -277,11 +278,16 @@ def _range_dates(start: str, end: str) -> tuple[str, str, int, int]:
 
 def _temporal(rs: dict, model: str, start: str, end: str):
     start_d, end_excl, _y0, y1 = _range_dates(start, end)
-    if model in PRECOMPUTED:
-        if model == "copernicus":
-            return rs["TemporalSpec"].year(COPERNICUS_FIXED_YEAR)
-        return rs["TemporalSpec"].year(y1)  # latest year in range for annual products
+    if model in PRECOMPUTED:  # annual products: latest year in range
+        return rs["TemporalSpec"].year(FIXED_YEAR.get(model, y1))
     return rs["TemporalSpec"].range(start_d, end_excl)
+
+
+def _temporal_json(t) -> dict[str, Any]:
+    """The temporal a model actually ran with, for the UI and the package manifest."""
+    if t.mode == "year":
+        return {"mode": "year", "year": t.year}
+    return {"mode": "range", "start": t.start, "end": t.end}
 
 
 def _export_grids(rs: dict, spatial, temporal, models: list[str]) -> dict[str, np.ndarray | str]:
@@ -452,6 +458,7 @@ def api_models() -> Any:
                 "id": m,
                 "type": "precomputed" if m in PRECOMPUTED else "onthefly",
                 "input": _input_kind(m),
+                "fixed_year": FIXED_YEAR.get(m),
             }
             for m in sorted(ids)
         ]
@@ -517,6 +524,8 @@ def api_embed(req: EmbedReq) -> Any:
         results: list[dict[str, Any]] = []
         pkg: dict[str, np.ndarray] = {}  # arrays written into the package
         pkg_models: list[dict[str, Any]] = []  # per-model metadata for the manifest
+        # annual products ignore the month window, so report what each model really used
+        temporals = {m: _temporal_json(_temporal(rs, m, req.start, req.end)) for m in models}
 
         def _ok(m: str, grid: np.ndarray) -> None:
             vec = H.pooled_vector(grid)
@@ -530,6 +539,7 @@ def api_embed(req: EmbedReq) -> Any:
                 {
                     "model": m,
                     "type": mtype,
+                    "temporal": temporals[m],
                     "dim": int(vec.shape[0]),
                     "grid_hw": [gh, gw],
                     "grid_saved": bool(saved),
@@ -539,6 +549,7 @@ def api_embed(req: EmbedReq) -> Any:
                 {
                     "model": m,
                     "type": mtype,
+                    "temporal": temporals[m],
                     "ok": True,
                     "image": _png_b64(H.pca_rgb(grid)),
                     "dim": int(vec.shape[0]),
@@ -553,6 +564,7 @@ def api_embed(req: EmbedReq) -> Any:
                 {
                     "model": m,
                     "type": "precomputed" if m in PRECOMPUTED else "onthefly",
+                    "temporal": temporals[m],
                     "ok": False,
                     "error": str(msg)[:400],
                 }

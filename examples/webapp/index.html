@@ -68,6 +68,7 @@
   #axisSlider .noUi-pips-horizontal{height:20px;padding:6px 0 0}
   #axisSlider .noUi-marker-horizontal.noUi-marker{height:4px}
   .yrlabel{font-variant-numeric:tabular-nums;font-weight:700}
+  #timeNote{margin-top:8px;padding:6px 8px;border-radius:8px;background:rgba(46,125,50,.08)}
   .tabs{display:flex;gap:6px;margin:2px 0 4px}
   .tab{flex:1;padding:8px 0;font-weight:700;border:1px solid var(--line);background:#fff;border-radius:9px;cursor:pointer;color:var(--muted);font-size:13px}
   .tab.active{background:var(--leaf);color:#fff;border-color:var(--leaf)}
@@ -95,6 +96,7 @@
   .gcard.active{border-color:var(--citrus);box-shadow:0 0 0 2px rgba(245,166,35,.45)}
   .gcard img{width:100%;display:block;image-rendering:pixelated}
   .gcard .gcap{font-size:11px;font-weight:600;padding:4px 6px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+  .gcard .gcap small{display:block;font-size:10px;font-weight:500;color:var(--muted);font-variant-numeric:tabular-nums}
   .gcard .gzoom{position:absolute;top:3px;right:3px;width:20px;height:20px;line-height:1;padding:0;
         border:none;border-radius:5px;background:rgba(15,23,32,.62);color:#fff;font-size:12px;cursor:pointer}
   .gcard .gzoom:hover{background:rgba(15,23,32,.85)}
@@ -250,6 +252,7 @@
           <div id="axisSlider"></div>
         </div>
         <div class="hint" style="margin:2px 0 2px">Drag the lower bar to <b>pan</b> the axis; drag its ends to <b>zoom</b> the visible span (3 mo → full).</div>
+        <div class="hint" id="timeNote" style="display:none"></div>
       </div>
 
       <div class="sec" id="resultsSec" style="display:none">
@@ -485,7 +488,38 @@ const MIN_VIEW = 2;                                  // smallest zoom = 3-month 
 let viewStart = midx(2022,1), viewEnd = midx(2022,12);
 const startStr = () => ymLabel(Math.min(tStart,tEnd));
 const endStr   = () => ymLabel(Math.max(tStart,tEnd));
-function endExclusive(){ let i=Math.max(tStart,tEnd), y=mY(i), m=mM(i)+1; if(m>12){m=1;y++;} return `${y}-${String(m).padStart(2,'0')}-01`; }
+const monthAfter = ym => { let [y,m] = ym.split('-').map(Number); if(++m>12){m=1;y++;} return `${y}-${String(m).padStart(2,'0')}`; };
+
+// Precomputed models are annual products: they return one year's embedding — the
+// window's end year, or the one year the product covers — never the month window.
+function annualYear(id, end){
+  const m = MODELS.find(x=>x.id===id) || {};
+  return m.type === 'precomputed' ? (m.fixed_year ?? +end.slice(0,4)) : null;
+}
+// rs-embed temporal for a model over the month window [start, end] ('YYYY-MM', end inclusive)
+function temporalFor(id, start, end){
+  const y = annualYear(id, end);
+  return y !== null ? `TemporalSpec.year(${y})`
+                    : `TemporalSpec.range("${start}-01", "${monthAfter(end)}-01")`;
+}
+// Label for the temporal a model actually ran with (the `temporal` field of /api/embed).
+function timeLabel(t){
+  if (!t) return '';
+  if (t.mode === 'year') return `${t.year} (annual)`;
+  const [y, m] = t.end.split('-').map(Number);      // end is exclusive: 1st of the next month
+  return `${t.start.slice(0,7)} – ${m===1 ? `${y-1}-12` : `${y}-${String(m-1).padStart(2,'0')}`}`;
+}
+// Under the time range: which selected models ignore the window, and what they return.
+function updateTimeNote(){
+  const el = document.getElementById('timeNote'); if (!el) return;
+  const byYear = {};
+  selectedModels().forEach(id => { const y = annualYear(id, endStr()); if (y !== null) (byYear[y] ||= []).push(id); });
+  const parts = Object.entries(byYear).map(([y, ids]) => `<b>${ids.join(', ')}</b> → ${y} annual embedding`);
+  el.style.display = parts.length ? '' : 'none';
+  el.innerHTML = parts.length
+    ? `Precomputed models are annual products and ignore the months: ${parts.join('; ')}. `+
+      `The window applies to on-the-fly models and the Sentinel-2 preview.` : '';
+}
 
 // Pips for the detail slider scale with the visible span: months when zoomed in,
 // years when zoomed out — so labels stay readable at any scale.
@@ -594,13 +628,12 @@ function updateQuery(){
   const sel = selectedModels();
   const m0 = sel[0] || '<model>';
   const spatial = spatialStr(geometry);
-  const rangeT = `TemporalSpec.range("${startStr()}-01", "${endExclusive()}")`;
+  updateTimeNote();   // tracks the same model/window selection as the query
   if (currentTab === 'use'){
     if (useApp === 'similarity'){
       // retrieval: pool two ROIs with one model → cosine similarity
       const sm = simModelId();
-      const isPc = (MODELS.find(x=>x.id===sm)||{}).type === 'precomputed';
-      const simT = isPc ? `TemporalSpec.year(${mY(Math.max(tStart,tEnd))})` : rangeT;
+      const simT = temporalFor(sm, startStr(), endStr());
       const spA = spatialStr(simRegions[0] && simRegions[0].geometry);
       const spB = spatialStr(simRegions[1] && simRegions[1].geometry);
       q.innerHTML =
@@ -616,8 +649,7 @@ cos = a @ b / (np.linalg.norm(a) * np.linalg.norm(b))   <span style="color:#7f8c
     if (useApp === 'segment'){
       // unsupervised segmentation: cluster a grid embedding into land cover
       const sm = segModelId();
-      const isPc = (MODELS.find(x=>x.id===sm)||{}).type === 'precomputed';
-      const segT = isPc ? `TemporalSpec.year(${mY(Math.max(tStart,tEnd))})` : rangeT;
+      const segT = temporalFor(sm, startStr(), endStr());
       q.innerHTML =
 `<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
 <span class="k">from</span> iguide_demo_helpers <span class="k">import</span> kmeans_landcover
@@ -639,9 +671,9 @@ dist = <span class="k">change_curve</span>(grids, baseline_index=<span class="k2
       return;
     }
     // downstream usage: embedding → head → prediction
-    const useT = `TemporalSpec.range("${USE_START}-01", "${USE_END}-31")`;
     if (demoMode){
       const um = predictModels()[0] || 'gse';
+      const useT = temporalFor(um, USE_START, USE_END);
       q.innerHTML =
 `<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
 emb = <span class="k">get_embedding</span>(<span class="k2">"${um}"</span>, spatial=${spatial},
@@ -650,6 +682,7 @@ yhat = head.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># 
       return;
     }
     const um = useModelId();
+    const useT = temporalFor(um, USE_START, USE_END);
     const task = (HEADS && HEADS.task) || 'corn_presence';
     const lbl = (HEADS && HEADS.label) || 'prediction';
     q.innerHTML =
@@ -662,29 +695,32 @@ yhat = reg.predict(emb.data.reshape(1, -1))[0]   <span style="color:#7f8c99"># $
     return;
   }
   if (!geometry){ q.textContent = 'Select an ROI to see the rs-embed call…'; return; }
+  const annualNote = id => annualYear(id, endStr()) !== null
+    ? '   <span style="color:#7f8c99"># annual product — not the month window</span>' : '';
   if (sel.length > 1){
-    // multiple models → export_batch (matches the backend)
-    const models = sel.map(s=>`<span class="k2">"${s}"</span>`).join(', ');
+    // multiple models → one export_batch per temporal (matches the backend)
+    const groups = {};
+    sel.forEach(s => (groups[temporalFor(s, startStr(), endStr())] ||= []).push(s));
+    const calls = Object.entries(groups).map(([t, ms], i, all) =>
+`<span class="k">export_batch</span>(
+    spatials=[${spatial}],
+    temporal=${t},${annualNote(ms[0])}
+    models=[${ms.map(s=>`<span class="k2">"${s}"</span>`).join(', ')}],
+    output=OutputSpec.grid(),
+    target=ExportTarget.combined(<span class="k2">"embeddings${all.length > 1 ? '_'+(i+1) : ''}.npz"</span>),
+)`);
     q.innerHTML =
 `<span class="k">from</span> rs_embed <span class="k">import</span> export_batch, OutputSpec, TemporalSpec, ExportTarget, BBox, PointBuffer
-<span class="k">export_batch</span>(
-    spatials=[${spatial}],
-    temporal=${rangeT},
-    models=[${models}],
-    output=OutputSpec.grid(),
-    target=ExportTarget.combined(<span class="k2">"embeddings.npz"</span>),
-)`;
+${calls.join('\n')}`;
   } else {
     // single model → get_embedding
     const m = sel[0] || '<model>';
-    const isPc = (MODELS.find(x=>x.id===m)||{}).type === 'precomputed';
-    const temporal = isPc ? `TemporalSpec.year(${mY(Math.max(tStart,tEnd))})` : rangeT;
     q.innerHTML =
 `<span class="k">from</span> rs_embed <span class="k">import</span> get_embedding, OutputSpec, TemporalSpec, BBox, PointBuffer
 <span class="k">get_embedding</span>(
     <span class="k2">"${m}"</span>,
     spatial=${spatial},
-    temporal=${temporal},
+    temporal=${temporalFor(m, startStr(), endStr())},${annualNote(m)}
     output=OutputSpec.grid(),
 )`;
   }
@@ -716,7 +752,7 @@ function modelCardHTML(x, i){
   if (x.ok){
     return `<div class="gcard" data-model="${x.model}" onclick="selectEmbedOverlay('${x.model}')" title="click → show on map">`+
       `<button class="gzoom" title="enlarge" onclick="event.stopPropagation();openLightbox(${i})">⤢</button>`+
-      `<img src="${x.image}" alt="PCA-RGB"><div class="gcap">${x.model}</div></div>`;
+      `<img src="${x.image}" alt="PCA-RGB"><div class="gcap">${x.model}<small>${timeLabel(x.temporal)}</small></div></div>`;
   }
   return `<div class="gcard err"><div class="gcap">${x.model}${badge}</div><div class="e">${x.error}</div></div>`;
 }
@@ -742,7 +778,7 @@ function selectEmbedOverlay(model){
     {opacity: ovOpacityVal(), pane: 'embedPane', className: 'embed-ov', interactive: false}).addTo(map);
   const info = document.getElementById('ovInfo');
   if (info) info.innerHTML =
-    `<b>${x.model}</b> · grid ${x.grid_hw[0]}×${x.grid_hw[1]} → ROI · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}`;
+    `<b>${x.model}</b> · ${timeLabel(x.temporal)} · grid ${x.grid_hw[0]}×${x.grid_hw[1]} → ROI · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}`;
 }
 function setEmbedOpacity(v){ if (embedOverlay) embedOverlay.setOpacity(+v); }
 function openLightbox(i){
@@ -752,7 +788,7 @@ function openLightbox(i){
   lb.querySelector('.lb-inner').innerHTML =
     `<div class="lb-title">${x.model} <span class="badge ${x.type==='precomputed'?'pc':'otf'}">${x.type==='precomputed'?'precomp':'on-the-fly'}</span></div>`+
     `<img src="${x.image}" alt="${x.model} PCA-RGB">`+
-    `<div class="lb-meta">grid ${x.grid_hw[0]}×${x.grid_hw[1]} · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}</div>`+
+    `<div class="lb-meta">${timeLabel(x.temporal)} · grid ${x.grid_hw[0]}×${x.grid_hw[1]} · dim ${x.dim} · ‖v‖=${x.norm.toFixed(2)}</div>`+
     `<div class="lb-hint">click anywhere / Esc to close</div>`;
   lb.style.display = 'flex';
 }
