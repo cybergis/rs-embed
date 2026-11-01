@@ -1,9 +1,6 @@
 <div align="center">
 
-<picture>
-  <source media="(prefers-color-scheme: dark)" srcset="https://raw.githubusercontent.com/cybergis/rs-embed/main/docs/assets/logo/rs-embed-logo-tagline-dark.svg">
-  <img alt="rs-embed" src="https://raw.githubusercontent.com/cybergis/rs-embed/main/docs/assets/logo/rs-embed-logo-tagline.svg" width="520">
-</picture>
+<img alt="rs-embed" src="https://raw.githubusercontent.com/cybergis/rs-embed/main/docs/assets/logo/rs-embed-logo-tagline-card.svg" width="560" />
 
 **One line code to get Any Remote Sensing Foundation Model (RSFM) embeddings for Any Place and Any Time**
 
