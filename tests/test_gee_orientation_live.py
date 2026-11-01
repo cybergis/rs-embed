@@ -1,17 +1,15 @@
 """Live-GEE row-order contract test (opt-in).
 
-The provider layer's north-up guarantee rests on one empirical fact about
-``sampleRectangle`` row order that mock tests cannot check:
+Every GEE pixel download goes through ``_compute_pixels_chw``, which asks
+``computePixels`` for the common grid with a negative ``scaleY`` (row 0 on the
+north edge). The provider layer's north-up guarantee rests on GEE honoring
+that grid whatever reprojection the image carries — both the
+``reproject(crs=..., scale=...)`` form (S1, multi-frame, all-bands paths) and
+the ``reproject(ee.Projection(...).atScale(...))`` form (``fetch_array_chw``),
+with or without ``.clip()``. Mock tests cannot check that.
 
-- ``reproject(crs=..., scale=...)`` returns **north-up** rows, with or
-  without ``.clip()`` (``_sample_image_bands_raw_chw``,
-  ``_fetch_all_bands_impl`` — no flip applied);
-- ``reproject(ee.Projection(...).atScale(...))`` returns **south-up** rows
-  (``fetch_array_chw`` applies ``_flip_sample_tile_y``).
-
-This test verifies that fact against real GEE using
-``ee.Image.pixelLonLat()`` — each pixel's value is its own latitude, so row
-order is read directly. Run with::
+This test verifies it against real GEE using ``ee.Image.pixelLonLat()`` — each
+pixel's value is its own latitude, so row order is read directly. Run with::
 
     RS_EMBED_LIVE_GEE=1 pytest tests/test_gee_orientation_live.py
 
@@ -20,18 +18,17 @@ Requires authenticated Earth Engine credentials.
 
 import os
 
-import numpy as np
 import pytest
+
+from rs_embed.core.specs import PointBuffer
+from rs_embed.providers.gee import GEEProvider
+from rs_embed.providers.gee_utils import _compute_pixels_chw
+from rs_embed.tools.projection import COMMON_CRS
 
 pytestmark = pytest.mark.skipif(
     not os.environ.get("RS_EMBED_LIVE_GEE"),
     reason="live GEE test; set RS_EMBED_LIVE_GEE=1 to run",
 )
-
-
-def _sample_latitude_rows(image, region) -> np.ndarray:
-    rect = image.sampleRectangle(region=region, defaultValue=-999.0).getInfo()
-    return np.array(rect["properties"]["latitude"], dtype=np.float64)
 
 
 @pytest.mark.parametrize(
@@ -41,26 +38,22 @@ def _sample_latitude_rows(image, region) -> np.ndarray:
         (151.2, -33.9, 500, 10),  # southern hemisphere, fine scale
     ],
 )
-def test_samplerectangle_row_order_contract(lon, lat, half_m, scale_m):
+def test_downloads_are_north_up_for_every_reprojection_form(lon, lat, half_m, scale_m):
     import ee
-    from pyproj import Transformer
 
-    ee.Initialize()
-    x, y = Transformer.from_crs("EPSG:4326", "EPSG:3857", always_xy=True).transform(lon, lat)
-    region = ee.Geometry.Rectangle(
-        [x - half_m, y - half_m, x + half_m, y + half_m], proj="EPSG:3857", geodesic=False
-    )
+    provider = GEEProvider()
+    provider.ensure_ready()
+    spatial = PointBuffer(lon=lon, lat=lat, buffer_m=half_m)
+    region = provider.get_region(spatial)
     img = ee.Image.pixelLonLat().select("latitude")
+    at_scale = ee.Projection(COMMON_CRS).atScale(scale_m)
 
-    # reproject(crs=..., scale=...): north-up, with or without clip.
-    for im in (
-        img.reproject(crs="EPSG:3857", scale=scale_m),
-        img.reproject(crs="EPSG:3857", scale=scale_m).clip(region),
+    for name, im in (
+        ("reproject(crs, scale)", img.reproject(crs=COMMON_CRS, scale=scale_m)),
+        ("reproject(crs, scale).clip", img.reproject(crs=COMMON_CRS, scale=scale_m).clip(region)),
+        ("reproject(atScale).clip", img.reproject(at_scale).clip(region)),
     ):
-        rows = _sample_latitude_rows(im, region)
-        assert rows[0].mean() > rows[-1].mean(), "reproject(crs,scale) must be north-up"
-
-    # Projection.atScale(): south-up (fetch_array_chw flips this).
-    proj = ee.Projection("EPSG:3857").atScale(scale_m)
-    rows = _sample_latitude_rows(img.reproject(proj).clip(region), region)
-    assert rows[0].mean() < rows[-1].mean(), "atScale form must be south-up"
+        rows = _compute_pixels_chw(
+            im, spatial=spatial, bands=("latitude",), scale_m=scale_m, fill_value=-999.0
+        )[0]
+        assert rows[0].mean() > rows[-1].mean(), f"{name} download must be north-up"

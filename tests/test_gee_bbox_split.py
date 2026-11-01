@@ -1,12 +1,12 @@
-"""Pixel-limit BBox splitting reproduces the single-request grid exactly (#134).
+"""Request-size BBox splitting reproduces the single-request grid exactly (#134).
 
-The fake ``sampleRectangle`` below samples the EPSG:3857 lattice the way GEE
-does for ``reproject(crs="EPSG:3857", scale=s).clip(region)``, and each
-pixel's two "bands" are its global (col, row) on that lattice, so a
-duplicated, dropped or padded pixel shows up exactly. GEE's boundary rule is
-not something a mock can pin down (``test_gee_bbox_split_live.py`` checks it),
-so both plausible rules are covered: pixel-center inclusion, and rounding the
-region outward to whole pixels.
+The fake fetch below samples the EPSG:3857 lattice of the requested BBox, and
+each pixel's two "bands" are its global (col, row) on that lattice, so a
+duplicated, dropped or padded pixel shows up exactly. Both plausible boundary
+rules are covered: pixel-center inclusion, and rounding the region outward to
+whole pixels (``test_gee_bbox_split_live.py`` checks the real one). Limits are
+in pixels per band: GEE counts 5 bytes per float32 value, so a pixel limit
+``n`` is the byte budget ``n * 5``.
 """
 
 import math
@@ -30,8 +30,8 @@ _OFFSET = 1_000_000.0
 
 _ALASKA = BBox(minlon=-170.0, minlat=52.0, maxlon=-130.0, maxlat=72.0)
 
-# (bbox, scale_m, pixel limit): Alaska is the reported ROI at GEE's real limit;
-# the rest use a small limit so many recursive splits stay cheap.
+# (bbox, scale_m, pixel limit): Alaska is the ROI reported in #134; the limits
+# are small so that it, and many recursive splits elsewhere, stay cheap.
 _CASES = [
     pytest.param(_ALASKA, 4000, 262144, id="alaska-4000m"),
     pytest.param(
@@ -63,12 +63,19 @@ class _LatticeSampler:
         n = (r1 - r0) * (c1 - c0)
         if n > self.limit:
             self.failed += 1
+            per_value = gee_utils._GEE_REQUEST_BYTES_PER_VALUE
             raise RuntimeError(
-                f"Image.sampleRectangle: Too many pixels in sample; must be <= {self.limit}. Got {n}."
+                f"Total request size ({n * per_value} bytes) must be less than or "
+                f"equal to {self.limit * per_value} bytes."
             )
         self.ok += 1
         cols, rows = np.meshgrid(np.arange(c0, c1), np.arange(r0, r1))
         return np.stack([cols, rows]).astype(np.float32) + _OFFSET
+
+
+def _set_pixel_limit(monkeypatch, pixels: int) -> None:
+    budget = pixels * gee_utils._GEE_REQUEST_BYTES_PER_VALUE
+    monkeypatch.setattr(gee_utils, "_GEE_REQUEST_MAX_BYTES", budget)
 
 
 def _fake_provider(sampler: _LatticeSampler) -> GEEProvider:
@@ -87,7 +94,7 @@ def _fake_provider(sampler: _LatticeSampler) -> GEEProvider:
 def test_split_fetch_matches_single_request(monkeypatch, bbox, scale_m, limit, rule, presplit):
     # presplit: the provider knows GEE's limit and splits before asking.
     # split-on-error: it thinks everything fits, so only GEE's error drives splits.
-    monkeypatch.setattr(gee_utils, "_GEE_SAMPLE_RECT_MAX_PIXELS", limit if presplit else 10**12)
+    _set_pixel_limit(monkeypatch, limit if presplit else 10**12)
     sampler = _LatticeSampler(rule, limit)
 
     arr, names = _fake_provider(sampler).fetch_collection_patch_all_bands_chw(
@@ -105,27 +112,53 @@ def test_split_fetch_matches_single_request(monkeypatch, bbox, scale_m, limit, r
     np.testing.assert_array_equal(arr, expected)
 
 
-def test_presplit_avoids_failing_requests():
-    sampler = _LatticeSampler("center", 262144)
+def test_presplit_avoids_failing_requests(monkeypatch):
+    # The pre-split check counts bytes the way GEE does, so no request is refused.
+    _set_pixel_limit(monkeypatch, 4096)
+    sampler = _LatticeSampler("outward", 4096)
+    bbox = BBox(minlon=-88.5, minlat=40.0, maxlon=-88.0, maxlat=40.4)
 
     arr, _ = _fake_provider(sampler).fetch_collection_patch_all_bands_chw(
-        spatial=_ALASKA,
+        spatial=bbox,
         temporal=None,
         collection="FAKE",
-        scale_m=4000,
+        scale_m=100,
         fill_value=-9999.0,
         composite="mosaic",
     )
 
-    np.testing.assert_array_equal(arr, _LatticeSampler("center")(_ALASKA, 4000))
-    # 1238 x 1113 px needs at least 6 requests under 262144; none may fail.
+    expected = _LatticeSampler("outward")(bbox, 100)
+    np.testing.assert_array_equal(arr, expected)
+    n_px = expected.shape[1] * expected.shape[2]
     assert sampler.failed == 0
-    assert sampler.ok <= 8
+    assert math.ceil(n_px / 4096) <= sampler.ok <= 4 * math.ceil(n_px / 4096)
+
+
+@pytest.mark.parametrize(
+    "shape,n_bands,over",
+    [
+        # 50_331_648 bytes at 5 bytes per float32 value, per band
+        ((3172, 3173), 1, False),
+        ((3173, 3173), 1, True),
+        ((2243, 2243), 2, False),
+        ((2243, 2245), 2, True),
+        # and at most 32_768 px on a side, whatever the size
+        ((10, 32_768), 1, False),
+        ((10, 32_769), 1, True),
+    ],
+)
+def test_request_limit_matches_gee_accounting(monkeypatch, shape, n_bands, over):
+    class _Grid:
+        pass
+
+    _Grid.shape = shape
+    monkeypatch.setattr(gee_utils, "common_grid", lambda *_a, **_k: _Grid())
+    assert gee_utils._exceeds_request_limit(_ALASKA, scale_m=10, n_bands=n_bands) is over
 
 
 @pytest.mark.parametrize("rule", ["center", "outward"])
 def test_array_fetch_fallback_matches_single_request(monkeypatch, rule):
-    monkeypatch.setattr(gee_utils, "_GEE_SAMPLE_RECT_MAX_PIXELS", 4096)
+    _set_pixel_limit(monkeypatch, 4096)
     bbox = BBox(minlon=-88.5, minlat=40.0, maxlon=-88.0, maxlat=40.4)
     sampler = _LatticeSampler(rule, 4096)
 
