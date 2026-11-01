@@ -1,4 +1,4 @@
-![rs-embed banner](assets/banner.png)
+![rs-embed](assets/logo/rs-embed-logo-tagline.svg){ width="520" }
 
 > One line of code to get embeddings from **any Remote Sensing Foundation Model (RSFM)** for **any place** and **any time**
 

@@ -5,6 +5,8 @@ repo_name: cybergis/rs-embed
 
 theme:
   name: material
+  logo: assets/logo/rs-embed-mark-small.svg
+  favicon: assets/logo/favicon.svg
   font:
     text: IBM Plex Sans
     code: IBM Plex Mono
