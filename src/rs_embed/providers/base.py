@@ -82,7 +82,7 @@ class ProviderBase:
         *,
         image: Any,
         bands: tuple[str, ...],
-        region: Any,
+        spatial: SpatialSpec,
         scale_m: int,
         fill_value: float,
         collection: str | None = None,
@@ -95,8 +95,9 @@ class ProviderBase:
             Provider-native image object.
         bands : tuple[str, ...]
             Band names and order to fetch.
-        region : Any
-            Provider-native region object.
+        spatial : SpatialSpec
+            Area to fetch; the provider derives its native region and its pixel
+            grid from it.
         scale_m : int
             Pixel scale in meters.
         fill_value : float

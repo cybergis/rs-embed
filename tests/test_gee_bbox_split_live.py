@@ -1,4 +1,4 @@
-"""Live-GEE check that pixel-limit BBox splits are exact (opt-in, #134).
+"""Live-GEE check that request-size BBox splits are exact (opt-in, #134).
 
 ``_bbox_recursive_fallback`` cuts oversized requests on pixel-lattice lines
 and concatenates the pieces. That is exact only if two facts about GEE hold,
@@ -66,7 +66,7 @@ def _pixel_coordinates():
 
 @pytest.mark.parametrize("axis", ["x", "y"])
 def test_all_bands_split_matches_single_request(provider, axis):
-    """The GSE path: reproject(crs, scale).clip(region).sampleRectangle()."""
+    """The GSE path: reproject(crs, scale).clip(region), then computePixels."""
 
     def fetch(sp):
         arr, _ = provider._fetch_all_bands_impl(
@@ -84,14 +84,14 @@ def test_all_bands_split_matches_single_request(provider, axis):
 
 @pytest.mark.parametrize("axis", ["x", "y"])
 def test_array_chw_split_matches_single_request(provider, axis):
-    """The on-the-fly path: reproject(Projection.atScale()).clip(region), flipped."""
+    """The on-the-fly path: reproject(Projection.atScale()).clip(region), then computePixels."""
     img = _pixel_coordinates()
 
     def fetch(sp):
         return provider.fetch_array_chw(
             image=img,
             bands=("x", "y"),
-            region=provider.get_region(sp),
+            spatial=sp,
             scale_m=_SCALE_M,
             fill_value=0.0,
         )
@@ -101,14 +101,13 @@ def test_array_chw_split_matches_single_request(provider, axis):
 
 def test_both_reprojection_forms_sample_the_common_grid_lattice(provider):
     img = _pixel_coordinates()
-    region = provider.get_region(_BBOX)
     fill = 0.0  # never a real 3857 coordinate this far from the origin
     for arr in (
         _sample_image_bands_raw_chw(
-            img, region=region, bands=("x", "y"), scale_m=_SCALE_M, fill_value=fill
+            img, spatial=_BBOX, bands=("x", "y"), scale_m=_SCALE_M, fill_value=fill
         ),
         provider.fetch_array_chw(
-            image=img, bands=("x", "y"), region=region, scale_m=_SCALE_M, fill_value=fill
+            image=img, bands=("x", "y"), spatial=_BBOX, scale_m=_SCALE_M, fill_value=fill
         ),
     ):
         arr = np.asarray(arr, dtype=np.float64)

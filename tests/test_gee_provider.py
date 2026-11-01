@@ -8,11 +8,74 @@ import time
 import types
 from concurrent.futures import ThreadPoolExecutor
 
+import numpy as np
 import pytest
 
 from rs_embed.core.errors import ProviderError
-from rs_embed.core.specs import SensorSpec, TemporalSpec
+from rs_embed.core.specs import BBox, PointBuffer, SensorSpec, TemporalSpec
+from rs_embed.providers import gee_utils
 from rs_embed.providers.gee import GEEProvider, _resolve_band_aliases
+from rs_embed.providers.gee_utils import (
+    _compute_pixels_chw,
+    _fetch_with_bbox_fallback,
+    _looks_like_gee_request_too_large,
+)
+from rs_embed.tools.projection import common_grid
+
+# ══════════════════════════════════════════════════════════════════════
+# Fake pixel download (ee.data.computePixels), shared by the fetch tests
+# ══════════════════════════════════════════════════════════════════════
+
+# Any real spatial works: the fake download ignores the requested grid.
+_SPATIAL = PointBuffer(lon=0.0, lat=0.0, buffer_m=10.0)
+_VV_VH = {"VV": [[1.0, 2.0], [3.0, 4.0]], "VH": [[5.0, 6.0], [7.0, 8.0]]}
+
+
+class _FakePixels:
+    """Fake ee image that computePixels can download: band name -> 2-D values.
+
+    ``reproject``/``clip``/``unmask``/``toFloat`` pass through, ``select`` keeps
+    the named bands in order, and ``on_download`` (if set) runs per download.
+    """
+
+    def __init__(self, bands, on_download=None):
+        self.bands, self.on_download = dict(bands), on_download
+
+    def select(self, names):
+        kept = {n: self.bands[n] for n in names if n in self.bands}
+        return _FakePixels(kept, self.on_download)
+
+    def reproject(self, *_args, **_kwargs):
+        return self
+
+    def clip(self, _region):
+        return self
+
+    def unmask(self, *_args):
+        return self
+
+    def toFloat(self):
+        return self
+
+    def bandNames(self):
+        return types.SimpleNamespace(getInfo=lambda: list(self.bands))
+
+
+def _fake_compute_pixels(params):
+    img = params["expression"]
+    if img.on_download is not None:
+        img.on_download()
+    if not img.bands:
+        return np.zeros((1, 1), dtype=np.dtype([]))
+    planes = {n: np.asarray(v, dtype=np.float32) for n, v in img.bands.items()}
+    shape = next(iter(planes.values())).shape
+    out = np.zeros(shape, dtype=[(n, "f4") for n in planes])
+    for n, v in planes.items():
+        out[n] = v
+    return out
+
+
+_FAKE_EE_DATA = types.SimpleNamespace(computePixels=_fake_compute_pixels)
 
 # ══════════════════════════════════════════════════════════════════════
 # Sentinel-2 aliases
@@ -258,37 +321,24 @@ def test_build_image_sorts_before_mosaic(monkeypatch):
     assert calls.index(("sort", "system:time_start")) < calls.index(("mosaic",))
 
 
-def test_fetch_array_chw_empty_sample_props_raises_clear_error(monkeypatch):
+def test_fetch_array_chw_empty_download_raises_clear_error(monkeypatch):
     class _FakeProjection:
         def atScale(self, _scale):
             return self
 
-    class _FakeRect:
-        def getInfo(self):
-            return {"properties": {}}
-
-    class _FakeImage:
-        def select(self, _bands):
-            return self
-
-        def reproject(self, _proj):
-            return self
-
-        def clip(self, _region):
-            return self
-
-        def sampleRectangle(self, *, region, defaultValue):  # noqa: ARG002
-            return _FakeRect()
-
-    fake_ee = types.SimpleNamespace(Projection=lambda *_args, **_kwargs: _FakeProjection())
+    fake_ee = types.SimpleNamespace(
+        Projection=lambda *_args, **_kwargs: _FakeProjection(), data=_FAKE_EE_DATA
+    )
     monkeypatch.setitem(sys.modules, "ee", fake_ee)
 
     provider = GEEProvider(auto_auth=False)
+    monkeypatch.setattr(provider, "ensure_ready", lambda: None)
+    monkeypatch.setattr(provider, "get_region", lambda _spatial: object())
     with pytest.raises(ProviderError, match="No images found"):
         provider.fetch_array_chw(
-            image=_FakeImage(),
+            image=_FakePixels({}),
             bands=("RED",),
-            region=object(),
+            spatial=_SPATIAL,
             scale_m=10,
             fill_value=0.0,
             collection="COPERNICUS/S2_SR_HARMONIZED",
@@ -397,25 +447,6 @@ def _make_s1_fake_ee(seen_filters: list):
         def listContains(field, value):
             return ("listContains", field, value)
 
-    class _FakeRect:
-        def getInfo(self):
-            return {
-                "properties": {
-                    "VV": [[1.0, 2.0], [3.0, 4.0]],
-                    "VH": [[5.0, 6.0], [7.0, 8.0]],
-                }
-            }
-
-    class _FakeImage:
-        def select(self, _bands):
-            return self
-
-        def reproject(self, **_kwargs):
-            return self
-
-        def sampleRectangle(self, *, region, defaultValue):  # noqa: ARG002
-            return _FakeRect()
-
     class _FakeCollection:
         def filterDate(self, _start, _end):
             return self
@@ -431,11 +462,12 @@ def _make_s1_fake_ee(seen_filters: list):
             return _FakeSize()
 
         def median(self):
-            return _FakeImage()
+            return _FakePixels(_VV_VH)
 
     return types.SimpleNamespace(
         ImageCollection=lambda _collection: _FakeCollection(),
         Filter=_FakeFilter,
+        data=_FAKE_EE_DATA,
     )
 
 
@@ -454,7 +486,7 @@ def test_fetch_s1_vvvh_raw_chw_applies_orbit_filter(monkeypatch):
     monkeypatch.setattr(provider, "get_region", lambda _spatial: object())
 
     arr, meta = provider.fetch_s1_vvvh_raw_chw_with_meta(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-02-01"),
         orbit="ascending",
     )
@@ -475,7 +507,7 @@ def test_fetch_s1_vvvh_raw_chw_no_orbit_stays_unfiltered(monkeypatch):
     monkeypatch.setattr(provider, "get_region", lambda _spatial: object())
 
     _arr, meta = provider.fetch_s1_vvvh_raw_chw_with_meta(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-02-01"),
         orbit=None,
     )
@@ -519,25 +551,6 @@ def test_fetch_s1_vvvh_raw_chw_mosaic_sorts_before_reduce(monkeypatch):
         def listContains(field, value):
             return ("listContains", field, value)
 
-    class _FakeRect:
-        def getInfo(self):
-            return {
-                "properties": {
-                    "VV": [[1.0, 2.0], [3.0, 4.0]],
-                    "VH": [[5.0, 6.0], [7.0, 8.0]],
-                }
-            }
-
-    class _FakeImage:
-        def select(self, _bands):
-            return self
-
-        def reproject(self, **_kwargs):
-            return self
-
-        def sampleRectangle(self, *, region, defaultValue):  # noqa: ARG002
-            return _FakeRect()
-
     class _FakeCollection:
         def __init__(self, count=5, stage="base"):
             self.count = count
@@ -578,11 +591,12 @@ def test_fetch_s1_vvvh_raw_chw_mosaic_sorts_before_reduce(monkeypatch):
 
         def mosaic(self):
             calls.append(("mosaic", self.stage))
-            return _FakeImage()
+            return _FakePixels(_VV_VH)
 
     fake_ee = types.SimpleNamespace(
         ImageCollection=lambda _collection: _FakeCollection(),
         Filter=_FakeFilter,
+        data=_FAKE_EE_DATA,
     )
     monkeypatch.setitem(sys.modules, "ee", fake_ee)
 
@@ -591,7 +605,7 @@ def test_fetch_s1_vvvh_raw_chw_mosaic_sorts_before_reduce(monkeypatch):
     monkeypatch.setattr(provider, "get_region", lambda _spatial: object())
 
     arr = provider.fetch_s1_vvvh_raw_chw(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-02-01"),
         composite="mosaic",
     )
@@ -617,25 +631,6 @@ def test_fetch_s1_vvvh_raw_chw_relaxes_iw_and_reports_meta(monkeypatch):
         @staticmethod
         def listContains(field, value):
             return ("listContains", field, value)
-
-    class _FakeRect:
-        def getInfo(self):
-            return {
-                "properties": {
-                    "VV": [[1.0, 2.0], [3.0, 4.0]],
-                    "VH": [[5.0, 6.0], [7.0, 8.0]],
-                }
-            }
-
-    class _FakeImage:
-        def select(self, _bands):
-            return self
-
-        def reproject(self, **_kwargs):
-            return self
-
-        def sampleRectangle(self, *, region, defaultValue):  # noqa: ARG002
-            return _FakeRect()
 
     class _FakeCollection:
         def __init__(self, count=5, stage="base"):
@@ -672,11 +667,12 @@ def test_fetch_s1_vvvh_raw_chw_relaxes_iw_and_reports_meta(monkeypatch):
             return _FakeSize(self.count)
 
         def median(self):
-            return _FakeImage()
+            return _FakePixels(_VV_VH)
 
     fake_ee = types.SimpleNamespace(
         ImageCollection=lambda _collection: _FakeCollection(),
         Filter=_FakeFilter,
+        data=_FAKE_EE_DATA,
     )
     monkeypatch.setitem(sys.modules, "ee", fake_ee)
 
@@ -685,7 +681,7 @@ def test_fetch_s1_vvvh_raw_chw_relaxes_iw_and_reports_meta(monkeypatch):
     monkeypatch.setattr(provider, "get_region", lambda _spatial: object())
 
     arr, meta = provider.fetch_s1_vvvh_raw_chw_with_meta(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-02-01"),
         require_iw=True,
         relax_iw_on_empty=True,
@@ -702,53 +698,25 @@ def test_fetch_s1_vvvh_raw_chw_relaxes_iw_and_reports_meta(monkeypatch):
 # ══════════════════════════════════════════════════════════════════════
 
 
-def test_fetch_all_bands_impl_passes_through_gee_row_order(monkeypatch):
+def test_fetch_all_bands_impl_passes_through_downloaded_row_order(monkeypatch):
     """Orientation contract test for _fetch_all_bands_impl.
 
-    The function applies **no** spatial flip — it passes through whatever row
-    order GEE's ``sampleRectangle`` returns.  For the
-    ``reproject(crs=..., scale=...) + .clip()`` call pattern used here, GEE
-    empirically returns north-up rows (row 0 = northernmost).  This test locks
-    in the pass-through behaviour so that any accidental flip addition would be
-    caught immediately.
+    The function applies **no** spatial flip: computePixels is asked for the
+    common grid, whose affine transform puts row 0 on the north edge, so the
+    downloaded rows are already north-up. This test locks in the pass-through
+    behaviour so that any accidental flip addition would be caught immediately.
 
     The mock injects two distinguishable rows:
-      row 0 → [1, 2]   (northernmost row, per the empirical GEE convention)
+      row 0 → [1, 2]   (northernmost row)
       row 1 → [3, 4]   (southernmost row)
-
-    We assert the output preserves this exact order.  If GEE is ever found to
-    return south-up for this pattern, add ``_flip_sample_tile_y`` to
-    ``_fetch_all_bands_impl`` **and** update this test to expect the flipped
-    order.
     """
     import numpy as np
 
-    from rs_embed.core.specs import BBox, TemporalSpec
+    from rs_embed.core.specs import TemporalSpec
 
     # ── GEE pixel data: row 0 = [1, 2], row 1 = [3, 4] ────────────────
     _NORTH_ROW = [1.0, 2.0]
     _SOUTH_ROW = [3.0, 4.0]
-
-    class _FakeImage:
-        def reproject(self, **_kw):
-            return self
-
-        def clip(self, _region):
-            return self
-
-        def bandNames(self):
-            class _Names:
-                def getInfo(self):
-                    return ["B1"]
-
-            return _Names()
-
-        def sampleRectangle(self, **_kw):
-            class _Rect:
-                def getInfo(self):
-                    return {"properties": {"B1": [_NORTH_ROW, _SOUTH_ROW]}}
-
-            return _Rect()
 
     class _FakeCollection:
         def filterBounds(self, _r):
@@ -765,9 +733,11 @@ def test_fetch_all_bands_impl_passes_through_gee_row_order(monkeypatch):
             return _Size()
 
         def median(self):
-            return _FakeImage()
+            return _FakePixels({"B1": [_NORTH_ROW, _SOUTH_ROW]})
 
-    fake_ee = types.SimpleNamespace(ImageCollection=lambda _c: _FakeCollection())
+    fake_ee = types.SimpleNamespace(
+        ImageCollection=lambda _c: _FakeCollection(), data=_FAKE_EE_DATA
+    )
     monkeypatch.setitem(sys.modules, "ee", fake_ee)
 
     provider = GEEProvider(auto_auth=False)
@@ -775,7 +745,7 @@ def test_fetch_all_bands_impl_passes_through_gee_row_order(monkeypatch):
     monkeypatch.setattr(provider, "get_region", lambda _spatial: object())
 
     arr, names = provider._fetch_all_bands_impl(
-        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.year(2024),
         collection="FAKE/COLL",
         scale_m=10,
@@ -784,10 +754,191 @@ def test_fetch_all_bands_impl_passes_through_gee_row_order(monkeypatch):
 
     assert names == ("B1",)
     assert arr.shape == (1, 2, 2)
-    # Row order is preserved as-is from GEE — no flip applied.
-    # Empirically GEE returns north-up for this call pattern, so row 0 = northernmost.
+    # Row order is preserved as downloaded (north-up) — no flip applied.
     np.testing.assert_allclose(arr[0, 0], _NORTH_ROW)
     np.testing.assert_allclose(arr[0, 1], _SOUTH_ROW)
+
+
+# ══════════════════════════════════════════════════════════════════════
+# _compute_pixels_chw — the binary download every GEE fetch goes through
+# ══════════════════════════════════════════════════════════════════════
+
+_FIVE_BANDS = {f"B{i}": [[float(i), i + 0.5], [i + 0.25, i + 0.75]] for i in range(5)}
+_SMALL_BBOX = BBox(minlon=-88.25, minlat=40.09, maxlon=-88.24, maxlat=40.10)
+
+
+class _RecordingPixels(_FakePixels):
+    def __init__(self, bands, log):
+        super().__init__(bands)
+        self.log = log
+
+    def unmask(self, *args):
+        self.log.append(("unmask", args))
+        return self
+
+
+def _install_compute_pixels(monkeypatch, requests, refuse=lambda _bands: False):
+    """Fake ee whose computePixels records each request's bands and can refuse some."""
+
+    def _compute(params):
+        bands = list(params["expression"].bands)
+        requests.append({**params, "bands": bands})
+        if refuse(bands):
+            raise RuntimeError(
+                "Total request size (99 bytes) must be less than or equal to 50331648 bytes."
+            )
+        return _fake_compute_pixels(params)
+
+    fake_ee = types.SimpleNamespace(data=types.SimpleNamespace(computePixels=_compute))
+    monkeypatch.setitem(sys.modules, "ee", fake_ee)
+
+
+def _band_bytes(spatial, scale_m=10):
+    grid = common_grid(spatial, scale_m=float(scale_m))
+    return grid.height * grid.width * gee_utils._GEE_REQUEST_BYTES_PER_VALUE
+
+
+def test_compute_pixels_requests_the_common_grid_north_up(monkeypatch):
+    requests: list = []
+    _install_compute_pixels(monkeypatch, requests)
+    log: list = []
+
+    arr = _compute_pixels_chw(
+        _RecordingPixels(_FIVE_BANDS, log),
+        spatial=_SMALL_BBOX,
+        bands=("B3", "B1"),
+        scale_m=10,
+        fill_value=-9999.0,
+    )
+
+    grid = common_grid(_SMALL_BBOX, scale_m=10.0)
+    t = grid.transform
+    (req,) = requests
+    assert req["fileFormat"] == "NUMPY_NDARRAY"
+    assert req["grid"]["crsCode"] == "EPSG:3857"
+    assert req["grid"]["dimensions"] == {"width": grid.width, "height": grid.height}
+    assert req["grid"]["affineTransform"] == {
+        "scaleX": t.a,
+        "shearX": t.b,
+        "translateX": t.c,
+        "shearY": t.d,
+        "scaleY": t.e,
+        "translateY": t.f,
+    }
+    assert t.e < 0  # row 0 is the north edge: downloads arrive north-up
+    # masked pixels, inside or outside the image footprint, become the fill
+    assert ("unmask", (-9999.0, False)) in log
+    expected = np.stack([_FIVE_BANDS["B3"], _FIVE_BANDS["B1"]]).astype(np.float32)
+    np.testing.assert_array_equal(arr, expected)
+
+
+def test_point_buffer_bands_split_evenly_to_fit_the_request_limit(monkeypatch):
+    # A PointBuffer cannot be split spatially, so its bands are: 4 bands fit per
+    # request, and 5 go out as 3 + 2 rather than 4 + 1.
+    requests: list = []
+    _install_compute_pixels(monkeypatch, requests)
+    monkeypatch.setattr(gee_utils, "_GEE_REQUEST_MAX_BYTES", 4 * _band_bytes(_SPATIAL))
+    bands = tuple(_FIVE_BANDS)
+
+    arr = _compute_pixels_chw(
+        _FakePixels(_FIVE_BANDS), spatial=_SPATIAL, bands=bands, scale_m=10, fill_value=0.0
+    )
+
+    assert [r["bands"] for r in requests] == [["B0", "B1", "B2"], ["B3", "B4"]]
+    np.testing.assert_array_equal(arr, np.stack([_FIVE_BANDS[b] for b in bands]))
+
+
+def test_bbox_over_the_request_limit_raises_before_sending(monkeypatch):
+    # A BBox is split spatially by the caller instead, keeping every band of a
+    # piece in one request; the limit error says so before anything is sent.
+    requests: list = []
+    _install_compute_pixels(monkeypatch, requests)
+    monkeypatch.setattr(gee_utils, "_GEE_REQUEST_MAX_BYTES", 4 * _band_bytes(_SMALL_BBOX))
+
+    with pytest.raises(ProviderError) as err:
+        _compute_pixels_chw(
+            _FakePixels(_FIVE_BANDS),
+            spatial=_SMALL_BBOX,
+            bands=tuple(_FIVE_BANDS),
+            scale_m=10,
+            fill_value=0.0,
+        )
+    assert _looks_like_gee_request_too_large(err.value)
+    assert requests == []
+
+
+def test_grid_side_over_the_limit_raises_the_limit_error(monkeypatch):
+    requests: list = []
+    _install_compute_pixels(monkeypatch, requests)
+    monkeypatch.setattr(gee_utils, "_GEE_REQUEST_MAX_GRID_SIDE", 1)
+
+    with pytest.raises(ProviderError, match="Pixel grid dimensions") as err:
+        _compute_pixels_chw(
+            _FakePixels(_FIVE_BANDS), spatial=_SPATIAL, bands=("B0",), scale_m=10, fill_value=0.0
+        )
+    assert _looks_like_gee_request_too_large(err.value)  # BBox fetches split on it
+    assert requests == []
+
+
+def test_compute_pixels_halves_a_band_chunk_gee_refuses(monkeypatch):
+    requests: list = []
+    _install_compute_pixels(monkeypatch, requests, refuse=lambda bands: len(bands) > 2)
+    bands = tuple(_FIVE_BANDS)
+
+    arr = _compute_pixels_chw(
+        _FakePixels(_FIVE_BANDS), spatial=_SMALL_BBOX, bands=bands, scale_m=10, fill_value=0.0
+    )
+
+    assert [r["bands"] for r in requests] == [
+        ["B0", "B1", "B2", "B3", "B4"],
+        ["B0", "B1"],
+        ["B2", "B3", "B4"],
+        ["B2"],
+        ["B3", "B4"],
+    ]
+    np.testing.assert_array_equal(arr, np.stack([_FIVE_BANDS[b] for b in bands]))
+
+
+def test_single_band_over_the_limit_raises_the_limit_error(monkeypatch):
+    requests: list = []
+    _install_compute_pixels(monkeypatch, requests)
+    monkeypatch.setattr(gee_utils, "_GEE_REQUEST_MAX_BYTES", _band_bytes(_SPATIAL) - 1)
+
+    def _fetch(sp):
+        return _compute_pixels_chw(
+            _FakePixels(_FIVE_BANDS), spatial=sp, bands=("B0",), scale_m=10, fill_value=0.0
+        )
+
+    # A PointBuffer is never split, so the limit error reaches the caller.
+    with pytest.raises(ProviderError) as err:
+        _fetch_with_bbox_fallback(spatial=_SPATIAL, scale_m=10, fetch_fn=_fetch)
+    assert _looks_like_gee_request_too_large(err.value)  # BBox fetches split on it
+    assert requests == []  # refused before anything is sent
+
+
+def test_fetch_array_chw_does_not_flip_downloaded_rows(monkeypatch):
+    class _FakeProjection:
+        def atScale(self, _scale):
+            return self
+
+    fake_ee = types.SimpleNamespace(
+        Projection=lambda *_args, **_kwargs: _FakeProjection(), data=_FAKE_EE_DATA
+    )
+    monkeypatch.setitem(sys.modules, "ee", fake_ee)
+    provider = GEEProvider(auto_auth=False)
+    monkeypatch.setattr(provider, "ensure_ready", lambda: None)
+    monkeypatch.setattr(provider, "get_region", lambda _spatial: object())
+
+    arr = provider.fetch_array_chw(
+        image=_FakePixels({"B4": [[1.0, 2.0], [3.0, 4.0]]}),
+        bands=("RED",),
+        spatial=_SPATIAL,
+        scale_m=10,
+        fill_value=0.0,
+        collection="COPERNICUS/S2_SR_HARMONIZED",
+    )
+
+    np.testing.assert_array_equal(arr, np.array([[[1.0, 2.0], [3.0, 4.0]]], dtype=np.float32))
 
 
 def test_cloud_property_for_collection_mapping():
@@ -928,28 +1079,14 @@ def _make_multiframe_fake_ee(
         def getInfo(self):
             return [item.getInfo() for item in self._items]
 
-    class _FakeImage:
-        def __init__(self, value, delay=0.0):
-            self.value, self.delay = value, delay
+    def _pixels(value, delay=0.0):
+        def _on_download():
+            time.sleep(delay)
+            sampled.append(value)
+            if value is None:
+                raise RuntimeError("whole-window composite failed")
 
-        def select(self, _bands):
-            return self
-
-        def reproject(self, **_kwargs):
-            return self
-
-        def sampleRectangle(self, *, region, defaultValue):  # noqa: ARG002
-            img = self
-
-            class _Rect:
-                def getInfo(self):
-                    time.sleep(img.delay)
-                    sampled.append(img.value)
-                    if img.value is None:
-                        raise RuntimeError("whole-window composite failed")
-                    return {"properties": {"B1": [[img.value]]}}
-
-            return _Rect()
+        return _FakePixels({"B1": [[value]]}, on_download=_on_download)
 
     class _FakeBin:
         def __init__(self, value, delay):
@@ -961,7 +1098,7 @@ def _make_multiframe_fake_ee(
             return _FakeSize(1 if self.value is not None else 0)
 
         def median(self):
-            return _FakeImage(self.value, self.delay)
+            return _pixels(self.value, self.delay)
 
     class _FakeCollection:
         def __init__(self):
@@ -986,11 +1123,12 @@ def _make_multiframe_fake_ee(
             return _FakeSize(1)
 
         def median(self):
-            return _FakeImage(fallback_value)
+            return _pixels(fallback_value)
 
     return types.SimpleNamespace(
         ImageCollection=lambda _collection: _FakeCollection(),
         List=_FakeList,
+        data=_FAKE_EE_DATA,
         Filter=types.SimpleNamespace(
             lte=lambda f, v: ("lte", f, v),
             eq=lambda f, v: ("eq", f, v),
@@ -1019,7 +1157,7 @@ def test_multiframe_fetch_does_not_clip_non_s2_collections(monkeypatch):
         _make_multiframe_fake_ee(bin_values=[-5.0, 20000.0], fallback_value=1.0),
     )
     arr = provider.fetch_multiframe_collection_raw_tchw(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
         collection="FAKE/LANDSAT_LIKE",
         bands=("B1",),
@@ -1036,7 +1174,7 @@ def test_multiframe_fetch_clips_s2_to_dn_range(monkeypatch):
         _make_multiframe_fake_ee(bin_values=[-5.0, 20000.0], fallback_value=1.0),
     )
     arr = provider.fetch_multiframe_collection_raw_tchw(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
         collection="COPERNICUS/S2_SR_HARMONIZED",
         bands=("B1",),
@@ -1058,7 +1196,7 @@ def test_multiframe_fetch_bin_count_failure_raises(monkeypatch):
     )
     with pytest.raises(ProviderError, match="Failed to query image count"):
         provider.fetch_multiframe_collection_raw_tchw(
-            spatial=object(),
+            spatial=_SPATIAL,
             temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
             collection="FAKE/COLL",
             bands=("B1",),
@@ -1078,7 +1216,7 @@ def test_multiframe_fetch_empty_bin_keeps_alignment_without_fallback(monkeypatch
         _make_multiframe_fake_ee(bin_values=[2.0, None, 4.0], fallback_value=None),
     )
     arr = provider.fetch_multiframe_collection_raw_tchw(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-04-01"),
         collection="FAKE/COLL",
         bands=("B1",),
@@ -1105,7 +1243,7 @@ def test_multiframe_fetch_concurrent_bins_keep_bin_order(monkeypatch):
         ),
     )
     arr = provider.fetch_multiframe_collection_raw_tchw(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-07-01"),
         collection="FAKE/COLL",
         bands=("B1",),
@@ -1122,7 +1260,7 @@ def test_multiframe_fetch_samples_fallback_only_for_empty_bins(monkeypatch):
     """
     full = _make_multiframe_fake_ee(bin_values=[2.0, 3.0], fallback_value=9.0)
     _multiframe_provider(monkeypatch, full).fetch_multiframe_collection_raw_tchw(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
         collection="FAKE/COLL",
         bands=("B1",),
@@ -1132,7 +1270,7 @@ def test_multiframe_fetch_samples_fallback_only_for_empty_bins(monkeypatch):
 
     gap = _make_multiframe_fake_ee(bin_values=[2.0, None], fallback_value=9.0)
     arr = _multiframe_provider(monkeypatch, gap).fetch_multiframe_collection_raw_tchw(
-        spatial=object(),
+        spatial=_SPATIAL,
         temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
         collection="FAKE/COLL",
         bands=("B1",),

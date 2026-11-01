@@ -17,9 +17,9 @@ from .gee_utils import (
     _bbox_recursive_fallback,
     _build_s1_dualpol_collection,
     _collection_size_or_none,
+    _compute_pixels_chw,
     _fetch_with_bbox_fallback,
     _filter_clouds,
-    _flip_sample_tile_y,
     _format_s1_empty_collection_message,
     _gee_error_message,
     _gee_init_kwargs,
@@ -144,62 +144,34 @@ class GEEProvider(ProviderBase):
         *,
         image: Any,
         bands: tuple[str, ...],
-        region: Any,
+        spatial: SpatialSpec,
         scale_m: int,
         fill_value: float,
         collection: str | None = None,
     ) -> np.ndarray:
-        """Download a rectangular patch as **north-up** CHW float32.
+        """Download *spatial*'s common-grid patch as **north-up** CHW float32.
 
-        Uses ``ee.Projection.atScale()`` + ``.clip(region)`` before
-        ``sampleRectangle``.  The ``atScale`` reprojection form makes GEE
-        return rows in south-up order (clipping does not affect row order —
-        see ``_sample_image_bands_raw_chw`` for the verified contract), so
-        ``_flip_sample_tile_y`` is applied here before returning — callers
-        always receive north-up output and must not flip again.
-
-        Also resolves band aliases (BLUE/GREEN/RED → B2/B3/B4 for S2, etc.)
-        and clips to ``region`` so that pixels outside non-rectangular
-        geometries (e.g. PointBuffer) are filled with ``fill_value``.
+        Resolves band aliases (BLUE/GREEN/RED → B2/B3/B4 for S2, etc.),
+        reprojects onto the EPSG:3857 lattice at *scale_m* and clips to the ROI
+        region; pixels outside it are filled with ``fill_value``. The download
+        itself is :func:`_compute_pixels_chw`, whose grid fixes the row order.
         """
         import ee
 
-        # 1) Resolve aliases using collection hint when provided
         resolved = self.normalize_bands(
             collection=(collection or ""),
             bands=bands,
         )
-
-        # 2) Select resolved bands (this will error at compute-time if typo)
-        img = image.select(list(resolved))
-
-        # 3) Force pixel grid at desired scale; clip masks non-rectangular regions
         proj = ee.Projection(COMMON_CRS).atScale(int(scale_m))
-        img = img.reproject(proj).clip(region)
-
-        # 4) Sample and build CHW (raw GEE output is south-up with atScale+clip)
-        rect = img.sampleRectangle(region=region, defaultValue=fill_value).getInfo()
-        props = rect.get("properties", {})
-        if not props:
-            raise ProviderError(_no_images_found_message(collection=collection))
-
-        arrs = []
-        missing = []
-        for b in resolved:
-            if b not in props:
-                missing.append(b)
-            else:
-                arrs.append(np.array(props[b], dtype=np.float32))
-
-        if missing:
-            avail = sorted(list(props.keys()))
-            raise ProviderError(
-                f"Band(s) {missing} not in sampled properties. "
-                f"Requested={resolved}. Available bands={avail}"
-            )
-
-        # 5) Normalise to north-up: atScale+clip yields south-up rows from GEE
-        return _flip_sample_tile_y(np.stack(arrs, axis=0))
+        img = image.select(list(resolved)).reproject(proj).clip(self.get_region(spatial))
+        return _compute_pixels_chw(
+            img,
+            spatial=spatial,
+            bands=resolved,
+            scale_m=int(scale_m),
+            fill_value=float(fill_value),
+            collection=collection,
+        )
 
     def normalize_bands(
         self,
@@ -296,6 +268,7 @@ class GEEProvider(ProviderBase):
             scale_m=scale_m,
             fetch_fn=_fetch,
             stitch_fn=_stitch,
+            n_bands=2,
         )
 
     def _fetch_s1_impl(
@@ -379,16 +352,14 @@ class GEEProvider(ProviderBase):
             raise ProviderError(f"Unknown composite='{composite}'. Use 'median' or 'mosaic'.")
 
         img = img.select(["VV", "VH"]).reproject(crs=COMMON_CRS, scale=int(scale_m))
-        rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
-        props = rect.get("properties", {}) if isinstance(rect, dict) else {}
-        if not props:
-            raise ProviderError(_no_images_found_message(collection=collection_id))
-        vv = np.array(props.get("VV", []), dtype=np.float32)
-        vh = np.array(props.get("VH", []), dtype=np.float32)
-        try:
-            arr = np.stack([vv, vh], axis=0).astype(np.float32)
-        except Exception as e:
-            raise ProviderError("Failed to sample S1 VV/VH rectangle from GEE image.") from e
+        arr = _compute_pixels_chw(
+            img,
+            spatial=spatial,
+            bands=("VV", "VH"),
+            scale_m=int(scale_m),
+            fill_value=float(fill_value),
+            collection=collection_id,
+        )
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
         if arr.ndim != 3 or int(arr.shape[0]) != 2:
             raise ProviderError(
@@ -435,6 +406,7 @@ class GEEProvider(ProviderBase):
             spatial=spatial,
             scale_m=int(scale_m),
             fetch_fn=_do,
+            n_bands=len(tuple(bands)),
         )
 
     def _fetch_multiframe_impl(
@@ -501,7 +473,7 @@ class GEEProvider(ProviderBase):
         def _sample(col: Any) -> np.ndarray:
             return _sample_image_bands_raw_chw(
                 _reduce(col),
-                region=region,
+                spatial=spatial,
                 bands=resolved_bands,
                 scale_m=scale_m,
                 fill_value=fill_value,
@@ -637,23 +609,19 @@ class GEEProvider(ProviderBase):
         else:
             raise ProviderError(f"Unknown composite='{composite}'. Use 'median' or 'mosaic'.")
 
-        # reproject(crs=..., scale=...) + clip: north-up — row order follows the
-        # reprojection form, not clipping (see _sample_image_bands_raw_chw for
-        # the verified contract). No flip here.
         img = img.reproject(crs=COMMON_CRS, scale=int(scale_m)).clip(region)
         band_names_raw = img.bandNames().getInfo()
         band_names = tuple(str(b) for b in (band_names_raw or []))
         if not band_names:
             raise ProviderError(f"No bands found for collection={collection!r}.")
 
-        rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
-        props = rect.get("properties", {}) if isinstance(rect, dict) else {}
-        if not props:
-            raise ProviderError(_no_images_found_message(collection=str(collection)))
-        arrs = [np.array(props.get(b, []), dtype=np.float32) for b in band_names]
-        try:
-            arr = np.stack(arrs, axis=0).astype(np.float32)
-        except Exception as e:
-            raise ProviderError("Failed to sample rectangle for all collection bands.") from e
+        arr = _compute_pixels_chw(
+            img,
+            spatial=spatial,
+            bands=band_names,
+            scale_m=int(scale_m),
+            fill_value=float(fill_value),
+            collection=str(collection),
+        )
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
         return arr, band_names
