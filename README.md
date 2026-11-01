@@ -20,6 +20,11 @@
 
 > Get Start on [I-GUIDE](https://platform.i-guide.io/notebooks/a013ce97-d963-4262-9f21-edd09976181a) Today!
 
+**🔥 News**
+
+- **[v0.4.0](https://github.com/cybergis/rs-embed/releases/tag/v0.4.0)** (Nov 2026): Google Earth Engine downloads are **3–10× faster**, with identical pixels. Upgrade with `pip install -U rs-embed`.
+- **[v0.3.0](https://github.com/cybergis/rs-embed/releases/tag/v0.3.0)** (Sep 2026): **Bring your own data**: embed your own arrays or GeoTIFFs with `get_embedding_from_data`, no GEE account needed. [Guide](https://cybergis.github.io/rs-embed/latest/user_data/)
+
 <img src="https://raw.githubusercontent.com/cybergis/rs-embed/main/docs/assets/background.png" />
 
 ## TL;DR
