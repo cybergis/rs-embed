@@ -115,7 +115,7 @@ def build_parser() -> argparse.ArgumentParser:
         "--fill-value",
         type=float,
         default=0.0,
-        help="Default fill value used by sampleRectangle",
+        help="Fill value for pixels without data",
     )
     ig.add_argument(
         "--composite",
