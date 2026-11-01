@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import sys
+import threading
 from collections.abc import Sequence
 from typing import Any
 
@@ -10,6 +12,7 @@ from ..core.errors import ModelError, ProviderError, SpecError
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..tools.projection import COMMON_CRS, web_mercator_bounds
 from .base import ProviderBase
+from .fetch import fetch_bins_concurrently
 from .gee_utils import (
     _bbox_recursive_fallback,
     _build_s1_dualpol_collection,
@@ -30,6 +33,24 @@ from .gee_utils import (
     fetch_provider_patch_raw,
 )
 
+# ee.Initialize is process-wide and not idempotent: each call re-fetches the API
+# discovery documents and swaps module globals without a lock. Initialization is
+# therefore done once and remembered as (ee module, project); a different project
+# — or a replaced ee module — initializes again.
+_EE_INIT_LOCK = threading.Lock()
+_EE_INIT_STATE: dict[str, Any] = {}
+
+
+def _ee_initialized_for(project: str | None) -> bool:
+    ee = sys.modules.get("ee")
+    if ee is None or _EE_INIT_STATE.get("ee") is not ee:
+        return False
+    if _EE_INIT_STATE.get("project") != project:
+        return False
+    # ee.Reset() ends the session without rs-embed noticing; ask ee when it can tell.
+    is_initialized = getattr(getattr(ee, "data", None), "is_initialized", None)
+    return is_initialized is None or bool(is_initialized())
+
 
 class GEEProvider(ProviderBase):
     name = "gee"
@@ -41,6 +62,15 @@ class GEEProvider(ProviderBase):
         )
 
     def ensure_ready(self) -> None:
+        if _ee_initialized_for(self.project):
+            return
+        with _EE_INIT_LOCK:
+            if _ee_initialized_for(self.project):
+                return
+            self._initialize_ee()
+            _EE_INIT_STATE.update(ee=sys.modules.get("ee"), project=self.project)
+
+    def _initialize_ee(self) -> None:
         try:
             import ee
 
@@ -435,7 +465,27 @@ class GEEProvider(ProviderBase):
             .filterBounds(region)
         )
         col_all = _filter_clouds(col_all, collection=str(collection), cloudy_pct=cloudy_pct)
-        _raise_if_empty_collection(col_all, collection=str(collection))
+
+        # One entry per bin (None = no imagery in that bin) so frame i always
+        # corresponds to bin i — consumers (e.g. prithvi's midpoint dates)
+        # rely on that alignment. Bin collections are built here, in order.
+        bins = _split_date_range(temporal.start, temporal.end, max(1, int(n_frames)))
+        bin_cols = [col_all.filterDate(start_i, end_i) for start_i, end_i in bins]
+        # Whole-window and per-bin image counts in one round trip.
+        try:
+            counts = [
+                int(n) for n in ee.List([col_all.size(), *(c.size() for c in bin_cols)]).getInfo()
+            ]
+        except Exception as e:
+            # A failed count is not an empty bin: substituting the
+            # whole-window composite for it would silently change the data.
+            raise ProviderError(
+                f"Failed to query image count for {str(collection)!r} "
+                f"over {len(bins)} time bin(s): {e}"
+            ) from e
+        if counts[0] == 0:
+            raise ProviderError(_no_images_found_message(collection=str(collection)))
+        bin_has_data = [n > 0 for n in counts[1:]]
 
         comp = str(composite).lower().strip()
         if comp not in {"median", "mosaic"}:
@@ -458,30 +508,25 @@ class GEEProvider(ProviderBase):
                 value_range=value_range,
             )
 
-        fallback_frame = None
-        try:
-            if int(col_all.size().getInfo()) > 0:
-                fallback_frame = _sample(col_all)
-        except Exception as _e:
-            fallback_frame = None
+        # Non-empty bins are sampled concurrently.
+        filled_idx = [i for i, has_data in enumerate(bin_has_data) if has_data]
+        sampled = fetch_bins_concurrently(
+            len(filled_idx), lambda k: _sample(bin_cols[filled_idx[k]])
+        )
+        binned: list[np.ndarray | None] = [None] * len(bins)
+        for i, frame in zip(filled_idx, sampled, strict=True):
+            binned[i] = frame
 
-        # One entry per bin (None = no imagery in that bin) so frame i always
-        # corresponds to bin i — consumers (e.g. prithvi's midpoint dates)
-        # rely on that alignment.
-        bins = _split_date_range(temporal.start, temporal.end, max(1, int(n_frames)))
-        binned: list[np.ndarray | None] = []
-        for start_i, end_i in bins:
-            col_i = col_all.filterDate(start_i, end_i)
+        # The whole-window composite only stands in for empty bins, so it is sampled
+        # only when one is empty — on its own, after the bins, so it never competes
+        # with them for the project's request concurrency. If it fails, empty bins
+        # back-fill from the nearest non-empty bin below instead.
+        fallback_frame = None
+        if len(filled_idx) < len(bins):
             try:
-                has_data = int(col_i.size().getInfo()) > 0
-            except Exception as e:
-                # A failed count is not an empty bin: substituting the
-                # whole-window composite here would silently change the data.
-                raise ProviderError(
-                    f"Failed to query image count for bin [{start_i}, {end_i}) "
-                    f"of {str(collection)!r}: {e}"
-                ) from e
-            binned.append(_sample(col_i) if has_data else None)
+                fallback_frame = _sample(col_all)
+            except Exception:
+                fallback_frame = None
 
         filled = [f is not None for f in binned]
         if not any(filled):
