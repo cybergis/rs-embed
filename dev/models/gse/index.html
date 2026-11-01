@@ -2564,7 +2564,7 @@
     FETCH --&gt; GRID["grid: (D,H,W)\nwith band-name coords"]</code></pre>
 <div class="admonition note">
 <p class="admonition-title">Large requests are split automatically</p>
-<p>When a <code>BBox</code> covers more pixels than GEE's <code>sampleRectangle</code> limit (262,144), the GEE provider splits it into smaller requests along pixel boundaries of the EPSG:3857 grid and concatenates the results. There is no hard cap on request size, and the result is pixel-for-pixel identical to a single large fetch. <code>input_prep</code> does not apply to <code>gse</code>; passing <code>input_prep="tile"</code> only emits a <code>UserWarning</code> saying so. The old <code>RS_EMBED_GSE_MAX_PIXELS</code> variable no longer has any effect.</p>
+<p>GEE caps one pixel request at 48 MiB, which GSE's 64 float bands reach at about 400 × 400 px. The GEE provider splits a larger <code>BBox</code> into pieces that fit along pixel boundaries of the EPSG:3857 grid and concatenates the results; a <code>PointBuffer</code> downloads its bands in several requests instead. There is no hard cap on request size, and the result is pixel-for-pixel identical to a single large fetch. <code>input_prep</code> does not apply to <code>gse</code>; passing <code>input_prep="tile"</code> only emits a <code>UserWarning</code> saying so. The old <code>RS_EMBED_GSE_MAX_PIXELS</code> variable no longer has any effect.</p>
 </div>
 <hr />
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
