@@ -78,7 +78,7 @@ def _input_kind(model: str) -> str | None:
 DOWNLOADS = HERE / "downloads"
 DOWNLOADS.mkdir(exist_ok=True)
 ASSETS = HERE / "assets"
-ASSETS.mkdir(exist_ok=True)  # holds logo.png etc., served at /assets
+ASSETS.mkdir(exist_ok=True)  # holds the logo and favicon, served at /assets
 
 # Pretrained downstream heads (built by build_demo_cache.py --only heads).
 _HEADS: dict[str, Any] = {}  # model -> loaded regressor (lazy)

@@ -37,7 +37,8 @@ examples/iguide_demo_cache/
 !examples/webapp/prototype.html
 examples/webapp/downloads/
 !examples/webapp/assets/
-!examples/webapp/assets/logo.png
+!examples/webapp/assets/rs-embed-logo-tagline.svg
+!examples/webapp/assets/favicon.svg
 .DS_Store
 /global_0.1_degree_representation/
 /global_0.1_degree_tiff_all/

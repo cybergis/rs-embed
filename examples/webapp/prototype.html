@@ -4,7 +4,7 @@
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>rs-embed — UI prototype (mock data)</title>
-<link rel="icon" type="image/png" href="assets/logo.png" />
+<link rel="icon" type="image/svg+xml" href="assets/favicon.svg" />
 <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
 <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/nouislider@15.7.1/dist/nouislider.min.css" />
 <style>
@@ -29,9 +29,8 @@
   #panelToggle:hover{background:#f3efe6}
   #panel{width:360px;flex:0 0 360px;height:100%;overflow-y:auto;background:var(--panel);
          border-left:1px solid var(--line);padding:16px 16px 22px;display:flex;flex-direction:column;gap:16px}
-  h1{font-size:18px;margin:0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
-  h1 .logo{height:34px;width:34px;object-fit:contain}
-  h1 small{flex-basis:100%;display:block;font-weight:500;color:var(--muted);font-size:12px;margin-top:2px}
+  h1{margin:0;padding-right:34px}           /* clear #panelToggle */
+  h1 .logo{display:block;width:100%;height:auto}
   .sec{border:1px solid var(--line);border-radius:12px;background:#fff;padding:12px 14px}
   .sec h2{font-size:13px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:0 0 10px}
   .hint{font-size:12px;color:var(--muted);line-height:1.45}
@@ -126,7 +125,7 @@
     </div>
   </div>
   <aside id="panel">
-    <h1><img class="logo" src="assets/logo.png" alt="rs-embed" onerror="this.replaceWith(Object.assign(document.createTextNode('🛰️')))"> rs-embed <small>any model · any place · any time</small></h1>
+    <h1><img class="logo" src="assets/rs-embed-logo-tagline.svg" alt="rs-embed — any model · any place · any time"></h1>
 
     <div class="tabs">
       <button id="tabExtract" class="tab active">① Extract</button>
