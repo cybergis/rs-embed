@@ -30,7 +30,7 @@ def _warn_if_legacy_max_pixels_env() -> None:
         return
     warnings.warn(
         f"{_LEGACY_MAX_PIXELS_ENV} is no longer used and will be removed: requests above "
-        "GEE's sampleRectangle limit are split by the provider along pixel boundaries, "
+        "GEE's request-size limit are split by the provider along pixel boundaries, "
         "so the result matches a single request "
         "(https://github.com/cybergis/rs-embed/issues/134).",
         FutureWarning,
@@ -73,7 +73,7 @@ class GSEAnnualEmbedder(EmbedderBase):
                 "fill_value": -9999.0,
                 "composite": "mosaic",
             },
-            "notes": "Uses sampleRectangle in EPSG:3857; returns [C,H,W] or pooled [C].",
+            "notes": "Downloads the EPSG:3857 common grid with computePixels; returns [C,H,W] or pooled [C].",
         }
 
     @staticmethod
@@ -115,7 +115,7 @@ class GSEAnnualEmbedder(EmbedderBase):
 
         _warn_if_legacy_max_pixels_env()
         provider = self._get_provider(backend)
-        # Requests above GEE's sampleRectangle pixel limit are split and
+        # Requests above GEE's request-size limit are split and
         # re-joined inside the provider, on the common grid's pixel lattice.
         emb_chw, band_names = _fetch_collection_patch_all_bands_chw(
             provider,

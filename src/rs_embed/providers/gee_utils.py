@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import math
 from collections.abc import Sequence
 from typing import Any
 
@@ -17,12 +18,19 @@ from ..tools.projection import (
 )
 from ..tools.temporal import split_date_range as _split_date_range_core
 
-_GEE_SAMPLE_RECT_TOO_MANY_PIXELS = "Too many pixels in sample"
-_GEE_SAMPLE_RECT_OP = "sampleRectangle"
-_GEE_SAMPLE_RECT_MUST_BE = "must be <="
 _MAX_GEE_BBOX_SPLIT_DEPTH = 12
-# GEE's ceiling for one sampleRectangle call; larger BBoxes are split up front.
-_GEE_SAMPLE_RECT_MAX_PIXELS = 262144
+# GEE's ceilings on one computePixels request: its size, counting every value as
+# its data type plus a one-byte mask (5 bytes for the float32 that is requested),
+# and the pixel grid's side length.
+_GEE_REQUEST_MAX_BYTES = 50_331_648
+_GEE_REQUEST_BYTES_PER_VALUE = 5
+_GEE_REQUEST_MAX_GRID_SIDE = 32_768
+# The limit errors as GEE words them ("Total request size (N bytes) must be less
+# than or equal to 50331648 bytes.", "Pixel grid dimensions (WxH) must be less
+# than or equal to 32768."); _compute_pixels_chw raises the same words.
+_GEE_REQUEST_TOO_LARGE = "Total request size"
+_GEE_GRID_TOO_LARGE = "Pixel grid dimensions"
+_GEE_REQUEST_MUST_BE = "must be less than or equal to"
 # How far (in pixels) a split child's cut edge sits inside its own side of the
 # lattice line: far above lon/lat round-trip error, far below half a pixel.
 _SPLIT_EDGE_NUDGE_PX = 1e-6
@@ -54,11 +62,25 @@ def _iter_exception_messages(exc: BaseException) -> tuple[str, ...]:
     return tuple(m for m in msgs if m)
 
 
-def _looks_like_gee_sample_too_many_pixels(exc: BaseException) -> bool:
+def _looks_like_gee_request_too_large(exc: BaseException) -> bool:
     msgs = " | ".join(_iter_exception_messages(exc))
-    if _GEE_SAMPLE_RECT_TOO_MANY_PIXELS not in msgs:
-        return False
-    return (_GEE_SAMPLE_RECT_OP in msgs) or (_GEE_SAMPLE_RECT_MUST_BE in msgs)
+    return _GEE_REQUEST_MUST_BE in msgs and (
+        _GEE_REQUEST_TOO_LARGE in msgs or _GEE_GRID_TOO_LARGE in msgs
+    )
+
+
+def _request_too_large_error(n_bytes: int) -> ProviderError:
+    return ProviderError(
+        f"{_GEE_REQUEST_TOO_LARGE} ({n_bytes} bytes) {_GEE_REQUEST_MUST_BE} "
+        f"{_GEE_REQUEST_MAX_BYTES} bytes."
+    )
+
+
+def _grid_too_large_error(height: int, width: int) -> ProviderError:
+    return ProviderError(
+        f"{_GEE_GRID_TOO_LARGE} ({width}x{height}) {_GEE_REQUEST_MUST_BE} "
+        f"{_GEE_REQUEST_MAX_GRID_SIDE}."
+    )
 
 
 def _looks_like_bbox_spatial(spatial: SpatialSpec) -> bool:
@@ -89,9 +111,7 @@ def _validated_mid(candidate: float, lo: float, hi: float, coord_name: str) -> f
     if not (lo < mid < hi):
         mid = 0.5 * (lo + hi)
     if not (lo < mid < hi):
-        raise ModelError(
-            f"Failed to split BBox along {coord_name} for GEE sampleRectangle fallback."
-        )
+        raise ModelError(f"Failed to split BBox along {coord_name} for GEE request-size fallback.")
     return mid
 
 
@@ -131,9 +151,7 @@ def _split_bbox_for_recursive_fetch(
     if axis == "y" and dy <= 0.0 and dx > 0.0:
         axis = "x"
     if dx <= 0.0 and dy <= 0.0:
-        raise ModelError(
-            "Cannot split degenerate BBox while handling GEE sampleRectangle pixel-limit error."
-        )
+        raise ModelError("Cannot split degenerate BBox while handling GEE request-size error.")
 
     lo_lon, lo_lat = float(bbox.minlon), float(bbox.minlat)
     hi_lon, hi_lat = float(bbox.maxlon), float(bbox.maxlat)
@@ -413,42 +431,114 @@ def _build_s1_dualpol_collection(base: Any, *, require_iw: bool) -> Any:
     return col
 
 
+def _compute_pixels_chw(
+    img: Any,
+    *,
+    spatial: SpatialSpec,
+    bands: Sequence[str],
+    scale_m: int,
+    fill_value: float,
+    collection: str | None = None,
+) -> np.ndarray:
+    """Download *bands* of *img* on the common grid of *spatial* as **north-up** CHW float32.
+
+    The request grid is :func:`common_grid` — the EPSG:3857 pixel lattice at
+    *scale_m* — and its affine transform puts row 0 on the north edge, so rows
+    arrive north-up whatever reprojection *img* carries. Masked pixels (outside
+    a clip, or without data) arrive as *fill_value*: ``unmask(..., sameFootprint=False)``
+    also fills outside the image footprint, as ``sampleRectangle``'s
+    ``defaultValue`` did.
+
+    Pixels travel as binary float32 (``NUMPY_NDARRAY``) rather than JSON numbers.
+    A request over GEE's size limit raises the limit error before anything is
+    sent when *spatial* is a BBox: the caller splits it along lattice lines
+    (:func:`_bbox_recursive_fallback`) into pieces that each carry every band, so
+    GEE computes the image once per piece. A PointBuffer cannot be split, so its
+    bands go in as few, evenly sized requests as the limit allows; the limit
+    error is raised only when one band alone is over it.
+    """
+    import ee
+
+    try:
+        grid = common_grid(spatial, scale_m=float(scale_m))
+    except SpecError as e:
+        raise ProviderError(str(e)) from e
+    if max(grid.height, grid.width) > _GEE_REQUEST_MAX_GRID_SIDE:
+        raise _grid_too_large_error(grid.height, grid.width)
+    names = [str(b) for b in bands]
+    band_bytes = grid.height * grid.width * _GEE_REQUEST_BYTES_PER_VALUE
+    request_bytes = band_bytes * len(names)
+    if request_bytes > _GEE_REQUEST_MAX_BYTES and _looks_like_bbox_spatial(spatial):
+        raise _request_too_large_error(request_bytes)
+    if band_bytes > _GEE_REQUEST_MAX_BYTES:
+        raise _request_too_large_error(band_bytes)
+    t = grid.transform
+    request = {
+        "fileFormat": "NUMPY_NDARRAY",
+        "grid": {
+            "dimensions": {"width": grid.width, "height": grid.height},
+            "crsCode": COMMON_CRS,
+            "affineTransform": {
+                "scaleX": t.a,
+                "shearX": t.b,
+                "translateX": t.c,
+                "shearY": t.d,
+                "scaleY": t.e,
+                "translateY": t.f,
+            },
+        },
+    }
+    filled = img.unmask(float(fill_value), False).toFloat()
+
+    def _download(part: list[str]) -> list[np.ndarray]:
+        try:
+            arr = ee.data.computePixels({**request, "expression": filled.select(part)})
+        except Exception as e:
+            if len(part) > 1 and _looks_like_gee_request_too_large(e):
+                half = len(part) // 2
+                return _download(part[:half]) + _download(part[half:])
+            raise
+        got = arr.dtype.names or ()
+        if not got:
+            raise ProviderError(_no_images_found_message(collection=collection))
+        missing = [b for b in part if b not in got]
+        if missing:
+            raise ProviderError(
+                f"Band(s) {missing} not in downloaded pixels. "
+                f"Requested={tuple(names)}. Available bands={sorted(got)}"
+            )
+        return [np.asarray(arr[b], dtype=np.float32) for b in part]
+
+    n_requests = max(1, math.ceil(request_bytes / _GEE_REQUEST_MAX_BYTES))
+    per_request = math.ceil(len(names) / n_requests)
+    planes: list[np.ndarray] = []
+    for i in range(0, len(names), per_request):
+        planes += _download(names[i : i + per_request])
+    if not planes:
+        raise ProviderError(_no_images_found_message(collection=collection))
+    return np.stack(planes, axis=0)
+
+
 def _sample_image_bands_raw_chw(
     img: Any,
     *,
-    region: Any,
+    spatial: SpatialSpec,
     bands: Sequence[str],
     scale_m: int,
     fill_value: float,
     value_range: tuple[float, float] | None = None,
 ) -> np.ndarray:
-    """Sample a GEE image as **north-up** CHW float32.
+    """Sample a GEE image as **north-up** CHW float32 on the common grid of *spatial*.
 
     *value_range*, when given, clips the sampled values — callers pass the
     collection's valid data range (e.g. ``(0, 10000)`` for S2 DN). ``None``
     (the default) returns values unclipped, so collections with other ranges
     (Landsat SR, signed products) are not silently destroyed.
-
-    Row-order contract (verified against live GEE with ``ee.Image.pixelLonLat``
-    across hemispheres and scales; see ``tests/test_gee_orientation_live.py``):
-    ``sampleRectangle`` row order depends on the *reprojection form*, not on
-    clipping —
-
-    - ``reproject(crs=..., scale=...)`` → north-up, with or without ``.clip()``
-      (this function and ``_fetch_all_bands_impl``; no flip applied).
-    - ``reproject(ee.Projection(...).atScale(...))`` → south-up
-      (``fetch_array_chw``, which applies ``_flip_sample_tile_y``).
     """
     img = img.select(list(bands)).reproject(crs=COMMON_CRS, scale=int(scale_m))
-    rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
-    props = rect.get("properties", {}) if isinstance(rect, dict) else {}
-    if not props:
-        raise ProviderError(_NO_IMAGES_FOUND_MSG)
-    arrs = [np.array(props.get(str(b), []), dtype=np.float32) for b in bands]
-    try:
-        raw = np.stack(arrs, axis=0).astype(np.float32)
-    except Exception as e:
-        raise ProviderError("Failed to sample rectangle from GEE image.") from e
+    raw = _compute_pixels_chw(
+        img, spatial=spatial, bands=bands, scale_m=scale_m, fill_value=fill_value
+    )
     raw = np.nan_to_num(raw, nan=0.0, posinf=0.0, neginf=0.0)
     if value_range is not None:
         raw = np.clip(raw, float(value_range[0]), float(value_range[1]))
@@ -458,30 +548,16 @@ def _sample_image_bands_raw_chw(
 # ── Tile fetch helpers ────────────────────────────────────────────────────────
 
 
-def _flip_sample_tile_y(arr: np.ndarray) -> np.ndarray:
-    """Flip the penultimate (height) axis of a CHW or TCHW array from south-up to north-up.
-
-    Called inside ``GEEProvider.fetch_array_chw``, whose
-    ``reproject(ee.Projection(...).atScale(...))`` form makes ``sampleRectangle``
-    return south-up rows. The ``reproject(crs=..., scale=...)`` form returns
-    north-up rows (clipping does not affect row order), so
-    ``_sample_image_bands_raw_chw`` and ``_fetch_all_bands_impl`` must NOT apply
-    this flip. Contract verified against live GEE; see
-    ``_sample_image_bands_raw_chw`` and ``tests/test_gee_orientation_live.py``.
-    """
-    a = np.asarray(arr, dtype=np.float32)
-    if a.ndim < 2:
-        raise ModelError(f"Expected fetched tile with spatial last2 dims, got shape={a.shape}")
-    return np.flip(a, axis=a.ndim - 2).astype(np.float32, copy=False)
-
-
-def _exceeds_sample_pixel_limit(bbox: BBox, *, scale_m: int) -> bool:
+def _exceeds_request_limit(bbox: BBox, *, scale_m: int, n_bands: int = 1) -> bool:
+    """Whether *n_bands* of *bbox*'s common grid are over GEE's limits for one request."""
     try:
         h, w = common_grid(bbox, scale_m=float(scale_m)).shape
     except SpecError:
         # Invalid bounds: let fetch_fn report them through the provider's own error path.
         return False
-    return h * w > _GEE_SAMPLE_RECT_MAX_PIXELS
+    if max(h, w) > _GEE_REQUEST_MAX_GRID_SIDE:
+        return True
+    return n_bands * h * w * _GEE_REQUEST_BYTES_PER_VALUE > _GEE_REQUEST_MAX_BYTES
 
 
 def _bbox_recursive_fallback(
@@ -490,28 +566,34 @@ def _bbox_recursive_fallback(
     scale_m: int,
     fetch_fn: Any,
     stitch_fn: Any,
+    n_bands: int = 1,
     _depth: int = 0,
 ) -> Any:
-    """Generic recursive BBox splitting for GEE's sampleRectangle pixel limit.
+    """Generic recursive BBox splitting for GEE's request limits.
 
-    A BBox whose common-grid footprint already exceeds the limit is split up
-    front; anything else is fetched with fetch_fn(spatial) and split only if
-    GEE still reports a pixel-limit error. Splits follow pixel-lattice lines
-    (see :func:`_split_bbox_for_recursive_fetch`), so
+    A BBox whose common-grid footprint with *n_bands* already exceeds the limits
+    is split up front; anything else is fetched with fetch_fn(spatial) and split
+    only if a request-limit error is still raised. Callers that know the band
+    count pass it so no request is wasted; otherwise the limit error that
+    :func:`_compute_pixels_chw` raises before sending drives the splits. Splits
+    follow pixel-lattice lines (see :func:`_split_bbox_for_recursive_fetch`), so
     stitch_fn(result_a, result_b, axis) only has to concatenate.
     """
     cause: BaseException | None = None
     is_bbox = _looks_like_bbox_spatial(spatial)
-    if not (is_bbox and _exceeds_sample_pixel_limit(_coerce_bbox_like(spatial), scale_m=scale_m)):
+    over = is_bbox and _exceeds_request_limit(
+        _coerce_bbox_like(spatial), scale_m=scale_m, n_bands=n_bands
+    )
+    if not over:
         try:
             return fetch_fn(spatial)
         except Exception as e:
-            if not (is_bbox and _looks_like_gee_sample_too_many_pixels(e)):
+            if not (is_bbox and _looks_like_gee_request_too_large(e)):
                 raise
             cause = e
     if _depth >= _MAX_GEE_BBOX_SPLIT_DEPTH:
         raise ModelError(
-            "GEE sampleRectangle pixel-limit fallback exceeded max recursive BBox splits "
+            "GEE request-size fallback exceeded max recursive BBox splits "
             f"({_MAX_GEE_BBOX_SPLIT_DEPTH})."
         ) from cause
     spatial_bbox = _coerce_bbox_like(spatial)
@@ -523,6 +605,7 @@ def _bbox_recursive_fallback(
         scale_m=scale_m,
         fetch_fn=fetch_fn,
         stitch_fn=stitch_fn,
+        n_bands=n_bands,
         _depth=_depth + 1,
     )
     return stitch_fn(
@@ -537,6 +620,7 @@ def _fetch_with_bbox_fallback(
     spatial: SpatialSpec,
     scale_m: int,
     fetch_fn: Any,
+    n_bands: int = 1,
     split_depth: int = 0,
 ) -> np.ndarray:
     """BBox-splitting fallback for fetch functions returning np.ndarray."""
@@ -545,6 +629,7 @@ def _fetch_with_bbox_fallback(
         scale_m=scale_m,
         fetch_fn=lambda sp: np.asarray(fetch_fn(sp), dtype=np.float32),
         stitch_fn=_stitch_bbox_split_arrays,
+        n_bands=n_bands,
         _depth=split_depth,
     )
 
@@ -560,13 +645,12 @@ def _fetch_provider_array_chw_with_bbox_fallback(
     collection: str | None,
 ) -> np.ndarray:
     def _do(sp: SpatialSpec) -> np.ndarray:
-        region = provider.get_region(sp)
         # fetch_array_chw owns its orientation contract: always returns north-up.
         return np.asarray(
             provider.fetch_array_chw(
                 image=image,
                 bands=bands,
-                region=region,
+                spatial=sp,
                 scale_m=int(scale_m),
                 fill_value=float(fill_value),
                 collection=collection,
@@ -578,6 +662,7 @@ def _fetch_provider_array_chw_with_bbox_fallback(
         spatial=spatial,
         scale_m=int(scale_m),
         fetch_fn=_do,
+        n_bands=len(bands),
     )
 
 

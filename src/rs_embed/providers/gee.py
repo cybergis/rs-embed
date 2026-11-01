@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import os
+import sys
+import threading
 from collections.abc import Sequence
 from typing import Any
 
@@ -10,13 +12,14 @@ from ..core.errors import ModelError, ProviderError, SpecError
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from ..tools.projection import COMMON_CRS, web_mercator_bounds
 from .base import ProviderBase
+from .fetch import fetch_bins_concurrently
 from .gee_utils import (
     _bbox_recursive_fallback,
     _build_s1_dualpol_collection,
     _collection_size_or_none,
+    _compute_pixels_chw,
     _fetch_with_bbox_fallback,
     _filter_clouds,
-    _flip_sample_tile_y,
     _format_s1_empty_collection_message,
     _gee_error_message,
     _gee_init_kwargs,
@@ -30,6 +33,24 @@ from .gee_utils import (
     fetch_provider_patch_raw,
 )
 
+# ee.Initialize is process-wide and not idempotent: each call re-fetches the API
+# discovery documents and swaps module globals without a lock. Initialization is
+# therefore done once and remembered as (ee module, project); a different project
+# — or a replaced ee module — initializes again.
+_EE_INIT_LOCK = threading.Lock()
+_EE_INIT_STATE: dict[str, Any] = {}
+
+
+def _ee_initialized_for(project: str | None) -> bool:
+    ee = sys.modules.get("ee")
+    if ee is None or _EE_INIT_STATE.get("ee") is not ee:
+        return False
+    if _EE_INIT_STATE.get("project") != project:
+        return False
+    # ee.Reset() ends the session without rs-embed noticing; ask ee when it can tell.
+    is_initialized = getattr(getattr(ee, "data", None), "is_initialized", None)
+    return is_initialized is None or bool(is_initialized())
+
 
 class GEEProvider(ProviderBase):
     name = "gee"
@@ -41,6 +62,15 @@ class GEEProvider(ProviderBase):
         )
 
     def ensure_ready(self) -> None:
+        if _ee_initialized_for(self.project):
+            return
+        with _EE_INIT_LOCK:
+            if _ee_initialized_for(self.project):
+                return
+            self._initialize_ee()
+            _EE_INIT_STATE.update(ee=sys.modules.get("ee"), project=self.project)
+
+    def _initialize_ee(self) -> None:
         try:
             import ee
 
@@ -114,62 +144,34 @@ class GEEProvider(ProviderBase):
         *,
         image: Any,
         bands: tuple[str, ...],
-        region: Any,
+        spatial: SpatialSpec,
         scale_m: int,
         fill_value: float,
         collection: str | None = None,
     ) -> np.ndarray:
-        """Download a rectangular patch as **north-up** CHW float32.
+        """Download *spatial*'s common-grid patch as **north-up** CHW float32.
 
-        Uses ``ee.Projection.atScale()`` + ``.clip(region)`` before
-        ``sampleRectangle``.  The ``atScale`` reprojection form makes GEE
-        return rows in south-up order (clipping does not affect row order —
-        see ``_sample_image_bands_raw_chw`` for the verified contract), so
-        ``_flip_sample_tile_y`` is applied here before returning — callers
-        always receive north-up output and must not flip again.
-
-        Also resolves band aliases (BLUE/GREEN/RED → B2/B3/B4 for S2, etc.)
-        and clips to ``region`` so that pixels outside non-rectangular
-        geometries (e.g. PointBuffer) are filled with ``fill_value``.
+        Resolves band aliases (BLUE/GREEN/RED → B2/B3/B4 for S2, etc.),
+        reprojects onto the EPSG:3857 lattice at *scale_m* and clips to the ROI
+        region; pixels outside it are filled with ``fill_value``. The download
+        itself is :func:`_compute_pixels_chw`, whose grid fixes the row order.
         """
         import ee
 
-        # 1) Resolve aliases using collection hint when provided
         resolved = self.normalize_bands(
             collection=(collection or ""),
             bands=bands,
         )
-
-        # 2) Select resolved bands (this will error at compute-time if typo)
-        img = image.select(list(resolved))
-
-        # 3) Force pixel grid at desired scale; clip masks non-rectangular regions
         proj = ee.Projection(COMMON_CRS).atScale(int(scale_m))
-        img = img.reproject(proj).clip(region)
-
-        # 4) Sample and build CHW (raw GEE output is south-up with atScale+clip)
-        rect = img.sampleRectangle(region=region, defaultValue=fill_value).getInfo()
-        props = rect.get("properties", {})
-        if not props:
-            raise ProviderError(_no_images_found_message(collection=collection))
-
-        arrs = []
-        missing = []
-        for b in resolved:
-            if b not in props:
-                missing.append(b)
-            else:
-                arrs.append(np.array(props[b], dtype=np.float32))
-
-        if missing:
-            avail = sorted(list(props.keys()))
-            raise ProviderError(
-                f"Band(s) {missing} not in sampled properties. "
-                f"Requested={resolved}. Available bands={avail}"
-            )
-
-        # 5) Normalise to north-up: atScale+clip yields south-up rows from GEE
-        return _flip_sample_tile_y(np.stack(arrs, axis=0))
+        img = image.select(list(resolved)).reproject(proj).clip(self.get_region(spatial))
+        return _compute_pixels_chw(
+            img,
+            spatial=spatial,
+            bands=resolved,
+            scale_m=int(scale_m),
+            fill_value=float(fill_value),
+            collection=collection,
+        )
 
     def normalize_bands(
         self,
@@ -266,6 +268,7 @@ class GEEProvider(ProviderBase):
             scale_m=scale_m,
             fetch_fn=_fetch,
             stitch_fn=_stitch,
+            n_bands=2,
         )
 
     def _fetch_s1_impl(
@@ -349,16 +352,14 @@ class GEEProvider(ProviderBase):
             raise ProviderError(f"Unknown composite='{composite}'. Use 'median' or 'mosaic'.")
 
         img = img.select(["VV", "VH"]).reproject(crs=COMMON_CRS, scale=int(scale_m))
-        rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
-        props = rect.get("properties", {}) if isinstance(rect, dict) else {}
-        if not props:
-            raise ProviderError(_no_images_found_message(collection=collection_id))
-        vv = np.array(props.get("VV", []), dtype=np.float32)
-        vh = np.array(props.get("VH", []), dtype=np.float32)
-        try:
-            arr = np.stack([vv, vh], axis=0).astype(np.float32)
-        except Exception as e:
-            raise ProviderError("Failed to sample S1 VV/VH rectangle from GEE image.") from e
+        arr = _compute_pixels_chw(
+            img,
+            spatial=spatial,
+            bands=("VV", "VH"),
+            scale_m=int(scale_m),
+            fill_value=float(fill_value),
+            collection=collection_id,
+        )
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
         if arr.ndim != 3 or int(arr.shape[0]) != 2:
             raise ProviderError(
@@ -405,6 +406,7 @@ class GEEProvider(ProviderBase):
             spatial=spatial,
             scale_m=int(scale_m),
             fetch_fn=_do,
+            n_bands=len(tuple(bands)),
         )
 
     def _fetch_multiframe_impl(
@@ -435,7 +437,27 @@ class GEEProvider(ProviderBase):
             .filterBounds(region)
         )
         col_all = _filter_clouds(col_all, collection=str(collection), cloudy_pct=cloudy_pct)
-        _raise_if_empty_collection(col_all, collection=str(collection))
+
+        # One entry per bin (None = no imagery in that bin) so frame i always
+        # corresponds to bin i — consumers (e.g. prithvi's midpoint dates)
+        # rely on that alignment. Bin collections are built here, in order.
+        bins = _split_date_range(temporal.start, temporal.end, max(1, int(n_frames)))
+        bin_cols = [col_all.filterDate(start_i, end_i) for start_i, end_i in bins]
+        # Whole-window and per-bin image counts in one round trip.
+        try:
+            counts = [
+                int(n) for n in ee.List([col_all.size(), *(c.size() for c in bin_cols)]).getInfo()
+            ]
+        except Exception as e:
+            # A failed count is not an empty bin: substituting the
+            # whole-window composite for it would silently change the data.
+            raise ProviderError(
+                f"Failed to query image count for {str(collection)!r} "
+                f"over {len(bins)} time bin(s): {e}"
+            ) from e
+        if counts[0] == 0:
+            raise ProviderError(_no_images_found_message(collection=str(collection)))
+        bin_has_data = [n > 0 for n in counts[1:]]
 
         comp = str(composite).lower().strip()
         if comp not in {"median", "mosaic"}:
@@ -451,37 +473,32 @@ class GEEProvider(ProviderBase):
         def _sample(col: Any) -> np.ndarray:
             return _sample_image_bands_raw_chw(
                 _reduce(col),
-                region=region,
+                spatial=spatial,
                 bands=resolved_bands,
                 scale_m=scale_m,
                 fill_value=fill_value,
                 value_range=value_range,
             )
 
-        fallback_frame = None
-        try:
-            if int(col_all.size().getInfo()) > 0:
-                fallback_frame = _sample(col_all)
-        except Exception as _e:
-            fallback_frame = None
+        # Non-empty bins are sampled concurrently.
+        filled_idx = [i for i, has_data in enumerate(bin_has_data) if has_data]
+        sampled = fetch_bins_concurrently(
+            len(filled_idx), lambda k: _sample(bin_cols[filled_idx[k]])
+        )
+        binned: list[np.ndarray | None] = [None] * len(bins)
+        for i, frame in zip(filled_idx, sampled, strict=True):
+            binned[i] = frame
 
-        # One entry per bin (None = no imagery in that bin) so frame i always
-        # corresponds to bin i — consumers (e.g. prithvi's midpoint dates)
-        # rely on that alignment.
-        bins = _split_date_range(temporal.start, temporal.end, max(1, int(n_frames)))
-        binned: list[np.ndarray | None] = []
-        for start_i, end_i in bins:
-            col_i = col_all.filterDate(start_i, end_i)
+        # The whole-window composite only stands in for empty bins, so it is sampled
+        # only when one is empty — on its own, after the bins, so it never competes
+        # with them for the project's request concurrency. If it fails, empty bins
+        # back-fill from the nearest non-empty bin below instead.
+        fallback_frame = None
+        if len(filled_idx) < len(bins):
             try:
-                has_data = int(col_i.size().getInfo()) > 0
-            except Exception as e:
-                # A failed count is not an empty bin: substituting the
-                # whole-window composite here would silently change the data.
-                raise ProviderError(
-                    f"Failed to query image count for bin [{start_i}, {end_i}) "
-                    f"of {str(collection)!r}: {e}"
-                ) from e
-            binned.append(_sample(col_i) if has_data else None)
+                fallback_frame = _sample(col_all)
+            except Exception:
+                fallback_frame = None
 
         filled = [f is not None for f in binned]
         if not any(filled):
@@ -592,23 +609,19 @@ class GEEProvider(ProviderBase):
         else:
             raise ProviderError(f"Unknown composite='{composite}'. Use 'median' or 'mosaic'.")
 
-        # reproject(crs=..., scale=...) + clip: north-up — row order follows the
-        # reprojection form, not clipping (see _sample_image_bands_raw_chw for
-        # the verified contract). No flip here.
         img = img.reproject(crs=COMMON_CRS, scale=int(scale_m)).clip(region)
         band_names_raw = img.bandNames().getInfo()
         band_names = tuple(str(b) for b in (band_names_raw or []))
         if not band_names:
             raise ProviderError(f"No bands found for collection={collection!r}.")
 
-        rect = img.sampleRectangle(region=region, defaultValue=float(fill_value)).getInfo()
-        props = rect.get("properties", {}) if isinstance(rect, dict) else {}
-        if not props:
-            raise ProviderError(_no_images_found_message(collection=str(collection)))
-        arrs = [np.array(props.get(b, []), dtype=np.float32) for b in band_names]
-        try:
-            arr = np.stack(arrs, axis=0).astype(np.float32)
-        except Exception as e:
-            raise ProviderError("Failed to sample rectangle for all collection bands.") from e
+        arr = _compute_pixels_chw(
+            img,
+            spatial=spatial,
+            bands=band_names,
+            scale_m=int(scale_m),
+            fill_value=float(fill_value),
+            collection=str(collection),
+        )
         arr = np.nan_to_num(arr, nan=0.0, posinf=0.0, neginf=0.0).astype(np.float32)
         return arr, band_names

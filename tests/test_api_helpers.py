@@ -29,16 +29,15 @@ class _FakeBBoxSplitProvider(ProviderBase):
         self.build_calls += 1
         return object()
 
-    def fetch_array_chw(self, *, image, bands, region, scale_m, fill_value, collection=None):  # noqa: ARG002
+    def fetch_array_chw(self, *, image, bands, spatial, scale_m, fill_value, collection=None):  # noqa: ARG002
         self.fetch_calls += 1
-        bbox = region
+        bbox = spatial
         assert isinstance(bbox, BBox)
         h, w, y0, x0 = self._dims_and_offsets(bbox)
         if h * w > self.max_pixels:
             raise RuntimeError(
-                "Image.sampleRectangle: Too many pixels in sample; must be <= "
-                f"{self.max_pixels}. Got "
-                f"{h * w}."
+                f"Total request size ({h * w * 5} bytes) must be less than or equal to "
+                f"{self.max_pixels * 5} bytes."
             )
         # fetch_array_chw contract: returns north-up CHW (row 0 = northernmost).
         yy = np.arange(y0, y0 + h, dtype=np.float32)[:, None]
@@ -139,7 +138,7 @@ def test_fetch_provider_patch_raw_uses_generic_path_for_s1():
             self.build_calls += 1
             return object()
 
-        def fetch_array_chw(self, *, image, bands, region, scale_m, fill_value, collection=None):
+        def fetch_array_chw(self, *, image, bands, spatial, scale_m, fill_value, collection=None):
             self.fetch_calls += 1
             # fetch_array_chw contract: return north-up CHW.
             return np.arange(2 * 3 * 4, dtype=np.float32).reshape(2, 3, 4)

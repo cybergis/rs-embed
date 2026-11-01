@@ -48,7 +48,7 @@ flowchart LR
 ```
 
 !!! note "Large requests are split automatically"
-    When a `BBox` covers more pixels than GEE's `sampleRectangle` limit (262,144), the GEE provider splits it into smaller requests along pixel boundaries of the EPSG:3857 grid and concatenates the results. There is no hard cap on request size, and the result is pixel-for-pixel identical to a single large fetch. `input_prep` does not apply to `gse`; passing `input_prep="tile"` only emits a `UserWarning` saying so. The old `RS_EMBED_GSE_MAX_PIXELS` variable no longer has any effect.
+    GEE caps one pixel request at 48 MiB, which GSE's 64 float bands reach at about 400 × 400 px. The GEE provider splits a larger `BBox` into pieces that fit along pixel boundaries of the EPSG:3857 grid and concatenates the results; a `PointBuffer` downloads its bands in several requests instead. There is no hard cap on request size, and the result is pixel-for-pixel identical to a single large fetch. `input_prep` does not apply to `gse`; passing `input_prep="tile"` only emits a `UserWarning` saying so. The old `RS_EMBED_GSE_MAX_PIXELS` variable no longer has any effect.
 
 ---
 
