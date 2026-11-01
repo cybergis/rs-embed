@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-11-01
+
+Google Earth Engine fetches are about 3–10× faster with the same pixels, and a round of fixes makes ROI cropping and pooling consistent across models. Several of those fixes change embeddings, so read the upgrade notes before comparing with results from 0.3.x.
+
 ### Upgrade notes
 
 Several fixes below change embeddings that earlier versions returned. Re-export results that fall in these cases:
@@ -205,7 +209,8 @@ This release rolls up upstream-alignment work and correctness fixes that may cha
 - Support for on-the-fly model adapters including `satmae`, `satmaepp`, `satmaepp_s2_10b`, `prithvi`, `scalemae`, `remoteclip`, `dofa`, `satvision`, `anysat`, `galileo`, `wildsat`, `fomo`, `terramind`, `terrafm`, `thor`, and `agrifm`.
 - Documentation site covering quickstart, model behavior, API contracts, and extension guidance.
 
-[Unreleased]: https://github.com/cybergis/rs-embed/compare/v0.3.1...HEAD
+[Unreleased]: https://github.com/cybergis/rs-embed/compare/v0.4.0...HEAD
+[0.4.0]: https://github.com/cybergis/rs-embed/compare/v0.3.1...v0.4.0
 [0.3.1]: https://github.com/cybergis/rs-embed/compare/v0.3.0...v0.3.1
 [0.3.0]: https://github.com/cybergis/rs-embed/compare/v0.2.1...v0.3.0
 [0.2.1]: https://github.com/cybergis/rs-embed/compare/v0.2.0...v0.2.1
