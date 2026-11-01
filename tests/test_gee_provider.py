@@ -4,7 +4,9 @@ Band alias resolution is pure logic — no network calls needed.
 """
 
 import sys
+import time
 import types
+from concurrent.futures import ThreadPoolExecutor
 
 import numpy as np
 import pytest
@@ -1050,12 +1052,16 @@ def _make_multiframe_fake_ee(
     bin_values: list[float | None],
     fallback_value: float | None = 1.0,
     bin_size_raises: bool = False,
+    bin_delays: list[float] | None = None,
 ):
     """Fake ee for multiframe fetch: one value per temporal bin (None = empty).
 
-    ``fallback_value=None`` makes the whole-window fallback probe fail;
-    ``bin_size_raises`` makes the per-bin image count query raise.
+    ``fallback_value=None`` makes sampling the whole-window fallback composite
+    fail; ``bin_size_raises`` makes the per-bin image count query raise;
+    ``bin_delays`` sleeps that long while sampling bin i (to reorder completion).
+    ``.sampled`` records each sampled value (the fallback included).
     """
+    sampled: list[float | None] = []
 
     class _FakeSize:
         def __init__(self, n=1, raises=False):
@@ -1066,9 +1072,25 @@ def _make_multiframe_fake_ee(
                 raise RuntimeError("transient getInfo failure")
             return self._n
 
+    class _FakeList:
+        def __init__(self, items):
+            self._items = items
+
+        def getInfo(self):
+            return [item.getInfo() for item in self._items]
+
+    def _pixels(value, delay=0.0):
+        def _on_download():
+            time.sleep(delay)
+            sampled.append(value)
+            if value is None:
+                raise RuntimeError("whole-window composite failed")
+
+        return _FakePixels({"B1": [[value]]}, on_download=_on_download)
+
     class _FakeBin:
-        def __init__(self, value):
-            self.value = value
+        def __init__(self, value, delay):
+            self.value, self.delay = value, delay
 
         def size(self):
             if bin_size_raises:
@@ -1076,7 +1098,7 @@ def _make_multiframe_fake_ee(
             return _FakeSize(1 if self.value is not None else 0)
 
         def median(self):
-            return _FakePixels({"B1": [[self.value]]})
+            return _pixels(self.value, self.delay)
 
     class _FakeCollection:
         def __init__(self):
@@ -1087,9 +1109,9 @@ def _make_multiframe_fake_ee(
             if not hasattr(self, "_dated"):
                 self._dated = True
                 return self
-            b = _FakeBin(bin_values[self.bin_idx])
+            i = self.bin_idx
             self.bin_idx += 1
-            return b
+            return _FakeBin(bin_values[i], bin_delays[i] if bin_delays else 0.0)
 
         def filterBounds(self, _region):
             return self
@@ -1098,21 +1120,21 @@ def _make_multiframe_fake_ee(
             return self
 
         def size(self):
-            if fallback_value is None:
-                return _FakeSize(raises=True)
             return _FakeSize(1)
 
         def median(self):
-            return _FakePixels({"B1": [[fallback_value]]})
+            return _pixels(fallback_value)
 
     return types.SimpleNamespace(
         ImageCollection=lambda _collection: _FakeCollection(),
+        List=_FakeList,
         data=_FAKE_EE_DATA,
         Filter=types.SimpleNamespace(
             lte=lambda f, v: ("lte", f, v),
             eq=lambda f, v: ("eq", f, v),
             listContains=lambda f, v: ("listContains", f, v),
         ),
+        sampled=sampled,
     )
 
 
@@ -1206,6 +1228,108 @@ def test_multiframe_fetch_empty_bin_keeps_alignment_without_fallback(monkeypatch
     assert vals[0] == 2.0
     assert vals[2] == 4.0
     assert vals[1] in (2.0, 4.0)
+
+
+def test_multiframe_fetch_concurrent_bins_keep_bin_order(monkeypatch):
+    """Bins are sampled concurrently; frame i must still be bin i.
+
+    Later bins finish first here, so a completion-ordered result would reverse them.
+    """
+    values = [1.0, 2.0, 3.0, 4.0, 5.0, 6.0]
+    provider = _multiframe_provider(
+        monkeypatch,
+        _make_multiframe_fake_ee(
+            bin_values=values, bin_delays=[0.06, 0.05, 0.04, 0.03, 0.02, 0.01]
+        ),
+    )
+    arr = provider.fetch_multiframe_collection_raw_tchw(
+        spatial=_SPATIAL,
+        temporal=TemporalSpec.range("2024-01-01", "2024-07-01"),
+        collection="FAKE/COLL",
+        bands=("B1",),
+        n_frames=6,
+    )
+    assert arr[:, 0, 0, 0].tolist() == values
+
+
+def test_multiframe_fetch_samples_fallback_only_for_empty_bins(monkeypatch):
+    """The whole-window composite only stands in for empty bins.
+
+    With every bin filled it is never sampled; with an empty bin it is sampled
+    once and fills that bin.
+    """
+    full = _make_multiframe_fake_ee(bin_values=[2.0, 3.0], fallback_value=9.0)
+    _multiframe_provider(monkeypatch, full).fetch_multiframe_collection_raw_tchw(
+        spatial=_SPATIAL,
+        temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
+        collection="FAKE/COLL",
+        bands=("B1",),
+        n_frames=2,
+    )
+    assert sorted(full.sampled) == [2.0, 3.0]
+
+    gap = _make_multiframe_fake_ee(bin_values=[2.0, None], fallback_value=9.0)
+    arr = _multiframe_provider(monkeypatch, gap).fetch_multiframe_collection_raw_tchw(
+        spatial=_SPATIAL,
+        temporal=TemporalSpec.range("2024-01-01", "2024-03-01"),
+        collection="FAKE/COLL",
+        bands=("B1",),
+        n_frames=2,
+    )
+    assert sorted(gap.sampled) == [2.0, 9.0]
+    assert arr[:, 0, 0, 0].tolist() == [2.0, 9.0]
+
+
+def test_ensure_ready_initializes_once_per_ee_module_and_project(monkeypatch):
+    """ee.Initialize is not idempotent, so it must run once — also under threads.
+
+    A different project, or a replaced ee module, initializes again.
+    """
+    calls = []
+
+    class _FakeEE:
+        @staticmethod
+        def Initialize(**kwargs):
+            time.sleep(0.01)
+            calls.append(kwargs)
+
+    monkeypatch.setitem(sys.modules, "ee", _FakeEE())
+    provider = GEEProvider(auto_auth=False, project="p1")
+    with ThreadPoolExecutor(max_workers=8) as ex:
+        list(ex.map(lambda _: provider.ensure_ready(), range(16)))
+    provider.ensure_ready()
+    GEEProvider(auto_auth=False, project="p1").ensure_ready()
+    assert calls == [{"project": "p1"}]
+
+    GEEProvider(auto_auth=False, project="p2").ensure_ready()
+    assert calls[-1] == {"project": "p2"}
+
+    monkeypatch.setitem(sys.modules, "ee", _FakeEE())
+    GEEProvider(auto_auth=False, project="p2").ensure_ready()
+    assert len(calls) == 3
+
+
+def test_ensure_ready_initializes_again_after_ee_reset(monkeypatch):
+    """ee.Reset() ends the session behind rs-embed's back; ask ee whether it is live."""
+    calls = []
+    live = {"on": False}
+
+    def _initialize(**kwargs):
+        calls.append(kwargs)
+        live["on"] = True
+
+    fake_ee = types.SimpleNamespace(
+        Initialize=_initialize, data=types.SimpleNamespace(is_initialized=lambda: live["on"])
+    )
+    monkeypatch.setitem(sys.modules, "ee", fake_ee)
+    provider = GEEProvider(auto_auth=False, project="p1")
+
+    provider.ensure_ready()
+    provider.ensure_ready()
+    assert len(calls) == 1
+    live["on"] = False  # ee.Reset()
+    provider.ensure_ready()
+    assert len(calls) == 2
 
 
 def test_normalize_s1_vvvh_rejects_db_scale_input():

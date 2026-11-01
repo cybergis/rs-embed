@@ -184,8 +184,112 @@ def test_fetch_s1_vvvh_binned_raw_tchw_reuses_single_frame_path():
     assert np.isnan(arr[1]).all()
     assert meta["frames"][0]["fetch"] == {"iw_applied": True}
     assert meta["frames"][1]["empty"] is True
-    # per-bin calls carry the S1-specific options through
-    assert seen == [("2022-01-01", True, False), ("2022-01-31", True, False)]
+    # per-bin calls carry the S1-specific options through (bins run concurrently)
+    assert sorted(seen) == [("2022-01-01", True, False), ("2022-01-31", True, False)]
+
+
+def test_binned_fetch_keeps_bin_order_when_bins_finish_out_of_order():
+    """Frames, meta and the reported last error follow bin order, not completion order."""
+    import time
+
+    import pytest
+
+    from rs_embed.core.errors import ModelError, ProviderError
+
+    bins = [(f"2022-0{m}-01", f"2022-0{m + 1}-01") for m in range(1, 6)]
+    delay = {start: 0.01 * (5 - i) for i, (start, _) in enumerate(bins)}  # last bin first
+
+    class _FakeProvider:
+        def fetch_sensor_patch_chw(self, *, spatial, temporal, sensor, to_float_image=False):
+            time.sleep(delay[str(temporal.start)])
+            month = int(str(temporal.start)[5:7])
+            if month in (2, 4):
+                raise ProviderError(f"no images in month {month}")
+            return np.full((1, 2, 2), float(month), dtype=np.float32)
+
+    arr, meta = ru.fetch_collection_binned_raw_tchw(
+        _FakeProvider(),
+        spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+        bins=bins,
+        collection="FAKE/COLL",
+        bands=("B1",),
+    )
+    assert [m["start"] for m in meta["frames"]] == [s for s, _ in bins]
+    assert [m["empty"] for m in meta["frames"]] == [False, True, False, True, False]
+    assert arr[[0, 2, 4], 0, 0, 0].tolist() == [1.0, 3.0, 5.0]
+
+    class _AllEmpty(_FakeProvider):
+        def fetch_sensor_patch_chw(self, *, spatial, temporal, sensor, to_float_image=False):
+            time.sleep(delay[str(temporal.start)])
+            raise ProviderError(f"no images starting {temporal.start}")
+
+    # sequentially the last bin's error is reported; it finishes first here
+    with pytest.raises(ModelError, match="Last fetch error: .*starting 2022-05-01"):
+        ru.fetch_collection_binned_raw_tchw(
+            _AllEmpty(),
+            spatial=BBox(minlon=0.0, minlat=0.0, maxlon=1.0, maxlat=1.0),
+            bins=bins,
+            collection="FAKE/COLL",
+            bands=("B1",),
+        )
+
+
+def _bin_probe(delays, fail=()):
+    """fetch_one for fetch_bins_concurrently: records starts and peak overlap."""
+    import threading
+    import time
+
+    lock = threading.Lock()
+    state = {"active": 0, "peak": 0, "started": []}
+
+    def fetch_one(i):
+        with lock:
+            state["started"].append(i)
+            state["active"] += 1
+            state["peak"] = max(state["peak"], state["active"])
+        try:
+            time.sleep(delays[i])
+            if i in fail:
+                raise ValueError(f"bin {i}")
+            return i * 10
+        finally:
+            with lock:
+                state["active"] -= 1
+
+    return fetch_one, state
+
+
+def test_fetch_bins_concurrently_overlaps_bins_in_bin_order():
+    fetch_one, state = _bin_probe([0.05, 0.04, 0.03, 0.02])
+    assert ru.fetch_bins_concurrently(4, fetch_one) == [0, 10, 20, 30]
+    assert state["peak"] > 1
+
+
+def test_fetch_bins_concurrently_reraises_lowest_bin_error_and_skips_unstarted_bins():
+    import pytest
+
+    # bin 3 fails first, bin 1 later: the error is bin 1's, as in a sequential loop
+    fetch_one, _ = _bin_probe([0.0, 0.1, 0.0, 0.0], fail=(1, 3))
+    with pytest.raises(ValueError, match="bin 1"):
+        ru.fetch_bins_concurrently(4, fetch_one)
+
+    # after bin 0 fails, bins nobody has started yet are cancelled
+    fetch_one, state = _bin_probe([0.0] + [0.2] * 7, fail=(0,))
+    with pytest.raises(ValueError, match="bin 0"):
+        ru.fetch_bins_concurrently(8, fetch_one)
+    assert len(state["started"]) < 8
+
+
+def test_fetch_bins_concurrently_runs_in_the_caller_when_no_slot_is_free(monkeypatch):
+    import threading
+
+    # Every extra slot is taken (e.g. by other export workers): the call still
+    # makes progress on its own thread, one bin at a time, as a sequential loop.
+    monkeypatch.setattr(ru, "_BIN_FETCH_EXTRA_SLOTS", threading.BoundedSemaphore(1))
+    ru._BIN_FETCH_EXTRA_SLOTS.acquire()
+    fetch_one, state = _bin_probe([0.01] * 4)
+    assert ru.fetch_bins_concurrently(4, fetch_one) == [0, 10, 20, 30]
+    assert state["peak"] == 1
 
 
 # ---------------------------------------------------------------------------

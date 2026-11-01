@@ -2,8 +2,10 @@
 
 from __future__ import annotations
 
+import threading
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import numpy as np
@@ -11,6 +13,55 @@ import numpy as np
 from ..core.errors import ModelError, ProviderError
 from ..core.specs import SensorSpec, SpatialSpec, TemporalSpec
 from .base import ProviderBase
+
+# Per-time-bin fetches can run inside callers that are already concurrent (export
+# prefetch workers). Each call always has its own thread, as a sequential loop did,
+# and borrows up to _BIN_FETCH_WORKERS - 1 more only while the process-wide pool of
+# extra slots has some free: concurrency never drops below the sequential loop's and
+# never rises more than the pool's size above it. Kept small because Earth Engine
+# refuses requests over a project's concurrency limit (429), and noncommercial
+# projects in restricted mode have a low one.
+_BIN_FETCH_WORKERS = 4
+_BIN_FETCH_EXTRA_SLOTS = threading.BoundedSemaphore(8)
+
+
+def fetch_bins_concurrently(n: int, fetch_one: Callable[[int], Any]) -> list[Any]:
+    """Run ``fetch_one(i)`` for ``i in range(n)``, overlapping bins; results in bin order.
+
+    Time bins are independent provider requests, so they overlap instead of
+    queueing one round trip after another. Once a bin fails no further bin is
+    started, and the exception of the lowest failed bin index is re-raised — the
+    one a sequential loop would have hit first.
+    """
+    extra = 0
+    while extra < min(n, _BIN_FETCH_WORKERS) - 1 and _BIN_FETCH_EXTRA_SLOTS.acquire(blocking=False):
+        extra += 1
+    try:
+        if extra == 0:
+            return [fetch_one(i) for i in range(n)]
+        return _fetch_bins_on_threads(n, fetch_one, workers=1 + extra)
+    finally:
+        for _ in range(extra):
+            _BIN_FETCH_EXTRA_SLOTS.release()
+
+
+def _fetch_bins_on_threads(n: int, fetch_one: Callable[[int], Any], *, workers: int) -> list[Any]:
+    results: list[Any] = [None] * n
+    errors: dict[int, Exception] = {}
+    with ThreadPoolExecutor(max_workers=workers) as ex:
+        futs = {ex.submit(fetch_one, i): i for i in range(n)}
+        for fut in as_completed(futs):
+            if fut.cancelled():
+                continue
+            try:
+                results[futs[fut]] = fut.result()
+            except Exception as e:  # re-raised below, lowest bin index first
+                errors[futs[fut]] = e
+                for pending in futs:
+                    pending.cancel()  # bins not started yet are skipped
+    if errors:
+        raise errors[min(errors)]
+    return results
 
 
 def fetch_sensor_patch_chw(
@@ -357,26 +408,29 @@ def fetch_collection_binned_raw_tchw(
     """
     if not bins:
         raise ModelError("fetch_collection_binned_raw_tchw requires at least one time bin.")
-    frames: list[np.ndarray | None] = []
-    last_error: str | None = None
-    for start, end in bins:
+
+    def _one(i: int) -> tuple[np.ndarray | None, str | None]:
+        start, end = bins[i]
         try:
-            frames.append(
-                fetch_collection_patch_chw(
-                    provider,
-                    spatial=spatial,
-                    temporal=TemporalSpec.range(start, end),
-                    collection=str(collection),
-                    bands=tuple(str(b) for b in bands),
-                    scale_m=int(scale_m),
-                    cloudy_pct=cloudy_pct,
-                    composite=str(composite),
-                    fill_value=float(fill_value),
-                )
+            arr = fetch_collection_patch_chw(
+                provider,
+                spatial=spatial,
+                temporal=TemporalSpec.range(start, end),
+                collection=str(collection),
+                bands=tuple(str(b) for b in bands),
+                scale_m=int(scale_m),
+                cloudy_pct=cloudy_pct,
+                composite=str(composite),
+                fill_value=float(fill_value),
             )
         except ModelError as exc:
-            last_error = str(exc)
-            frames.append(None)
+            return None, str(exc)
+        return arr, None
+
+    results = fetch_bins_concurrently(len(bins), _one)
+    frames = [arr for arr, _ in results]
+    errors = [err for _, err in results if err is not None]
+    last_error = errors[-1] if errors else None
     return _stack_binned_frames(
         frames,
         bins,
@@ -409,10 +463,9 @@ def fetch_s1_vvvh_binned_raw_tchw(
     if not bins:
         raise ModelError("fetch_s1_vvvh_binned_raw_tchw requires at least one time bin.")
     _require_s1_support(provider, "fetch_s1_vvvh_raw_chw_with_meta")
-    frames: list[np.ndarray | None] = []
-    frame_fetch_meta: list[dict[str, Any] | None] = []
-    last_error: str | None = None
-    for start, end in bins:
+
+    def _one(i: int) -> tuple[np.ndarray | None, dict[str, Any] | None, str | None]:
+        start, end = bins[i]
         try:
             arr, fmeta = fetch_s1_vvvh_raw_chw_with_meta(
                 provider,
@@ -426,12 +479,15 @@ def fetch_s1_vvvh_binned_raw_tchw(
                 require_iw=bool(require_iw),
                 relax_iw_on_empty=bool(relax_iw_on_empty),
             )
-            frames.append(arr)
-            frame_fetch_meta.append(fmeta)
         except ModelError as exc:
-            last_error = str(exc)
-            frames.append(None)
-            frame_fetch_meta.append(None)
+            return None, None, str(exc)
+        return arr, fmeta, None
+
+    results = fetch_bins_concurrently(len(bins), _one)
+    frames = [arr for arr, _, _ in results]
+    frame_fetch_meta = [fmeta for _, fmeta, _ in results]
+    errors = [err for _, _, err in results if err is not None]
+    last_error = errors[-1] if errors else None
     arr, meta = _stack_binned_frames(
         frames,
         bins,
