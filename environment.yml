@@ -1,60 +1,12 @@
+# Dependencies live in pyproject.toml; this env only provides Python and an
+# editable install of rs-embed. Create it from the repo root:
+#   conda env create -f environment.yml
 name: rsembed
 channels:
   - conda-forge
-  - defaults
 dependencies:
   - python=3.12
   - pip
   - ipykernel
   - pip:
-      # PyTorch ecosystem
-      - torch>=2.2
-      - torchvision>=0.17
-
-      # timm: pinned range required by THOR vendored runtime
-      - timm>=1.0.3,<=1.0.15
-
-      # Foundation models & HuggingFace
-      - transformers
-      - diffusers
-      - huggingface-hub
-      - tifffile
-      - presto
-      - geotessera
-      - rshf
-      - open-clip-torch==2.32.0
-
-      # Computer vision
-      - albumentations
-      - opencv-python-headless
-      - scikit-image
-
-      # Geospatial data
-      - rioxarray
-      - xarray
-      - netCDF4>=1.6
-      - earthengine-api
-      - geemap
-
-      # Scientific computing
-      - scipy
-      - scikit-learn
-      - h5py
-      - dask
-      - pyarrow
-      - zarr
-
-      # Experiment tracking & visualization
-      - wandb
-      - plotly
-
-      # Config & utilities
-      - hydra-core
-      - pycocotools
-
-      # Development
-      - pytest
-      - pytest-cov
-
-      # Jupyter widgets
-      - ipywidgets
+      - -e .[dev]
