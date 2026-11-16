@@ -420,9 +420,7 @@ def _terrafm_pooled_and_grid(
             )
 
         last_idx = depth - 1
-        feats = model.extract_feature(
-            x, return_h_w=True, out_indices=[last_idx], is_l2a=is_l2a
-        )
+        feats = model.extract_feature(x, return_h_w=True, out_indices=[last_idx], is_l2a=is_l2a)
         # feats[-1] is (B, C, H, W) for the requested index
         fmap = feats[-1]
         grid = fmap[0].detach().float().cpu().numpy().astype(np.float32)  # [D,Ht,Wt]
@@ -460,9 +458,7 @@ def _terrafm_pooled_and_grid_batch(
                 "TerraFM model does not expose extract_feature/blocks for grid output."
             )
         last_idx = depth - 1
-        feats = model.extract_feature(
-            x, return_h_w=True, out_indices=[last_idx], is_l2a=is_l2a
-        )
+        feats = model.extract_feature(x, return_h_w=True, out_indices=[last_idx], is_l2a=is_l2a)
         fmap = feats[-1]  # [B,D,H,W]
         grid = fmap.detach().float().cpu().numpy().astype(np.float32)
         return pooled_np, grid

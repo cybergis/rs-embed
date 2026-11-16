@@ -34,8 +34,8 @@
 
     | Modality       | `input_chw`                                      | Adapter normalization                                      |
     | -------------- | ------------------------------------------------ | ---------------------------------------------------------- |
-    | `s2` (default) | `CHW`, `C=12`, raw SR `0..10000`                 | raw SR → `/10000` → clip `[0,1]` (provider-equivalent)     |
-    | `s1`           | `CHW`, `C=2` in `VV, VH`, raw Sentinel-1 values  | shared `log1p` + percentile scaling (provider-equivalent)  |
+    | `s2` (default) | `CHW`, `C=12`, raw SR `0..10000`                 | raw SR → TerraFM `normalize(x, "s2_l2a")`, L2A stem (provider-equivalent) |
+    | `s1`           | `CHW`, `C=2` in `VV, VH`, raw Sentinel-1 values  | linear → dB → TerraFM `normalize(x, "s1")` (provider-equivalent) |
 
 !!! warning "Strict channel-count routing"
     TerraFM's original model routes by channel count: `C == 12` → S2 branch, `C == 2` → S1 branch. Setting `modality` alone is not enough if `input_chw` has the wrong `C`.
@@ -58,13 +58,16 @@
 
     When provider-backed S1 fetch succeeds, metadata records `s1_iw_requested`, `s1_iw_applied`, `s1_iw_relaxed_on_empty`, and `s1_relax_iw_on_empty`, so you can tell whether a sample came from strict `IW` filtering or from the relaxed fallback path.
 
+!!! note "Input scaling follows TerraFM pretraining"
+    Inputs are scaled with TerraFM's published pretraining statistics, `(x - (mean - 2·std)) / (4·std)` per band ([TerraFM README](https://github.com/mbzuai-oryx/TerraFM#input-preprocessing)). `COPERNICUS/S2_SR_HARMONIZED` is Sentinel-2 L2A, so S2 input uses the `s2_l2a` statistics and TerraFM's L2A patch-embedding stem (`is_l2a=True`). S1 linear backscatter is converted to dB before the `s1` statistics are applied.
+
 ### Provider path
 
 ```mermaid
 flowchart LR
     INPUT["Provider fetch"] --> MOD{Modality}
-    MOD -- s2 --> S2["12-band S2\n→ SR/10000 → [0,1]"]
-    MOD -- s1 --> S1["S1 VV/VH\n→ IW pref → log1p"]
+    MOD -- s2 --> S2["12-band S2\n→ TerraFM s2_l2a stats\n→ L2A stem"]
+    MOD -- s1 --> S1["S1 VV/VH\n→ IW pref → dB\n→ TerraFM s1 stats"]
     S2 --> FWD["Resize 224×224\n→ TerraFM-B forward"]
     S1 --> FWD
     FWD --> POOL["pooled: CLS embedding"]
@@ -76,8 +79,8 @@ flowchart LR
 ```mermaid
 flowchart LR
     INPUT["Read input_chw"] --> VAL{C = ?}
-    VAL -- "12" --> S2["S2 norm → [0,1]"]
-    VAL -- "2" --> S1["S1 log1p + percentile"]
+    VAL -- "12" --> S2["S2: TerraFM s2_l2a stats"]
+    VAL -- "2" --> S1["S1: dB → TerraFM s1 stats"]
     S2 --> FWD["Resize 224×224\n→ TerraFM-B forward"]
     S1 --> FWD
     FWD --> POOL["pooled: CLS embedding"]
@@ -94,8 +97,8 @@ flowchart LR
 ```mermaid
 flowchart LR
     IN["Input CHW"] --> R{C = ?}
-    R -- "C=12" --> S2["S2: SR/10000 → [0,1]"]
-    R -- "C=2" --> S1["S1: IW pref, log1p"]
+    R -- "C=12" --> S2["S2: TerraFM s2_l2a stats, L2A stem"]
+    R -- "C=2" --> S1["S1: IW pref, dB, TerraFM s1 stats"]
     S2 --> ENC["TerraFM-B\nextract_feature(...)"]
     S1 --> ENC
     ENC --> POOL["pooled: CLS embedding"]
