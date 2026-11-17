@@ -21,7 +21,7 @@
       
       
       <link rel="icon" href="../../assets/logo/favicon.svg">
-      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.0">
+      <meta name="generator" content="mkdocs-1.6.1, mkdocs-material-9.8.1">
     
     
       
@@ -2612,12 +2612,12 @@
 <tr>
 <td><code>s2</code> (default)</td>
 <td><code>CHW</code>, <code>C=12</code>, raw SR <code>0..10000</code></td>
-<td>raw SR → <code>/10000</code> → clip <code>[0,1]</code> (provider-equivalent)</td>
+<td>raw SR → TerraFM <code>normalize(x, "s2_l2a")</code>, L2A stem (provider-equivalent)</td>
 </tr>
 <tr>
 <td><code>s1</code></td>
 <td><code>CHW</code>, <code>C=2</code> in <code>VV, VH</code>, raw Sentinel-1 values</td>
-<td>shared <code>log1p</code> + percentile scaling (provider-equivalent)</td>
+<td>linear → dB → TerraFM <code>normalize(x, "s1")</code> (provider-equivalent)</td>
 </tr>
 </tbody>
 </table>
@@ -2647,11 +2647,15 @@
 <p>With <code>s1_require_iw=True</code>, rs-embed first tries <code>instrumentMode == "IW"</code> together with dual-pol <code>VV/VH</code>. If <code>s1_relax_iw_on_empty=True</code>, a strict <code>IW</code> miss triggers one retry without the <code>IW</code> filter. With <code>s1_require_iw=False</code>, the adapter queries dual-pol <code>VV/VH</code> directly and does not enforce <code>IW</code>.</p>
 <p>When provider-backed S1 fetch succeeds, metadata records <code>s1_iw_requested</code>, <code>s1_iw_applied</code>, <code>s1_iw_relaxed_on_empty</code>, and <code>s1_relax_iw_on_empty</code>, so you can tell whether a sample came from strict <code>IW</code> filtering or from the relaxed fallback path.</p>
 </div>
+<div class="admonition note">
+<p class="admonition-title">Input scaling follows TerraFM pretraining</p>
+<p>Inputs are scaled with TerraFM's published pretraining statistics, <code>(x - (mean - 2·std)) / (4·std)</code> per band (<a href="https://github.com/mbzuai-oryx/TerraFM#input-preprocessing">TerraFM README</a>). <code>COPERNICUS/S2_SR_HARMONIZED</code> is Sentinel-2 L2A, so S2 input uses the <code>s2_l2a</code> statistics and TerraFM's L2A patch-embedding stem (<code>is_l2a=True</code>). S1 linear backscatter is converted to dB before the <code>s1</code> statistics are applied.</p>
+</div>
 <h3 id="provider-path">Provider path<a class="headerlink" href="#provider-path" title="Permanent link">&para;</a></h3>
 <pre class="mermaid"><code>flowchart LR
     INPUT["Provider fetch"] --&gt; MOD{Modality}
-    MOD -- s2 --&gt; S2["12-band S2\n→ SR/10000 → [0,1]"]
-    MOD -- s1 --&gt; S1["S1 VV/VH\n→ IW pref → log1p"]
+    MOD -- s2 --&gt; S2["12-band S2\n→ TerraFM s2_l2a stats\n→ L2A stem"]
+    MOD -- s1 --&gt; S1["S1 VV/VH\n→ IW pref → dB\n→ TerraFM s1 stats"]
     S2 --&gt; FWD["Resize 224×224\n→ TerraFM-B forward"]
     S1 --&gt; FWD
     FWD --&gt; POOL["pooled: CLS embedding"]
@@ -2659,8 +2663,8 @@
 <h3 id="tensor-backend-path">Tensor backend path<a class="headerlink" href="#tensor-backend-path" title="Permanent link">&para;</a></h3>
 <pre class="mermaid"><code>flowchart LR
     INPUT["Read input_chw"] --&gt; VAL{C = ?}
-    VAL -- "12" --&gt; S2["S2 norm → [0,1]"]
-    VAL -- "2" --&gt; S1["S1 log1p + percentile"]
+    VAL -- "12" --&gt; S2["S2: TerraFM s2_l2a stats"]
+    VAL -- "2" --&gt; S1["S1: dB → TerraFM s1 stats"]
     S2 --&gt; FWD["Resize 224×224\n→ TerraFM-B forward"]
     S1 --&gt; FWD
     FWD --&gt; POOL["pooled: CLS embedding"]
@@ -2673,8 +2677,8 @@
 <h2 id="architecture-concept">Architecture Concept<a class="headerlink" href="#architecture-concept" title="Permanent link">&para;</a></h2>
 <pre class="mermaid"><code>flowchart LR
     IN["Input CHW"] --&gt; R{C = ?}
-    R -- "C=12" --&gt; S2["S2: SR/10000 → [0,1]"]
-    R -- "C=2" --&gt; S1["S1: IW pref, log1p"]
+    R -- "C=12" --&gt; S2["S2: TerraFM s2_l2a stats, L2A stem"]
+    R -- "C=2" --&gt; S1["S1: IW pref, dB, TerraFM s1 stats"]
     S2 --&gt; ENC["TerraFM-B\nextract_feature(...)"]
     S1 --&gt; ENC
     ENC --&gt; POOL["pooled: CLS embedding"]
@@ -2825,7 +2829,7 @@
       <script id="__config" type="application/json">{"annotate": null, "base": "../..", "features": ["navigation.tabs", "navigation.indexes", "navigation.sections", "navigation.expand", "navigation.top", "toc.follow", "content.code.copy", "content.code.annotate", "content.tabs.link", "search.suggest", "search.highlight"], "search": "../../assets/javascripts/workers/search.a7633da7.min.js", "tags": null, "translations": {"clipboard.copied": "Copied to clipboard", "clipboard.copy": "Copy to clipboard", "search.result.more.one": "1 more on this page", "search.result.more.other": "# more on this page", "search.result.none": "No matching documents", "search.result.one": "1 matching document", "search.result.other": "# matching documents", "search.result.placeholder": "Type to start searching", "search.result.term.missing": "Missing", "select.version": "Select version"}, "version": {"alias": true, "default": "latest", "provider": "mike"}}</script>
     
     
-      <script src="../../assets/javascripts/bundle.c21346df.min.js"></script>
+      <script src="../../assets/javascripts/bundle.a5f9d56c.min.js"></script>
       
         <script src="https://cdn.jsdelivr.net/npm/mathjax@3/es5/tex-mml-chtml.js"></script>
       
