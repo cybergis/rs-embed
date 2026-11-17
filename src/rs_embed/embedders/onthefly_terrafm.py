@@ -89,6 +89,27 @@ def _resize_chw_to_224(x_chw: np.ndarray, *, size: int = 224) -> np.ndarray:
     return x[0].cpu().numpy().astype(np.float32)
 
 
+def _terrafm_scale_chw(x_chw: np.ndarray, *, modality: str) -> np.ndarray:
+    """Scale raw provider values the way TerraFM saw them in pretraining.
+
+    S2: surface-reflectance DN -> TerraFM ``normalize(x, "s2_l2a")``.
+    S1: linear backscatter -> dB -> TerraFM ``normalize(x, "s1")``.
+    """
+    import torch
+
+    tfm = _load_terrafm_module()
+    x = np.asarray(x_chw, dtype=np.float32)
+    if modality == "s2":
+        sensor = "s2_l2a"
+    elif modality == "s1":
+        x = 10.0 * np.log10(np.maximum(x, 1e-6))
+        sensor = "s1"
+    else:
+        raise ModelError("modality must be 's2' or 's1'.")
+    out = tfm.normalize(torch.from_numpy(x), sensor).numpy().astype(np.float32)
+    return np.nan_to_num(out, nan=0.0)
+
+
 # -----------------------------
 # Provider: Fetch S2 (12 bands, SR)
 # -----------------------------
@@ -223,14 +244,14 @@ def _prepare_tensor_input_chw(
             expected_channels=12,
             model_name="TerraFM S2",
         )
-        x_chw = np.clip(x_chw / 10000.0, 0.0, 1.0).astype(np.float32)
+        x_chw = _terrafm_scale_chw(x_chw, modality="s2")
     elif modality_l == "s1":
         x_chw = coerce_single_input_chw(
             input_chw,
             expected_channels=2,
             model_name="TerraFM S1",
         )
-        x_chw = _normalize_s1_vvvh_chw(x_chw)
+        x_chw = _terrafm_scale_chw(x_chw, modality="s1")
     else:
         raise ModelError("modality must be 's2' or 's1'.")
     return _resize_chw_to_224(x_chw, size=image_size)
@@ -381,10 +402,11 @@ def _terrafm_pooled_and_grid(
     import torch
 
     dev = _auto_device(device)
+    is_l2a = int(x_bchw.shape[1]) == 12  # S2 input is S2_SR_HARMONIZED (L2A)
 
     x = torch.from_numpy(x_bchw).to(dev)  # [B,C,H,W]
     with torch.no_grad():
-        pooled = model(x)  # TerraFM forward returns CLS embedding (B,D)
+        pooled = model(x, is_l2a=is_l2a)  # TerraFM forward returns CLS embedding (B,D)
         pooled_np = pooled[0].detach().float().cpu().numpy().astype(np.float32)
 
         if not want_grid:
@@ -398,7 +420,7 @@ def _terrafm_pooled_and_grid(
             )
 
         last_idx = depth - 1
-        feats = model.extract_feature(x, return_h_w=True, out_indices=[last_idx])
+        feats = model.extract_feature(x, return_h_w=True, out_indices=[last_idx], is_l2a=is_l2a)
         # feats[-1] is (B, C, H, W) for the requested index
         fmap = feats[-1]
         grid = fmap[0].detach().float().cpu().numpy().astype(np.float32)  # [D,Ht,Wt]
@@ -420,10 +442,11 @@ def _terrafm_pooled_and_grid_batch(
     import torch
 
     dev = _auto_device(device)
+    is_l2a = int(x_bchw.shape[1]) == 12  # S2 input is S2_SR_HARMONIZED (L2A)
     x = torch.from_numpy(x_bchw).to(dev)  # [B,C,H,W]
 
     with torch.inference_mode():
-        pooled = model(x)  # [B,D]
+        pooled = model(x, is_l2a=is_l2a)  # [B,D]
         pooled_np = pooled.detach().float().cpu().numpy().astype(np.float32)
 
         if not want_grid:
@@ -435,7 +458,7 @@ def _terrafm_pooled_and_grid_batch(
                 "TerraFM model does not expose extract_feature/blocks for grid output."
             )
         last_idx = depth - 1
-        feats = model.extract_feature(x, return_h_w=True, out_indices=[last_idx])
+        feats = model.extract_feature(x, return_h_w=True, out_indices=[last_idx], is_l2a=is_l2a)
         fmap = feats[-1]  # [B,D,H,W]
         grid = fmap.detach().float().cpu().numpy().astype(np.float32)
         return pooled_np, grid
@@ -717,13 +740,13 @@ class TerraFMBEmbedder(EmbedderBase):
                     raise ModelError(
                         f"input_chw must be CHW with 12 bands for TerraFM S2, got {getattr(input_chw, 'shape', None)}"
                     )
-                x_chw = np.clip(input_chw.astype(np.float32) / 10000.0, 0.0, 1.0)
+                x_chw = _terrafm_scale_chw(input_chw, modality="s2")
             elif modality == "s1":
                 if input_chw.ndim != 3 or int(input_chw.shape[0]) != 2:
                     raise ModelError(
                         f"input_chw must be CHW with 2 bands (VV,VH) for TerraFM S1, got {getattr(input_chw, 'shape', None)}"
                     )
-                x_chw = _normalize_s1_vvvh_chw(input_chw)
+                x_chw = _terrafm_scale_chw(input_chw, modality="s1")
             else:
                 raise ModelError("modality must be 's2' or 's1'.")
 

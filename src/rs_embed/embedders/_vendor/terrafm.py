@@ -1,10 +1,11 @@
-# Vendored from https://huggingface.co/MBZUAI/TerraFM
+# Vendored from https://github.com/mbzuai-oryx/TerraFM (commit e245c34)
 # Upstream path: terrafm.py
 
 # ------------------------------------------------------------------------------
-# This file includes code copied and adapted from DINO:
-# - DINO (https://github.com/facebookresearch/dino)
+# TerraFM - MIT License (see LICENSE). Applies to code and released weights.
 #
+# This file includes code copied and adapted from DINO:
+# - DINO (https://github.com/facebookresearch/dino), Apache License 2.0
 # ------------------------------------------------------------------------------
 import random
 import math
@@ -12,6 +13,65 @@ import torch
 import torch.nn as nn
 from torch import Tensor
 from functools import partial
+
+
+# ------------------------------------------------------------------------------
+# Input preprocessing
+#
+# TerraFM was pretrained on inputs scaled per band so that mean +/- 2*std maps
+# to [0, 1]:   x_norm = (x - (mean - 2*std)) / (4*std)
+#
+# Expected raw inputs:
+#   * Sentinel-2 (L2A or L1C): 12 bands in the order below (B10 excluded), in raw
+#     digital numbers, i.e. reflectance * 10000 (multiply 0-1 reflectance by 10000).
+#   * Sentinel-1: 2 bands [VV, VH] in dB.
+# Use the statistics that match the product level, and pass the same `is_l2a`
+# flag to the model (L2A -> is_l2a=True, L1C -> is_l2a=False).
+# If a band is unavailable, normalize the others and set that channel to 0.
+# ------------------------------------------------------------------------------
+S2_BANDS = ["B01", "B02", "B03", "B04", "B05", "B06", "B07", "B08", "B8A", "B09", "B11", "B12"]
+S1_BANDS = ["VV", "VH"]
+
+STATS = {
+    "s2_l2a": {
+        "mean": [1033.9414, 1135.3391, 1382.2553, 1526.9789, 1883.3911, 2516.2726,
+                 2782.7811, 2829.3833, 2977.2936, 3004.2905, 2832.1983, 2186.6507],
+        "std": [2761.4226, 807.365, 919.6919, 1221.4198, 1265.8146, 1323.0764,
+                1428.7845, 1459.0343, 1497.9797, 1577.071, 1738.6128, 1620.8854],
+    },
+    "s2_l1c": {
+        "mean": [2153.94, 1937.191, 1885.8236, 1906.7263, 2096.8369, 2692.8083,
+                 3015.8569, 2930.3957, 3243.99, 1389.849, 2915.8289, 2186.0514],
+        "std": [581.6321, 619.9756, 714.7784, 1018.3657, 1021.4312, 1116.4055,
+                1265.8559, 1234.6123, 1374.9582, 608.362, 1547.9093, 1336.0316],
+    },
+    "s1": {
+        "mean": [-12.7572, -19.6423],
+        "std": [5.8491, 5.8516],
+    },
+}
+
+
+def normalize(x: Tensor, sensor: str) -> Tensor:
+    """Scale raw inputs the way TerraFM saw them during pretraining.
+
+    Args:
+        x: Tensor of shape [B, C, H, W] (or [C, H, W]); C = 12 for Sentinel-2
+            (order S2_BANDS, digital numbers) or 2 for Sentinel-1 (VV, VH in dB).
+        sensor: "s2_l2a", "s2_l1c" or "s1".
+
+    Returns:
+        Tensor of the same shape, roughly in [0, 1].
+    """
+    if sensor not in STATS:
+        raise ValueError(f"sensor must be one of {list(STATS)}, got {sensor!r}")
+    mean = torch.tensor(STATS[sensor]["mean"], dtype=x.dtype, device=x.device)
+    std = torch.tensor(STATS[sensor]["std"], dtype=x.dtype, device=x.device)
+    if x.shape[-3] != mean.numel():
+        raise ValueError(f"{sensor} expects {mean.numel()} channels, got {x.shape[-3]}")
+    shape = (-1, 1, 1)
+    low = (mean - 2 * std).view(shape)
+    return (x - low) / (4 * std).view(shape)
 
 
 def make_2tuple(x):
@@ -290,9 +350,9 @@ class TerraFM(nn.Module):
         patch_pos_embed = patch_pos_embed.permute(0, 2, 3, 1).view(1, -1, dim)
         return torch.cat((class_pos_embed.unsqueeze(0), patch_pos_embed), dim=1)
 
-    def prepare_tokens(self, x):
+    def prepare_tokens(self, x, is_l2a=False):
         B, nc, w, h = x.shape
-        x = self.patch_embed(x)  # patch linear embedding
+        x = self.patch_embed(x, is_l2a=is_l2a)  # patch linear embedding
 
         # add the [CLS] token to the embed patch tokens
         cls_tokens = self.cls_token.expand(B, -1, -1)
@@ -303,18 +363,20 @@ class TerraFM(nn.Module):
 
         return self.pos_drop(x)
 
-    def forward_features(self, x):
-        return self.forward(x)
+    def forward_features(self, x, is_l2a=False):
+        return self.forward(x, is_l2a=is_l2a)
 
-    def forward(self, x):
-        x = self.prepare_tokens(x)
+    def forward(self, x, is_l2a=False):
+        """x: normalized input (see `normalize`). 2 channels -> Sentinel-1;
+        12 channels -> Sentinel-2, using the L2A stem if is_l2a else the L1C stem."""
+        x = self.prepare_tokens(x, is_l2a=is_l2a)
         for blk in self.blocks:
             x = blk(x)
         x = self.norm(x)
         return x[:, 0]
 
-    def get_last_selfattention(self, x):
-        x = self.prepare_tokens(x)
+    def get_last_selfattention(self, x, is_l2a=False):
+        x = self.prepare_tokens(x, is_l2a=is_l2a)
         for i, blk in enumerate(self.blocks):
             if i < len(self.blocks) - 1:
                 x = blk(x)
@@ -324,9 +386,10 @@ class TerraFM(nn.Module):
 
     def get_intermediate_layers(self, x, n=1,
         return_class_token = False,
-        norm=False,                        
+        norm=False,
+        is_l2a=False,
         ):
-        x = self.prepare_tokens(x)
+        x = self.prepare_tokens(x, is_l2a=is_l2a)
         # we return the output tokens from the `n` last blocks
         output = []
         for i, blk in enumerate(self.blocks):
@@ -342,8 +405,8 @@ class TerraFM(nn.Module):
             return tuple(zip(output, class_tokens))
         return output
     
-    def extract_feature(self, images, return_h_w=True, out_indices=[3, 5, 7, 11]):
-        x = self.prepare_tokens(images)
+    def extract_feature(self, images, return_h_w=True, out_indices=[3, 5, 7, 11], is_l2a=False):
+        x = self.prepare_tokens(images, is_l2a=is_l2a)
         output = []
         h, w = int(images.shape[2] / self.patch_embed.patch_size), int(images.shape[3] / self.patch_embed.patch_size)
         for i, blk in enumerate(self.blocks):

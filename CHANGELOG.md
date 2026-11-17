@@ -8,6 +8,10 @@ The format is based on Keep a Changelog, and the project follows Semantic Versio
 
 ## [Unreleased]
 
+### Changed
+
+- **`terrafm` uses TerraFM's published input preprocessing.** S2 surface reflectance is scaled with TerraFM's `s2_l2a` pretraining statistics instead of `/10000` and goes through the L2A patch-embedding stem (`is_l2a=True`) instead of the L1C stem; S1 is converted to dB and scaled with TerraFM's `s1` statistics instead of `log1p` + per-image percentile scaling. The vendored `terrafm.py` is updated from upstream. `terrafm` embeddings change: re-export earlier `terrafm` results.
+
 ## [0.4.0] — 2026-11-01
 
 Google Earth Engine fetches are about 3–10× faster with the same pixels, and a round of fixes makes ROI cropping and pooling consistent across models. Several of those fixes change embeddings, so read the upgrade notes before comparing with results from 0.3.x.
